@@ -197,7 +197,8 @@ public class BotWebhookService {
     private CodeReviewService createCodeReviewService(Bot bot) {
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
-        return new CodeReviewService(repoClient, aiClient, promptService, sessionService, bot.getUsername());
+        return new CodeReviewService(repoClient, aiClient, promptService, sessionService,
+                bot.getUsername(), bot.isDeepThinkingEnabled());
     }
 
     /**
