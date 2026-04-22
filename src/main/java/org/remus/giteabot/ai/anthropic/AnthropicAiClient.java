@@ -12,6 +12,19 @@ import java.util.Locale;
 @Slf4j
 public class AnthropicAiClient extends AbstractAiClient {
 
+    /**
+     * Default budget tokens for extended thinking.
+     * Reserved for the model's internal reasoning process.
+     * Must be less than max_tokens.
+     */
+    static final int DEFAULT_THINKING_BUDGET_TOKENS = 10000;
+
+    /**
+     * Minimum max_tokens when extended thinking is enabled.
+     * Extended thinking requires max_tokens > budget_tokens.
+     */
+    static final int THINKING_MIN_MAX_TOKENS = DEFAULT_THINKING_BUDGET_TOKENS + 1000;
+
     private final RestClient restClient;
 
     public AnthropicAiClient(RestClient restClient, String model, int maxTokens,
@@ -24,21 +37,39 @@ public class AnthropicAiClient extends AbstractAiClient {
     @Override
     protected String sendReviewRequest(String systemPrompt, String effectiveModel,
                                        int maxTokens, String userMessage) {
-        AnthropicRequest request = AnthropicRequest.builder()
+        return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage, false);
+    }
+
+    @Override
+    protected String sendReviewRequest(String systemPrompt, String effectiveModel,
+                                       int maxTokens, String userMessage,
+                                       boolean thinkingEnabled) {
+        AnthropicRequest.AnthropicRequestBuilder builder = AnthropicRequest.builder()
                 .model(effectiveModel)
-                .maxTokens(maxTokens)
                 .system(systemPrompt)
                 .messages(List.of(
                         AnthropicRequest.Message.builder()
                                 .role("user")
                                 .content(userMessage)
                                 .build()
-                ))
-                .build();
+                ));
+
+        if (thinkingEnabled) {
+            int effectiveMaxTokens = Math.max(maxTokens, THINKING_MIN_MAX_TOKENS);
+            builder.maxTokens(effectiveMaxTokens)
+                    .thinking(AnthropicRequest.Thinking.builder()
+                            .type("enabled")
+                            .budgetTokens(DEFAULT_THINKING_BUDGET_TOKENS)
+                            .build());
+            log.info("Anthropic extended thinking enabled: budgetTokens={}, maxTokens={}",
+                    DEFAULT_THINKING_BUDGET_TOKENS, effectiveMaxTokens);
+        } else {
+            builder.maxTokens(maxTokens);
+        }
 
         AnthropicResponse response = restClient.post()
                 .uri("/v1/messages")
-                .body(request)
+                .body(builder.build())
                 .retrieve()
                 .body(AnthropicResponse.class);
 
@@ -48,6 +79,13 @@ public class AnthropicAiClient extends AbstractAiClient {
     @Override
     protected String sendChatRequest(String systemPrompt, String effectiveModel,
                                      int maxTokens, List<AiMessage> messages) {
+        return sendChatRequest(systemPrompt, effectiveModel, maxTokens, messages, false);
+    }
+
+    @Override
+    protected String sendChatRequest(String systemPrompt, String effectiveModel,
+                                     int maxTokens, List<AiMessage> messages,
+                                     boolean thinkingEnabled) {
         List<AnthropicRequest.Message> anthropicMessages = messages.stream()
                 .map(m -> AnthropicRequest.Message.builder()
                         .role(m.getRole())
@@ -55,16 +93,27 @@ public class AnthropicAiClient extends AbstractAiClient {
                         .build())
                 .toList();
 
-        AnthropicRequest request = AnthropicRequest.builder()
+        AnthropicRequest.AnthropicRequestBuilder builder = AnthropicRequest.builder()
                 .model(effectiveModel)
-                .maxTokens(maxTokens)
                 .system(systemPrompt)
-                .messages(anthropicMessages)
-                .build();
+                .messages(anthropicMessages);
+
+        if (thinkingEnabled) {
+            int effectiveMaxTokens = Math.max(maxTokens, THINKING_MIN_MAX_TOKENS);
+            builder.maxTokens(effectiveMaxTokens)
+                    .thinking(AnthropicRequest.Thinking.builder()
+                            .type("enabled")
+                            .budgetTokens(DEFAULT_THINKING_BUDGET_TOKENS)
+                            .build());
+            log.info("Anthropic extended thinking enabled: budgetTokens={}, maxTokens={}",
+                    DEFAULT_THINKING_BUDGET_TOKENS, effectiveMaxTokens);
+        } else {
+            builder.maxTokens(maxTokens);
+        }
 
         AnthropicResponse response = restClient.post()
                 .uri("/v1/messages")
-                .body(request)
+                .body(builder.build())
                 .retrieve()
                 .body(AnthropicResponse.class);
 
