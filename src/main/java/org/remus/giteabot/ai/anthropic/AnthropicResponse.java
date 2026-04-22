@@ -26,6 +26,8 @@ public class AnthropicResponse {
     public static class ContentBlock {
         private String type;
         private String text;
+        /** Present for thinking blocks when extended thinking is enabled. */
+        private String thinking;
     }
 
     @Data
