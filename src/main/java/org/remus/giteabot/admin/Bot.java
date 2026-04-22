@@ -41,6 +41,15 @@ public class Bot {
     @Column(nullable = false)
     private boolean agentEnabled = false;
 
+    /**
+     * Enables provider-specific extended thinking / reasoning tokens.
+     * For Anthropic: activates Extended Thinking (claude-3-7-sonnet+).
+     * For OpenAI: sets reasoning_effort=high (o-series models).
+     * Providers that do not support this feature silently ignore the flag.
+     */
+    @Column(nullable = false)
+    private boolean deepThinkingEnabled = false;
+
     @Column(nullable = false)
     private long webhookCallCount = 0;
 
