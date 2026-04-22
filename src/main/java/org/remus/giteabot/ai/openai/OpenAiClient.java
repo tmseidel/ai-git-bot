@@ -17,6 +17,12 @@ import java.util.Locale;
 @Slf4j
 public class OpenAiClient extends AbstractAiClient {
 
+    /**
+     * Reasoning effort level applied when deep thinking is enabled.
+     * "high" instructs the model to spend more tokens on internal reasoning.
+     */
+    static final String DEEP_THINKING_REASONING_EFFORT = "high";
+
     private final RestClient restClient;
 
     public OpenAiClient(RestClient restClient, String model, int maxTokens,
@@ -29,16 +35,30 @@ public class OpenAiClient extends AbstractAiClient {
     @Override
     protected String sendReviewRequest(String systemPrompt, String effectiveModel,
                                        int maxTokens, String userMessage) {
+        return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage, false);
+    }
+
+    @Override
+    protected String sendReviewRequest(String systemPrompt, String effectiveModel,
+                                       int maxTokens, String userMessage,
+                                       boolean thinkingEnabled) {
         List<OpenAiRequest.Message> messages = new ArrayList<>();
         messages.add(OpenAiRequest.Message.builder().role("system").content(systemPrompt).build());
         messages.add(OpenAiRequest.Message.builder().role("user").content(userMessage).build());
 
-        return doRequest(effectiveModel, maxTokens, messages, "review");
+        return doRequest(effectiveModel, maxTokens, messages, "review", thinkingEnabled);
     }
 
     @Override
     protected String sendChatRequest(String systemPrompt, String effectiveModel,
                                      int maxTokens, List<AiMessage> conversationMessages) {
+        return sendChatRequest(systemPrompt, effectiveModel, maxTokens, conversationMessages, false);
+    }
+
+    @Override
+    protected String sendChatRequest(String systemPrompt, String effectiveModel,
+                                     int maxTokens, List<AiMessage> conversationMessages,
+                                     boolean thinkingEnabled) {
         List<OpenAiRequest.Message> messages = new ArrayList<>();
         messages.add(OpenAiRequest.Message.builder().role("system").content(systemPrompt).build());
 
@@ -49,7 +69,7 @@ public class OpenAiClient extends AbstractAiClient {
                     .build());
         }
 
-        return doRequest(effectiveModel, maxTokens, messages, "chat");
+        return doRequest(effectiveModel, maxTokens, messages, "chat", thinkingEnabled);
     }
 
     @Override
@@ -63,15 +83,25 @@ public class OpenAiClient extends AbstractAiClient {
 
     private String doRequest(String model, int maxTokens,
                              List<OpenAiRequest.Message> messages, String context) {
-        OpenAiRequest request = OpenAiRequest.builder()
+        return doRequest(model, maxTokens, messages, context, false);
+    }
+
+    private String doRequest(String model, int maxTokens,
+                             List<OpenAiRequest.Message> messages, String context,
+                             boolean thinkingEnabled) {
+        OpenAiRequest.OpenAiRequestBuilder builder = OpenAiRequest.builder()
                 .model(model)
                 .maxTokens(maxTokens)
-                .messages(messages)
-                .build();
+                .messages(messages);
+
+        if (thinkingEnabled) {
+            builder.reasoningEffort(DEEP_THINKING_REASONING_EFFORT);
+            log.info("OpenAI reasoning tokens enabled: effort={}", DEEP_THINKING_REASONING_EFFORT);
+        }
 
         OpenAiResponse response = restClient.post()
                 .uri("/v1/chat/completions")
-                .body(request)
+                .body(builder.build())
                 .retrieve()
                 .body(OpenAiResponse.class);
 
