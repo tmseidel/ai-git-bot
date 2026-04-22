@@ -91,6 +91,18 @@
                                 <label class="form-check-label" for="agentEnabled">Agent Enabled</label>
                             </div>
                         </div>
+                        <div class="col-md-6">
+                            <div class="form-check form-switch mt-3">
+                                <input class="form-check-input" type="checkbox" id="deepThinkingEnabled"
+                                       th:field="*{deepThinkingEnabled}"/>
+                                <label class="form-check-label" for="deepThinkingEnabled">Deep Thinking</label>
+                                <div class="form-text">
+                                    Enables extended thinking for supported providers
+                                    (Anthropic: Extended Thinking, OpenAI: reasoning tokens).
+                                    Has no effect on unsupported providers.
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="mt-4">
