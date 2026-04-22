@@ -29,15 +29,23 @@ public class CodeReviewService {
     private final PromptService promptService;
     private final SessionService sessionService;
     private final String botUsername;
+    private final boolean deepThinkingEnabled;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
                              PromptService promptService, SessionService sessionService,
                              String botUsername) {
+        this(repositoryClient, aiClient, promptService, sessionService, botUsername, false);
+    }
+
+    public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
+                             PromptService promptService, SessionService sessionService,
+                             String botUsername, boolean deepThinkingEnabled) {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.promptService = promptService;
         this.sessionService = sessionService;
         this.botUsername = botUsername;
+        this.deepThinkingEnabled = deepThinkingEnabled;
     }
 
     public void reviewPullRequest(WebhookPayload payload, String promptName) {
@@ -63,7 +71,7 @@ public class CodeReviewService {
             String review;
             if (session.getMessages().isEmpty()) {
                 // Initial review: use the chunked diff review for thoroughness
-                review = aiClient.reviewDiff(prTitle, prBody, diff, systemPrompt, null);
+                review = aiClient.reviewDiff(prTitle, prBody, diff, systemPrompt, null, deepThinkingEnabled);
 
                 // Store a summary user message and the review in the session
                 String userSummary = buildPrSummaryMessage(prTitle, prBody);
@@ -74,7 +82,7 @@ public class CodeReviewService {
                 String updateMessage = buildPrUpdateMessage(prTitle, diff);
                 List<AiMessage> history = sessionService.toAiMessages(session);
 
-                review = aiClient.chat(history, updateMessage, systemPrompt, null);
+                review = aiClient.chat(history, updateMessage, systemPrompt, null, null, deepThinkingEnabled);
 
                 sessionService.addMessage(session, "user", updateMessage);
                 sessionService.addMessage(session, "assistant", review);
@@ -125,7 +133,7 @@ public class CodeReviewService {
 
             // Send the comment as a new message in the conversation
             List<AiMessage> history = sessionService.toAiMessages(session);
-            String response = aiClient.chat(history, commentBody, systemPrompt, null);
+            String response = aiClient.chat(history, commentBody, systemPrompt, null, null, deepThinkingEnabled);
 
             // Store messages in session
             sessionService.addMessage(session, "user", commentBody);
@@ -230,13 +238,14 @@ public class CodeReviewService {
         }
     }
 
-    private String buildInlineCommentAndSend(String filePath, String diffHunk, String commentBody, ReviewSession session, String systemPrompt, String modelOverride) {
+    private String buildInlineCommentAndSend(String filePath, String diffHunk, String commentBody,
+                                             ReviewSession session, String systemPrompt, String modelOverride) {
         // Build context message with file/code context
         String contextMessage = buildInlineCommentContext(filePath, diffHunk, commentBody);
 
         // Send to AI
         List<AiMessage> history = sessionService.toAiMessages(session);
-        String response = aiClient.chat(history, contextMessage, systemPrompt, modelOverride);
+        String response = aiClient.chat(history, contextMessage, systemPrompt, modelOverride, null, deepThinkingEnabled);
 
         // Store in session
         sessionService.addMessage(session, "user", contextMessage);
@@ -364,7 +373,7 @@ public class CodeReviewService {
             log.warn("Failed to add reaction to review comment #{}: {}", commentId, e.getMessage());
         }
 
-        // Build context message
+        // Build context message and send
         var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, modelOverride);
         if (line != null && line > 0) {
             try {
@@ -390,12 +399,12 @@ public class CodeReviewService {
     }
 
     String formatReviewComment(String review) {
-        return "## 🤖 AI Code Review\n\n" + review +
+        return "## \uD83E\uDD16 AI Code Review\n\n" + review +
                 "\n\n---\n*Automated review by AI Gitea Bot*";
     }
 
     String formatBotResponse(String response) {
-        return "## 🤖 Bot Response\n\n" + response +
+        return "## \uD83E\uDD16 Bot Response\n\n" + response +
                 "\n\n---\n*Response by AI Gitea Bot*";
     }
 
@@ -419,7 +428,8 @@ public class CodeReviewService {
 
     String buildInlineCommentContext(String filePath, String diffHunk, String commentBody) {
         StringBuilder sb = new StringBuilder();
-        sb.append("Someone left an inline review comment on file `").append(filePath).append("`.\n\n");
+        sb.append("Someone left an inline review comment on file `").append(filePath).append("`.");
+        sb.append("\n\n");
         if (diffHunk != null && !diffHunk.isBlank()) {
             sb.append("Code context (diff hunk):\n```diff\n").append(diffHunk).append("\n```\n\n");
         }
