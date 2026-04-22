@@ -66,12 +66,38 @@ public abstract class AbstractAiClient implements AiClient {
                                                 int maxTokens, String userMessage);
 
     /**
+     * Sends a single review request to the AI provider with optional extended thinking.
+     * Default implementation ignores the thinking flag; providers that support it should override.
+     *
+     * @param thinkingEnabled Whether to enable provider-specific extended thinking
+     * @return the review text
+     */
+    protected String sendReviewRequest(String systemPrompt, String effectiveModel,
+                                       int maxTokens, String userMessage,
+                                       boolean thinkingEnabled) {
+        return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage);
+    }
+
+    /**
      * Sends a multi-turn chat request to the AI provider.
      *
      * @return the assistant's response text
      */
     protected abstract String sendChatRequest(String systemPrompt, String effectiveModel,
                                               int maxTokens, List<AiMessage> messages);
+
+    /**
+     * Sends a multi-turn chat request to the AI provider with optional extended thinking.
+     * Default implementation ignores the thinking flag; providers that support it should override.
+     *
+     * @param thinkingEnabled Whether to enable provider-specific extended thinking
+     * @return the assistant's response text
+     */
+    protected String sendChatRequest(String systemPrompt, String effectiveModel,
+                                     int maxTokens, List<AiMessage> messages,
+                                     boolean thinkingEnabled) {
+        return sendChatRequest(systemPrompt, effectiveModel, maxTokens, messages);
+    }
 
     /**
      * Detects whether a client error indicates the prompt exceeded the model's input limit.
@@ -84,57 +110,17 @@ public abstract class AbstractAiClient implements AiClient {
     }
 
     @Override
-    public String chat(List<AiMessage> conversationHistory, String newUserMessage,
-                       String systemPrompt, String modelOverride) {
-        return chat(conversationHistory, newUserMessage, systemPrompt, modelOverride, null);
-    }
-
-    @Override
-    public String chat(List<AiMessage> conversationHistory, String newUserMessage,
-                       String systemPrompt, String modelOverride, Integer maxTokensOverride) {
-        String effectiveModel = resolveModel(modelOverride);
-        String effectivePrompt = resolvePrompt(systemPrompt);
-        int effectiveMaxTokens = (maxTokensOverride != null && maxTokensOverride > 0) ? maxTokensOverride : maxTokens;
-
-        log.info("Sending chat message to AI provider model={}, conversation size={}, maxTokens={}",
-                effectiveModel, conversationHistory.size(), effectiveMaxTokens);
-
-        // Debug logging: Log the full request
-        if (log.isDebugEnabled()) {
-            log.debug("=== AI CHAT REQUEST ===");
-            log.debug("System Prompt:\n{}", effectivePrompt);
-            log.debug("Conversation History ({} messages):", conversationHistory.size());
-            for (int i = 0; i < conversationHistory.size(); i++) {
-                AiMessage msg = conversationHistory.get(i);
-                log.debug("  [{}] {}: {} chars", i, msg.getRole(),
-                        msg.getContent() != null ? msg.getContent().length() : 0);
-            }
-            log.debug("New User Message ({} chars):\n{}", newUserMessage.length(), newUserMessage);
-        }
-
-        List<AiMessage> messages = new ArrayList<>(conversationHistory);
-        messages.add(AiMessage.builder()
-                .role("user")
-                .content(newUserMessage)
-                .build());
-
-        String response = sendChatRequest(effectivePrompt, effectiveModel, effectiveMaxTokens, messages);
-
-        // Debug logging: Log the response
-        if (log.isDebugEnabled()) {
-            log.debug("=== AI CHAT RESPONSE ===");
-            log.debug("Response ({} chars):\n{}", response != null ? response.length() : 0, response);
-        }
-
-        return response;
-    }
-
-    @Override
     public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt, String modelOverride) {
+        return reviewDiff(prTitle, prBody, diff, systemPrompt, modelOverride, false);
+    }
+
+    @Override
+    public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt,
+                             String modelOverride, boolean thinkingEnabled) {
         String effectiveModel = resolveModel(modelOverride);
         String effectivePrompt = resolvePrompt(systemPrompt);
 
-        log.info("Requesting code review from AI provider model={}", effectiveModel);
+        log.info("Requesting code review from AI provider model={}, deepThinking={}", effectiveModel, thinkingEnabled);
         ChunkingResult chunkingResult = splitDiffIntoChunks(diff);
         List<String> reviews = new ArrayList<>();
         int failedChunks = 0;
@@ -147,7 +133,7 @@ public abstract class AbstractAiClient implements AiClient {
 
             try {
                 String review = reviewSingleChunk(prTitle, prBody, chunk, chunkNumber, totalChunks, false,
-                        effectivePrompt, effectiveModel);
+                        effectivePrompt, effectiveModel, thinkingEnabled);
 
                 if (totalChunks > 1) {
                     reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks + "\n" + review);
@@ -181,11 +167,65 @@ public abstract class AbstractAiClient implements AiClient {
         return String.join("\n\n", reviews);
     }
 
+    @Override
+    public String chat(List<AiMessage> conversationHistory, String newUserMessage,
+                       String systemPrompt, String modelOverride) {
+        return chat(conversationHistory, newUserMessage, systemPrompt, modelOverride, null, false);
+    }
+
+    @Override
+    public String chat(List<AiMessage> conversationHistory, String newUserMessage,
+                       String systemPrompt, String modelOverride, Integer maxTokensOverride) {
+        return chat(conversationHistory, newUserMessage, systemPrompt, modelOverride, maxTokensOverride, false);
+    }
+
+    @Override
+    public String chat(List<AiMessage> conversationHistory, String newUserMessage,
+                       String systemPrompt, String modelOverride, Integer maxTokensOverride,
+                       boolean thinkingEnabled) {
+        String effectiveModel = resolveModel(modelOverride);
+        String effectivePrompt = resolvePrompt(systemPrompt);
+        int effectiveMaxTokens = (maxTokensOverride != null && maxTokensOverride > 0) ? maxTokensOverride : maxTokens;
+
+        log.info("Sending chat message to AI provider model={}, conversation size={}, maxTokens={}, deepThinking={}",
+                effectiveModel, conversationHistory.size(), effectiveMaxTokens, thinkingEnabled);
+
+        // Debug logging: Log the full request
+        if (log.isDebugEnabled()) {
+            log.debug("=== AI CHAT REQUEST ===");
+            log.debug("System Prompt:\n{}", effectivePrompt);
+            log.debug("Conversation History ({} messages):", conversationHistory.size());
+            for (int i = 0; i < conversationHistory.size(); i++) {
+                AiMessage msg = conversationHistory.get(i);
+                log.debug("  [{}] {}: {} chars", i, msg.getRole(),
+                        msg.getContent() != null ? msg.getContent().length() : 0);
+            }
+            log.debug("New User Message ({} chars):\n{}", newUserMessage.length(), newUserMessage);
+        }
+
+        List<AiMessage> messages = new ArrayList<>(conversationHistory);
+        messages.add(AiMessage.builder()
+                .role("user")
+                .content(newUserMessage)
+                .build());
+
+        String response = sendChatRequest(effectivePrompt, effectiveModel, effectiveMaxTokens, messages, thinkingEnabled);
+
+        // Debug logging: Log the response
+        if (log.isDebugEnabled()) {
+            log.debug("=== AI CHAT RESPONSE ===");
+            log.debug("Response ({} chars):\n{}", response != null ? response.length() : 0, response);
+        }
+
+        return response;
+    }
+
     private String reviewSingleChunk(String prTitle, String prBody, String diffChunk, int chunkNumber, int totalChunks,
-                                     boolean isRetry, String systemPrompt, String effectiveModel) {
+                                     boolean isRetry, String systemPrompt, String effectiveModel,
+                                     boolean thinkingEnabled) {
         try {
             return reviewSingleChunkInternal(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry,
-                    systemPrompt, effectiveModel);
+                    systemPrompt, effectiveModel, thinkingEnabled);
         } catch (HttpClientErrorException.BadRequest e) {
             if (isPromptTooLongError(e) && !isRetry && diffChunk.length() > retryTruncatedChunkChars) {
                 log.warn("Prompt too long for chunk {}/{} (chars={}), retrying with truncated chunk (chars={})",
@@ -195,7 +235,7 @@ public abstract class AbstractAiClient implements AiClient {
                         retryTruncatedChunkChars);
                 String truncatedChunk = truncateDiff(diffChunk, retryTruncatedChunkChars);
                 return reviewSingleChunk(prTitle, prBody, truncatedChunk, chunkNumber, totalChunks, true,
-                        systemPrompt, effectiveModel);
+                        systemPrompt, effectiveModel, thinkingEnabled);
             }
             throw e;
         }
@@ -207,9 +247,10 @@ public abstract class AbstractAiClient implements AiClient {
      */
     String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
                                      int chunkNumber, int totalChunks, boolean isRetry,
-                                     String systemPrompt, String effectiveModel) {
+                                     String systemPrompt, String effectiveModel,
+                                     boolean thinkingEnabled) {
         String userMessage = buildUserMessage(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry);
-        return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage);
+        return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage, thinkingEnabled);
     }
 
     ChunkingResult splitDiffIntoChunks(String diff) {
