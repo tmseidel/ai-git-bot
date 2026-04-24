@@ -98,6 +98,8 @@ public class CodeReviewService {
         Long prNumber = payload.getIssue().getNumber();
         Long commentId = payload.getComment().getId();
         String commentBody = payload.getComment().getBody();
+        String commentAuthor = payload.getComment() != null && payload.getComment().getUser() != null
+                ? payload.getComment().getUser().getLogin() : null;
 
         log.info("Handling bot command in comment #{} for PR #{} in {}/{}", commentId, prNumber, owner, repo);
 
@@ -123,16 +125,21 @@ public class CodeReviewService {
                         "I've reviewed the pull request context. How can I help you?");
             }
 
+            boolean sideClarification = isSideClarificationRequest(commentAuthor);
+            String userMessage = sideClarification
+                    ? buildSideClarificationPrompt(commentAuthor, commentBody)
+                    : commentBody;
+
             // Send the comment as a new message in the conversation
             List<AiMessage> history = sessionService.toAiMessages(session);
-            String response = aiClient.chat(history, commentBody, systemPrompt, null);
+            String response = aiClient.chat(history, userMessage, systemPrompt, null);
 
             // Store messages in session
-            sessionService.addMessage(session, "user", commentBody);
+            sessionService.addMessage(session, "user", userMessage);
             sessionService.addMessage(session, "assistant", response);
 
             // Post the response as a comment on the PR
-            String formattedResponse = formatBotResponse(response);
+            String formattedResponse = formatBotResponse(response, sideClarification);
             repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
 
             // Compact context window to reduce memory/token usage
@@ -395,8 +402,24 @@ public class CodeReviewService {
     }
 
     String formatBotResponse(String response) {
-        return "## 🤖 Bot Response\n\n" + response +
-                "\n\n---\n*Response by AI Gitea Bot*";
+        return formatBotResponse(response, false);
+    }
+
+    String formatBotResponse(String response, boolean sideClarification) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("## 🤖 Bot Response\n\n");
+        if (sideClarification) {
+            sb.append("> Side clarification response for another PR participant.\n\n");
+        }
+        sb.append(response)
+                .append("\n\n---\n*");
+        if (sideClarification) {
+            sb.append("Side clarification response by AI Gitea Bot");
+        } else {
+            sb.append("Response by AI Gitea Bot");
+        }
+        sb.append("*");
+        return sb.toString();
     }
 
     private String buildPrSummaryMessage(String prTitle, String prBody) {
@@ -435,6 +458,21 @@ public class CodeReviewService {
             return payload.getPullRequest().getNumber();
         }
         return null;
+    }
+
+    private boolean isSideClarificationRequest(String commentAuthor) {
+        return commentAuthor != null
+                && !commentAuthor.isBlank()
+                && botUsername != null
+                && !botUsername.isBlank()
+                && !botUsername.equalsIgnoreCase(commentAuthor);
+    }
+
+    private String buildSideClarificationPrompt(String commentAuthor, String commentBody) {
+        return "Another PR participant named '" + commentAuthor + "' addressed the bot. " +
+                "Respond with a side clarification based on the existing PR discussion context. " +
+                "Make it clear that this is a side clarification response for another participant.\n\n" +
+                "Comment:\n" + commentBody;
     }
 
     /**
