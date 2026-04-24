@@ -30,6 +30,11 @@ public class ReviewSession {
 
     private String promptName;
 
+    private String prTitle;
+
+    @Column(length = 4000)
+    private String prBody;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JoinColumn(name = "session_id")
     @OrderBy("createdAt ASC")

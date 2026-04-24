@@ -65,6 +65,7 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt(isNull())).thenReturn("test system prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
@@ -77,6 +78,7 @@ class CodeReviewServiceTest {
         verify(repositoryClient).postReviewComment(
                 eq("testowner"), eq("testrepo"), eq(1L), contains("Looks good!"));
         verify(sessionService).getOrCreateSession("testowner", "testrepo", 1L, null);
+        verify(sessionService).updatePrContext(session, "Test PR", "Test body");
         verify(sessionService, times(2)).addMessage(any(), anyString(), anyString());
     }
 
@@ -100,6 +102,7 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt("security")).thenReturn("You are a security reviewer.");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, "security")).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
@@ -122,6 +125,7 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Previous question").build(),
@@ -147,6 +151,7 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
@@ -159,6 +164,33 @@ class CodeReviewServiceTest {
 
         verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
         verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
+    }
+
+    @Test
+    void handleBotCommand_fromOtherAuthor_marksSideClarificationAndProvidesContext() {
+        WebhookPayload payload = createCommentPayloadFromOtherAuthor("@ai_bot can you clarify the review?", "reviewer1");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.setPrTitle("Test PR");
+        session.setPrBody("Test body");
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+
+        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(aiClient.chat(anyList(), contains("side clarification request from another pull request participant"),
+                eq("test prompt"), isNull())).thenReturn("Clarification for reviewer");
+
+        codeReviewService.handleBotCommand(payload, null);
+
+        verify(aiClient).chat(anyList(), contains("reviewer1"), eq("test prompt"), isNull());
+        verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L),
+                contains(CodeReviewService.SIDE_CLARIFICATION_MARKER));
     }
 
     @Test
@@ -187,6 +219,12 @@ class CodeReviewServiceTest {
     }
 
     @Test
+    void formatBotResponse_sideClarification_containsMarker() {
+        String result = codeReviewService.formatBotResponse("some response", true);
+        assertTrue(result.contains(CodeReviewService.SIDE_CLARIFICATION_MARKER));
+    }
+
+    @Test
     void handleInlineComment_postsInlineReviewComment() {
         WebhookPayload payload = createInlineCommentPayload(
                 "@ai_bot explain this", "src/main/java/Foo.java",
@@ -197,6 +235,7 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
@@ -215,6 +254,36 @@ class CodeReviewServiceTest {
     }
 
     @Test
+    void handleInlineComment_fromOtherAuthor_marksSideClarification() {
+        WebhookPayload payload = createInlineCommentPayloadFromOtherAuthor(
+                "@ai_bot explain this", "src/main/java/Foo.java",
+                "@@ -10,7 +10,7 @@\n code context", 15, "reviewer1");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.setPrTitle("Test PR");
+        session.setPrBody("Test body");
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+
+        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(aiClient.chat(anyList(), contains("side clarification request from another pull request participant"),
+                eq("test prompt"), isNull())).thenReturn("Inline clarification");
+
+        codeReviewService.handleInlineComment(payload, null);
+
+        verify(repositoryClient).postInlineReviewComment(
+                eq("testowner"), eq("testrepo"), eq(1L),
+                eq("src/main/java/Foo.java"), eq(15),
+                contains(CodeReviewService.SIDE_CLARIFICATION_MARKER));
+    }
+
+    @Test
     void handleInlineComment_fallsBackToRegularComment_whenNoLine() {
         WebhookPayload payload = createInlineCommentPayload(
                 "@ai_bot explain this", "src/main/java/Foo.java",
@@ -225,6 +294,7 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
@@ -285,26 +355,28 @@ class CodeReviewServiceTest {
 
         when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 2L, null)).thenReturn(session);
+        when(sessionService.updatePrContext(session, "Test PR", "Test body")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
 
-        // Set up review fetching
         GiteaReview review = new GiteaReview();
         review.setId(10L);
         review.setState("COMMENT");
         when(repositoryClient.getReviews("testowner", "testrepo", 2L))
                 .thenReturn(List.<Review>of(review));
 
-        // Set up review comments - one with bot mention, one without
         GiteaReviewComment botComment = new GiteaReviewComment();
         botComment.setId(100L);
         botComment.setBody("@ai_bot explain this");
         botComment.setPath("src/main/java/Foo.java");
         botComment.setDiffHunk("@@ -10,7 +10,7 @@\n code");
         botComment.setLine(15);
+        GiteaReview.GiteaUser reviewer = new GiteaReview.GiteaUser();
+        reviewer.setLogin("reviewer1");
+        botComment.setUser(reviewer);
 
         GiteaReviewComment normalComment = new GiteaReviewComment();
         normalComment.setId(101L);
@@ -320,14 +392,12 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleReviewSubmitted(payload, null);
 
-        // Should only process the bot-mentioning comment
         verify(repositoryClient).addReaction("testowner", "testrepo", 100L, "eyes");
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(2L),
                 eq("src/main/java/Foo.java"), eq(15),
-                contains("Here's the explanation"));
+                contains(CodeReviewService.SIDE_CLARIFICATION_MARKER));
 
-        // Should NOT react to the normal comment
         verify(repositoryClient, never()).addReaction("testowner", "testrepo", 101L, "eyes");
     }
 
@@ -376,7 +446,6 @@ class CodeReviewServiceTest {
         when(repositoryClient.getReviews("testowner", "testrepo", 2L))
                 .thenReturn(List.<Review>of(review));
 
-        // Bot's own comment that mentions itself (e.g. from its formatted response)
         GiteaReviewComment botOwnComment = new GiteaReviewComment();
         botOwnComment.setId(200L);
         botOwnComment.setBody("## 🤖 Bot Response\n\nSome answer mentioning @ai_bot");
@@ -391,7 +460,6 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleReviewSubmitted(payload, null);
 
-        // Bot's own comment should be filtered out — no AI call, no reaction
         verify(aiClient, never()).chat(anyList(), anyString(), anyString(), anyString());
         verify(repositoryClient, never()).addReaction(anyString(), anyString(), anyLong(), anyString());
     }
@@ -406,6 +474,10 @@ class CodeReviewServiceTest {
         pr.setBody("Test body");
         payload.setPullRequest(pr);
 
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("testowner");
+        payload.setSender(sender);
+
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("testowner");
 
@@ -419,6 +491,10 @@ class CodeReviewServiceTest {
     }
 
     private WebhookPayload createCommentPayload(String body) {
+        return createCommentPayloadFromOtherAuthor(body, "testowner");
+    }
+
+    private WebhookPayload createCommentPayloadFromOtherAuthor(String body, String commentAuthor) {
         WebhookPayload payload = new WebhookPayload();
         payload.setAction("created");
 
@@ -426,7 +502,7 @@ class CodeReviewServiceTest {
         comment.setId(42L);
         comment.setBody(body);
         WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
-        commentUser.setLogin("testuser");
+        commentUser.setLogin(commentAuthor);
         comment.setUser(commentUser);
         payload.setComment(comment);
 
@@ -436,6 +512,10 @@ class CodeReviewServiceTest {
         issue.setBody("Test body");
         issue.setPullRequest(new WebhookPayload.IssuePullRequest());
         payload.setIssue(issue);
+
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("testowner");
+        payload.setSender(sender);
 
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("testowner");
@@ -450,7 +530,12 @@ class CodeReviewServiceTest {
     }
 
     private WebhookPayload createInlineCommentPayload(String body, String path, String diffHunk, Integer line) {
-        WebhookPayload payload = createCommentPayload(body);
+        return createInlineCommentPayloadFromOtherAuthor(body, path, diffHunk, line, "testowner");
+    }
+
+    private WebhookPayload createInlineCommentPayloadFromOtherAuthor(String body, String path, String diffHunk,
+                                                                     Integer line, String commentAuthor) {
+        WebhookPayload payload = createCommentPayloadFromOtherAuthor(body, commentAuthor);
         payload.getComment().setId(55L);
         payload.getComment().setPath(path);
         payload.getComment().setDiffHunk(diffHunk);

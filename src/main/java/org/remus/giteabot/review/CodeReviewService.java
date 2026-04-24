@@ -23,6 +23,7 @@ import java.util.List;
 public class CodeReviewService {
 
     static final int MAX_DIFF_CHARS_FOR_CONTEXT = 60000;
+    static final String SIDE_CLARIFICATION_MARKER = "[Side clarification for another PR participant]";
 
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
@@ -59,18 +60,16 @@ public class CodeReviewService {
             String systemPrompt = promptService.getSystemPrompt(promptName);
 
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
+            sessionService.updatePrContext(session, prTitle, prBody);
 
             String review;
             if (session.getMessages().isEmpty()) {
-                // Initial review: use the chunked diff review for thoroughness
                 review = aiClient.reviewDiff(prTitle, prBody, diff, systemPrompt, null);
 
-                // Store a summary user message and the review in the session
                 String userSummary = buildPrSummaryMessage(prTitle, prBody);
                 sessionService.addMessage(session, "user", userSummary);
                 sessionService.addMessage(session, "assistant", review);
             } else {
-                // PR was updated: use conversation context with new diff
                 String updateMessage = buildPrUpdateMessage(prTitle, diff);
                 List<AiMessage> history = sessionService.toAiMessages(session);
 
@@ -83,7 +82,6 @@ public class CodeReviewService {
             String commentBody = formatReviewComment(review);
             repositoryClient.postReviewComment(owner, repo, prNumber, commentBody);
 
-            // Compact context window to reduce memory/token usage for subsequent calls
             sessionService.compactContextWindow(session);
 
             log.info("Code review completed for PR #{} in {}/{}", prNumber, owner, repo);
@@ -97,12 +95,10 @@ public class CodeReviewService {
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getIssue().getNumber();
         Long commentId = payload.getComment().getId();
-        String commentBody = payload.getComment().getBody();
 
         log.info("Handling bot command in comment #{} for PR #{} in {}/{}", commentId, prNumber, owner, repo);
 
         try {
-            // Add eyes reaction to acknowledge the comment
             try {
                 repositoryClient.addReaction(owner, repo, commentId, "eyes");
             } catch (Exception e) {
@@ -111,10 +107,11 @@ public class CodeReviewService {
 
             String systemPrompt = promptService.getSystemPrompt(promptName);
 
-            // Get or create session
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
+            sessionService.updatePrContext(session,
+                    payload.getIssue() != null ? payload.getIssue().getTitle() : null,
+                    payload.getIssue() != null ? payload.getIssue().getBody() : null);
 
-            // If session is empty, add context from the PR
             if (session.getMessages().isEmpty()) {
                 String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
                 var prContext = buildPrContextString(payload, diff);
@@ -123,19 +120,16 @@ public class CodeReviewService {
                         "I've reviewed the pull request context. How can I help you?");
             }
 
-            // Send the comment as a new message in the conversation
+            String userMessage = buildBotCommandMessage(payload, session);
             List<AiMessage> history = sessionService.toAiMessages(session);
-            String response = aiClient.chat(history, commentBody, systemPrompt, null);
+            String response = aiClient.chat(history, userMessage, systemPrompt, null);
 
-            // Store messages in session
-            sessionService.addMessage(session, "user", commentBody);
+            sessionService.addMessage(session, "user", userMessage);
             sessionService.addMessage(session, "assistant", response);
 
-            // Post the response as a comment on the PR
-            String formattedResponse = formatBotResponse(response);
+            String formattedResponse = formatBotResponse(response, isSideClarification(payload));
             repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
 
-            // Compact context window to reduce memory/token usage
             sessionService.compactContextWindow(session);
 
             log.info("Bot command handled for comment #{} on PR #{} in {}/{}", commentId, prNumber, owner, repo);
@@ -150,7 +144,6 @@ public class CodeReviewService {
                 "Title: " + payload.getIssue().getTitle() + "\n" +
                 "Description: " + (payload.getIssue().getBody() != null ? payload.getIssue().getBody() : "N/A");
         if (diff != null && !diff.isBlank()) {
-            // Truncate diff to avoid excessively large context
             String truncatedDiff = diff.length() > MAX_DIFF_CHARS_FOR_CONTEXT
                     ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(truncated)" : diff;
             prContext += "\n\nDiff:\n```diff\n" + truncatedDiff + "\n```";
@@ -172,7 +165,6 @@ public class CodeReviewService {
                 commentId, filePath, prNumber, owner, repo);
 
         try {
-            // Add eyes reaction to acknowledge the comment
             try {
                 repositoryClient.addReaction(owner, repo, commentId, "eyes");
             } catch (Exception e) {
@@ -181,14 +173,13 @@ public class CodeReviewService {
 
             String systemPrompt = promptService.getSystemPrompt(promptName);
 
-            // Get or create session for conversation context
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
+            sessionService.updatePrContext(session, extractPrTitle(payload), extractPrBody(payload));
 
-            // If session is empty, add PR context
             if (session.getMessages().isEmpty()) {
                 String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-                String prTitle = payload.getIssue() != null ? payload.getIssue().getTitle() : "";
-                String prBody = payload.getIssue() != null ? payload.getIssue().getBody() : null;
+                String prTitle = extractPrTitle(payload);
+                String prBody = extractPrBody(payload);
                 String prContext = "This is a pull request in " + owner + "/" + repo + ".";
                 if (prTitle != null && !prTitle.isBlank()) {
                     prContext += " Title: " + prTitle;
@@ -206,7 +197,8 @@ public class CodeReviewService {
                         "I've reviewed the pull request context. How can I help you?");
             }
 
-            var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, null);
+            var formattedResponse = buildInlineCommentAndSend(payload, filePath, diffHunk, commentBody,
+                    session, systemPrompt, null);
             if (line != null && line > 0) {
                 try {
                     repositoryClient.postInlineReviewComment(owner, repo, prNumber,
@@ -219,7 +211,6 @@ public class CodeReviewService {
                 repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
             }
 
-            // Compact context window to reduce memory/token usage
             sessionService.compactContextWindow(session);
 
             log.info("Inline comment handled for comment #{} on PR #{} in {}/{}",
@@ -230,28 +221,20 @@ public class CodeReviewService {
         }
     }
 
-    private String buildInlineCommentAndSend(String filePath, String diffHunk, String commentBody, ReviewSession session, String systemPrompt, String modelOverride) {
-        // Build context message with file/code context
-        String contextMessage = buildInlineCommentContext(filePath, diffHunk, commentBody);
+    private String buildInlineCommentAndSend(WebhookPayload payload, String filePath, String diffHunk,
+                                             String commentBody, ReviewSession session,
+                                             String systemPrompt, String modelOverride) {
+        String contextMessage = buildInlineCommentContext(payload, session, filePath, diffHunk, commentBody);
 
-        // Send to AI
         List<AiMessage> history = sessionService.toAiMessages(session);
         String response = aiClient.chat(history, contextMessage, systemPrompt, modelOverride);
 
-        // Store in session
         sessionService.addMessage(session, "user", contextMessage);
         sessionService.addMessage(session, "assistant", response);
 
-        // Reply inline at the same file/line if possible
-        return formatBotResponse(response);
+        return formatBotResponse(response, isSideClarification(payload));
     }
 
-    /**
-     * Handles a review submitted event (action: "reviewed").
-     * Gitea sends this when a user submits a review with inline comments.
-     * The individual comments are NOT in the webhook payload, so we fetch them
-     * from the repository API, filter for bot mentions, and respond to each.
-     */
     public void handleReviewSubmitted(WebhookPayload payload, String promptName) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
@@ -262,14 +245,12 @@ public class CodeReviewService {
         try {
             String systemPrompt = promptService.getSystemPrompt(promptName);
 
-            // Fetch all reviews for the PR to find the latest one
             List<Review> reviews = repositoryClient.getReviews(owner, repo, prNumber);
             if (reviews.isEmpty()) {
                 log.warn("No reviews found for PR #{} in {}/{}", prNumber, owner, repo);
                 return;
             }
 
-            // Take the latest review (highest ID)
             Review latestReview = reviews.stream()
                     .reduce((a, b) -> (b.getId() != null && (a.getId() == null || b.getId() > a.getId())) ? b : a)
                     .orElse(null);
@@ -281,11 +262,8 @@ public class CodeReviewService {
 
             log.info("Processing latest review #{} for PR #{} in {}/{}", latestReview.getId(), prNumber, owner, repo);
 
-            // Fetch comments for this review
-            List<ReviewComment> comments = repositoryClient.getReviewComments(
-                    owner, repo, prNumber, latestReview.getId());
+            List<ReviewComment> comments = repositoryClient.getReviewComments(owner, repo, prNumber, latestReview.getId());
 
-            // Filter for comments that mention the bot, excluding the bot's own comments
             String botAlias = (botUsername != null && !botUsername.isBlank()) ? "@" + botUsername : "";
             List<ReviewComment> botMentionComments = comments.stream()
                     .filter(c -> c.getBody() != null && c.getBody().contains(botAlias))
@@ -300,10 +278,11 @@ public class CodeReviewService {
             log.info("Found {} bot-mentioning comment(s) in review #{} for PR #{}",
                     botMentionComments.size(), latestReview.getId(), prNumber);
 
-            // Get or create session
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
+            sessionService.updatePrContext(session,
+                    payload.getPullRequest() != null ? payload.getPullRequest().getTitle() : null,
+                    payload.getPullRequest() != null ? payload.getPullRequest().getBody() : null);
 
-            // If session is empty, add PR context
             if (session.getMessages().isEmpty()) {
                 String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
                 String prTitle = payload.getPullRequest().getTitle();
@@ -325,18 +304,16 @@ public class CodeReviewService {
                         "I've reviewed the pull request context. How can I help you?");
             }
 
-            // Process each bot-mentioning comment
             for (ReviewComment reviewComment : botMentionComments) {
                 try {
-                    processReviewComment(owner, repo, prNumber, reviewComment,
-                            session, systemPrompt, null);
+                    processReviewComment(owner, repo, prNumber, reviewComment, session, systemPrompt, null,
+                            payload.getSender() != null ? payload.getSender().getLogin() : null);
                 } catch (Exception e) {
                     log.error("Failed to process review comment #{} on PR #{} in {}/{}: {}",
                             reviewComment.getId(), prNumber, owner, repo, e.getMessage(), e);
                 }
             }
 
-            // Compact context window after processing all comments
             sessionService.compactContextWindow(session);
 
             log.info("Review submitted event handled for PR #{} in {}/{}", prNumber, owner, repo);
@@ -348,7 +325,8 @@ public class CodeReviewService {
 
     private void processReviewComment(String owner, String repo, Long prNumber,
                                       ReviewComment reviewComment, ReviewSession session,
-                                      String systemPrompt, String modelOverride) {
+                                      String systemPrompt, String modelOverride,
+                                      String prAuthorLogin) {
         Long commentId = reviewComment.getId();
         String filePath = reviewComment.getPath();
         String diffHunk = reviewComment.getDiffHunk();
@@ -357,15 +335,17 @@ public class CodeReviewService {
 
         log.info("Processing review comment #{} on file {} for PR #{}", commentId, filePath, prNumber);
 
-        // Add eyes reaction to acknowledge
         try {
             repositoryClient.addReaction(owner, repo, commentId, "eyes");
         } catch (Exception e) {
             log.warn("Failed to add reaction to review comment #{}: {}", commentId, e.getMessage());
         }
 
-        // Build context message
-        var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, modelOverride);
+        WebhookPayload synthesizedPayload = buildPayloadFromReviewComment(owner, repo, prNumber,
+                reviewComment, session, prAuthorLogin);
+
+        var formattedResponse = buildInlineCommentAndSend(synthesizedPayload, filePath, diffHunk, commentBody,
+                session, systemPrompt, modelOverride);
         if (line != null && line > 0) {
             try {
                 repositoryClient.postInlineReviewComment(owner, repo, prNumber,
@@ -395,7 +375,12 @@ public class CodeReviewService {
     }
 
     String formatBotResponse(String response) {
-        return "## 🤖 Bot Response\n\n" + response +
+        return formatBotResponse(response, false);
+    }
+
+    String formatBotResponse(String response, boolean sideClarification) {
+        String prefix = sideClarification ? SIDE_CLARIFICATION_MARKER + "\n\n" : "";
+        return "## 🤖 Bot Response\n\n" + prefix + response +
                 "\n\n---\n*Response by AI Gitea Bot*";
     }
 
@@ -410,7 +395,6 @@ public class CodeReviewService {
     }
 
     private String buildPrUpdateMessage(String prTitle, String diff) {
-        // Truncate diff for conversation context to avoid excessively large messages
         String truncatedDiff = diff.length() > MAX_DIFF_CHARS_FOR_CONTEXT
                 ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(truncated)" : diff;
         return "The pull request '" + prTitle + "' has been updated with new changes. " +
@@ -418,8 +402,22 @@ public class CodeReviewService {
     }
 
     String buildInlineCommentContext(String filePath, String diffHunk, String commentBody) {
+        return buildInlineCommentContext(null, null, filePath, diffHunk, commentBody);
+    }
+
+    String buildInlineCommentContext(WebhookPayload payload, ReviewSession session,
+                                     String filePath, String diffHunk, String commentBody) {
         StringBuilder sb = new StringBuilder();
+        if (isSideClarification(payload)) {
+            sb.append("This is a side clarification request from another pull request participant, not the PR author. ");
+            String commenter = extractCommentAuthor(payload);
+            if (commenter != null && !commenter.isBlank()) {
+                sb.append("The participant is `").append(commenter).append("`. ");
+            }
+            sb.append("Use the existing PR review context to answer helpfully, but make clear the reply is only a side clarification and not a new main review decision.\n\n");
+        }
         sb.append("Someone left an inline review comment on file `").append(filePath).append("`.\n\n");
+        appendPrSummary(sb, session);
         if (diffHunk != null && !diffHunk.isBlank()) {
             sb.append("Code context (diff hunk):\n```diff\n").append(diffHunk).append("\n```\n\n");
         }
@@ -437,15 +435,139 @@ public class CodeReviewService {
         return null;
     }
 
-    /**
-     * Checks whether a review comment was written by the bot itself.
-     * Prevents the bot from responding to its own comments in review-submitted events.
-     */
     private boolean isBotComment(ReviewComment comment, String botUsername) {
         if (botUsername == null || botUsername.isBlank()) {
             return false;
         }
         return comment.getUserLogin() != null
                 && botUsername.equalsIgnoreCase(comment.getUserLogin());
+    }
+
+    private boolean isSideClarification(WebhookPayload payload) {
+        if (payload == null || payload.getComment() == null || payload.getComment().getUser() == null) {
+            return false;
+        }
+        String commentAuthor = payload.getComment().getUser().getLogin();
+        if (commentAuthor == null || commentAuthor.isBlank()) {
+            return false;
+        }
+        String prAuthor = extractPrAuthor(payload);
+        if (prAuthor == null || prAuthor.isBlank()) {
+            return false;
+        }
+        return !commentAuthor.equalsIgnoreCase(prAuthor);
+    }
+
+    private String buildBotCommandMessage(WebhookPayload payload, ReviewSession session) {
+        String commentBody = payload.getComment().getBody();
+        if (!isSideClarification(payload)) {
+            return commentBody;
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("This is a side clarification request from another pull request participant, not the PR author. ");
+        String commenter = extractCommentAuthor(payload);
+        if (commenter != null && !commenter.isBlank()) {
+            sb.append("The participant is `").append(commenter).append("`. ");
+        }
+        String prAuthor = extractPrAuthor(payload);
+        if (prAuthor != null && !prAuthor.isBlank()) {
+            sb.append("The PR author is `").append(prAuthor).append("`. ");
+        }
+        sb.append("Use the known pull request context and answer only as a side clarification, not as a new main review.\n\n");
+        appendPrSummary(sb, session);
+        sb.append("Their comment/question:\n").append(commentBody);
+        return sb.toString();
+    }
+
+    private void appendPrSummary(StringBuilder sb, ReviewSession session) {
+        if (session == null) {
+            return;
+        }
+        if (session.getPrTitle() != null && !session.getPrTitle().isBlank()) {
+            sb.append("Pull request title: ").append(session.getPrTitle()).append("\n");
+        }
+        if (session.getPrBody() != null && !session.getPrBody().isBlank()) {
+            sb.append("Pull request description: ").append(session.getPrBody()).append("\n\n");
+        }
+    }
+
+    private String extractCommentAuthor(WebhookPayload payload) {
+        return payload != null && payload.getComment() != null && payload.getComment().getUser() != null
+                ? payload.getComment().getUser().getLogin()
+                : null;
+    }
+
+    private String extractPrAuthor(WebhookPayload payload) {
+        return payload != null && payload.getSender() != null ? payload.getSender().getLogin() : null;
+    }
+
+    private String extractPrTitle(WebhookPayload payload) {
+        if (payload.getPullRequest() != null && payload.getPullRequest().getTitle() != null) {
+            return payload.getPullRequest().getTitle();
+        }
+        if (payload.getIssue() != null) {
+            return payload.getIssue().getTitle();
+        }
+        return null;
+    }
+
+    private String extractPrBody(WebhookPayload payload) {
+        if (payload.getPullRequest() != null && payload.getPullRequest().getBody() != null) {
+            return payload.getPullRequest().getBody();
+        }
+        if (payload.getIssue() != null) {
+            return payload.getIssue().getBody();
+        }
+        return null;
+    }
+
+    private WebhookPayload buildPayloadFromReviewComment(String owner, String repo, Long prNumber,
+                                                         ReviewComment reviewComment, ReviewSession session,
+                                                         String prAuthorLogin) {
+        WebhookPayload payload = new WebhookPayload();
+
+        WebhookPayload.Repository repository = new WebhookPayload.Repository();
+        repository.setName(repo);
+        WebhookPayload.Owner repoOwner = new WebhookPayload.Owner();
+        repoOwner.setLogin(owner);
+        repository.setOwner(repoOwner);
+        payload.setRepository(repository);
+
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setNumber(prNumber);
+        pr.setTitle(session.getPrTitle());
+        pr.setBody(session.getPrBody());
+        payload.setPullRequest(pr);
+
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setId(reviewComment.getId());
+        comment.setBody(reviewComment.getBody());
+        comment.setPath(reviewComment.getPath());
+        comment.setDiffHunk(reviewComment.getDiffHunk());
+        comment.setLine(reviewComment.getLine());
+        if (reviewComment.getUserLogin() != null) {
+            WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
+            commentUser.setLogin(reviewComment.getUserLogin());
+            comment.setUser(commentUser);
+        }
+        payload.setComment(comment);
+
+        if (prAuthorLogin != null && !prAuthorLogin.isBlank()) {
+            WebhookPayload.Owner sender = new WebhookPayload.Owner();
+            sender.setLogin(prAuthorLogin);
+            payload.setSender(sender);
+        }
+
+        if (session.getPrTitle() != null || session.getPrBody() != null) {
+            WebhookPayload.Issue issue = new WebhookPayload.Issue();
+            issue.setNumber(prNumber);
+            issue.setTitle(session.getPrTitle());
+            issue.setBody(session.getPrBody());
+            issue.setPullRequest(new WebhookPayload.IssuePullRequest());
+            payload.setIssue(issue);
+        }
+
+        return payload;
     }
 }

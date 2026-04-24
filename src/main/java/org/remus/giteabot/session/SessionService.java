@@ -5,6 +5,7 @@ import org.remus.giteabot.ai.AiMessage;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
@@ -55,6 +56,27 @@ public class SessionService {
     }
 
     @Transactional
+    public ReviewSession updatePrContext(ReviewSession session, String prTitle, String prBody) {
+        boolean changed = false;
+
+        if (prTitle != null && !prTitle.equals(session.getPrTitle())) {
+            session.setPrTitle(prTitle);
+            changed = true;
+        }
+
+        if (prBody != null && !prBody.equals(session.getPrBody())) {
+            session.setPrBody(prBody);
+            changed = true;
+        }
+
+        if (!changed) {
+            return session;
+        }
+
+        return repository.save(session);
+    }
+
+    @Transactional
     public void deleteSession(String owner, String repo, Long prNumber) {
         log.info("Deleting session for PR #{} in {}/{}", prNumber, owner, repo);
         repository.deleteByRepoOwnerAndRepoNameAndPrNumber(owner, repo, prNumber);
@@ -78,7 +100,6 @@ public class SessionService {
             return session;
         }
 
-        // Calculate total content size
         int totalChars = messages.stream()
                 .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0)
                 .sum();
@@ -92,22 +113,16 @@ public class SessionService {
         log.info("Compacting session {} context window: {} messages, {} chars -> keeping last {} messages",
                 session.getId(), messages.size(), totalChars, MAX_MESSAGES_AFTER_COMPACT);
 
-        // Keep only the most recent messages
         int removeCount = messages.size() - MAX_MESSAGES_AFTER_COMPACT;
-
-        // Create a summary of what was removed
         String contextSummary = buildContextSummary(messages.subList(0, removeCount));
 
-        // Remove old messages (from the beginning)
-        for (int i = 0; i < removeCount; i++) {
-            messages.removeFirst();
-        }
+        List<ConversationMessage> retainedMessages = new LinkedList<>(messages.subList(removeCount, messages.size()));
+        messages.clear();
 
-        // Add a context summary as the first message if we removed substantial content
         if (!contextSummary.isBlank()) {
-            ConversationMessage summaryMessage = new ConversationMessage("user", contextSummary);
-            messages.addFirst(summaryMessage);
+            messages.add(new ConversationMessage("user", contextSummary));
         }
+        messages.addAll(retainedMessages);
 
         int newTotalChars = messages.stream()
                 .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0)
@@ -127,12 +142,10 @@ public class SessionService {
             return "";
         }
 
-        // Extract key information from removed messages
         StringBuilder summary = new StringBuilder();
         summary.append("[Previous conversation context was compacted. ");
         summary.append("This discussion involves a code review. ");
 
-        // Count message types
         long userMessages = removedMessages.stream().filter(m -> "user".equals(m.getRole())).count();
         long assistantMessages = removedMessages.stream().filter(m -> "assistant".equals(m.getRole())).count();
 
