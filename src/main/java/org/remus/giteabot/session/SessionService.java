@@ -92,6 +92,7 @@ public class SessionService {
             return session;
         }
 
+        // Calculate total content size
         int totalChars = messages.stream()
                 .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0)
                 .sum();
@@ -105,13 +106,18 @@ public class SessionService {
         log.info("Compacting session {} context window: {} messages, {} chars -> keeping last {} messages",
                 session.getId(), messages.size(), totalChars, MAX_MESSAGES_AFTER_COMPACT);
 
+        // Keep only the most recent messages
         int removeCount = messages.size() - MAX_MESSAGES_AFTER_COMPACT;
+
+        // Create a summary of what was removed
         String contextSummary = buildContextSummary(messages.subList(0, removeCount));
 
+        // Remove old messages (from the beginning)
         for (int i = 0; i < removeCount; i++) {
             messages.removeFirst();
         }
 
+        // Add a context summary as the first message if we removed substantial content
         if (!contextSummary.isBlank()) {
             ConversationMessage summaryMessage = new ConversationMessage("user", contextSummary);
             messages.addFirst(summaryMessage);
@@ -127,15 +133,20 @@ public class SessionService {
         return repository.save(session);
     }
 
+    /**
+     * Builds a brief summary of the removed conversation context.
+     */
     private String buildContextSummary(List<ConversationMessage> removedMessages) {
         if (removedMessages.isEmpty()) {
             return "";
         }
 
+        // Extract key information from removed messages
         StringBuilder summary = new StringBuilder();
         summary.append("[Previous conversation context was compacted. ");
         summary.append("This discussion involves a code review. ");
 
+        // Count message types
         long userMessages = removedMessages.stream().filter(m -> "user".equals(m.getRole())).count();
         long assistantMessages = removedMessages.stream().filter(m -> "assistant".equals(m.getRole())).count();
 
@@ -145,6 +156,9 @@ public class SessionService {
         return summary.toString();
     }
 
+    /**
+     * Converts stored conversation messages to provider-agnostic AI message format.
+     */
     public List<AiMessage> toAiMessages(ReviewSession session) {
         return session.getMessages().stream()
                 .map(m -> AiMessage.builder()

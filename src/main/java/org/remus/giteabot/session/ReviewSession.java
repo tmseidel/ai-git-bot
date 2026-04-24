@@ -74,7 +74,8 @@ public class ReviewSession {
     }
 
     public boolean hasParticipant(String login) {
-        return normalizeParticipant(login) != null && participants.contains(normalizeParticipant(login));
+        String normalized = normalizeParticipant(login);
+        return normalized != null && participants.contains(normalized);
     }
 
     public void addParticipant(String login) {

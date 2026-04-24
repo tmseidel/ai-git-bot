@@ -162,7 +162,7 @@ class CodeReviewServiceTest {
 
         verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
         verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
-        verify(repositoryClient, never()).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Side-clarifying response"));
+        verify(repositoryClient, never()).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("side-clarifying"));
     }
 
     @Test
@@ -186,7 +186,7 @@ class CodeReviewServiceTest {
         codeReviewService.handleBotCommand(payload, null);
 
         verify(sessionService).rememberParticipant(session, "testuser");
-        verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Side-clarifying response"));
+        verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("side-clarifying"));
     }
 
     @Test
@@ -215,9 +215,9 @@ class CodeReviewServiceTest {
     }
 
     @Test
-    void formatBotResponse_sideClarifying_containsMarker() {
+    void formatBotResponse_sideClarifying_containsHeader() {
         String result = codeReviewService.formatBotResponse("some response", true);
-        assertTrue(result.contains("Side-clarifying response"));
+        assertTrue(result.contains("side-clarifying"));
     }
 
     @Test
@@ -276,7 +276,7 @@ class CodeReviewServiceTest {
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(1L),
                 eq("src/main/java/Foo.java"), eq(15),
-                contains("Side-clarifying response"));
+                contains("side-clarifying"));
     }
 
     @Test
@@ -360,12 +360,14 @@ class CodeReviewServiceTest {
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
 
+        // Set up review fetching
         GiteaReview review = new GiteaReview();
         review.setId(10L);
         review.setState("COMMENT");
         when(repositoryClient.getReviews("testowner", "testrepo", 2L))
                 .thenReturn(List.of(review));
 
+        // Set up review comments - one with bot mention, one without
         GiteaReviewComment botComment = new GiteaReviewComment();
         botComment.setId(100L);
         botComment.setBody("@ai_bot explain this");
@@ -390,11 +392,14 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleReviewSubmitted(payload, null);
 
+        // Should only process the bot-mentioning comment
         verify(repositoryClient).addReaction("testowner", "testrepo", 100L, "eyes");
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(2L),
                 eq("src/main/java/Foo.java"), eq(15),
                 contains("Here's the explanation"));
+
+        // Should NOT react to the normal comment
         verify(repositoryClient, never()).addReaction("testowner", "testrepo", 101L, "eyes");
     }
 
@@ -440,7 +445,7 @@ class CodeReviewServiceTest {
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(2L),
                 eq("src/main/java/Foo.java"), eq(15),
-                contains("Side-clarifying response"));
+                contains("side-clarifying"));
     }
 
     @Test
@@ -488,6 +493,7 @@ class CodeReviewServiceTest {
         when(repositoryClient.getReviews("testowner", "testrepo", 2L))
                 .thenReturn(List.of(review));
 
+        // Bot's own comment that mentions itself (e.g. from its formatted response)
         GiteaReviewComment botOwnComment = new GiteaReviewComment();
         botOwnComment.setId(200L);
         botOwnComment.setBody("## 🤖 Bot Response\n\nSome answer mentioning @ai_bot");
@@ -502,6 +508,7 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleReviewSubmitted(payload, null);
 
+        // Bot's own comment should be filtered out — no AI call, no reaction
         verify(aiClient, never()).chat(anyList(), anyString(), anyString(), anyString());
         verify(repositoryClient, never()).addReaction(anyString(), anyString(), anyLong(), anyString());
     }
