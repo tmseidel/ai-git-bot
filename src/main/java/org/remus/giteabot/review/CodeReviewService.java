@@ -5,10 +5,12 @@ import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.PromptService;
+import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
+import org.remus.giteabot.review.enrichment.PrContextEnricher;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.session.SessionService;
 
@@ -29,15 +31,17 @@ public class CodeReviewService {
     private final PromptService promptService;
     private final SessionService sessionService;
     private final String botUsername;
+    private final PrContextEnricher contextEnricher;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
                              PromptService promptService, SessionService sessionService,
-                             String botUsername) {
+                             String botUsername, ReviewConfigProperties reviewConfig) {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.promptService = promptService;
         this.sessionService = sessionService;
         this.botUsername = botUsername;
+        this.contextEnricher = new PrContextEnricher(repositoryClient, reviewConfig);
     }
 
     public void reviewPullRequest(WebhookPayload payload, String promptName) {
@@ -58,12 +62,23 @@ public class CodeReviewService {
 
             String systemPrompt = promptService.getSystemPrompt(promptName);
 
+            // Build enriched context for better review quality
+            String headRef = resolveHeadRef(payload);
+            String additionalContext = gatherAdditionalContext(owner, repo, prNumber, diff, headRef, prBody);
+
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
 
             String review;
             if (session.getMessages().isEmpty()) {
-                // Initial review: use the chunked diff review for thoroughness
-                review = aiClient.reviewDiff(prTitle, prBody, diff, systemPrompt, null);
+                // Initial review: use the chunked diff review with enriched context
+                log.debug("LLM request [reviewDiff] for PR #{}: systemPrompt length={}, prTitle='{}', prBody length={}, diff length={}, additionalContext length={}",
+                        prNumber, systemPrompt != null ? systemPrompt.length() : 0, prTitle,
+                        prBody != null ? prBody.length() : 0, diff.length(),
+                        additionalContext != null ? additionalContext.length() : 0);
+                review = aiClient.reviewDiff(prTitle, prBody, diff, systemPrompt, null, additionalContext);
+                log.debug("LLM response [reviewDiff] for PR #{}: length={}, preview='{}'",
+                        prNumber, review != null ? review.length() : 0,
+                        review != null ? review.substring(0, Math.min(review.length(), 500)) : "null");
 
                 // Store a summary user message and the review in the session
                 String userSummary = buildPrSummaryMessage(prTitle, prBody);
@@ -74,7 +89,13 @@ public class CodeReviewService {
                 String updateMessage = buildPrUpdateMessage(prTitle, diff);
                 List<AiMessage> history = sessionService.toAiMessages(session);
 
+                log.debug("LLM request [chat/update] for PR #{}: history size={}, updateMessage length={}, systemPrompt length={}",
+                        prNumber, history.size(), updateMessage.length(),
+                        systemPrompt != null ? systemPrompt.length() : 0);
                 review = aiClient.chat(history, updateMessage, systemPrompt, null);
+                log.debug("LLM response [chat/update] for PR #{}: length={}, preview='{}'",
+                        prNumber, review != null ? review.length() : 0,
+                        review != null ? review.substring(0, Math.min(review.length(), 500)) : "null");
 
                 sessionService.addMessage(session, "user", updateMessage);
                 sessionService.addMessage(session, "assistant", review);
@@ -119,7 +140,7 @@ public class CodeReviewService {
             // If session is empty, add context from the PR
             if (session.getMessages().isEmpty()) {
                 String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-                var prContext = buildPrContextString(payload, diff);
+                var prContext = buildPrContextString(payload, diff, owner, repo, prNumber);
                 sessionService.addMessage(session, "user", prContext);
                 sessionService.addMessage(session, "assistant",
                         "I've reviewed the pull request context. How can I help you?");
@@ -132,7 +153,15 @@ public class CodeReviewService {
 
             // Send the comment as a new message in the conversation
             List<AiMessage> history = sessionService.toAiMessages(session);
-            String response = aiClient.chat(history, userMessage, systemPrompt, null);
+            log.debug("LLM request [chat/botCommand] for PR #{}: history size={}, commentBody length={}, systemPrompt length={}",
+                    prNumber, history.size(), commentBody.length(),
+                    systemPrompt != null ? systemPrompt.length() : 0);
+            log.debug("LLM request [chat/botCommand] user message: '{}'",
+                    commentBody.substring(0, Math.min(commentBody.length(), 500)));
+            String response = aiClient.chat(history, commentBody, systemPrompt, null);
+            log.debug("LLM response [chat/botCommand] for PR #{}: length={}, preview='{}'",
+                    prNumber, response != null ? response.length() : 0,
+                    response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
 
             // Store messages in session
             sessionService.addMessage(session, "user", userMessage);
@@ -152,7 +181,8 @@ public class CodeReviewService {
         }
     }
 
-    private static @NonNull String buildPrContextString(WebhookPayload payload, String diff) {
+    private @NonNull String buildPrContextString(WebhookPayload payload, String diff,
+                                                    String owner, String repo, Long prNumber) {
         String prContext = "This is a pull request. " +
                 "Title: " + payload.getIssue().getTitle() + "\n" +
                 "Description: " + (payload.getIssue().getBody() != null ? payload.getIssue().getBody() : "N/A");
@@ -162,6 +192,15 @@ public class CodeReviewService {
                     ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(truncated)" : diff;
             prContext += "\n\nDiff:\n```diff\n" + truncatedDiff + "\n```";
         }
+
+        // Add enriched context
+        String headRef = resolveHeadRef(payload);
+        String prBody = payload.getIssue() != null ? payload.getIssue().getBody() : null;
+        String enrichedContext = gatherAdditionalContext(owner, repo, prNumber, diff, headRef, prBody);
+        if (!enrichedContext.isEmpty()) {
+            prContext += "\n\n" + enrichedContext;
+        }
+
         return prContext;
     }
 
@@ -208,6 +247,14 @@ public class CodeReviewService {
                             ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(truncated)" : diff;
                     prContext += "\n\nDiff:\n```diff\n" + truncatedDiff + "\n```";
                 }
+
+                // Add enriched context
+                String headRef = resolveHeadRef(payload);
+                String enrichedContext = gatherAdditionalContext(owner, repo, prNumber, diff, headRef, prBody);
+                if (!enrichedContext.isEmpty()) {
+                    prContext += "\n\n" + enrichedContext;
+                }
+
                 sessionService.addMessage(session, "user", prContext);
                 sessionService.addMessage(session, "assistant",
                         "I've reviewed the pull request context. How can I help you?");
@@ -243,7 +290,15 @@ public class CodeReviewService {
 
         // Send to AI
         List<AiMessage> history = sessionService.toAiMessages(session);
+        log.debug("LLM request [chat/inline] for file '{}': history size={}, contextMessage length={}, systemPrompt length={}",
+                filePath, history.size(), contextMessage.length(),
+                systemPrompt != null ? systemPrompt.length() : 0);
+        log.debug("LLM request [chat/inline] user message: '{}'",
+                contextMessage.substring(0, Math.min(contextMessage.length(), 500)));
         String response = aiClient.chat(history, contextMessage, systemPrompt, modelOverride);
+        log.debug("LLM response [chat/inline] for file '{}': length={}, preview='{}'",
+                filePath, response != null ? response.length() : 0,
+                response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
 
         // Store in session
         sessionService.addMessage(session, "user", contextMessage);
@@ -327,6 +382,14 @@ public class CodeReviewService {
                             ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(truncated)" : diff;
                     prContext += "\n\nDiff:\n```diff\n" + truncatedDiff + "\n```";
                 }
+
+                // Add enriched context
+                String headRef = resolveHeadRef(payload);
+                String enrichedContext = gatherAdditionalContext(owner, repo, prNumber, diff, headRef, prBody);
+                if (!enrichedContext.isEmpty()) {
+                    prContext += "\n\n" + enrichedContext;
+                }
+
                 sessionService.addMessage(session, "user", prContext);
                 sessionService.addMessage(session, "assistant",
                         "I've reviewed the pull request context. How can I help you?");
@@ -485,5 +548,40 @@ public class CodeReviewService {
         }
         return comment.getUserLogin() != null
                 && botUsername.equalsIgnoreCase(comment.getUserLogin());
+    }
+
+    /**
+     * Resolves the head branch ref from the webhook payload.
+     * Tries PullRequest.head.ref first, then falls back to the default branch.
+     */
+    String resolveHeadRef(WebhookPayload payload) {
+        if (payload.getPullRequest() != null && payload.getPullRequest().getHead() != null
+                && payload.getPullRequest().getHead().getRef() != null) {
+            return payload.getPullRequest().getHead().getRef();
+        }
+        // Fallback: try to get the default branch
+        try {
+            String owner = payload.getRepository().getOwner().getLogin();
+            String repo = payload.getRepository().getName();
+            return repositoryClient.getDefaultBranch(owner, repo);
+        } catch (Exception e) {
+            log.debug("Could not resolve head ref, falling back to 'main': {}", e.getMessage());
+            return "main";
+        }
+    }
+
+    /**
+     * Gathers additional context for a PR review using the PrContextEnricher.
+     * Returns an empty string if context gathering fails.
+     */
+    String gatherAdditionalContext(String owner, String repo, Long prNumber,
+                                           String diff, String headRef, String prBody) {
+        try {
+            return contextEnricher.buildEnrichedContext(owner, repo, prNumber, diff, headRef, prBody);
+        } catch (Exception e) {
+            log.warn("Failed to gather additional context for PR #{} in {}/{}: {}",
+                    prNumber, owner, repo, e.getMessage());
+            return "";
+        }
     }
 }

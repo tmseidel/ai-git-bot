@@ -12,6 +12,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.Mockito.*;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -43,7 +44,9 @@ class SetupControllerTest {
 
         mockMvc.perform(get("/setup"))
                 .andExpect(status().isOk())
-                .andExpect(view().name("setup"));
+                .andExpect(view().name("setup"))
+                .andExpect(content().string(containsString("/images/favicon.svg")))
+                .andExpect(content().string(containsString("brand-icon")));
     }
 
     @Test
@@ -117,6 +120,8 @@ class SetupControllerTest {
 
         mockMvc.perform(get("/login"))
                 .andExpect(status().isOk())
-                .andExpect(view().name("login"));
+                .andExpect(view().name("login"))
+                .andExpect(content().string(containsString("/images/favicon.svg")))
+                .andExpect(content().string(containsString("brand-icon")));
     }
 }

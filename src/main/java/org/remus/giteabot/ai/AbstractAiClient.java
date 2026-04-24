@@ -131,6 +131,12 @@ public abstract class AbstractAiClient implements AiClient {
 
     @Override
     public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt, String modelOverride) {
+        return reviewDiff(prTitle, prBody, diff, systemPrompt, modelOverride, null);
+    }
+
+    @Override
+    public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt,
+                             String modelOverride, String additionalContext) {
         String effectiveModel = resolveModel(modelOverride);
         String effectivePrompt = resolvePrompt(systemPrompt);
 
@@ -147,7 +153,7 @@ public abstract class AbstractAiClient implements AiClient {
 
             try {
                 String review = reviewSingleChunk(prTitle, prBody, chunk, chunkNumber, totalChunks, false,
-                        effectivePrompt, effectiveModel);
+                        effectivePrompt, effectiveModel, additionalContext);
 
                 if (totalChunks > 1) {
                     reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks + "\n" + review);
@@ -182,10 +188,11 @@ public abstract class AbstractAiClient implements AiClient {
     }
 
     private String reviewSingleChunk(String prTitle, String prBody, String diffChunk, int chunkNumber, int totalChunks,
-                                     boolean isRetry, String systemPrompt, String effectiveModel) {
+                                     boolean isRetry, String systemPrompt, String effectiveModel,
+                                     String additionalContext) {
         try {
             return reviewSingleChunkInternal(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry,
-                    systemPrompt, effectiveModel);
+                    systemPrompt, effectiveModel, additionalContext);
         } catch (HttpClientErrorException.BadRequest e) {
             if (isPromptTooLongError(e) && !isRetry && diffChunk.length() > retryTruncatedChunkChars) {
                 log.warn("Prompt too long for chunk {}/{} (chars={}), retrying with truncated chunk (chars={})",
@@ -195,7 +202,7 @@ public abstract class AbstractAiClient implements AiClient {
                         retryTruncatedChunkChars);
                 String truncatedChunk = truncateDiff(diffChunk, retryTruncatedChunkChars);
                 return reviewSingleChunk(prTitle, prBody, truncatedChunk, chunkNumber, totalChunks, true,
-                        systemPrompt, effectiveModel);
+                        systemPrompt, effectiveModel, additionalContext);
             }
             throw e;
         }
@@ -208,7 +215,20 @@ public abstract class AbstractAiClient implements AiClient {
     String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
                                      int chunkNumber, int totalChunks, boolean isRetry,
                                      String systemPrompt, String effectiveModel) {
-        String userMessage = buildUserMessage(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry);
+        return reviewSingleChunkInternal(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry,
+                systemPrompt, effectiveModel, null);
+    }
+
+    /**
+     * Performs the actual API call for a single diff chunk with additional context.
+     * Package-private so it can be overridden in tests.
+     */
+    String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
+                                     int chunkNumber, int totalChunks, boolean isRetry,
+                                     String systemPrompt, String effectiveModel,
+                                     String additionalContext) {
+        String userMessage = buildUserMessage(prTitle, prBody, diffChunk, chunkNumber, totalChunks,
+                isRetry, additionalContext);
         return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage);
     }
 
@@ -249,10 +269,15 @@ public abstract class AbstractAiClient implements AiClient {
     }
 
     String buildUserMessage(String prTitle, String prBody, String diff) {
-        return buildUserMessage(prTitle, prBody, diff, 1, 1, false);
+        return buildUserMessage(prTitle, prBody, diff, 1, 1, false, null);
     }
 
     String buildUserMessage(String prTitle, String prBody, String diff, int chunkNumber, int totalChunks, boolean isRetry) {
+        return buildUserMessage(prTitle, prBody, diff, chunkNumber, totalChunks, isRetry, null);
+    }
+
+    String buildUserMessage(String prTitle, String prBody, String diff, int chunkNumber, int totalChunks,
+                            boolean isRetry, String additionalContext) {
         StringBuilder sb = new StringBuilder();
         sb.append("Please review the following pull request.\n\n");
         sb.append("**Title:** ").append(prTitle).append("\n");
@@ -264,6 +289,9 @@ public abstract class AbstractAiClient implements AiClient {
         }
         if (isRetry) {
             sb.append("**Note:** The diff for this chunk was truncated to fit model limits.\n");
+        }
+        if (additionalContext != null && !additionalContext.isBlank()) {
+            sb.append("\n**Additional Context:**\n").append(additionalContext).append("\n");
         }
         sb.append("\n**Diff:**\n```diff\n").append(diff).append("\n```");
         return sb.toString();

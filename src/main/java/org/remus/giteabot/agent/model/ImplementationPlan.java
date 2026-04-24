@@ -21,6 +21,11 @@ public class ImplementationPlan {
     private List<String> requestFiles;
 
     /**
+     * Repository exploration tools the AI wants to run before coding.
+     */
+    private List<ToolRequest> requestTools;
+
+    /**
      * List of file changes to implement.
      */
     private List<FileChange> fileChanges;
@@ -40,6 +45,20 @@ public class ImplementationPlan {
      */
     public boolean hasFileRequests() {
         return requestFiles != null && !requestFiles.isEmpty();
+    }
+
+    /**
+     * Returns true if the AI is requesting repository exploration tools.
+     */
+    public boolean hasContextToolRequests() {
+        return requestTools != null && !requestTools.isEmpty();
+    }
+
+    /**
+     * Returns true if the AI is requesting any additional repository context.
+     */
+    public boolean hasContextRequests() {
+        return hasFileRequests() || hasContextToolRequests();
     }
 
     /**

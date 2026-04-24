@@ -66,6 +66,23 @@ public interface RepositoryApiClient {
     List<ReviewComment> getReviewComments(String owner, String repo,
                                                      Long pullNumber, Long reviewId);
 
+    /**
+     * Returns the list of commits in a pull request.
+     * Each map contains at minimum "message" (commit message) and "sha" keys.
+     * Default implementation returns an empty list.
+     */
+    default List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+        return List.of();
+    }
+
+    /**
+     * Returns issue details as a map with "title" and "body" keys.
+     * Default implementation returns an empty map.
+     */
+    default Map<String, Object> getIssueDetails(String owner, String repo, Long issueNumber) {
+        return Map.of();
+    }
+
     // ---- Repository operations ----
 
     String getDefaultBranch(String owner, String repo);

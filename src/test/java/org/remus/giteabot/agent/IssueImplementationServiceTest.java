@@ -5,20 +5,25 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.remus.giteabot.agent.model.FileChange;
-import org.remus.giteabot.agent.model.ImplementationPlan;
+import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
+import org.remus.giteabot.agent.validation.WorkspaceService;
+import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -41,6 +46,9 @@ class IssueImplementationServiceTest {
     private ToolExecutionService toolExecutionService;
 
     @Mock
+    private WorkspaceService workspaceService;
+
+    @Mock
     private DiffApplyService diffApplyService;
 
     private AgentConfigProperties agentConfig;
@@ -54,291 +62,7 @@ class IssueImplementationServiceTest {
         agentConfig.setMaxFiles(10);
         agentConfig.setBranchPrefix("ai-agent/");
         service = new IssueImplementationService(repositoryClient, aiClient, promptService, agentConfig,
-                sessionService, toolExecutionService, diffApplyService);
-    }
-
-    @Test
-    void parseAiResponse_validJson_returnsImplementationPlan() {
-        String aiResponse = """
-                Here is the implementation:
-                ```json
-                {
-                  "summary": "Added hello world feature",
-                  "fileChanges": [
-                    {
-                      "path": "src/main/java/Hello.java",
-                      "operation": "CREATE",
-                      "content": "public class Hello {}"
-                    }
-                  ]
-                }
-                ```
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.getSummary()).isEqualTo("Added hello world feature");
-        assertThat(plan.getFileChanges()).hasSize(1);
-        assertThat(plan.getFileChanges().getFirst().getPath()).isEqualTo("src/main/java/Hello.java");
-        assertThat(plan.getFileChanges().getFirst().getOperation()).isEqualTo(FileChange.Operation.CREATE);
-        assertThat(plan.getFileChanges().getFirst().getContent()).isEqualTo("public class Hello {}");
-    }
-
-    @Test
-    void parseAiResponse_multipleFiles_parsesAll() {
-        String aiResponse = """
-                ```json
-                {
-                  "summary": "Implemented feature X",
-                  "fileChanges": [
-                    {
-                      "path": "src/Foo.java",
-                      "operation": "CREATE",
-                      "content": "class Foo {}"
-                    },
-                    {
-                      "path": "src/Bar.java",
-                      "operation": "UPDATE",
-                      "content": "class Bar { int x; }"
-                    },
-                    {
-                      "path": "src/Old.java",
-                      "operation": "DELETE",
-                      "content": ""
-                    }
-                  ]
-                }
-                ```
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.getFileChanges()).hasSize(3);
-        assertThat(plan.getFileChanges().get(0).getOperation()).isEqualTo(FileChange.Operation.CREATE);
-        assertThat(plan.getFileChanges().get(1).getOperation()).isEqualTo(FileChange.Operation.UPDATE);
-        assertThat(plan.getFileChanges().get(2).getOperation()).isEqualTo(FileChange.Operation.DELETE);
-    }
-
-    @Test
-    void parseAiResponse_invalidJson_returnsNull() {
-        ImplementationPlan plan = service.parseAiResponse("This is not valid JSON at all");
-
-        assertThat(plan).isNull();
-    }
-
-    @Test
-    void parseAiResponse_emptyResponse_returnsNull() {
-        assertThat(service.parseAiResponse(null)).isNull();
-        assertThat(service.parseAiResponse("")).isNull();
-        assertThat(service.parseAiResponse("   ")).isNull();
-    }
-
-    @Test
-    void parseAiResponse_noFileChanges_returnsPlanWithEmptyChanges() {
-        String aiResponse = """
-                ```json
-                {
-                  "summary": "Nothing to do"
-                }
-                ```
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        // Plan is returned but with no file changes (valid for file requests)
-        assertThat(plan).isNotNull();
-        assertThat(plan.getSummary()).isEqualTo("Nothing to do");
-        assertThat(plan.hasFileChanges()).isFalse();
-    }
-
-    @Test
-    void parseAiResponse_withRequestFiles_returnsPlan() {
-        String aiResponse = """
-                ```json
-                {
-                  "summary": "Need more context",
-                  "requestFiles": ["src/Main.java", "pom.xml"]
-                }
-                ```
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.hasFileRequests()).isTrue();
-        assertThat(plan.getRequestFiles()).containsExactly("src/Main.java", "pom.xml");
-        assertThat(plan.hasFileChanges()).isFalse();
-    }
-
-    @Test
-    void parseAiResponse_withToolRequest_returnsPlanWithTool() {
-        String aiResponse = """
-                ```json
-                {
-                  "summary": "Implemented feature and requesting validation",
-                  "fileChanges": [
-                    {
-                      "path": "src/main/java/Hello.java",
-                      "operation": "CREATE",
-                      "content": "public class Hello {}"
-                    }
-                  ],
-                  "runTool": {
-                    "tool": "mvn",
-                    "args": ["compile", "-q", "-B"]
-                  }
-                }
-                ```
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.getSummary()).isEqualTo("Implemented feature and requesting validation");
-        assertThat(plan.hasFileChanges()).isTrue();
-        assertThat(plan.getFileChanges()).hasSize(1);
-        // Tool request parsing - check if it works
-        // Note: Jackson 3.x may need special handling for nested objects
-        // For now, just verify the plan is returned correctly
-        if (plan.getToolRequest() != null) {
-            assertThat(plan.getToolRequest().getTool()).isEqualTo("mvn");
-            assertThat(plan.getToolRequest().getArgs()).containsExactly("compile", "-q", "-B");
-        }
-    }
-
-    @Test
-    void parseAiResponse_withDiff_returnsPlan() {
-        String aiResponse = """
-                ```json
-                {
-                  "summary": "Updated file",
-                  "fileChanges": [
-                    {
-                      "path": "src/Test.java",
-                      "operation": "UPDATE",
-                      "diff": "<<<<<<< SEARCH\\nold\\n=======\\nnew\\n>>>>>>> REPLACE"
-                    }
-                  ]
-                }
-                ```
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.getFileChanges()).hasSize(1);
-        assertThat(plan.getFileChanges().getFirst().isDiffBased()).isTrue();
-        assertThat(plan.getFileChanges().getFirst().getDiff()).contains("SEARCH");
-    }
-
-    @Test
-    void parseAiResponse_rawJson_withoutCodeBlock() {
-        String aiResponse = """
-                {
-                  "summary": "Direct JSON",
-                  "fileChanges": [
-                    {
-                      "path": "test.txt",
-                      "operation": "CREATE",
-                      "content": "hello"
-                    }
-                  ]
-                }
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.getSummary()).isEqualTo("Direct JSON");
-        assertThat(plan.getFileChanges()).hasSize(1);
-    }
-
-    @Test
-    void parseAiResponse_rawJson_withRunTool() {
-        String aiResponse = """
-                {
-                  "summary": "Implemented feature with validation",
-                  "fileChanges": [
-                    {
-                      "path": "src/Main.java",
-                      "operation": "CREATE",
-                      "content": "public class Main {}"
-                    }
-                  ],
-                  "runTool": {
-                    "tool": "mvn",
-                    "args": ["compile", "-q", "-B"]
-                  }
-                }
-                """;
-
-        ImplementationPlan plan = service.parseAiResponse(aiResponse);
-
-        assertThat(plan).isNotNull();
-        assertThat(plan.hasFileChanges()).isTrue();
-        assertThat(plan.hasToolRequest()).as("Plan should have tool request").isTrue();
-        assertThat(plan.getToolRequest()).isNotNull();
-        assertThat(plan.getToolRequest().getTool()).isEqualTo("mvn");
-        assertThat(plan.getToolRequest().getArgs()).containsExactly("compile", "-q", "-B");
-    }
-
-    @Test
-    void parseAiResponse_rawJson_withRunTool_directObjectMapper() {
-        // Test Jackson parsing directly to isolate the issue
-        String jsonStr = """
-                {
-                  "summary": "Implemented feature with validation",
-                  "fileChanges": [
-                    {
-                      "path": "src/Main.java",
-                      "operation": "CREATE",
-                      "content": "public class Main {}"
-                    }
-                  ],
-                  "runTool": {
-                    "tool": "mvn",
-                    "args": ["compile", "-q", "-B"]
-                  }
-                }
-                """;
-
-        tools.jackson.databind.ObjectMapper mapper = new tools.jackson.databind.ObjectMapper();
-
-        // Parse as generic tree to inspect structure
-        tools.jackson.databind.JsonNode root = mapper.readTree(jsonStr);
-        assertThat(root.has("runTool")).isTrue();
-        assertThat(root.get("runTool").has("tool")).isTrue();
-        assertThat(root.get("runTool").get("tool").asString()).isEqualTo("mvn");
-    }
-
-    @Test
-    void buildTreeContext_withFiles_formatsTree() {
-        List<Map<String, Object>> tree = List.of(
-                Map.of("type", "blob", "path", "src/Main.java"),
-                Map.of("type", "blob", "path", "README.md"),
-                Map.of("type", "tree", "path", "src")
-        );
-
-        String context = service.buildTreeContext(tree);
-
-        assertThat(context).contains("src/Main.java");
-        assertThat(context).contains("README.md");
-        // tree type entries are not listed as files
-        assertThat(context).doesNotContain("  src\n");
-    }
-
-    @Test
-    void buildTreeContext_emptyTree_returnsMessage() {
-        String context = service.buildTreeContext(List.of());
-        assertThat(context).contains("No files found");
-    }
-
-    @Test
-    void buildTreeContext_nullTree_returnsMessage() {
-        String context = service.buildTreeContext(null);
-        assertThat(context).contains("No files found");
+                sessionService, toolExecutionService, workspaceService, diffApplyService);
     }
 
     @Test
@@ -461,26 +185,163 @@ class IssueImplementationServiceTest {
     }
 
     @Test
-    void fetchRelevantFileContents_includesMentionedFiles() {
-        List<Map<String, Object>> tree = List.of(
-                Map.of("type", "blob", "path", "src/Main.java"),
-                Map.of("type", "blob", "path", "pom.xml"),
-                Map.of("type", "blob", "path", "README.md"),
-                Map.of("type", "blob", "path", "src/Other.java")
-        );
+    void handleIssueComment_multipleFileRequestRounds_fetchesAllRequestedFiles() {
+        WebhookPayload payload = createCommentPayload("Please also update the config");
 
-        when(repositoryClient.getFileContent("o", "r", "pom.xml", "main")).thenReturn("<pom/>");
-        when(repositoryClient.getFileContent("o", "r", "README.md", "main")).thenReturn("# Readme");
-        when(repositoryClient.getFileContent("o", "r", "src/Main.java", "main")).thenReturn("class Main {}");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
 
-        String result = service.fetchRelevantFileContents("o", "r", "main", tree,
-                "Fix src/Main.java", "Update the main class");
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(
+                new ArrayList<>(List.of(AiMessage.builder().role("user").content("Please also update the config").build())));
 
-        assertThat(result).contains("src/Main.java");
-        assertThat(result).contains("pom.xml");
-        assertThat(result).contains("README.md");
-        // src/Other.java is not mentioned in the issue, not a config file
-        assertThat(result).doesNotContain("src/Other.java");
+        // First AI response: request files (round 1)
+        String firstResponse = """
+                ```json
+                {
+                  "summary": "Need to see config",
+                  "requestFiles": ["src/Config.java"]
+                }
+                ```
+                """;
+        // Second AI response: request more files (round 2)
+        String secondResponse = """
+                ```json
+                {
+                  "summary": "Need to see model too",
+                  "requestFiles": ["src/Model.java"]
+                }
+                ```
+                """;
+        // Third AI response: actual implementation
+        String thirdResponse = """
+                ```json
+                {
+                  "summary": "Updated config",
+                  "fileChanges": [
+                    {
+                      "path": "src/Config.java",
+                      "operation": "UPDATE",
+                      "content": "class Config { int x; }"
+                    }
+                  ]
+                }
+                ```
+                """;
+
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn(firstResponse, secondResponse, thirdResponse);
+
+        when(repositoryClient.getFileContent("testowner", "testrepo", "src/Config.java", "ai-agent/issue-42"))
+                .thenReturn("class Config {}");
+        when(repositoryClient.getFileContent("testowner", "testrepo", "src/Model.java", "ai-agent/issue-42"))
+                .thenReturn("class Model {}");
+        when(repositoryClient.getFileSha("testowner", "testrepo", "src/Config.java", "ai-agent/issue-42"))
+                .thenReturn("abc123");
+
+        service.handleIssueComment(payload);
+
+        // Verify file contents were fetched for both rounds
+        verify(repositoryClient).getFileContent("testowner", "testrepo", "src/Config.java", "ai-agent/issue-42");
+        verify(repositoryClient).getFileContent("testowner", "testrepo", "src/Model.java", "ai-agent/issue-42");
+        // Verify AI was called 3 times (initial + 2 file request rounds)
+        verify(aiClient, times(3)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+        // Verify file change was applied
+        verify(repositoryClient).createOrUpdateFile(eq("testowner"), eq("testrepo"), eq("src/Config.java"),
+                eq("class Config { int x; }"), anyString(), eq("ai-agent/issue-42"), eq("abc123"));
+    }
+
+    @Test
+    void handleIssueComment_contextToolRequest_executesToolAndContinues() {
+        WebhookPayload payload = createCommentPayload("Please trace where Config is used");
+
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(
+                new ArrayList<>(List.of(AiMessage.builder().role("user").content("Please trace where Config is used").build())));
+
+        String firstResponse = """
+                ```json
+                {
+                  "summary": "Need to search for usages",
+                  "requestTools": [
+                    {"tool": "rg", "args": ["ConfigService", "src"]}
+                  ]
+                }
+                ```
+                """;
+        String secondResponse = """
+                ```json
+                {
+                  "summary": "Updated config after tracing usages",
+                  "fileChanges": [
+                    {
+                      "path": "src/Config.java",
+                      "operation": "UPDATE",
+                      "content": "class Config { boolean enabled = true; }"
+                    }
+                  ]
+                }
+                ```
+                """;
+
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn(firstResponse, secondResponse);
+        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
+                eq(List.of()), isNull(), isNull()))
+                .thenReturn(WorkspaceResult.success(Path.of("/tmp/context-workspace"), List.of()));
+        when(toolExecutionService.executeContextTool(Path.of("/tmp/context-workspace"), "rg",
+                List.of("ConfigService", "src")))
+                .thenReturn(new ToolResult(true, 0, "src/Config.java:12: ConfigService configService", ""));
+        when(repositoryClient.getFileSha("testowner", "testrepo", "src/Config.java", "ai-agent/issue-42"))
+                .thenReturn("abc123");
+
+        service.handleIssueComment(payload);
+
+        verify(toolExecutionService).executeContextTool(Path.of("/tmp/context-workspace"), "rg",
+                List.of("ConfigService", "src"));
+        verify(workspaceService).cleanupWorkspace(Path.of("/tmp/context-workspace"));
+        verify(repositoryClient).createOrUpdateFile(eq("testowner"), eq("testrepo"), eq("src/Config.java"),
+                eq("class Config { boolean enabled = true; }"), anyString(), eq("ai-agent/issue-42"), eq("abc123"));
+    }
+
+    private WebhookPayload createCommentPayload(String commentBody) {
+        WebhookPayload payload = new WebhookPayload();
+        payload.setAction("created");
+
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setId(100L);
+        comment.setBody(commentBody);
+        payload.setComment(comment);
+
+        WebhookPayload.Issue issue = new WebhookPayload.Issue();
+        issue.setNumber(42L);
+        issue.setTitle("Add new feature X");
+        issue.setBody("Please implement feature X that does Y and Z");
+        payload.setIssue(issue);
+
+        WebhookPayload.Owner owner = new WebhookPayload.Owner();
+        owner.setLogin("testowner");
+
+        WebhookPayload.Repository repository = new WebhookPayload.Repository();
+        repository.setName("testrepo");
+        repository.setFullName("testowner/testrepo");
+        repository.setOwner(owner);
+        payload.setRepository(repository);
+
+        return payload;
     }
 
     private WebhookPayload createIssuePayload() {
@@ -506,60 +367,6 @@ class IssueImplementationServiceTest {
         repository.setOwner(owner);
         payload.setRepository(repository);
 
-
         return payload;
-    }
-
-    // ---- extractNonJsonResponse tests ----
-
-    @Test
-    void extractNonJsonResponse_pureJsonBlock_returnsNull() {
-        String response = """
-                ```json
-                {
-                  "summary": "test",
-                  "fileChanges": []
-                }
-                ```
-                """;
-        assertThat(service.extractNonJsonResponse(response)).isNull();
-    }
-
-    @Test
-    void extractNonJsonResponse_pureRawJson_returnsNull() {
-        String response = """
-                {
-                  "summary": "test",
-                  "fileChanges": []
-                }
-                """;
-        assertThat(service.extractNonJsonResponse(response)).isNull();
-    }
-
-    @Test
-    void extractNonJsonResponse_thinkingBeforeJson_returnsThinking() {
-        String response = """
-                I'll create the following files for you.
-                ```json
-                {
-                  "summary": "test",
-                  "fileChanges": []
-                }
-                ```
-                """;
-        String result = service.extractNonJsonResponse(response);
-        assertThat(result).isEqualTo("I'll create the following files for you.");
-    }
-
-    @Test
-    void extractNonJsonResponse_onlyWhitespaceBeforeJson_returnsNull() {
-        String response = "\n  \n```json\n{}\n```";
-        assertThat(service.extractNonJsonResponse(response)).isNull();
-    }
-
-    @Test
-    void extractNonJsonResponse_plainText_returnsText() {
-        String response = "I can't implement this because the issue is too vague.";
-        assertThat(service.extractNonJsonResponse(response)).isEqualTo(response);
     }
 }

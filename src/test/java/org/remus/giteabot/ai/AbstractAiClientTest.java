@@ -88,7 +88,8 @@ class AbstractAiClientTest {
             @Override
             String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
                                              int chunkNumber, int totalChunks, boolean isRetry,
-                                             String systemPrompt, String effectiveModel) {
+                                             String systemPrompt, String effectiveModel,
+                                             String additionalContext) {
                 callCount++;
                 if (callCount == 2) {
                     throw new RuntimeException("API error on chunk 2");
@@ -110,7 +111,8 @@ class AbstractAiClientTest {
             @Override
             String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
                                              int chunkNumber, int totalChunks, boolean isRetry,
-                                             String systemPrompt, String effectiveModel) {
+                                             String systemPrompt, String effectiveModel,
+                                             String additionalContext) {
                 throw new RuntimeException("API error on chunk " + chunkNumber);
             }
         };
@@ -130,7 +132,8 @@ class AbstractAiClientTest {
             @Override
             String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
                                              int chunkNumber, int totalChunks, boolean isRetry,
-                                             String systemPrompt, String effectiveModel) {
+                                             String systemPrompt, String effectiveModel,
+                                             String additionalContext) {
                 assertEquals("Custom prompt", systemPrompt);
                 assertEquals("custom-model", effectiveModel);
                 return "Review with custom prompt";
@@ -147,7 +150,8 @@ class AbstractAiClientTest {
             @Override
             String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
                                              int chunkNumber, int totalChunks, boolean isRetry,
-                                             String systemPrompt, String effectiveModel) {
+                                             String systemPrompt, String effectiveModel,
+                                             String additionalContext) {
                 assertEquals(AbstractAiClient.DEFAULT_SYSTEM_PROMPT, systemPrompt);
                 assertEquals("test-model", effectiveModel);
                 return "Review with default prompt";

@@ -7,6 +7,7 @@ Respond with a JSON object:
 {
   "summary": "Brief description of changes",
   "requestFiles": ["path/to/file1", "path/to/file2"],
+  "requestTools": [{"tool": "rg", "args": ["UserService.save", "src"]}],
   "fileChanges": [
     {"path": "path/to/file", "operation": "CREATE", "content": "full file content"},
     {"path": "path/to/existing", "operation": "UPDATE", "diff": "<<<<<<< SEARCH\nold code\n=======\nnew code\n>>>>>>> REPLACE"}
@@ -36,6 +37,19 @@ Multiple blocks can be used for multiple changes in one file.
 ## Requesting Files
 
 If you need to see additional files, set `requestFiles` array. The bot will provide them and ask you to continue.
+
+## Repository Exploration Tools
+
+If you need repository context before coding, set `requestTools` with one or more tool calls. Supported tools:
+
+- `rg` / `ripgrep` / `grep`: `{"tool": "rg", "args": ["UserService.save", "src"]}`
+- `find`: `{"tool": "find", "args": ["*.yml"]}`
+- `cat`: `{"tool": "cat", "args": ["src/main/java/App.java", "1", "120"]}`
+- `git-log`: `{"tool": "git-log", "args": ["src/main/java/App.java", "10"]}`
+- `git-blame`: `{"tool": "git-blame", "args": ["src/main/java/App.java", "20", "60"]}`
+- `tree`: `{"tool": "tree", "args": ["src/main/java", "3"]}`
+
+Use these tools to search usages, inspect file subsets with line numbers, understand history, and explore directories before emitting `fileChanges`.
 
 ## Validation with Tools (MANDATORY)
 

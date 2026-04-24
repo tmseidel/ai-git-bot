@@ -118,6 +118,28 @@ public class GiteaApiClient implements RepositoryApiClient {
         return comments != null ? List.copyOf(comments) : List.of();
     }
 
+    // ---- PR context enrichment ----
+
+    @Override
+    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+        log.info("Fetching commits for PR #{} in {}/{}", pullNumber, owner, repo);
+        List<Map<String, Object>> commits = giteaRestClient.get()
+                .uri("/api/v1/repos/{owner}/{repo}/pulls/{index}/commits", owner, repo, pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return commits != null ? commits : List.of();
+    }
+
+    @Override
+    public Map<String, Object> getIssueDetails(String owner, String repo, Long issueNumber) {
+        log.info("Fetching issue #{} in {}/{}", issueNumber, owner, repo);
+        Map<String, Object> issue = giteaRestClient.get()
+                .uri("/api/v1/repos/{owner}/{repo}/issues/{index}", owner, repo, issueNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return issue != null ? issue : Map.of();
+    }
+
     // ---- Repository operations for the issue implementation agent ----
 
     @Override
@@ -150,22 +172,28 @@ public class GiteaApiClient implements RepositoryApiClient {
     @Override
     public String getFileContent(String owner, String repo, String path, String ref) {
         log.info("Fetching file content for {}/{}/{} at ref={}", owner, repo, path, ref);
-        Map<String, Object> result = giteaRestClient.get()
-                .uri("/api/v1/repos/{owner}/{repo}/contents/{path}?ref={ref}", owner, repo, path, ref)
+        // Use the raw endpoint to get full file content without base64 encoding or size limits.
+        // Build URI manually to avoid Spring encoding slashes in the file path.
+        String content = giteaRestClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/repos/{owner}/{repo}/raw/")
+                        .path(path)
+                        .queryParam("ref", ref)
+                        .build(owner, repo))
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("content")) {
-            String base64Content = (String) result.get("content");
-            return new String(Base64.getMimeDecoder().decode(base64Content));
-        }
-        return "";
+                .body(String.class);
+        return content != null ? content : "";
     }
 
     @Override
     public String getFileSha(String owner, String repo, String path, String ref) {
         log.info("Fetching file SHA for {}/{}/{} at ref={}", owner, repo, path, ref);
         Map<String, Object> result = giteaRestClient.get()
-                .uri("/api/v1/repos/{owner}/{repo}/contents/{path}?ref={ref}", owner, repo, path, ref)
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/repos/{owner}/{repo}/contents/")
+                        .path(path)
+                        .queryParam("ref", ref)
+                        .build(owner, repo))
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
         if (result != null && result.containsKey("sha")) {
@@ -193,13 +221,19 @@ public class GiteaApiClient implements RepositoryApiClient {
 
         if (sha != null) {
             giteaRestClient.put()
-                    .uri("/api/v1/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/api/v1/repos/{owner}/{repo}/contents/")
+                            .path(path)
+                            .build(owner, repo))
                     .body(new UpdateFileRequest(base64Content, message, branch, sha))
                     .retrieve()
                     .toBodilessEntity();
         } else {
             giteaRestClient.post()
-                    .uri("/api/v1/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/api/v1/repos/{owner}/{repo}/contents/")
+                            .path(path)
+                            .build(owner, repo))
                     .body(new CreateFileRequest(base64Content, message, branch))
                     .retrieve()
                     .toBodilessEntity();
@@ -212,7 +246,10 @@ public class GiteaApiClient implements RepositoryApiClient {
                            String branch, String sha) {
         log.info("Deleting file {} on branch '{}' in {}/{}", path, branch, owner, repo);
         giteaRestClient.method(org.springframework.http.HttpMethod.DELETE)
-                .uri("/api/v1/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v1/repos/{owner}/{repo}/contents/")
+                        .path(path)
+                        .build(owner, repo))
                 .body(new DeleteFileRequest(message, branch, sha))
                 .retrieve()
                 .toBodilessEntity();

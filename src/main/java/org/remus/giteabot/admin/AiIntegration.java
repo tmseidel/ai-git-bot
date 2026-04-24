@@ -25,6 +25,7 @@ public class AiIntegration {
     @Column(nullable = false)
     private String apiUrl;
 
+    @Column(length = 1000)
     private String apiKey;
 
     private String apiVersion;

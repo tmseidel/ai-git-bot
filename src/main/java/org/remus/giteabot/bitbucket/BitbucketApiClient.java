@@ -173,6 +173,34 @@ public class BitbucketApiClient implements RepositoryApiClient {
         return comments != null ? List.copyOf(comments) : List.of();
     }
 
+    // ---- PR context enrichment ----
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+        log.info("Fetching commits for PR #{} in {}/{}", pullNumber, owner, repo);
+        Map<String, Object> result = restClient.get()
+                .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}/commits",
+                        owner, repo, pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (result != null && result.containsKey("values")) {
+            return (List<Map<String, Object>>) result.get("values");
+        }
+        return List.of();
+    }
+
+    @Override
+    public Map<String, Object> getIssueDetails(String owner, String repo, Long issueNumber) {
+        log.info("Fetching issue #{} in {}/{}", issueNumber, owner, repo);
+        Map<String, Object> issue = restClient.get()
+                .uri("/repositories/{workspace}/{repo}/issues/{issue_id}",
+                        owner, repo, issueNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return issue != null ? issue : Map.of();
+    }
+
     // ---- Repository operations ----
 
     @Override
@@ -206,12 +234,16 @@ public class BitbucketApiClient implements RepositoryApiClient {
     @Override
     public String getFileContent(String owner, String repo, String path, String ref) {
         log.info("Fetching file content for {}/{}/{} at ref={}", owner, repo, path, ref);
-        return restClient.get()
-                .uri("/repositories/{workspace}/{repo}/src/{ref}/{path}",
-                        owner, repo, ref, path)
+        // Build URI manually to avoid Spring encoding slashes in the file path.
+        String content = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repositories/{workspace}/{repo}/src/{ref}/")
+                        .path(path)
+                        .build(owner, repo, ref))
                 .header("Accept", "text/plain")
                 .retrieve()
                 .body(String.class);
+        return content != null ? content : "";
     }
 
     @Override
@@ -219,8 +251,11 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public String getFileSha(String owner, String repo, String path, String ref) {
         log.info("Fetching file SHA for {}/{}/{} at ref={}", owner, repo, path, ref);
         Map<String, Object> result = restClient.get()
-                .uri("/repositories/{workspace}/{repo}/src/{ref}/{path}?format=meta",
-                        owner, repo, ref, path)
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repositories/{workspace}/{repo}/src/{ref}/")
+                        .path(path)
+                        .queryParam("format", "meta")
+                        .build(owner, repo, ref))
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
         if (result != null && result.containsKey("commit")) {

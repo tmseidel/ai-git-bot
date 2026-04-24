@@ -124,6 +124,28 @@ public class GitHubApiClient implements RepositoryApiClient {
         return comments != null ? List.copyOf(comments) : List.of();
     }
 
+    // ---- PR context enrichment ----
+
+    @Override
+    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+        log.info("Fetching commits for PR #{} in {}/{}", pullNumber, owner, repo);
+        List<Map<String, Object>> commits = restClient.get()
+                .uri("/repos/{owner}/{repo}/pulls/{pull_number}/commits", owner, repo, pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return commits != null ? commits : List.of();
+    }
+
+    @Override
+    public Map<String, Object> getIssueDetails(String owner, String repo, Long issueNumber) {
+        log.info("Fetching issue #{} in {}/{}", issueNumber, owner, repo);
+        Map<String, Object> issue = restClient.get()
+                .uri("/repos/{owner}/{repo}/issues/{issue_number}", owner, repo, issueNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return issue != null ? issue : Map.of();
+    }
+
     // ---- Repository operations ----
 
     @Override
@@ -156,22 +178,29 @@ public class GitHubApiClient implements RepositoryApiClient {
     @Override
     public String getFileContent(String owner, String repo, String path, String ref) {
         log.info("Fetching file content for {}/{}/{} at ref={}", owner, repo, path, ref);
-        Map<String, Object> result = restClient.get()
-                .uri("/repos/{owner}/{repo}/contents/{path}?ref={ref}", owner, repo, path, ref)
+        // Use raw media type to get full file content without base64 encoding or size limits.
+        // Build URI manually to avoid Spring encoding slashes in the file path.
+        String content = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/contents/")
+                        .path(path)
+                        .queryParam("ref", ref)
+                        .build(owner, repo))
+                .header("Accept", "application/vnd.github.raw+json")
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("content")) {
-            String base64Content = (String) result.get("content");
-            return new String(Base64.getMimeDecoder().decode(base64Content));
-        }
-        return "";
+                .body(String.class);
+        return content != null ? content : "";
     }
 
     @Override
     public String getFileSha(String owner, String repo, String path, String ref) {
         log.info("Fetching file SHA for {}/{}/{} at ref={}", owner, repo, path, ref);
         Map<String, Object> result = restClient.get()
-                .uri("/repos/{owner}/{repo}/contents/{path}?ref={ref}", owner, repo, path, ref)
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/contents/")
+                        .path(path)
+                        .queryParam("ref", ref)
+                        .build(owner, repo))
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
         if (result != null && result.containsKey("sha")) {
@@ -209,7 +238,10 @@ public class GitHubApiClient implements RepositoryApiClient {
         }
 
         restClient.put()
-                .uri("/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/contents/")
+                        .path(path)
+                        .build(owner, repo))
                 .body(body)
                 .retrieve()
                 .toBodilessEntity();
@@ -221,7 +253,10 @@ public class GitHubApiClient implements RepositoryApiClient {
                            String branch, String sha) {
         log.info("Deleting file {} on branch '{}' in {}/{}", path, branch, owner, repo);
         restClient.method(org.springframework.http.HttpMethod.DELETE)
-                .uri("/repos/{owner}/{repo}/contents/{path}", owner, repo, path)
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repos/{owner}/{repo}/contents/")
+                        .path(path)
+                        .build(owner, repo))
                 .body(Map.of("message", message, "branch", branch, "sha", sha))
                 .retrieve()
                 .toBodilessEntity();

@@ -197,6 +197,32 @@ public class GitLabApiClient implements RepositoryApiClient {
         return List.of();
     }
 
+    // ---- PR context enrichment ----
+
+    @Override
+    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+        log.info("Fetching commits for MR !{} in {}/{}", pullNumber, owner, repo);
+        String projectPath = encodeProjectPath(owner, repo);
+        List<Map<String, Object>> commits = gitlabRestClient.get()
+                .uri("/api/v4/projects/{projectPath}/merge_requests/{iid}/commits",
+                        projectPath, pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return commits != null ? commits : List.of();
+    }
+
+    @Override
+    public Map<String, Object> getIssueDetails(String owner, String repo, Long issueNumber) {
+        log.info("Fetching issue #{} in {}/{}", issueNumber, owner, repo);
+        String projectPath = encodeProjectPath(owner, repo);
+        Map<String, Object> issue = gitlabRestClient.get()
+                .uri("/api/v4/projects/{projectPath}/issues/{issue_iid}",
+                        projectPath, issueNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return issue != null ? issue : Map.of();
+    }
+
     // ---- Repository operations ----
 
     @Override
@@ -228,7 +254,7 @@ public class GitLabApiClient implements RepositoryApiClient {
         // Normalize to match the Gitea tree format (path, type fields)
         return tree.stream().map(entry -> {
             // GitLab uses "blob"/"tree", same as Gitea convention
-            return (Map<String, Object>) new LinkedHashMap<String, Object>(entry);
+            return (Map<String, Object>) new LinkedHashMap<>(entry);
         }).collect(Collectors.toList());
     }
 
@@ -236,16 +262,14 @@ public class GitLabApiClient implements RepositoryApiClient {
     public String getFileContent(String owner, String repo, String path, String ref) {
         log.info("Fetching file content for {}/{}/{} at ref={}", owner, repo, path, ref);
         String projectPath = encodeProjectPath(owner, repo);
-        Map<String, Object> result = gitlabRestClient.get()
-                .uri("/api/v4/projects/{projectPath}/repository/files/{filePath}?ref={ref}",
+        // Use the raw endpoint to get full file content without base64 encoding or size limits.
+        // GitLab expects URL-encoded file paths, which Spring's URI template expansion handles.
+        String content = gitlabRestClient.get()
+                .uri("/api/v4/projects/{projectPath}/repository/files/{filePath}/raw?ref={ref}",
                         projectPath, path, ref)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("content")) {
-            String base64Content = (String) result.get("content");
-            return new String(Base64.getMimeDecoder().decode(base64Content));
-        }
-        return "";
+                .body(String.class);
+        return content != null ? content : "";
     }
 
     @Override

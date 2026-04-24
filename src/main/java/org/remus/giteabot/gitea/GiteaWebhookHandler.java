@@ -211,11 +211,13 @@ public class GiteaWebhookHandler {
                         payload.getComment().getId(), botAlias);
                 return ResponseEntity.ok("ignored");
             }
-            if (payload.getIssue().getPullRequest() != null) {
-                botWebhookService.handleBotCommand(bot, payload);
-                return ResponseEntity.ok("command received");
+            if (payload.getPullRequest() != null) {
+                // Comment on a PR discussion thread — let BotWebhookService decide whether to
+                // route to the agent (session exists) or the code-review handler (no session).
+                botWebhookService.handlePrComment(bot, payload);
+                return ResponseEntity.ok("pr comment received");
             }
-            // Issue comment (not a PR) — route to agent
+            // Comment on a regular issue — always route to the agent
             botWebhookService.handleIssueComment(bot, payload);
             return ResponseEntity.ok("issue comment received");
         }

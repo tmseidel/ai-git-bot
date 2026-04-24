@@ -5,9 +5,11 @@ import org.remus.giteabot.agent.DiffApplyService;
 import org.remus.giteabot.agent.IssueImplementationService;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
+import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
+import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.review.CodeReviewService;
@@ -36,8 +38,10 @@ public class BotWebhookService {
     private final PromptService promptService;
     private final SessionService sessionService;
     private final AgentConfigProperties agentConfig;
+    private final ReviewConfigProperties reviewConfig;
     private final AgentSessionService agentSessionService;
     private final ToolExecutionService toolExecutionService;
+    private final WorkspaceService workspaceService;
     private final DiffApplyService diffApplyService;
     private final BotService botService;
 
@@ -46,8 +50,10 @@ public class BotWebhookService {
                              PromptService promptService,
                              SessionService sessionService,
                              AgentConfigProperties agentConfig,
+                             ReviewConfigProperties reviewConfig,
                              AgentSessionService agentSessionService,
                              ToolExecutionService toolExecutionService,
+                             WorkspaceService workspaceService,
                              DiffApplyService diffApplyService,
                              BotService botService) {
         this.aiClientFactory = aiClientFactory;
@@ -55,8 +61,10 @@ public class BotWebhookService {
         this.promptService = promptService;
         this.sessionService = sessionService;
         this.agentConfig = agentConfig;
+        this.reviewConfig = reviewConfig;
         this.agentSessionService = agentSessionService;
         this.toolExecutionService = toolExecutionService;
+        this.workspaceService = workspaceService;
         this.diffApplyService = diffApplyService;
         this.botService = botService;
     }
@@ -86,6 +94,43 @@ public class BotWebhookService {
         } catch (Exception e) {
             log.error("[Bot '{}'] Failed to handle command: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
+        }
+    }
+
+    /**
+     * Handles a comment on a PR discussion thread.
+     * <p>
+     * Routes to the agent when an agent session exists for the PR (i.e. the PR was created by the
+     * agent and can be continued), or falls back to the code-review handler for manually created PRs.
+     */
+    @Async
+    public void handlePrComment(Bot bot, WebhookPayload payload) {
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long prNumber = payload.getPullRequest().getNumber();
+        Long issueNumber = payload.getIssue().getNumber(); // equals prNumber for PRs in Gitea
+
+        boolean hasAgentSession =
+                agentSessionService.getSessionByIssue(owner, repo, issueNumber).isPresent()
+                || agentSessionService.getSessionByPr(owner, repo, prNumber).isPresent();
+
+        if (hasAgentSession && bot.isAgentEnabled()) {
+            log.debug("[Bot '{}'] Agent session found for PR #{}, routing to agent", bot.getName(), prNumber);
+            try {
+                createIssueImplementationService(bot).handleIssueComment(payload);
+            } catch (Exception e) {
+                log.error("[Bot '{}'] Failed to handle PR comment via agent: {}", bot.getName(), e.getMessage(), e);
+                botService.recordError(bot, e.getMessage());
+            }
+        } else {
+            log.debug("[Bot '{}'] No agent session for PR #{}, routing to code-review handler",
+                    bot.getName(), prNumber);
+            try {
+                createCodeReviewService(bot).handleBotCommand(payload, null);
+            } catch (Exception e) {
+                log.error("[Bot '{}'] Failed to handle PR comment via review handler: {}", bot.getName(), e.getMessage(), e);
+                botService.recordError(bot, e.getMessage());
+            }
         }
     }
 
@@ -197,7 +242,7 @@ public class BotWebhookService {
     private CodeReviewService createCodeReviewService(Bot bot) {
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
-        return new CodeReviewService(repoClient, aiClient, promptService, sessionService, bot.getUsername());
+        return new CodeReviewService(repoClient, aiClient, promptService, sessionService, bot.getUsername(), reviewConfig);
     }
 
     /**
@@ -207,6 +252,6 @@ public class BotWebhookService {
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
         return new IssueImplementationService(repoClient, aiClient, promptService, agentConfig,
-                agentSessionService, toolExecutionService, diffApplyService);
+                agentSessionService, toolExecutionService, workspaceService, diffApplyService);
     }
 }
