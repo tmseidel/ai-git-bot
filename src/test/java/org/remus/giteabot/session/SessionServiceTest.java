@@ -94,6 +94,41 @@ class SessionServiceTest {
     }
 
     @Test
+    void hasParticipant_detachedSession_reloadsParticipants() {
+        ReviewSession detachedSession = new ReviewSession("owner", "repo", 1L, null);
+        detachedSession.setId(44L);
+
+        ReviewSession managedSession = new ReviewSession("owner", "repo", 1L, null);
+        managedSession.setId(44L);
+        managedSession.addParticipant("alice");
+
+        when(repository.findWithParticipantsById(44L)).thenReturn(Optional.of(managedSession));
+
+        assertTrue(sessionService.hasParticipant(detachedSession, "ALICE"));
+        verify(repository).findWithParticipantsById(44L);
+    }
+
+    @Test
+    void rememberParticipant_detachedSession_updatesReloadedEntity() {
+        ReviewSession detachedSession = new ReviewSession("owner", "repo", 1L, null);
+        detachedSession.setId(44L);
+
+        ReviewSession managedSession = new ReviewSession("owner", "repo", 1L, null);
+        managedSession.setId(44L);
+        managedSession.addParticipant("alice");
+
+        when(repository.findWithParticipantsById(44L)).thenReturn(Optional.of(managedSession));
+        when(repository.save(any(ReviewSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ReviewSession result = sessionService.rememberParticipant(detachedSession, "Bob");
+
+        assertSame(managedSession, result);
+        assertTrue(result.hasParticipant("bob"));
+        verify(repository).findWithParticipantsById(44L);
+        verify(repository).save(managedSession);
+    }
+
+    @Test
     void deleteSession_deletesFromRepository() {
         sessionService.deleteSession("owner", "repo", 1L);
 

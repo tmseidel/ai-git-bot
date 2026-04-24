@@ -56,16 +56,17 @@ public class SessionService {
 
     @Transactional
     public ReviewSession rememberParticipant(ReviewSession session, String login) {
-        if (session.hasParticipant(login)) {
-            return session;
+        ReviewSession managedSession = attachSessionWithParticipants(session);
+        if (managedSession.hasParticipant(login)) {
+            return managedSession;
         }
-        session.addParticipant(login);
-        return repository.save(session);
+        managedSession.addParticipant(login);
+        return repository.save(managedSession);
     }
 
     @Transactional(readOnly = true)
     public boolean hasParticipant(ReviewSession session, String login) {
-        return session.hasParticipant(login);
+        return attachSessionWithParticipants(session).hasParticipant(login);
     }
 
     @Transactional
@@ -166,5 +167,13 @@ public class SessionService {
                         .content(m.getContent())
                         .build())
                 .toList();
+    }
+
+    private ReviewSession attachSessionWithParticipants(ReviewSession session) {
+        if (session == null || session.getId() == null) {
+            return session;
+        }
+        return repository.findWithParticipantsById(session.getId())
+                .orElse(session);
     }
 }
