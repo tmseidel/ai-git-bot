@@ -64,6 +64,36 @@ class SessionServiceTest {
     }
 
     @Test
+    void rememberParticipant_addsNewParticipant() {
+        ReviewSession session = new ReviewSession("owner", "repo", 1L, null);
+        when(repository.save(any(ReviewSession.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        sessionService.rememberParticipant(session, "Alice");
+
+        assertTrue(session.hasParticipant("alice"));
+        verify(repository).save(session);
+    }
+
+    @Test
+    void rememberParticipant_existingParticipant_skipsSave() {
+        ReviewSession session = new ReviewSession("owner", "repo", 1L, null);
+        session.addParticipant("alice");
+
+        sessionService.rememberParticipant(session, "Alice");
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void hasParticipant_checksNormalizedLogin() {
+        ReviewSession session = new ReviewSession("owner", "repo", 1L, null);
+        session.addParticipant("alice");
+
+        assertTrue(sessionService.hasParticipant(session, "ALICE"));
+        assertFalse(sessionService.hasParticipant(session, "bob"));
+    }
+
+    @Test
     void deleteSession_deletesFromRepository() {
         sessionService.deleteSession("owner", "repo", 1L);
 
@@ -103,7 +133,6 @@ class SessionServiceTest {
 
         ReviewSession result = sessionService.compactContextWindow(session);
 
-        // Should keep all messages since below threshold and few messages
         assertEquals(2, result.getMessages().size());
         verify(repository, never()).save(any());
     }
@@ -111,7 +140,6 @@ class SessionServiceTest {
     @Test
     void compactContextWindow_fewMessages_noCompaction() {
         ReviewSession session = new ReviewSession("owner", "repo", 1L, null);
-        // Only 4 messages, at the limit (MAX_MESSAGES_AFTER_COMPACT = 4)
         session.addMessage("user", "Message 1");
         session.addMessage("assistant", "Reply 1");
         session.addMessage("user", "Message 2");
@@ -126,7 +154,6 @@ class SessionServiceTest {
     @Test
     void compactContextWindow_manyMessagesButSmallContent_noCompaction() {
         ReviewSession session = new ReviewSession("owner", "repo", 1L, null);
-        // More than 4 messages but small content (below 50000 chars threshold)
         for (int i = 0; i < 10; i++) {
             session.addMessage("user", "Question " + i);
             session.addMessage("assistant", "Answer " + i);
@@ -134,7 +161,6 @@ class SessionServiceTest {
 
         ReviewSession result = sessionService.compactContextWindow(session);
 
-        // Should not compact because content is below threshold
         assertEquals(20, result.getMessages().size());
         verify(repository, never()).save(any());
     }
@@ -142,8 +168,7 @@ class SessionServiceTest {
     @Test
     void compactContextWindow_largeContent_compacts() {
         ReviewSession session = new ReviewSession("owner", "repo", 1L, null);
-        // Add messages exceeding the threshold (50000 chars) AND more than 4 messages
-        String largeDiff = "x".repeat(40000); // Large diff content
+        String largeDiff = "x".repeat(40000);
         session.addMessage("user", "Review this PR\n" + largeDiff);
         session.addMessage("assistant", "Here's my review: " + "y".repeat(15000));
         session.addMessage("user", "What about security?");
@@ -155,10 +180,7 @@ class SessionServiceTest {
 
         ReviewSession result = sessionService.compactContextWindow(session);
 
-        // Should compact: removes old messages and adds summary
-        // Original: 6 messages, should keep last 4 + 1 summary = 5
         assertTrue(result.getMessages().size() <= 6);
-        // Most recent messages should be preserved
         assertTrue(result.getMessages().getLast().getContent().contains("welcome"));
         verify(repository).save(session);
     }
@@ -180,7 +202,6 @@ class SessionServiceTest {
 
         ReviewSession result = sessionService.compactContextWindow(session);
 
-        // Last messages should be preserved
         List<ConversationMessage> messages = result.getMessages();
         assertTrue(messages.stream().anyMatch(m -> m.getContent().contains("Final answer")));
         assertTrue(messages.stream().anyMatch(m -> m.getContent().contains("Final question")));
