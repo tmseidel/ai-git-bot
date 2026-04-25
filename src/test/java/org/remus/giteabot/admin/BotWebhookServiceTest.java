@@ -16,6 +16,7 @@ import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.session.SessionService;
+import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.util.Optional;
 
@@ -242,6 +243,10 @@ class BotWebhookServiceTest {
         bot.setName(name);
         bot.setUsername(username);
         bot.setAgentEnabled(agentEnabled);
+        SystemPrompt systemPrompt = new SystemPrompt();
+        systemPrompt.setReviewSystemPrompt("Review prompt");
+        systemPrompt.setIssueAgentSystemPrompt("Agent prompt");
+        bot.setSystemPrompt(systemPrompt);
         return bot;
     }
 
@@ -315,5 +320,4 @@ class BotWebhookServiceTest {
         return payload;
     }
 }
-
 

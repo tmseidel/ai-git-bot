@@ -9,8 +9,6 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Controller
@@ -68,6 +66,7 @@ public class BotController {
                        @RequestParam Long aiIntegrationId,
                        @RequestParam Long gitIntegrationId,
                        @RequestParam Long systemPromptId,
+                       Model model,
                        RedirectAttributes redirectAttributes) {
         try {
             AiIntegration aiIntegration = aiIntegrationService.findById(aiIntegrationId)
@@ -84,24 +83,18 @@ public class BotController {
             redirectAttributes.addFlashAttribute("success", "Bot saved successfully");
         } catch (Exception e) {
             log.error("Failed to save Bot", e);
-            redirectAttributes.addFlashAttribute("error", "Failed to save: " + e.getMessage());
+            model.addAttribute("error", "Failed to save: " + e.getMessage());
+            addFormAttributes(model);
+            return "bots/form";
         }
         return "redirect:/bots";
     }
 
     private void addFormAttributes(Model model) {
         List<SystemPrompt> systemPrompts = systemPromptService.findAll();
-        Map<Long, Map<String, String>> systemPromptPreviews = systemPrompts.stream()
-                .collect(Collectors.toMap(
-                        SystemPrompt::getId,
-                        prompt -> Map.of(
-                                "name", prompt.getName(),
-                                "reviewSystemPrompt", prompt.getReviewSystemPrompt(),
-                                "issueAgentSystemPrompt", prompt.getIssueAgentSystemPrompt())));
         model.addAttribute("aiIntegrations", aiIntegrationService.findAll());
         model.addAttribute("gitIntegrations", gitIntegrationService.findAll());
         model.addAttribute("systemPrompts", systemPrompts);
-        model.addAttribute("systemPromptPreviews", systemPromptPreviews);
         model.addAttribute("activeNav", "bots");
     }
 

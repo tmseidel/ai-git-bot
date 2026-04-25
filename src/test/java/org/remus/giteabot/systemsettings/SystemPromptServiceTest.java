@@ -68,4 +68,52 @@ class SystemPromptServiceTest {
         assertEquals("Issue-Agent System-Prompt is required", exception.getMessage());
         verify(systemPromptRepository, never()).save(any());
     }
+
+    @Test
+    void save_requiresName() {
+        SystemPrompt systemPrompt = new SystemPrompt();
+        systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setIssueAgentSystemPrompt("agent");
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("Name is required", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
+    @Test
+    void save_rejectsDuplicateName() {
+        SystemPrompt systemPrompt = new SystemPrompt();
+        systemPrompt.setName("Custom");
+        systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setIssueAgentSystemPrompt("agent");
+        when(systemPromptRepository.existsByName("Custom")).thenReturn(true);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("A system prompt with this name already exists", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
+    @Test
+    void save_rejectsSecondDefaultEntry() {
+        SystemPrompt existingDefault = new SystemPrompt();
+        existingDefault.setId(1L);
+        SystemPrompt systemPrompt = new SystemPrompt();
+        systemPrompt.setId(2L);
+        systemPrompt.setName("Custom");
+        systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setIssueAgentSystemPrompt("agent");
+        systemPrompt.setDefaultEntry(true);
+        when(systemPromptRepository.existsByNameAndIdNot("Custom", 2L)).thenReturn(false);
+        when(systemPromptRepository.findByDefaultEntryTrue()).thenReturn(Optional.of(existingDefault));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("Only one default system prompt is allowed", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
 }

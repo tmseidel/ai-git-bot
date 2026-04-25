@@ -7,7 +7,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
-import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.GiteaReview;
 import org.remus.giteabot.gitea.model.GiteaReviewComment;
@@ -44,17 +43,16 @@ class CodeReviewServiceTest {
     private AiClient aiClient;
 
     @Mock
-    private PromptService promptService;
-
-    @Mock
     private SessionService sessionService;
+
+    private static final String TEST_PROMPT = "test prompt";
 
     private CodeReviewService codeReviewService;
 
     @BeforeEach
     void setUp() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                promptService, sessionService, "ai_bot", new ReviewConfigProperties());
+                sessionService, "ai_bot", new ReviewConfigProperties(), TEST_PROMPT);
     }
 
     @Test
@@ -62,13 +60,12 @@ class CodeReviewServiceTest {
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test system prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
         when(aiClient.reviewDiff(eq("Test PR"), eq("Test body"), anyString(),
-                eq("test system prompt"), isNull(), anyString()))
+                eq(TEST_PROMPT), isNull(), anyString()))
                 .thenReturn("Looks good!");
 
         codeReviewService.reviewPullRequest(payload, null);
@@ -94,29 +91,28 @@ class CodeReviewServiceTest {
     }
 
     @Test
-    void reviewPullRequest_withPromptName_usesPromptConfig() {
+    void reviewPullRequest_withPromptName_usesConfiguredBotPrompt() {
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, "security");
 
-        when(promptService.getSystemPrompt("security")).thenReturn("You are a security reviewer.");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, "security")).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
         when(aiClient.reviewDiff(eq("Test PR"), eq("Test body"), anyString(),
-                eq("You are a security reviewer."), isNull(), anyString()))
-                .thenReturn("Security looks good!");
+                eq(TEST_PROMPT), isNull(), anyString()))
+                .thenReturn("Bot prompt used.");
 
         codeReviewService.reviewPullRequest(payload, "security");
 
         verify(repositoryClient).postReviewComment(
-                eq("testowner"), eq("testrepo"), eq(1L), contains("Security looks good!"));
+                eq("testowner"), eq("testrepo"), eq(1L), contains("Bot prompt used."));
     }
 
     @Test
     void reviewPullRequest_withConfiguredSystemPrompt_usesBotPrompt() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                promptService, sessionService, "ai_bot", new ReviewConfigProperties(), "Configured review prompt");
+                sessionService, "ai_bot", new ReviewConfigProperties(), "Configured review prompt");
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
 
@@ -130,7 +126,6 @@ class CodeReviewServiceTest {
 
         codeReviewService.reviewPullRequest(payload, null);
 
-        verify(promptService, never()).getSystemPrompt(any());
         verify(repositoryClient).postReviewComment(
                 eq("testowner"), eq("testrepo"), eq(1L), contains("Configured prompt used."));
     }
@@ -142,7 +137,6 @@ class CodeReviewServiceTest {
         session.addMessage("user", "Previous question");
         session.addMessage("assistant", "Previous answer");
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
@@ -151,12 +145,12 @@ class CodeReviewServiceTest {
         ));
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("new diff content");
-        when(aiClient.chat(anyList(), anyString(), eq("test prompt"), isNull()))
+        when(aiClient.chat(anyList(), anyString(), eq(TEST_PROMPT), isNull()))
                 .thenReturn("Updated review");
 
         codeReviewService.reviewPullRequest(payload, null);
 
-        verify(aiClient).chat(anyList(), anyString(), eq("test prompt"), isNull());
+        verify(aiClient).chat(anyList(), anyString(), eq(TEST_PROMPT), isNull());
         verify(aiClient, never()).reviewDiff(anyString(), anyString(), anyString(), anyString(), anyString());
         verify(aiClient, never()).reviewDiff(anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
     }
@@ -168,14 +162,13 @@ class CodeReviewServiceTest {
         session.addMessage("user", "Initial context");
         session.addMessage("assistant", "Initial review");
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
-        when(aiClient.chat(anyList(), eq("@ai_bot explain this"), eq("test prompt"), isNull()))
+        when(aiClient.chat(anyList(), eq("@ai_bot explain this"), eq(TEST_PROMPT), isNull()))
                 .thenReturn("Here's my explanation");
 
         codeReviewService.handleBotCommand(payload, null);
@@ -218,14 +211,13 @@ class CodeReviewServiceTest {
         session.addMessage("user", "Initial context");
         session.addMessage("assistant", "Initial review");
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
-        when(aiClient.chat(anyList(), contains("src/main/java/Foo.java"), eq("test prompt"), isNull()))
+        when(aiClient.chat(anyList(), contains("src/main/java/Foo.java"), eq(TEST_PROMPT), isNull()))
                 .thenReturn("Here's the explanation");
 
         codeReviewService.handleInlineComment(payload, null);
@@ -246,14 +238,13 @@ class CodeReviewServiceTest {
         session.addMessage("user", "Initial context");
         session.addMessage("assistant", "Initial review");
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, null)).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
                 AiMessage.builder().role("user").content("Initial context").build(),
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
-        when(aiClient.chat(anyList(), anyString(), eq("test prompt"), isNull()))
+        when(aiClient.chat(anyList(), anyString(), eq(TEST_PROMPT), isNull()))
                 .thenReturn("Explanation without line");
 
         codeReviewService.handleInlineComment(payload, null);
@@ -306,7 +297,6 @@ class CodeReviewServiceTest {
         session.addMessage("user", "Initial context");
         session.addMessage("assistant", "Initial review");
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
         when(sessionService.getOrCreateSession("testowner", "testrepo", 2L, null)).thenReturn(session);
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(sessionService.toAiMessages(session)).thenReturn(List.of(
@@ -338,7 +328,7 @@ class CodeReviewServiceTest {
         when(repositoryClient.getReviewComments("testowner", "testrepo", 2L, 10L))
                 .thenReturn(List.of(botComment, normalComment));
 
-        when(aiClient.chat(anyList(), contains("src/main/java/Foo.java"), eq("test prompt"), isNull()))
+        when(aiClient.chat(anyList(), contains("src/main/java/Foo.java"), eq(TEST_PROMPT), isNull()))
                 .thenReturn("Here's the explanation");
 
         codeReviewService.handleReviewSubmitted(payload, null);
@@ -370,7 +360,6 @@ class CodeReviewServiceTest {
     void handleReviewSubmitted_noBotMentions_doesNothing() {
         WebhookPayload payload = createReviewSubmittedPayload();
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
 
         GiteaReview review = new GiteaReview();
         review.setId(10L);
@@ -392,7 +381,6 @@ class CodeReviewServiceTest {
     void handleReviewSubmitted_botOwnComments_filtered() {
         WebhookPayload payload = createReviewSubmittedPayload();
 
-        when(promptService.getSystemPrompt(isNull())).thenReturn("test prompt");
 
         GiteaReview review = new GiteaReview();
         review.setId(10L);

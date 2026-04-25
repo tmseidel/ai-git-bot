@@ -238,9 +238,11 @@ public class BotWebhookService {
     private CodeReviewService createCodeReviewService(Bot bot) {
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
-        String reviewSystemPrompt = bot.getSystemPrompt() != null ? bot.getSystemPrompt().getReviewSystemPrompt() : null;
-        return new CodeReviewService(repoClient, aiClient, promptService, sessionService, bot.getUsername(),
-                reviewConfig, reviewSystemPrompt);
+        if (bot.getSystemPrompt() == null) {
+            throw new IllegalStateException("Bot must have a system prompt assigned");
+        }
+        return new CodeReviewService(repoClient, aiClient, sessionService, bot.getUsername(),
+                reviewConfig, bot.getSystemPrompt().getReviewSystemPrompt());
     }
 
     /**
@@ -249,10 +251,11 @@ public class BotWebhookService {
     private IssueImplementationService createIssueImplementationService(Bot bot) {
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
-        String issueAgentSystemPrompt = bot.getSystemPrompt() != null
-                ? bot.getSystemPrompt().getIssueAgentSystemPrompt()
-                : null;
+        if (bot.getSystemPrompt() == null) {
+            throw new IllegalStateException("Bot must have a system prompt assigned");
+        }
         return new IssueImplementationService(repoClient, aiClient, promptService, agentConfig,
-                agentSessionService, toolExecutionService, workspaceService, issueAgentSystemPrompt);
+                agentSessionService, toolExecutionService, workspaceService,
+                bot.getSystemPrompt().getIssueAgentSystemPrompt());
     }
 }

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Service
@@ -36,11 +37,27 @@ public class SystemPromptService {
     }
 
     public SystemPrompt save(SystemPrompt systemPrompt) {
+        if (systemPrompt.getName() == null || systemPrompt.getName().isBlank()) {
+            throw new IllegalArgumentException("Name is required");
+        }
+        systemPrompt.setName(systemPrompt.getName().trim());
         if (systemPrompt.getReviewSystemPrompt() == null || systemPrompt.getReviewSystemPrompt().isBlank()) {
             throw new IllegalArgumentException("Review System-Prompt is required");
         }
         if (systemPrompt.getIssueAgentSystemPrompt() == null || systemPrompt.getIssueAgentSystemPrompt().isBlank()) {
             throw new IllegalArgumentException("Issue-Agent System-Prompt is required");
+        }
+        boolean duplicateName = systemPrompt.getId() == null
+                ? systemPromptRepository.existsByName(systemPrompt.getName())
+                : systemPromptRepository.existsByNameAndIdNot(systemPrompt.getName(), systemPrompt.getId());
+        if (duplicateName) {
+            throw new IllegalArgumentException("A system prompt with this name already exists");
+        }
+        if (systemPrompt.isDefaultEntry()) {
+            Optional<SystemPrompt> existingDefault = systemPromptRepository.findByDefaultEntryTrue();
+            if (existingDefault.isPresent() && !Objects.equals(existingDefault.get().getId(), systemPrompt.getId())) {
+                throw new IllegalArgumentException("Only one default system prompt is allowed");
+            }
         }
         return systemPromptRepository.save(systemPrompt);
     }

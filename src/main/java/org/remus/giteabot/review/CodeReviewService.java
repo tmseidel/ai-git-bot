@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
-import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -28,25 +27,19 @@ public class CodeReviewService {
 
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
-    private final PromptService promptService;
     private final SessionService sessionService;
     private final String botUsername;
     private final String reviewSystemPrompt;
     private final PrContextEnricher contextEnricher;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
-                              PromptService promptService, SessionService sessionService,
-                              String botUsername, ReviewConfigProperties reviewConfig) {
-        this(repositoryClient, aiClient, promptService, sessionService, botUsername, reviewConfig, null);
-    }
-
-    public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
-                             PromptService promptService, SessionService sessionService,
-                             String botUsername, ReviewConfigProperties reviewConfig,
+                             SessionService sessionService, String botUsername, ReviewConfigProperties reviewConfig,
                              String reviewSystemPrompt) {
+        if (reviewSystemPrompt == null || reviewSystemPrompt.isBlank()) {
+            throw new IllegalArgumentException("Review system prompt is required");
+        }
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
-        this.promptService = promptService;
         this.sessionService = sessionService;
         this.botUsername = botUsername;
         this.reviewSystemPrompt = reviewSystemPrompt;
@@ -69,7 +62,7 @@ public class CodeReviewService {
                 return;
             }
 
-            String systemPrompt = resolveSystemPrompt(promptName);
+            String systemPrompt = reviewSystemPrompt;
 
             // Build enriched context for better review quality
             String headRef = resolveHeadRef(payload);
@@ -139,7 +132,7 @@ public class CodeReviewService {
                 log.warn("Failed to add reaction to comment #{}: {}", commentId, e.getMessage());
             }
 
-            String systemPrompt = resolveSystemPrompt(promptName);
+            String systemPrompt = reviewSystemPrompt;
 
             // Get or create session
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
@@ -227,7 +220,7 @@ public class CodeReviewService {
                 log.warn("Failed to add reaction to inline comment #{}: {}", commentId, e.getMessage());
             }
 
-            String systemPrompt = resolveSystemPrompt(promptName);
+            String systemPrompt = reviewSystemPrompt;
 
             // Get or create session for conversation context
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
@@ -324,7 +317,7 @@ public class CodeReviewService {
         log.info("Handling review submitted event for PR #{} in {}/{}", prNumber, owner, repo);
 
         try {
-            String systemPrompt = resolveSystemPrompt(promptName);
+            String systemPrompt = reviewSystemPrompt;
 
             // Fetch all reviews for the PR to find the latest one
             List<Review> reviews = repositoryClient.getReviews(owner, repo, prNumber);
@@ -469,13 +462,6 @@ public class CodeReviewService {
     String formatBotResponse(String response) {
         return "## 🤖 Bot Response\n\n" + response +
                 "\n\n---\n*Response by AI Git Bot*";
-    }
-
-    private String resolveSystemPrompt(String promptName) {
-        if ((promptName == null || promptName.isBlank()) && reviewSystemPrompt != null && !reviewSystemPrompt.isBlank()) {
-            return reviewSystemPrompt;
-        }
-        return promptService.getSystemPrompt(promptName);
     }
 
     private String buildPrSummaryMessage(String prTitle, String prBody) {

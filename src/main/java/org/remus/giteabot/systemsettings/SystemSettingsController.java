@@ -6,6 +6,8 @@ import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.util.Map;
+
 @Slf4j
 @Controller
 @RequestMapping("/system-settings")
@@ -64,7 +66,7 @@ public class SystemSettingsController {
     }
 
     @PostMapping("/system-prompts/save")
-    public String save(@ModelAttribute SystemPrompt systemPrompt, RedirectAttributes redirectAttributes) {
+    public String save(@ModelAttribute SystemPrompt systemPrompt, Model model, RedirectAttributes redirectAttributes) {
         try {
             if (systemPrompt.getId() != null) {
                 SystemPrompt existing = systemPromptService.findById(systemPrompt.getId())
@@ -75,9 +77,23 @@ public class SystemSettingsController {
             redirectAttributes.addFlashAttribute("success", "System prompt saved successfully");
         } catch (Exception e) {
             log.error("Failed to save system prompt", e);
-            redirectAttributes.addFlashAttribute("error", "Failed to save: " + e.getMessage());
+            model.addAttribute("error", "Failed to save: " + e.getMessage());
+            model.addAttribute("systemPrompt", systemPrompt);
+            model.addAttribute("activeNav", "system-settings");
+            return "system-settings/form";
         }
         return "redirect:/system-settings";
+    }
+
+    @GetMapping("/system-prompts/{id}/preview")
+    @ResponseBody
+    public Map<String, String> preview(@PathVariable Long id) {
+        SystemPrompt systemPrompt = systemPromptService.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("System prompt not found"));
+        return Map.of(
+                "name", systemPrompt.getName(),
+                "reviewSystemPrompt", systemPrompt.getReviewSystemPrompt(),
+                "issueAgentSystemPrompt", systemPrompt.getIssueAgentSystemPrompt());
     }
 
     @PostMapping("/system-prompts/{id}/delete")
