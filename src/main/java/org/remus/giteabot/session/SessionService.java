@@ -55,21 +55,6 @@ public class SessionService {
     }
 
     @Transactional
-    public ReviewSession rememberParticipant(ReviewSession session, String login) {
-        ReviewSession managedSession = attachSessionWithParticipants(session);
-        if (managedSession.hasParticipant(login)) {
-            return managedSession;
-        }
-        managedSession.addParticipant(login);
-        return repository.save(managedSession);
-    }
-
-    @Transactional(readOnly = true)
-    public boolean hasParticipant(ReviewSession session, String login) {
-        return attachSessionWithParticipants(session).hasParticipant(login);
-    }
-
-    @Transactional
     public void deleteSession(String owner, String repo, Long prNumber) {
         log.info("Deleting session for PR #{} in {}/{}", prNumber, owner, repo);
         repository.deleteByRepoOwnerAndRepoNameAndPrNumber(owner, repo, prNumber);
@@ -167,13 +152,5 @@ public class SessionService {
                         .content(m.getContent())
                         .build())
                 .toList();
-    }
-
-    private ReviewSession attachSessionWithParticipants(ReviewSession session) {
-        if (session == null || session.getId() == null) {
-            return session;
-        }
-        return repository.findWithParticipantsById(session.getId())
-                .orElse(session);
     }
 }

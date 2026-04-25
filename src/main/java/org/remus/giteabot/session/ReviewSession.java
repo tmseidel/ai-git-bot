@@ -6,9 +6,7 @@ import lombok.NoArgsConstructor;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 @Data
 @NoArgsConstructor
@@ -31,11 +29,6 @@ public class ReviewSession {
     private Long prNumber;
 
     private String promptName;
-
-    @ElementCollection(fetch = FetchType.LAZY)
-    @CollectionTable(name = "review_session_participants", joinColumns = @JoinColumn(name = "session_id"))
-    @Column(name = "participant_login", nullable = false)
-    private Set<String> participants = new HashSet<>();
 
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @JoinColumn(name = "session_id")
@@ -71,24 +64,5 @@ public class ReviewSession {
 
     public void addMessage(String role, String content) {
         messages.add(new ConversationMessage(role, content));
-    }
-
-    public boolean hasParticipant(String login) {
-        String normalized = normalizeParticipant(login);
-        return normalized != null && participants.contains(normalized);
-    }
-
-    public void addParticipant(String login) {
-        String normalized = normalizeParticipant(login);
-        if (normalized != null) {
-            participants.add(normalized);
-        }
-    }
-
-    private String normalizeParticipant(String login) {
-        if (login == null || login.isBlank()) {
-            return null;
-        }
-        return login.trim().toLowerCase();
     }
 }

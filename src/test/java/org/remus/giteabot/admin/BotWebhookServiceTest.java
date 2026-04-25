@@ -116,6 +116,22 @@ class BotWebhookServiceTest {
         assertEquals("", botWebhookService.getBotAlias(bot));
     }
 
+    @Test
+    void isSideTopicPrComment_nonOwnerComment_returnsTrue() {
+        WebhookPayload payload = buildPrCommentPayload("Test", "my-repo", 140L, 1055L,
+                "@claude_bot please help", "contributor");
+
+        assertTrue(botWebhookService.isSideTopicPrComment(payload));
+    }
+
+    @Test
+    void isSideTopicPrComment_ownerComment_returnsFalse() {
+        WebhookPayload payload = buildPrCommentPayload("Test", "my-repo", 140L, 1055L,
+                "@claude_bot please help", "Test");
+
+        assertFalse(botWebhookService.isSideTopicPrComment(payload));
+    }
+
     // ---- handlePrComment routing tests ----
 
     @Nested
@@ -131,7 +147,7 @@ class BotWebhookServiceTest {
         @BeforeEach
         void setUpPayload() {
             prCommentPayload = buildPrCommentPayload(OWNER, REPO, PR_NUMBER, COMMENT_ID,
-                    "@claude_bot please do something");
+                    "@claude_bot please do something", "tom");
             // Both factories return the shared repository client mock
             when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
             when(aiClientFactory.getClient(any())).thenReturn(null); // not reached in these tests
@@ -262,13 +278,13 @@ class BotWebhookServiceTest {
      */
     private WebhookPayload buildPrCommentPayload(String owner, String repo,
                                                   long prNumber, long commentId,
-                                                  String commentBody) {
+                                                  String commentBody, String commentUserLogin) {
         WebhookPayload payload = new WebhookPayload();
         payload.setAction("created");
 
         // Sender
         WebhookPayload.Owner sender = new WebhookPayload.Owner();
-        sender.setLogin("tom");
+        sender.setLogin(commentUserLogin);
         payload.setSender(sender);
 
         // Repository
@@ -308,12 +324,10 @@ class BotWebhookServiceTest {
         comment.setId(commentId);
         comment.setBody(commentBody);
         WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
-        commentUser.setLogin("tom");
+        commentUser.setLogin(commentUserLogin);
         comment.setUser(commentUser);
         payload.setComment(comment);
 
         return payload;
     }
 }
-
-

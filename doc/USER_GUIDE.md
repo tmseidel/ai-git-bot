@@ -214,6 +214,12 @@ Select the following events in your Git provider's webhook configuration:
 | PR Comment | ✅ Pull Request Comment | ✅ Pull request review comments | — | — | Inline code comments |
 | Issues | ✅ Issues | ✅ Issues | ✅ Issues events | — | Agent feature (optional) |
 
+### PR Discussion Behavior
+
+When the PR owner mentions the bot, the bot replies normally using the stored PR context.
+
+When **someone other than the PR owner** mentions the bot in a PR discussion or inline review comment, the bot still answers using the existing PR context, but clearly labels the reply as a **side-clarifying response**. This helps distinguish the answer from the main PR-owner conversation.
+
 ### Bot Statistics
 
 The dashboard and bot list show per-bot statistics:

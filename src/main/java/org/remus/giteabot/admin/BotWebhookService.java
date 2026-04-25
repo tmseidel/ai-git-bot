@@ -98,6 +98,7 @@ public class BotWebhookService {
      * <p>
      * Routes to the agent when an agent session exists for the PR (i.e. the PR was created by the
      * agent and can be continued), or falls back to the code-review handler for manually created PRs.
+     * Non-owner PR comments are treated as side-topic clarifications in the review handler.
      */
     @Async
     public void handlePrComment(Bot bot, WebhookPayload payload) {
@@ -119,10 +120,11 @@ public class BotWebhookService {
                 botService.recordError(bot, e.getMessage());
             }
         } else {
-            log.debug("[Bot '{}'] No agent session for PR #{}, routing to code-review handler",
-                    bot.getName(), prNumber);
+            boolean sideTopicResponse = isSideTopicPrComment(payload);
+            log.debug("[Bot '{}'] No agent session for PR #{}, routing to code-review handler (sideTopic={})",
+                    bot.getName(), prNumber, sideTopicResponse);
             try {
-                createCodeReviewService(bot).handleBotCommand(payload, null);
+                createCodeReviewService(bot).handleBotCommand(payload, null, sideTopicResponse);
             } catch (Exception e) {
                 log.error("[Bot '{}'] Failed to handle PR comment via review handler: {}", bot.getName(), e.getMessage(), e);
                 botService.recordError(bot, e.getMessage());
@@ -137,7 +139,7 @@ public class BotWebhookService {
     @Async
     public void handleInlineComment(Bot bot, WebhookPayload payload) {
         try {
-            createCodeReviewService(bot).handleInlineComment(payload, null);
+            createCodeReviewService(bot).handleInlineComment(payload, null, isSideTopicPrComment(payload));
         } catch (Exception e) {
             log.error("[Bot '{}'] Failed to handle inline comment: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
@@ -151,7 +153,7 @@ public class BotWebhookService {
     @Async
     public void handleReviewSubmitted(Bot bot, WebhookPayload payload) {
         try {
-            createCodeReviewService(bot).handleReviewSubmitted(payload, null);
+            createCodeReviewService(bot).handleReviewSubmitted(payload, null, isSideTopicPrComment(payload));
         } catch (Exception e) {
             log.error("[Bot '{}'] Failed to handle review submitted: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
@@ -230,6 +232,19 @@ public class BotWebhookService {
             return "";
         }
         return "@" + username;
+    }
+
+    boolean isSideTopicPrComment(WebhookPayload payload) {
+        if (payload.getIssue() == null || payload.getComment() == null || payload.getRepository() == null) {
+            return false;
+        }
+        String prOwner = payload.getRepository().getOwner() != null
+                ? payload.getRepository().getOwner().getLogin()
+                : null;
+        String commenter = payload.getComment().getUser() != null
+                ? payload.getComment().getUser().getLogin()
+                : null;
+        return prOwner != null && commenter != null && !prOwner.equalsIgnoreCase(commenter);
     }
 
     /**

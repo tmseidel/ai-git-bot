@@ -114,12 +114,15 @@ public class CodeReviewService {
     }
 
     public void handleBotCommand(WebhookPayload payload, String promptName) {
+        handleBotCommand(payload, promptName, false);
+    }
+
+    public void handleBotCommand(WebhookPayload payload, String promptName, boolean sideTopicResponse) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getIssue().getNumber();
         Long commentId = payload.getComment().getId();
         String commentBody = payload.getComment().getBody();
-        String commenter = payload.getComment().getUser() != null ? payload.getComment().getUser().getLogin() : null;
 
         log.info("Handling bot command in comment #{} for PR #{} in {}/{}", commentId, prNumber, owner, repo);
 
@@ -135,7 +138,6 @@ public class CodeReviewService {
 
             // Get or create session
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
-            boolean isKnownParticipant = sessionService.hasParticipant(session, commenter);
 
             // If session is empty, add context from the PR
             if (session.getMessages().isEmpty()) {
@@ -161,10 +163,9 @@ public class CodeReviewService {
             // Store messages in session
             sessionService.addMessage(session, "user", commentBody);
             sessionService.addMessage(session, "assistant", response);
-            sessionService.rememberParticipant(session, commenter);
 
             // Post the response as a comment on the PR
-            String formattedResponse = formatBotResponse(response, !isKnownParticipant);
+            String formattedResponse = formatBotResponse(response, sideTopicResponse);
             repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
 
             // Compact context window to reduce memory/token usage
@@ -201,6 +202,10 @@ public class CodeReviewService {
     }
 
     public void handleInlineComment(WebhookPayload payload, String promptName) {
+        handleInlineComment(payload, promptName, false);
+    }
+
+    public void handleInlineComment(WebhookPayload payload, String promptName, boolean sideTopicResponse) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = resolvePrNumber(payload);
@@ -209,7 +214,6 @@ public class CodeReviewService {
         String filePath = payload.getComment().getPath();
         String diffHunk = payload.getComment().getDiffHunk();
         Integer line = payload.getComment().getLine();
-        String commenter = payload.getComment().getUser() != null ? payload.getComment().getUser().getLogin() : null;
 
         log.info("Handling inline comment #{} on file {} for PR #{} in {}/{}",
                 commentId, filePath, prNumber, owner, repo);
@@ -226,7 +230,6 @@ public class CodeReviewService {
 
             // Get or create session for conversation context
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, promptName);
-            boolean isKnownParticipant = sessionService.hasParticipant(session, commenter);
 
             // If session is empty, add PR context
             if (session.getMessages().isEmpty()) {
@@ -258,8 +261,7 @@ public class CodeReviewService {
                         "I've reviewed the pull request context. How can I help you?");
             }
 
-            var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, null, !isKnownParticipant);
-            sessionService.rememberParticipant(session, commenter);
+            var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, null, sideTopicResponse);
             if (line != null && line > 0) {
                 try {
                     repositoryClient.postInlineReviewComment(owner, repo, prNumber,
@@ -285,7 +287,7 @@ public class CodeReviewService {
 
     private String buildInlineCommentAndSend(String filePath, String diffHunk, String commentBody,
                                              ReviewSession session, String systemPrompt, String modelOverride,
-                                             boolean sideClarifyingResponse) {
+                                             boolean sideTopicResponse) {
         // Build context message with file/code context
         String contextMessage = buildInlineCommentContext(filePath, diffHunk, commentBody);
 
@@ -306,7 +308,7 @@ public class CodeReviewService {
         sessionService.addMessage(session, "assistant", response);
 
         // Reply inline at the same file/line if possible
-        return formatBotResponse(response, sideClarifyingResponse);
+        return formatBotResponse(response, sideTopicResponse);
     }
 
     /**
@@ -316,6 +318,10 @@ public class CodeReviewService {
      * from the repository API, filter for bot mentions, and respond to each.
      */
     public void handleReviewSubmitted(WebhookPayload payload, String promptName) {
+        handleReviewSubmitted(payload, promptName, false);
+    }
+
+    public void handleReviewSubmitted(WebhookPayload payload, String promptName, boolean sideTopicResponse) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -399,10 +405,8 @@ public class CodeReviewService {
             // Process each bot-mentioning comment
             for (ReviewComment reviewComment : botMentionComments) {
                 try {
-                    boolean isKnownParticipant = sessionService.hasParticipant(session, reviewComment.getUserLogin());
                     processReviewComment(owner, repo, prNumber, reviewComment,
-                            session, systemPrompt, null, !isKnownParticipant);
-                    sessionService.rememberParticipant(session, reviewComment.getUserLogin());
+                            session, systemPrompt, null, sideTopicResponse);
                 } catch (Exception e) {
                     log.error("Failed to process review comment #{} on PR #{} in {}/{}: {}",
                             reviewComment.getId(), prNumber, owner, repo, e.getMessage(), e);
@@ -422,7 +426,7 @@ public class CodeReviewService {
     private void processReviewComment(String owner, String repo, Long prNumber,
                                       ReviewComment reviewComment, ReviewSession session,
                                       String systemPrompt, String modelOverride,
-                                      boolean sideClarifyingResponse) {
+                                      boolean sideTopicResponse) {
         Long commentId = reviewComment.getId();
         String filePath = reviewComment.getPath();
         String diffHunk = reviewComment.getDiffHunk();
@@ -439,7 +443,7 @@ public class CodeReviewService {
         }
 
         // Build context message
-        var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, modelOverride, sideClarifyingResponse);
+        var formattedResponse = buildInlineCommentAndSend(filePath, diffHunk, commentBody, session, systemPrompt, modelOverride, sideTopicResponse);
         if (line != null && line > 0) {
             try {
                 repositoryClient.postInlineReviewComment(owner, repo, prNumber,
@@ -472,11 +476,11 @@ public class CodeReviewService {
         return formatBotResponse(response, false);
     }
 
-    String formatBotResponse(String response, boolean sideClarifyingResponse) {
-        String note = sideClarifyingResponse
-                ? "\n\n> Note: this is a side-clarifying response for another PR participant and is based on the existing review context."
+    String formatBotResponse(String response, boolean sideTopicResponse) {
+        String sideTopicNote = sideTopicResponse
+                ? "\n\n> Note: This is a side-clarifying response for a non-owner PR comment and is based on the existing PR context."
                 : "";
-        return "## 🤖 Bot Response\n\n" + response + note +
+        return "## 🤖 Bot Response\n\n" + response + sideTopicNote +
                 "\n\n---\n*Response by AI Git Bot*";
     }
 

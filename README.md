@@ -106,11 +106,15 @@ When a pull request is opened or updated, the bot automatically reviews the diff
 
 Mention the bot (e.g. `@ai_bot`) in any PR comment to ask questions or request additional analysis. The bot acknowledges with 👀 and responds using the full conversation history.
 
+If the comment comes from someone other than the PR owner, the bot still replies with the known PR context, but the message is explicitly marked as a **side-clarifying response**.
+
 <img src="doc/screenshots/gitea/screenshot_code_review_with_comment.png" alt="Code Review with Comment" width="600"/>
 
 ### 📝 Inline Review Comment Responses
 
 Mention the bot in an inline review comment on a specific code line. The bot includes the file context and diff hunk when generating its answer and replies directly inline.
+
+For comments from a non-owner of the PR, the inline answer is also marked as a **side-clarifying response**.
 
 <img src="doc/screenshots/gitea/screenshot_code_review_with_inline_comment.png" alt="Code Review with Inline Comment" width="600"/>
 
