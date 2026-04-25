@@ -17,10 +17,10 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
     public static final String PROVIDER_TYPE = "openai";
     public static final String DEFAULT_API_URL = "https://api.openai.com";
     public static final List<String> SUGGESTED_MODELS = List.of(
+            "gpt-5.5",
             "gpt-5.4",
-            "gpt-5.3-codex",
-            "gpt-5.1-codex-max",
-            "gpt-5-codex"
+            "gpt-5.4-mini",
+            "gpt-5.3-codex"
     );
 
     @Override

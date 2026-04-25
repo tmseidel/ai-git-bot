@@ -168,8 +168,10 @@ public class IssueImplementationService {
             String toolsInfo = buildToolsInfo();
             String fullPrompt = implementationPrompt + toolsInfo;
 
-            boolean implementationSucceeded = runToolImplementationLoop(
-                    session, fullPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber);
+            ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
+                    session, fullPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
+            boolean implementationSucceeded = implementationResult.success();
+            baseBranch = implementationResult.selectedBranch();
 
             if (!implementationSucceeded) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
@@ -244,15 +246,17 @@ public class IssueImplementationService {
      * @param userMessage the next user turn to kick off this loop (will be appended to the session)
      * @return {@code true} when the implementation is considered successful
      */
-    private boolean runToolImplementationLoop(
+    private ToolImplementationLoopResult runToolImplementationLoop(
             AgentSession session, String userMessage, String systemPrompt,
-            Path workspaceDir, String owner, String repo, Long issueNumber) {
+            Path workspaceDir, String owner, String repo, Long issueNumber,
+            String initialContextBranch) {
 
         int maxRetries    = agentConfig.getValidation().isEnabled()
                 ? agentConfig.getValidation().getMaxRetries() : 1;
         int maxToolRounds = agentConfig.getValidation().getMaxToolExecutions();
         int fileRequestRounds = 0;
         int toolRounds    = 0;
+        String currentContextBranch = initialContextBranch;
 
         // Snapshot the prior conversation history (file-request dialogue, earlier comments, …)
         // so it is visible to the model as context.  The list is then extended locally as the
@@ -273,16 +277,18 @@ public class IssueImplementationService {
             ImplementationPlan plan = responseParser.parseAiResponse(aiResponse);
             if (plan == null) {
                 log.warn("Failed to parse AI response on attempt {}", attempt);
-                return false;
+                return new ToolImplementationLoopResult(false, currentContextBranch);
             }
 
             // Context request before implementation — does not count as an implementation attempt
             if (plan.hasContextRequests() && !plan.hasToolRequest() && fileRequestRounds < 3) {
                 fileRequestRounds++;
                 log.info("AI requesting additional context (round {}/3)", fileRequestRounds);
-                String ctx = fetchRequestedContext(owner, repo,
-                        repositoryClient.getDefaultBranch(owner, repo),
-                        plan.getRequestFiles(), plan.getRequestTools(), workspaceDir);
+                BranchSwitchResult branchSwitchResult = applyRequestedBranchSwitch(
+                        workspaceDir, currentContextBranch, plan.getRequestTools(), issueNumber);
+                currentContextBranch = branchSwitchResult.selectedBranch();
+                String ctx = fetchRequestedContext(owner, repo, currentContextBranch,
+                        plan.getRequestFiles(), branchSwitchResult.remainingToolRequests(), workspaceDir);
                 String ctxMsg = "Here is the requested repository context:\n" + ctx
                         + "\n\nNow implement the issue using `runTools`. "
                         + "Use write-file/patch-file for changes and include validation tools.";
@@ -308,7 +314,7 @@ public class IssueImplementationService {
             // Guard against runaway tool rounds
             if (toolRounds >= maxToolRounds) {
                 log.warn("Reached max tool rounds ({}) — returning current result", maxToolRounds);
-                return false;
+                return new ToolImplementationLoopResult(false, currentContextBranch);
             }
             toolRounds++;
 
@@ -325,17 +331,17 @@ public class IssueImplementationService {
 
             // Validation disabled → treat as success after first tool execution
             if (!agentConfig.getValidation().isEnabled()) {
-                return true;
+                return new ToolImplementationLoopResult(true, currentContextBranch);
             }
 
             // No validation tools present → file-only changes, consider success
             if (!hasValidationTools(requests)) {
-                return true;
+                return new ToolImplementationLoopResult(true, currentContextBranch);
             }
 
             if (allValidationToolsPassed(requests, results)) {
                 log.info("All validation tools passed on attempt {}", attempt);
-                return true;
+                return new ToolImplementationLoopResult(true, currentContextBranch);
             }
 
             // Validation failed → give feedback and let the AI retry
@@ -347,7 +353,7 @@ public class IssueImplementationService {
         }
 
         log.warn("Tool implementation loop exhausted {} attempts without full success", maxRetries);
-        return false;
+        return new ToolImplementationLoopResult(false, currentContextBranch);
     }
 
     /**
@@ -446,8 +452,10 @@ public class IssueImplementationService {
 
             log.info("Requesting AI to continue implementation for issue #{}", issueNumber);
             // runToolImplementationLoop handles: AI call, context rounds, tool execution, retries
-            boolean success = runToolImplementationLoop(
-                    session, userMessage, systemPrompt, workspaceDir, owner, repo, issueNumber);
+            ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
+                    session, userMessage, systemPrompt, workspaceDir, owner, repo, issueNumber, workingBranch);
+            boolean success = implementationResult.success();
+            String selectedContextBranch = implementationResult.selectedBranch();
             if (!success) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
                 repositoryClient.postComment(owner, repo, issueNumber,
@@ -478,7 +486,7 @@ public class IssueImplementationService {
                 String prBody = promptBuilder.buildPrBody(issueNumber, latestPlan != null ? latestPlan
                         : ImplementationPlan.builder().summary("Automated implementation").build());
                 Long prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
-                        branchName, defaultBranch);
+                        branchName, createNew ? selectedContextBranch : defaultBranch);
                 sessionService.setPrNumber(session, prNumber);
             }
 
@@ -709,6 +717,10 @@ public class IssueImplementationService {
     private record BranchSwitchResult(String initialBranch,
                                       String selectedBranch,
                                       List<ImplementationPlan.ToolRequest> remainingToolRequests) {
+    }
+
+    /** Result of the implementation loop including the final branch used for context lookups. */
+    private record ToolImplementationLoopResult(boolean success, String selectedBranch) {
     }
 
     /** Retrieves the last parsed plan from the session history (the latest assistant JSON response). */

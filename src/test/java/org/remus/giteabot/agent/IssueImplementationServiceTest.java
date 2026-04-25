@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.*;
@@ -37,14 +38,13 @@ class IssueImplementationServiceTest {
     @Mock private ToolExecutionService toolExecutionService;
     @Mock private WorkspaceService workspaceService;
 
-    private AgentConfigProperties agentConfig;
     private IssueImplementationService service;
 
     private static final Path FAKE_WORKSPACE = Path.of("/tmp/test-workspace");
 
     @BeforeEach
     void setUp() {
-        agentConfig = new AgentConfigProperties();
+        AgentConfigProperties agentConfig = new AgentConfigProperties();
         agentConfig.setEnabled(true);
         agentConfig.setMaxFiles(10);
         agentConfig.setBranchPrefix("ai-agent/");
@@ -57,7 +57,7 @@ class IssueImplementationServiceTest {
         lenient().when(toolExecutionService.getAvailableContextTools()).thenReturn(List.of("branch-switcher", "rg", "cat", "find", "tree"));
         // isValidationTool is the authoritative check for validation tools; delegate to getAvailableTools()
         lenient().when(toolExecutionService.isValidationTool(anyString()))
-                .thenAnswer(inv -> List.of("mvn").contains(inv.getArgument(0)));
+                .thenAnswer(inv -> Objects.equals("mvn", inv.getArgument(0)));
     }
 
     // ---- handleIssueAssigned tests ----
@@ -282,6 +282,69 @@ class IssueImplementationServiceTest {
     }
 
     @Test
+    void handleIssueAssigned_followUpContextRequest_readsFilesFromCurrentBaseBranch() {
+        WebhookPayload payload = createIssuePayload();
+        payload.getIssue().setRef("refs/heads/release/1.x");
+
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "release/1.x"))
+                .thenReturn(List.of(Map.of("type", "blob", "path", "pom.xml")));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("release/1.x"),
+                isNull(), isNull()))
+                .thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+
+        String initialContextResponse = """
+                ```json
+                {"summary": "Need initial context", "requestFiles": []}
+                ```
+                """;
+        String followUpContextResponse = """
+                ```json
+                {"summary": "Need pom", "requestFiles": ["pom.xml"]}
+                ```
+                """;
+        String implResponse = """
+                ```json
+                {
+                  "summary": "Implemented on release branch",
+                  "runTools": [
+                    {"id": "f-101", "tool": "write-file", "args": ["src/Feature.java", "public class Feature {}"]},
+                    {"id": "v-101", "tool": "mvn", "args": ["compile", "-q", "-B"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn(initialContextResponse, followUpContextResponse, implResponse);
+
+        when(repositoryClient.getFileContent("testowner", "testrepo", "pom.xml", "release/1.x"))
+                .thenReturn("<project />");
+
+        when(toolExecutionService.isFileTool("write-file")).thenReturn(true);
+        when(toolExecutionService.isFileTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isContextTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isSilentTool("write-file")).thenReturn(true);
+        when(toolExecutionService.isSilentTool("mvn")).thenReturn(false);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File written: src/Feature.java", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(true)))
+                .thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("release/1.x"))).thenReturn(1L);
+
+        service.handleIssueAssigned(payload);
+
+        verify(repositoryClient).getFileContent("testowner", "testrepo", "pom.xml", "release/1.x");
+        verify(repositoryClient, never()).getFileContent("testowner", "testrepo", "pom.xml", "main");
+        verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("release/1.x"));
+    }
+
+    @Test
     void handleIssueAssigned_aiReturnsNoTools_postsFailure() {
         WebhookPayload payload = createIssuePayload();
 
@@ -425,6 +488,69 @@ class IssueImplementationServiceTest {
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
                 anyString(), anyString(), anyString(), eq(false));
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
+    }
+
+    @Test
+    void handleIssueComment_followUpContextRequest_readsFilesFromWorkingBranch() {
+        WebhookPayload payload = createCommentPayload("Please inspect the current branch state");
+
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(
+                new ArrayList<>(List.of(AiMessage.builder().role("user").content("Please inspect the current branch state").build())));
+        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
+                isNull(), isNull()))
+                .thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+
+        String firstResponse = """
+                ```json
+                {
+                  "summary": "Need file contents from the working branch",
+                  "requestFiles": ["README.md"]
+                }
+                ```
+                """;
+        String secondResponse = """
+                ```json
+                {
+                  "summary": "Updated docs after reviewing working branch",
+                  "runTools": [
+                    {"id": "f-201", "tool": "patch-file", "args": ["README.md", "old", "new"]},
+                    {"id": "v-201", "tool": "mvn", "args": ["compile"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn(firstResponse, secondResponse);
+
+        when(repositoryClient.getFileContent("testowner", "testrepo", "README.md", "ai-agent/issue-42"))
+                .thenReturn("branch-specific readme");
+
+        when(toolExecutionService.isFileTool("patch-file")).thenReturn(true);
+        when(toolExecutionService.isFileTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isContextTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isSilentTool("patch-file")).thenReturn(true);
+        when(toolExecutionService.isSilentTool("mvn")).thenReturn(false);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("patch-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File patched", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(false)))
+                .thenReturn(true);
+
+        service.handleIssueComment(payload);
+
+        verify(repositoryClient).getFileContent("testowner", "testrepo", "README.md", "ai-agent/issue-42");
+        verify(repositoryClient, never()).getFileContent("testowner", "testrepo", "README.md", "main");
     }
 
     // ---- helpers ----

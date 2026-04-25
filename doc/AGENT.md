@@ -55,8 +55,8 @@ The previous approach required the AI to produce SEARCH/REPLACE diff blocks in a
 - Even small differences between the expected and actual file content (variable names, whitespace) caused diff application to fail
 - The AI had to hold the entire JSON diff structure in its working context, burning tokens
 With file tools, the AI instead:
-1. Uses `cat` to read the exact current content of a file
-2. Uses `patch-file` with the verbatim text it just read as the search string
+1. Uses `cat` in `requestTools` (or a dedicated context-only round) to read the exact current content of a file
+2. Uses `patch-file` in a later `runTools` batch with the verbatim text it just read as the search string
 3. Or uses `write-file` to replace the whole file when the change is large
 This works reliably with **any model tier**.
 ## Context Tools
@@ -112,14 +112,22 @@ Ensure the bot user has at minimum **Write** permission on the target repositori
 ## AI-Driven Code Generation and Validation
 The agent uses AI-driven tool calls where the AI decides which file operations and validation commands to run based on the project structure.
 ### How It Works
-1. The AI analyzes the repository file tree (e.g., sees `pom.xml`) and reads relevant source files via `cat`
-2. The AI responds with a `runTools` array that mixes file tools and validation tools:
+1. The AI analyzes the repository file tree (e.g., sees `pom.xml`) and reads relevant source files via `requestTools` such as `cat`
+2. If it needs to inspect a file before patching it, the AI first requests context in a dedicated context step:
+   ```json
+   {
+     "summary": "Inspect HelloService before patching it",
+     "requestTools": [
+       {"id": "550e8400-e29b-41d4-a716-446655440001", "tool": "cat",
+        "args": ["src/main/java/HelloService.java", "1", "40"]}
+     ]
+   }
+   ```
+3. After receiving that context, the AI responds with a `runTools` array that mixes file tools and validation tools:
    ```json
    {
      "summary": "Add greeting method to HelloService",
      "runTools": [
-       {"id": "550e8400-e29b-41d4-a716-446655440001", "tool": "cat",
-        "args": ["src/main/java/HelloService.java", "1", "40"]},
        {"id": "550e8400-e29b-41d4-a716-446655440002", "tool": "patch-file",
         "args": ["src/main/java/HelloService.java",
                  "    // end of class\n}",
@@ -130,9 +138,10 @@ The agent uses AI-driven tool calls where the AI decides which file operations a
    }
    ```
 3. The bot executes all tools sequentially in the cloned workspace
-4. File tool results are silent; validation tool output (`mvn`, `npm`, …) is posted as an issue comment
-5. If there are build/test errors, the AI fixes the code and requests the tools again
-6. Once all validation tools succeed, the workspace is committed and pushed
+4. `cat` should not be placed in the same `runTools` batch as a dependent `patch-file`; inspect first, then patch
+5. File tool results are silent; validation tool output (`mvn`, `npm`, …) is posted as an issue comment
+6. If there are build/test errors, the AI fixes the code and requests the tools again
+7. Once all validation tools succeed, the workspace is committed and pushed
 ### Installed Build Tools
 The Docker image includes the following build tools:
 | Language | Tools |
