@@ -81,8 +81,14 @@ public class WriterResponseParser {
             }
             if (!inString) {
                 if (c == '{') braces++;
-                if (c == '}' && --braces == 0) {
-                    return json.substring(0, i + 1);
+                if (c == '}') {
+                    braces--;
+                    if (braces < 0) {
+                        return json;
+                    }
+                    if (braces == 0) {
+                        return json.substring(0, i + 1);
+                    }
                 }
             }
         }

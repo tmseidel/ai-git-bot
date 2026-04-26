@@ -161,19 +161,29 @@ public class WriterAgentService {
         Map<String, Object> details = repositoryClient.getIssueDetails(owner, repo, issueNumber);
         Object user = details.get("user");
         if (user instanceof Map<?, ?> userMap) {
-            Object login = userMap.get("login");
-            if (login != null) {
-                return commenter.equalsIgnoreCase(login.toString());
+            String identity = extractUserIdentity(userMap);
+            if (identity != null) {
+                return commenter.equalsIgnoreCase(identity);
             }
         }
         Object author = details.get("author");
         if (author instanceof Map<?, ?> authorMap) {
-            Object username = authorMap.get("username");
-            if (username != null) {
-                return commenter.equalsIgnoreCase(username.toString());
+            String identity = extractUserIdentity(authorMap);
+            if (identity != null) {
+                return commenter.equalsIgnoreCase(identity);
             }
         }
-        return true;
+        return false;
+    }
+
+    private String extractUserIdentity(Map<?, ?> userMap) {
+        for (String key : List.of("login", "username", "name")) {
+            Object value = userMap.get(key);
+            if (value != null && !value.toString().isBlank()) {
+                return value.toString();
+            }
+        }
+        return null;
     }
 
     private String resolveWriterSystemPrompt() {
