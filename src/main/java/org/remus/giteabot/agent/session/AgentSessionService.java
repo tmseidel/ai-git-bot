@@ -60,7 +60,9 @@ public class AgentSessionService {
             return Optional.empty();
         }
         session.setStatus(AgentSession.AgentSessionStatus.UPDATING);
-        return Optional.of(repository.save(session));
+        AgentSession savedSession = repository.save(session);
+        savedSession.getMessages().size();
+        return Optional.of(savedSession);
     }
 
     @Transactional(readOnly = true)

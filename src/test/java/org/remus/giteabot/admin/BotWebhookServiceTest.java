@@ -10,8 +10,8 @@ import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
-import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
@@ -22,8 +22,8 @@ import org.remus.giteabot.session.SessionService;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import java.util.Optional;
 import java.nio.file.Path;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -226,6 +227,32 @@ class BotWebhookServiceTest {
 
         verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
+    }
+
+    @Test
+    void writerBot_assignmentKickoffFailureResetsSessionFromUpdating() {
+        Bot bot = createBot("writer", "writer_bot", false);
+        bot.setBotType(BotType.WRITER);
+        WebhookPayload payload = buildIssuePayload("Test", "my-repo", 12L, "Vague issue", "Do something");
+        AgentSession session = new AgentSession("Test", "my-repo", 12L, "Vague issue");
+
+        when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(aiClientFactory.getClient(any())).thenReturn(aiClient);
+        when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.empty());
+        when(repositoryApiClient.getIssueDetails("Test", "my-repo", 12L))
+                .thenReturn(java.util.Map.of("user", java.util.Map.of("login", "tom")));
+        when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
+                AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
+        when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
+        doThrow(new RuntimeException("kickoff comment failed"))
+                .doNothing()
+                .when(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L), any());
+
+        botWebhookService.handleIssueAssigned(bot, payload);
+
+        verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
+        verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
     }
 
     @Test

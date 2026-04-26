@@ -20,7 +20,7 @@ public interface AgentSessionRepository extends JpaRepository<AgentSession, Long
             @Param("issueNumber") Long issueNumber);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT s FROM AgentSession s LEFT JOIN FETCH s.messages " +
+    @Query("SELECT s FROM AgentSession s " +
            "WHERE s.repoOwner = :owner AND s.repoName = :repo AND s.issueNumber = :issueNumber")
     Optional<AgentSession> findByRepoOwnerAndRepoNameAndIssueNumberForUpdate(
             @Param("owner") String repoOwner,

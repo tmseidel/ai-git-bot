@@ -93,22 +93,18 @@ public class WriterAgentService {
         }
 
         String issueAuthor = findIssueAuthor(owner, repo, issueNumber);
-        AgentSession session;
+        AgentSession session = null;
         String baseBranch = issueRef != null && !issueRef.isBlank()
                 ? issueRef : repositoryClient.getDefaultBranch(owner, repo);
+        Path workspaceDir = null;
         try {
             session = sessionService.createSession(owner, repo, issueNumber, issueTitle,
                     AgentSession.AgentSessionType.WRITER, issueAuthor);
             sessionService.setBranchName(session, baseBranch);
             sessionService.setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
-        } catch (DataIntegrityViolationException e) {
-            log.info("Writer session was created concurrently for issue #{} in {}/{}", issueNumber, owner, repo);
-            return;
-        }
-        Path workspaceDir = null;
-        repositoryClient.postComment(owner, repo, issueNumber,
-                "🤖 **AI Technical Writer**: I've been assigned and will review this issue for completeness.");
-        try {
+            repositoryClient.postComment(owner, repo, issueNumber,
+                    "🤖 **AI Technical Writer**: I've been assigned and will review this issue for completeness.");
+
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken());
             if (!wsResult.success()) {
@@ -123,6 +119,9 @@ public class WriterAgentService {
                     repositoryClient.getRepositoryTree(owner, repo, baseBranch), MAX_INITIAL_TREE_FILES);
             runWriterLoop(session, owner, repo, issueNumber, workspaceDir,
                     promptBuilder.buildInitialPrompt(issueNumber, issueTitle, issueBody, treeContext));
+        } catch (DataIntegrityViolationException e) {
+            log.info("Writer session was created concurrently for issue #{} in {}/{}", issueNumber, owner, repo);
+            return;
         } catch (Exception e) {
             log.error("Writer failed while handling assignment for issue #{} in {}/{}: {}",
                     issueNumber, owner, repo, e.getMessage(), e);
