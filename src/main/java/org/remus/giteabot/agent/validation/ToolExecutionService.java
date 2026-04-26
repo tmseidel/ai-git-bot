@@ -602,24 +602,26 @@ public class ToolExecutionService {
                 includeGlobs.add(argument.substring("--glob=".length()));
                 continue;
             }
-            if ("--glob".equals(argument) || "-g".equals(argument)) {
-                if (i + 1 < arguments.size()) {
-                    includeGlobs.add(arguments.get(++i));
+            switch (argument) {
+                case "--glob", "-g" -> {
+                    if (i + 1 < arguments.size()) {
+                        includeGlobs.add(arguments.get(++i));
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if ("-name".equals(argument) || "-iname".equals(argument)) {
-                caseInsensitive = "-iname".equals(argument);
-                if (i + 1 < arguments.size()) {
-                    globPattern = arguments.get(++i);
+                case "-name", "-iname" -> {
+                    caseInsensitive = "-iname".equals(argument);
+                    if (i + 1 < arguments.size()) {
+                        globPattern = arguments.get(++i);
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if ("-type".equals(argument)) {
-                if (i + 1 < arguments.size()) {
-                    i++;
+                case "-type" -> {
+                    if (i + 1 < arguments.size()) {
+                        i++;
+                    }
+                    continue;
                 }
-                continue;
             }
             if (argument.startsWith("-")) {
                 continue;
@@ -798,10 +800,6 @@ public class ToolExecutionService {
             return true;
         }
         return globPatterns.stream().anyMatch(glob -> matchesGlob(path, glob, caseInsensitive));
-    }
-
-    private boolean matchesGlob(String path, String globPattern) {
-        return matchesGlob(path, globPattern, false);
     }
 
     private boolean matchesGlob(String path, String globPattern, boolean caseInsensitive) {

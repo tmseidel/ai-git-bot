@@ -363,7 +363,7 @@ public class WriterAgentService {
     }
 
     private String firstArgOrDefault(List<String> args, String defaultValue) {
-        return args == null || args.isEmpty() ? defaultValue : args.get(0);
+        return args == null || args.isEmpty() ? defaultValue : args.getFirst();
     }
 
     private boolean isIssueAuthor(String owner, String repo, Long issueNumber, WebhookPayload payload) {
@@ -377,7 +377,7 @@ public class WriterAgentService {
             return commenter.equalsIgnoreCase(sessionOpt.get().getIssueAuthorUsername());
         }
         String issueAuthor = findIssueAuthor(owner, repo, issueNumber);
-        return issueAuthor != null && commenter.equalsIgnoreCase(issueAuthor);
+        return commenter.equalsIgnoreCase(issueAuthor);
     }
 
     private boolean isAssignedToThisBot(WebhookPayload payload) {
