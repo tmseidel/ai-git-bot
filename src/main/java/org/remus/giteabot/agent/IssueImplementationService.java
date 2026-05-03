@@ -106,7 +106,7 @@ public class IssueImplementationService {
         Optional<AgentSession> existingSession = sessionService.getSessionByIssue(owner, repo, issueNumber);
         if (existingSession.isPresent()) {
             if (existingSession.get().getSessionType() != AgentSession.AgentSessionType.CODING) {
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Agent**: A technical-writer session already exists for this issue. "
                                 + "Please clone the issue if you want the coding agent to implement it separately.");
             }
@@ -118,7 +118,7 @@ public class IssueImplementationService {
         Path workspaceDir = null;
 
         try {
-            repositoryClient.postComment(owner, repo, issueNumber,
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Agent**: I've been assigned to this issue. Analyzing repository structure...");
 
             // Determine base branch
@@ -137,7 +137,7 @@ public class IssueImplementationService {
                     repositoryClient.getCloneUrl(), repositoryClient.getToken());
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
                 return;
             }
@@ -194,7 +194,7 @@ public class IssueImplementationService {
 
             if (!implementationSucceeded) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         """
                         🤖 **AI Agent**: I was unable to produce a valid implementation for this issue. \
                         The issue may be too complex or ambiguous for automated implementation.
@@ -213,7 +213,7 @@ public class IssueImplementationService {
 
             if (!pushed) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Agent**: Implementation succeeded but pushing the branch failed. Please check the logs.");
                 return;
             }
@@ -434,7 +434,7 @@ public class IssueImplementationService {
 
         AgentSession session = sessionOpt.get();
         if (session.getSessionType() != AgentSession.AgentSessionType.CODING) {
-            repositoryClient.postComment(owner, repo, issueNumber,
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Agent**: This issue is currently owned by a technical-writer session. "
                             + "Please clone the issue if you want the coding agent to implement it separately.");
             return;
@@ -459,7 +459,7 @@ public class IssueImplementationService {
                     owner, repo, workingBranch,
                     repositoryClient.getCloneUrl(), repositoryClient.getToken());
             if (!wsResult.success()) {
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
                 return;
             }
@@ -476,7 +476,7 @@ public class IssueImplementationService {
             String selectedContextBranch = implementationResult.selectedBranch();
             if (!success) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Agent**: Validation failed and I couldn't fix the issues. " +
                         "Please check the tool output above and provide more guidance.");
                 return;
@@ -492,7 +492,7 @@ public class IssueImplementationService {
             boolean pushed = workspaceService.commitAndPush(workspaceDir, branchName, commitMessage,
                     GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, createNew);
             if (!pushed) {
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Agent**: Tool execution succeeded but pushing changes failed.");
                 return;
             }

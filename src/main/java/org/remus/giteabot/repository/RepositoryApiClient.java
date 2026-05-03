@@ -54,7 +54,18 @@ public interface RepositoryApiClient {
 
     void postReviewComment(String owner, String repo, Long pullNumber, String body);
 
-    void postComment(String owner, String repo, Long issueNumber, String body);
+    /**
+     * Posts a regular top-level comment on a pull/merge request conversation.
+     * <p>
+     * Providers like GitHub and Gitea can often reuse the same underlying endpoint as issue comments,
+     * while GitLab requires a merge-request-specific endpoint.
+     */
+    void postPullRequestComment(String owner, String repo, Long pullNumber, String body);
+
+    /**
+     * Posts a regular top-level comment on an issue.
+     */
+    void postIssueComment(String owner, String repo, Long issueNumber, String body);
 
     void addReaction(String owner, String repo, Long commentId, String reaction);
 

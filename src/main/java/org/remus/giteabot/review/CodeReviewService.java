@@ -169,7 +169,7 @@ public class CodeReviewService {
 
             // Post the response as a comment on the PR
             String formattedResponse = formatBotResponse(response);
-            repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
+            repositoryClient.postPullRequestComment(owner, repo, prNumber, formattedResponse);
 
             // Compact context window to reduce memory/token usage
             sessionService.compactContextWindow(session);
@@ -267,10 +267,10 @@ public class CodeReviewService {
                             filePath, line, formattedResponse);
                 } catch (Exception e) {
                     log.warn("Failed to post inline reply, falling back to regular comment: {}", e.getMessage());
-                    repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
+                    repositoryClient.postPullRequestComment(owner, repo, prNumber, formattedResponse);
                 }
             } else {
-                repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
+                repositoryClient.postPullRequestComment(owner, repo, prNumber, formattedResponse);
             }
 
             // Compact context window to reduce memory/token usage
@@ -443,10 +443,10 @@ public class CodeReviewService {
             } catch (Exception e) {
                 log.warn("Failed to post inline reply for review comment #{}, falling back to regular comment: {}",
                         commentId, e.getMessage());
-                repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
+                repositoryClient.postPullRequestComment(owner, repo, prNumber, formattedResponse);
             }
         } else {
-            repositoryClient.postComment(owner, repo, prNumber, formattedResponse);
+            repositoryClient.postPullRequestComment(owner, repo, prNumber, formattedResponse);
         }
     }
 

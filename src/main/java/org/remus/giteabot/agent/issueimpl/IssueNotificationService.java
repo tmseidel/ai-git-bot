@@ -102,7 +102,7 @@ public class IssueNotificationService {
         }
 
         try {
-            repositoryClient.postComment(owner, repo, issueNumber, commentText);
+            repositoryClient.postIssueComment(owner, repo, issueNumber, commentText);
         } catch (Exception e) {
             log.warn("Failed to post AI thinking comment on issue #{}: {}", issueNumber, e.getMessage());
         }
@@ -138,7 +138,7 @@ public class IssueNotificationService {
                 }
             }
 
-            repositoryClient.postComment(owner, repo, issueNumber, comment.toString());
+            repositoryClient.postIssueComment(owner, repo, issueNumber, comment.toString());
         } catch (Exception e) {
             log.warn("Failed to post tool result comment: {}", e.getMessage());
         }
@@ -161,7 +161,7 @@ public class IssueNotificationService {
                         on this issue and I'll continue working on it.""",
                 prRef, summary);
 
-        repositoryClient.postComment(owner, repo, issueNumber, successComment);
+        repositoryClient.postIssueComment(owner, repo, issueNumber, successComment);
     }
 
     /**
@@ -178,7 +178,7 @@ public class IssueNotificationService {
                         **Summary**: %s""",
                 prRef, summary);
 
-        repositoryClient.postComment(owner, repo, issueNumber, updateComment);
+        repositoryClient.postIssueComment(owner, repo, issueNumber, updateComment);
     }
 
     // ---- Helpers ----
