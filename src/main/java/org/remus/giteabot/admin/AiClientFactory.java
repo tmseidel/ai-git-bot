@@ -61,12 +61,16 @@ public class AiClientFactory {
         String providerType = integration.getProviderType();
         AiProviderMetadata provider = providerRegistry.getProviderOrThrow(providerType);
 
-        String decryptedApiKey = provider.requiresApiKey()
+        String decryptedApiKey = provider.requiresApiKey() || hasConfiguredApiKey(integration)
                 ? aiIntegrationService.decryptApiKey(integration)
                 : null;
 
         RestClient restClient = provider.buildRestClient(integration, decryptedApiKey);
         return provider.createClient(restClient, integration);
+    }
+
+    private boolean hasConfiguredApiKey(AiIntegration integration) {
+        return integration.getApiKey() != null && !integration.getApiKey().isBlank();
     }
 
     private record CachedClient(long updatedAtMillis, AiClient client) {}

@@ -15,6 +15,8 @@ import org.remus.giteabot.ai.ollama.OllamaClient;
 import org.remus.giteabot.ai.ollama.OllamaProviderMetadata;
 import org.remus.giteabot.ai.openai.OpenAiClient;
 import org.remus.giteabot.ai.openai.OpenAiProviderMetadata;
+import org.remus.giteabot.ai.vllm.VllmClient;
+import org.remus.giteabot.ai.vllm.VllmProviderMetadata;
 
 import java.time.Instant;
 import java.util.List;
@@ -38,7 +40,8 @@ class AiClientFactoryTest {
                 new AnthropicProviderMetadata(),
                 new OpenAiProviderMetadata(),
                 new OllamaProviderMetadata(),
-                new LlamaCppProviderMetadata()
+                new LlamaCppProviderMetadata(),
+                new VllmProviderMetadata()
         ));
         aiClientFactory = new AiClientFactory(aiIntegrationService, providerRegistry);
     }
@@ -79,6 +82,26 @@ class AiClientFactoryTest {
         AiClient client = aiClientFactory.getClient(integration);
         assertInstanceOf(LlamaCppClient.class, client);
         verify(aiIntegrationService, never()).decryptApiKey(any());
+    }
+
+    @Test
+    void getClient_vllm_createsVllmClientWithoutApiKey() {
+        AiIntegration integration = createIntegration("vllm", null);
+        // vLLM doesn't require API key, so decryptApiKey should not be called when unset
+
+        AiClient client = aiClientFactory.getClient(integration);
+        assertInstanceOf(VllmClient.class, client);
+        verify(aiIntegrationService, never()).decryptApiKey(any());
+    }
+
+    @Test
+    void getClient_vllm_decryptsOptionalApiKeyWhenConfigured() {
+        AiIntegration integration = createIntegration("vllm", "encrypted-token");
+        when(aiIntegrationService.decryptApiKey(integration)).thenReturn("test-token");
+
+        AiClient client = aiClientFactory.getClient(integration);
+        assertInstanceOf(VllmClient.class, client);
+        verify(aiIntegrationService).decryptApiKey(integration);
     }
 
     @Test
