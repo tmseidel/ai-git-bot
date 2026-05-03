@@ -23,7 +23,7 @@ AI-Git-Bot is a lightweight, self-hostable **gateway application** that connects
 | 👥 **Multi-pass reviews with different personas** | Create multiple bots with different prompts: a security reviewer, a performance expert, a junior mentor — all on the same PR. |
 | 🧾 **Product owners, maintainers, and triagers** | Use writer bots to turn vague issue reports into actionable, testable implementation-ready issues without leaving the Git platform. |
 | 🧠 **Teams that need better issue quality before coding starts** | Let a technical-writer agent check completeness, contradictions, assumptions, and acceptance criteria before engineering work begins. |
-| 🔒 **Self-hosters with compliance requirements** | Run everything on-premise with local LLMs (Ollama, llama.cpp). No code leaves your infrastructure — ideal for regulatory and compliance needs. |
+| 🔒 **Self-hosters with compliance requirements** | Run everything on-premise with local LLMs (Ollama, llama.cpp, vLLM). No code leaves your infrastructure — ideal for regulatory and compliance needs. |
 | ⚡ **Lightweight AI implementation** | A single Docker image, one PostgreSQL database — done. No complex infrastructure, no Kubernetes clusters required. |
 
 ## 🤖🧠 Half Bot, Half Agent
@@ -57,6 +57,7 @@ graph LR
         OpenAI
         Ollama
         llama.cpp
+        vLLM
     end
 
     Gateway["🌉 AI-Git-Bot\n(Gateway)"]
@@ -70,6 +71,7 @@ graph LR
     Gateway <--> OpenAI
     Gateway <--> Ollama
     Gateway <--> llama.cpp
+    Gateway <--> vLLM
     Gateway --> DB
 ```
 
@@ -151,7 +153,7 @@ Writer bots are currently intended for providers with issue-assignment workflows
 
 All configuration is managed through a **web-based UI** — no environment variables needed for AI providers, Git connections, or bot settings:
 
-- Create multiple **AI Integrations** (Anthropic, OpenAI, Ollama, llama.cpp)
+- Create multiple **AI Integrations** (Anthropic, OpenAI, Ollama, llama.cpp, vLLM)
 - Create multiple **Git Integrations** (Gitea, GitHub, GitHub Enterprise, GitLab, Bitbucket Cloud)
 - Create multiple **Bots**, each with its own webhook URL, AI provider, and system prompt
 - Dashboard with statistics and monitoring
@@ -164,6 +166,7 @@ All configuration is managed through a **web-based UI** — no environment varia
 | **OpenAI** | `https://api.openai.com` | gpt-5.4, gpt-5.3-codex, gpt-5.1-codex-max, gpt-5-codex |
 | **Ollama** | `http://localhost:11434` | User-configured local models |
 | **llama.cpp** | `http://localhost:8081` | User-configured GGUF models |
+| **vLLM** | `http://localhost:8000` | User-configured served chat models |
 
 ### 🌐 Supported Git Platforms
 
@@ -244,10 +247,10 @@ This starts:
 
 1. **Create an AI Integration:**
    - Go to **AI Integrations → New Integration**
-   - Select a provider (e.g. "anthropic")
+   - Select a provider (e.g. "anthropic" or "vllm")
    - The API URL is auto-filled with the provider's default
    - Select a model from the dropdown or enter a custom model name
-   - Enter your API key
+   - Enter your API key if the provider requires one (vLLM API keys are optional)
 
 2. **Create a Git Integration:**
    - Go to **Git Integrations → New Integration**
@@ -279,7 +282,7 @@ See the [User Guide](doc/USER_GUIDE.md) for detailed instructions.
 graph LR
     Git["Git Platform<br/>(Gitea / GitHub / GitLab / Bitbucket)"]
     Bot["AI-Git-Bot<br/>(Gateway)"]
-    AI["AI Provider<br/>(Anthropic / OpenAI / Ollama / llama.cpp)"]
+    AI["AI Provider<br/>(Anthropic / OpenAI / Ollama / llama.cpp / vLLM)"]
     DB["PostgreSQL"]
 
     Git -- "Webhooks" --> Bot
@@ -307,6 +310,7 @@ The bot receives webhooks from your Git provider, fetches PR diffs, sends them t
 | **AI Provider Setup** | |
 | [Using Ollama](doc/OLLAMA.md) | Running with local LLMs via Ollama |
 | [Using llama.cpp](doc/LLAMACPP.md) | Running with llama.cpp and GBNF grammar support |
+| [Using vLLM](doc/VLLM.md) | Running with OpenAI-compatible vLLM servers |
 | **Deployment** | |
 | [Deployment](doc/DEPLOYMENT.md) | Docker Compose deployment, environment variables |
 | [Local Development](doc/LOCAL_DEVELOPMENT.md) | Building, testing, project structure |

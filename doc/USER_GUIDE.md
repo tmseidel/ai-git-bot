@@ -2,7 +2,7 @@
 
 ## Overview
 
-AI-Git-Bot is a **Gateway application** that provides a web-based management interface for creating and managing AI-powered code review bots. Each bot connects an AI provider (Anthropic, OpenAI, Ollama, or llama.cpp) with a Git provider (Gitea, GitHub, GitHub Enterprise, GitLab, or Bitbucket Cloud) and has its own unique webhook URL. The Gateway architecture allows you to manage multiple bots with different configurations across different Git platforms — all from a single dashboard.
+AI-Git-Bot is a **Gateway application** that provides a web-based management interface for creating and managing AI-powered code review bots. Each bot connects an AI provider (Anthropic, OpenAI, Ollama, llama.cpp, or vLLM) with a Git provider (Gitea, GitHub, GitHub Enterprise, GitLab, or Bitbucket Cloud) and has its own unique webhook URL. The Gateway architecture allows you to manage multiple bots with different configurations across different Git platforms — all from a single dashboard.
 
 Besides classic pull-request review bots, AI-Git-Bot also supports **issue-based agent workflows**:
 
@@ -52,9 +52,10 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
      | `openai` | `https://api.openai.com` | gpt-5.4, gpt-5.3-codex, gpt-5.1-codex-max, gpt-5-codex |
      | `ollama` | `http://localhost:11434` | *(user-configured)* |
      | `llamacpp` | `http://localhost:8081` | *(user-configured)* |
+     | `vllm` | `http://localhost:8000` | *(user-configured served model)* |
      
    - **API URL**: Pre-filled based on provider; customize for self-hosted or proxy setups
-   - **API Key**: Your API key (encrypted at rest; not needed for Ollama or llama.cpp)
+   - **API Key**: Your API key (encrypted at rest; not needed for Ollama or llama.cpp; optional for vLLM)
    - **API Version**: API version string (Anthropic only, e.g., `2023-06-01`)
    - **Model**: Select from the dropdown for suggested models, or type a custom model name
    - **Max Tokens**: Maximum tokens per AI response (default: 4096)
@@ -84,6 +85,12 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 - No API key required
 - Model is determined by the llama.cpp server configuration
 - Supports GBNF grammar constraints for reliable JSON output (agent feature)
+
+#### vLLM
+- No API key required by default
+- If the vLLM server is started with API-key enforcement, enter that key and the bot sends it as `Authorization: Bearer <key>`
+- Uses the OpenAI-compatible `/v1/chat/completions` endpoint
+- Model must match the chat model served by vLLM
 
 ### Editing an AI Integration
 

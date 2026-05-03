@@ -2,7 +2,7 @@
 
 > **Half Bot, half Agent** — The intelligent Gateway between Git platforms and AI providers. 🤖🧠
 
-AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powered code reviews, issue implementation, and technical-writing issue drafting. Connects **Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud** with **Anthropic Claude, OpenAI, Ollama (local LLMs), and llama.cpp** — all managed through a **web-based UI**.
+AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powered code reviews, issue implementation, and technical-writing issue drafting. Connects **Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud** with **Anthropic Claude, OpenAI, Ollama (local LLMs), llama.cpp, and vLLM** — all managed through a **web-based UI**.
 
 ## Features
 
@@ -10,7 +10,7 @@ AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powere
 - **Web-Based Management** — Configure bots, AI providers, and Git connections through a browser UI
 - **Multi-Bot Support** — Create multiple bots with different AI providers, prompts, and personas
 - **Multiple Git Providers** — Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud support
-- **Multiple AI Providers** — Anthropic, OpenAI, Ollama, and llama.cpp support
+- **Multiple AI Providers** — Anthropic, OpenAI, Ollama, llama.cpp, and vLLM support
 - **Automatic PR Reviews** — Reviews diffs when Pull Requests are opened or updated
 - **Interactive Bot Commands** — Mention the bot in PR comments to ask questions
 - **Inline Review Comments** — Context-aware answers to code-level review comments
@@ -103,8 +103,9 @@ volumes:
 | **OpenAI** | `https://api.openai.com` | gpt-5.4, gpt-5.3-codex, gpt-5.1-codex-max, gpt-5-codex |
 | **Ollama** | `http://localhost:11434` | User-configured local models |
 | **llama.cpp** | `http://localhost:8081` | User-configured GGUF models |
+| **vLLM** | `http://localhost:8000` | User-configured served chat models |
 
-All AI configuration (API URLs, keys, models) is managed through the web UI — no environment variables needed.
+All AI configuration (API URLs, keys, models) is managed through the web UI — no environment variables needed. vLLM API keys are optional and only needed when your vLLM server enforces bearer-token authentication.
 
 ## Supported Git Providers
 
