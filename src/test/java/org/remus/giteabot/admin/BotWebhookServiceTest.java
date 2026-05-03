@@ -124,6 +124,42 @@ class BotWebhookServiceTest {
         assertEquals("", botWebhookService.getBotAlias(bot));
     }
 
+    @Test
+    void shouldTriggerCodeReview_botReviewerAndNoSkip_returnsTrue() {
+        Bot bot = createBot("test-bot", "ai_bot", false);
+        WebhookPayload payload = buildPullRequestPayload("Regular PR", "ai_bot");
+
+        assertTrue(botWebhookService.shouldTriggerCodeReview(bot, payload));
+    }
+
+    @Test
+    void shouldTriggerCodeReview_notReviewer_returnsFalse() {
+        Bot bot = createBot("test-bot", "ai_bot", false);
+        WebhookPayload payload = buildPullRequestPayload("Regular PR", "someone_else");
+
+        assertFalse(botWebhookService.shouldTriggerCodeReview(bot, payload));
+    }
+
+    @Test
+    void shouldTriggerCodeReview_skipTextMatchesTitle_returnsFalse() {
+        Bot bot = createBot("test-bot", "ai_bot", false);
+        bot.setCodeReviewSkipText("[skip review]");
+        WebhookPayload payload = buildPullRequestPayload("Add feature [SKIP REVIEW]", "ai_bot");
+
+        assertFalse(botWebhookService.shouldTriggerCodeReview(bot, payload));
+    }
+
+    @Test
+    void shouldTriggerCodeReview_requestedReviewerMatch_returnsTrue() {
+        Bot bot = createBot("test-bot", "ai_bot", false);
+        WebhookPayload payload = buildPullRequestPayload("Regular PR", "someone_else");
+        WebhookPayload.Owner requestedReviewer = new WebhookPayload.Owner();
+        requestedReviewer.setLogin("ai_bot");
+        payload.setRequestedReviewer(requestedReviewer);
+
+        assertTrue(botWebhookService.shouldTriggerCodeReview(bot, payload));
+    }
+
     // ---- handlePrComment routing tests ----
 
     @Test
@@ -702,6 +738,17 @@ class BotWebhookServiceTest {
         AgentSession s = new AgentSession(owner, repo, issueNumber, "test issue");
         s.setPrNumber(issueNumber); // PR created from this issue
         return s;
+    }
+
+    private WebhookPayload buildPullRequestPayload(String title, String reviewerLogin) {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setTitle(title);
+        WebhookPayload.Owner reviewer = new WebhookPayload.Owner();
+        reviewer.setLogin(reviewerLogin);
+        pr.setRequestedReviewers(java.util.List.of(reviewer));
+        payload.setPullRequest(pr);
+        return payload;
     }
 
     /**

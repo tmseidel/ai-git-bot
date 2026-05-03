@@ -40,6 +40,51 @@ class GitHubWebhookHandlerTest {
         bot.setUsername("ai_bot");
 
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
+        lenient().when(botWebhookService.shouldTriggerCodeReview(eq(bot), any(WebhookPayload.class))).thenReturn(true);
+    }
+
+    @Test
+    void pullRequestOpened_isIgnored() {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", "opened");
+        payload.put("sender", ownerMap("tom"));
+        payload.put("repository", repositoryMap());
+        payload.put("pull_request", pullRequestMap(42L, "Regular PR"));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void pullRequestSynchronized_whenBotReviewer_triggersReview() {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", "synchronize");
+        payload.put("sender", ownerMap("tom"));
+        payload.put("repository", repositoryMap());
+        payload.put("pull_request", pullRequestMap(42L, "Regular PR"));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void pullRequestReviewRequested_whenSkipOrReviewerCheckFails_isIgnored() {
+        when(botWebhookService.shouldTriggerCodeReview(eq(bot), any(WebhookPayload.class))).thenReturn(false);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", "review_requested");
+        payload.put("sender", ownerMap("tom"));
+        payload.put("repository", repositoryMap());
+        payload.put("requested_reviewer", ownerMap("ai_bot"));
+        payload.put("pull_request", pullRequestMap(42L, "Regular PR"));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
 
     @Test
@@ -108,6 +153,17 @@ class GitHubWebhookHandlerTest {
         m.put("body", "");
         m.put("assignee", ownerMap(assigneeLogin));
         m.put("ref", ref);
+        return m;
+    }
+
+    private Map<String, Object> pullRequestMap(long number, String title) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("id", 80);
+        m.put("number", number);
+        m.put("title", title);
+        m.put("body", "");
+        m.put("state", "open");
+        m.put("requested_reviewers", java.util.List.of(ownerMap("ai_bot")));
         return m;
     }
 }

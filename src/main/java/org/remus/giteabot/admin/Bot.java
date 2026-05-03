@@ -43,6 +43,8 @@ public class Bot {
     @Column(nullable = false)
     private boolean agentEnabled = false;
 
+    private String codeReviewSkipText;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private BotType botType = BotType.CODING;

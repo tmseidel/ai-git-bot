@@ -148,7 +148,7 @@ class WebhookIntegrationTest {
     }
 
     @Test
-    void perBotWebhook_triggersReview() throws Exception {
+    void perBotWebhook_synchronizedPrWithBotReviewer_triggersReview() throws Exception {
         // Set up integrations and bot in the DB
         AiIntegration ai = new AiIntegration();
         ai.setName("Test AI Integration");
@@ -180,7 +180,7 @@ class WebhookIntegrationTest {
         bot = botService.save(bot);
 
         String secret = bot.getWebhookSecret();
-        String webhookPayload = createWebhookPayload("opened");
+        String webhookPayload = createWebhookPayload("synchronized");
 
         long startTime = System.currentTimeMillis();
         mockMvc.perform(post("/api/webhook/" + secret)
@@ -198,6 +198,44 @@ class WebhookIntegrationTest {
 
         String reviewBody = giteaReviewBodies.getFirst();
         assertTrue(reviewBody.contains("body"), "Review should contain a body field");
+    }
+
+    @Test
+    void perBotWebhook_openedPr_isIgnored() throws Exception {
+        AiIntegration ai = new AiIntegration();
+        ai.setName("AI Open Test");
+        ai.setProviderType("anthropic");
+        ai.setApiUrl("http://localhost:" + anthropicPort);
+        ai.setApiKey("test-api-key");
+        ai.setApiVersion("2023-06-01");
+        ai.setModel("claude-sonnet-4-20250514");
+        ai.setMaxTokens(1024);
+        ai.setMaxDiffCharsPerChunk(50000);
+        ai.setMaxDiffChunks(4);
+        ai.setRetryTruncatedChunkChars(20000);
+        ai = aiIntegrationService.save(ai);
+
+        GitIntegration git = new GitIntegration();
+        git.setName("Git Open Test");
+        git.setProviderType(org.remus.giteabot.repository.RepositoryType.GITEA);
+        git.setUrl("http://localhost:" + giteaPort);
+        git.setToken("test-token");
+        git = gitIntegrationService.save(git);
+
+        Bot bot = new Bot();
+        bot.setName("Open Test Bot");
+        bot.setUsername("ai_bot");
+        bot.setEnabled(true);
+        bot.setAiIntegration(ai);
+        bot.setGitIntegration(git);
+        bot.setSystemPrompt(getOrCreateDefaultSystemPrompt());
+        bot = botService.save(bot);
+
+        mockMvc.perform(post("/api/webhook/" + bot.getWebhookSecret())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(createWebhookPayload("opened")))
+                .andExpect(status().isOk())
+                .andExpect(content().string("ignored"));
     }
 
     @Test
@@ -261,6 +299,7 @@ class WebhookIntegrationTest {
                         "title": "Add user authentication module",
                         "body": "This PR adds JWT-based authentication.",
                         "state": "open",
+                        "requested_reviewers": [{"login": "ai_bot"}],
                         "head": {"ref": "feature/auth", "sha": "abc123"},
                         "base": {"ref": "main", "sha": "def456"}
                     },

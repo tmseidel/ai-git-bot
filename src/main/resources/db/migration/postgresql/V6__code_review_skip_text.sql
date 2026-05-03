@@ -1,0 +1,1 @@
+ALTER TABLE bots ADD COLUMN IF NOT EXISTS code_review_skip_text VARCHAR(255);

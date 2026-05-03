@@ -76,6 +76,10 @@ public class BotWebhookService {
             log.debug("[Bot '{}'] Writer bot ignores pull request review event", bot.getName());
             return;
         }
+        if (isCodeReviewSkipActive(bot, payload)) {
+            log.debug("[Bot '{}'] Skipping pull request review because PR title matches skip text", bot.getName());
+            return;
+        }
         try {
             createCodeReviewService(bot).reviewPullRequest(payload, null);
         } catch (Exception e) {
@@ -273,6 +277,44 @@ public class BotWebhookService {
             return "";
         }
         return "@" + username;
+    }
+
+    /**
+     * Returns whether an automatic code review may run for a PR/MR webhook event.
+     */
+    public boolean shouldTriggerCodeReview(Bot bot, WebhookPayload payload) {
+        return isBotReviewer(bot, payload) && !isCodeReviewSkipActive(bot, payload);
+    }
+
+    public boolean isBotReviewer(Bot bot, WebhookPayload payload) {
+        String botUsername = bot.getUsername();
+        if (botUsername == null || botUsername.isBlank() || payload == null) {
+            return false;
+        }
+
+        if (payload.getRequestedReviewer() != null
+                && botUsername.equalsIgnoreCase(payload.getRequestedReviewer().getLogin())) {
+            return true;
+        }
+
+        WebhookPayload.PullRequest pullRequest = payload.getPullRequest();
+        return pullRequest != null
+                && pullRequest.getRequestedReviewers() != null
+                && pullRequest.getRequestedReviewers().stream()
+                .anyMatch(reviewer -> reviewer != null
+                        && botUsername.equalsIgnoreCase(reviewer.getLogin()));
+    }
+
+    public boolean isCodeReviewSkipActive(Bot bot, WebhookPayload payload) {
+        String skipText = bot.getCodeReviewSkipText();
+        if (skipText == null || skipText.isBlank()
+                || payload == null || payload.getPullRequest() == null
+                || payload.getPullRequest().getTitle() == null) {
+            return false;
+        }
+        return payload.getPullRequest().getTitle()
+                .toLowerCase(java.util.Locale.ROOT)
+                .contains(skipText.trim().toLowerCase(java.util.Locale.ROOT));
     }
 
     /**

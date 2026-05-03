@@ -45,6 +45,7 @@ class GiteaWebhookHandlerTest {
         // isBotUser to return true and never reach getBotAlias.
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
         lenient().when(botWebhookService.getBotAlias(bot)).thenReturn(BOT_ALIAS);
+        lenient().when(botWebhookService.shouldTriggerCodeReview(eq(bot), any(WebhookPayload.class))).thenReturn(true);
     }
 
     // ---- PR comment routing ----
@@ -146,13 +147,13 @@ class GiteaWebhookHandlerTest {
     // ---- PR open/sync routing ----
 
     @Test
-    void prOpenedEvent_routesToReviewPullRequest() {
+    void prOpenedEvent_isIgnored() {
         Map<String, Object> payload = buildPrEventPayload("opened");
 
         ResponseEntity<String> response = handler.handleWebhook(bot, payload);
 
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
 
     @Test
@@ -163,6 +164,28 @@ class GiteaWebhookHandlerTest {
 
         assertEquals("review triggered", response.getBody());
         verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void prReviewRequestedEvent_routesToReviewPullRequest() {
+        Map<String, Object> payload = buildPrEventPayload("review_requested");
+        payload.put("requested_reviewer", ownerMap(BOT_USERNAME));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void prSynchronizedEvent_withoutTriggerEligibility_isIgnored() {
+        when(botWebhookService.shouldTriggerCodeReview(eq(bot), any(WebhookPayload.class))).thenReturn(false);
+        Map<String, Object> payload = buildPrEventPayload("synchronized");
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
 
     @Test
@@ -336,5 +359,4 @@ class GiteaWebhookHandlerTest {
         return m;
     }
 }
-
 

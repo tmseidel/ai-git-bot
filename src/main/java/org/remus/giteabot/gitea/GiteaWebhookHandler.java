@@ -61,6 +61,7 @@ public class GiteaWebhookHandler {
         payload.setIssue(extractIssue((Map<String, Object>) raw.get("issue")));
         payload.setComment(extractComment((Map<String, Object>) raw.get("comment")));
         payload.setReview(extractReview((Map<String, Object>) raw.get("review")));
+        payload.setRequestedReviewer(extractOwner((Map<String, Object>) raw.get("requested_reviewer")));
         return payload;
     }
 
@@ -111,6 +112,12 @@ public class GiteaWebhookHandler {
             b.setRef((String) base.get("ref"));
             b.setSha((String) base.get("sha"));
             p.setBase(b);
+        }
+        List<Map<String, Object>> reviewers = (List<Map<String, Object>>) pr.get("requested_reviewers");
+        if (reviewers != null) {
+            p.setRequestedReviewers(reviewers.stream()
+                    .map(this::extractOwner)
+                    .toList());
         }
         return p;
     }
@@ -253,15 +260,29 @@ public class GiteaWebhookHandler {
             return ResponseEntity.ok("session closed");
         }
 
-        if ("opened".equals(action) || "synchronized".equals(action)) {
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
+        if ("review_requested".equals(action) || "review_request".equals(action)) {
+            return triggerReviewIfAllowed(bot, payload);
+        }
+
+        if ("synchronized".equals(action)) {
+            return triggerReviewIfAllowed(bot, payload);
+        }
+
+        if ("opened".equals(action)) {
+            return ResponseEntity.ok("ignored");
         }
 
         log.debug("Unhandled Gitea PR action '{}', ignoring", action);
         return ResponseEntity.ok("ignored");
     }
-}
 
+    private ResponseEntity<String> triggerReviewIfAllowed(Bot bot, WebhookPayload payload) {
+        if (botWebhookService.shouldTriggerCodeReview(bot, payload)) {
+            botWebhookService.reviewPullRequest(bot, payload);
+            return ResponseEntity.ok("review triggered");
+        }
+        return ResponseEntity.ok("ignored");
+    }
+}
 
 

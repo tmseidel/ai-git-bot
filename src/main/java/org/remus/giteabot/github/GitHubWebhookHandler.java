@@ -76,13 +76,26 @@ public class GitHubWebhookHandler {
 
     private ResponseEntity<String> handlePullRequestEvent(Bot bot, WebhookPayload payload) {
         String action = payload.getAction();
-        if ("opened".equals(action) || "synchronized".equals(action)) {
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
+        if ("review_requested".equals(action)) {
+            return triggerReviewIfAllowed(bot, payload);
+        }
+        if ("synchronized".equals(action)) {
+            return triggerReviewIfAllowed(bot, payload);
+        }
+        if ("opened".equals(action)) {
+            return ResponseEntity.ok("ignored");
         }
         if ("closed".equals(action)) {
             botWebhookService.handlePrClosed(bot, payload);
             return ResponseEntity.ok("session closed");
+        }
+        return ResponseEntity.ok("ignored");
+    }
+
+    private ResponseEntity<String> triggerReviewIfAllowed(Bot bot, WebhookPayload payload) {
+        if (botWebhookService.shouldTriggerCodeReview(bot, payload)) {
+            botWebhookService.reviewPullRequest(bot, payload);
+            return ResponseEntity.ok("review triggered");
         }
         return ResponseEntity.ok("ignored");
     }
@@ -163,6 +176,7 @@ public class GitHubWebhookHandler {
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setPullRequest(extractPullRequest((Map<String, Object>) raw.get("pull_request")));
+        payload.setRequestedReviewer(extractOwner((Map<String, Object>) raw.get("requested_reviewer")));
         if (payload.getPullRequest() != null) {
             payload.setNumber(payload.getPullRequest().getNumber());
         }
@@ -277,7 +291,27 @@ public class GitHubWebhookHandler {
             b.setSha((String) base.get("sha"));
             pullRequest.setBase(b);
         }
+        pullRequest.setRequestedReviewers(extractOwners(
+                (List<Map<String, Object>>) pr.get("requested_reviewers"), "login"));
         return pullRequest;
+    }
+
+    private WebhookPayload.Owner extractOwner(Map<String, Object> rawOwner) {
+        if (rawOwner == null) return null;
+        WebhookPayload.Owner owner = new WebhookPayload.Owner();
+        owner.setLogin((String) rawOwner.get("login"));
+        return owner;
+    }
+
+    private List<WebhookPayload.Owner> extractOwners(List<Map<String, Object>> rawOwners, String loginKey) {
+        if (rawOwners == null) return null;
+        return rawOwners.stream()
+                .map(rawOwner -> {
+                    WebhookPayload.Owner owner = new WebhookPayload.Owner();
+                    owner.setLogin((String) rawOwner.get(loginKey));
+                    return owner;
+                })
+                .toList();
     }
 
     @SuppressWarnings("unchecked")

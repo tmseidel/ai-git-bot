@@ -93,6 +93,16 @@
                             </select>
                         </div>
 
+                        <div class="col-12">
+                            <label for="codeReviewSkipText" class="form-label">Code Review Skip Text</label>
+                            <input type="text" class="form-control" id="codeReviewSkipText"
+                                   th:field="*{codeReviewSkipText}"
+                                   placeholder="e.g. [skip review]"/>
+                            <div class="form-text">
+                                Optional. If the PR/MR title contains this text (case-insensitive), automatic code reviews are skipped.
+                            </div>
+                        </div>
+
                         <div class="col-md-6">
                             <div class="form-check form-switch mt-3">
                                 <input class="form-check-input" type="checkbox" id="enabled"

@@ -65,8 +65,8 @@ public class BitbucketWebhookHandler {
         log.debug("Event passed all checks, processing {} with botAlias='{}'", eventKey, botAlias);
 
         return switch (eventKey) {
-            case "pullrequest:created", "pullrequest:updated", "pullrequest:open" ->
-                    handlePullRequestOpenedOrUpdated(bot, webhookPayload);
+            case "pullrequest:created", "pullrequest:open" -> ResponseEntity.ok("ignored");
+            case "pullrequest:updated" -> handlePullRequestUpdated(bot, webhookPayload, payload);
             case "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:merged", "pullrequest:declined" ->
                     handlePullRequestClosed(bot, webhookPayload);
             case "pullrequest:comment_created" ->
@@ -78,9 +78,17 @@ public class BitbucketWebhookHandler {
         };
     }
 
-    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, WebhookPayload payload) {
-        botWebhookService.reviewPullRequest(bot, payload);
-        return ResponseEntity.ok("review triggered");
+    @SuppressWarnings("unchecked")
+    private ResponseEntity<String> handlePullRequestUpdated(Bot bot, WebhookPayload payload, Map<String, Object> raw) {
+        Map<String, Object> changes = (Map<String, Object>) raw.get("changes");
+        boolean commitUpdated = changes != null
+                && (changes.containsKey("source") || changes.containsKey("commits"));
+        boolean reviewerUpdated = changes != null && changes.containsKey("reviewers");
+        if ((commitUpdated || reviewerUpdated) && botWebhookService.shouldTriggerCodeReview(bot, payload)) {
+            botWebhookService.reviewPullRequest(bot, payload);
+            return ResponseEntity.ok("review triggered");
+        }
+        return ResponseEntity.ok("ignored");
     }
 
     private ResponseEntity<String> handlePullRequestClosed(Bot bot, WebhookPayload payload) {
@@ -240,8 +248,27 @@ public class BitbucketWebhookHandler {
         }
 
         pullRequest.setMerged("MERGED".equals(pr.get("state")));
+        pullRequest.setRequestedReviewers(extractReviewers(
+                (java.util.List<Map<String, Object>>) pr.get("reviewers")));
 
         return pullRequest;
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<WebhookPayload.Owner> extractReviewers(java.util.List<Map<String, Object>> reviewers) {
+        if (reviewers == null) return null;
+        return reviewers.stream()
+                .map(reviewer -> {
+                    Map<String, Object> user = (Map<String, Object>) reviewer.get("user");
+                    Map<String, Object> source = user != null ? user : reviewer;
+                    WebhookPayload.Owner owner = new WebhookPayload.Owner();
+                    String nickname = (String) source.get("nickname");
+                    String username = (String) source.get("username");
+                    String displayName = (String) source.get("display_name");
+                    owner.setLogin(nickname != null ? nickname : (username != null ? username : displayName));
+                    return owner;
+                })
+                .toList();
     }
 
     @SuppressWarnings("unchecked")
@@ -279,4 +306,3 @@ public class BitbucketWebhookHandler {
         return null;
     }
 }
-
