@@ -183,6 +183,7 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, and writer-agent instructions before saving.
    - **AI Integration**: Select an AI integration from the dropdown
    - **Git Integration**: Select a Git integration from the dropdown
+   - **Code Review Skip Text**: Optional text that suppresses automatic PR/MR reviews while the title contains it. Matching is case-insensitive substring matching.
    - **Enabled**: Whether the bot is active
    - **Agent Enabled**: Whether the AI agent feature (issue implementation) is active for a coding bot. This option is hidden for writer bots.
 3. Click **Save**
@@ -208,7 +209,7 @@ Select the following events in your Git provider's webhook configuration:
 
 | Event | Gitea | GitHub | GitLab | Bitbucket | Description |
 |-------|-------|--------|--------|-----------|-------------|
-| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | Triggers on PR/MR open/update |
+| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | Reviewer requests, reviewer-gated pushes/updates, and closes |
 | Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | Bot mentions in comments |
 | PR Review | ✅ Pull Request Review | ✅ Pull request reviews | — | — | Review submissions |
 | PR Comment | ✅ Pull Request Comment | ✅ Pull request review comments | — | — | Inline code comments |
@@ -225,11 +226,15 @@ The dashboard and bot list show per-bot statistics:
 
 #### Coding bot
 
-Coding bots keep the existing behavior:
+Coding bots handle pull-request reviews and issue implementation:
 
-- Review pull requests when PR webhooks arrive.
+- Do not review a PR/MR just because it was opened.
+- Review when the bot is added as reviewer, unless the title matches the bot's **Code Review Skip Text**.
+- Review later push/update events only while the bot is still assigned as reviewer and the title does not match the skip text.
 - Respond to bot mentions in PR comments and inline review comments.
 - If **Agent Enabled** is selected, start the issue implementation workflow when the bot is assigned to an issue.
+
+> **Migration note:** Automatic review on PR/MR creation is no longer the default behavior. Existing installations should add the bot as a reviewer on PRs/MRs that should be reviewed, and keep pull-request/merge-request update webhooks enabled so later pushes can trigger follow-up reviews.
 
 #### Writer bot
 

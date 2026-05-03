@@ -83,9 +83,11 @@ graph LR
 
 ## Features
 
-### 🔍 Automatic PR Code Reviews
+### 🔍 Reviewer-Based PR Code Reviews
 
-When a pull request is opened or updated, the bot automatically reviews the diff and posts feedback as a review comment. Large diffs are intelligently split into chunks with automatic retry on token limits.
+Opening a pull request no longer starts a review automatically. Assign the bot as a reviewer to request an initial review; later pushes trigger one new review per qualifying push while the bot is still assigned as reviewer. Large diffs are intelligently split into chunks with automatic retry on token limits.
+
+> **Migration note:** If you are upgrading from an older release, automatic review on PR/MR creation is no longer the default. Add the bot as reviewer on PRs/MRs that should be reviewed, and optionally configure a bot-level skip text such as `[skip review]` to suppress automatic reviews by title.
 
 <details>
 <summary>📸 Screenshots: Code reviews across platforms</summary>
@@ -260,6 +262,7 @@ This starts:
    - Choose **Coding bot** for pull-request review/issue implementation, or **Writer bot** for technical-writing issue drafts
    - Select your AI and Git integrations
    - Select a system prompt entry from **System settings**
+   - Optionally set **Code Review Skip Text** (for example `[skip review]`) to suppress automatic reviews while a PR/MR title contains that text
    - Copy the generated **Webhook URL**
 
 ### 4. Configure Webhooks

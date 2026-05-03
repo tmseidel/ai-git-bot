@@ -138,6 +138,7 @@ In the bot's web UI:
    - Set the **Username** to match the bot's GitHub username (e.g., `ai-code-reviewer`)
    - This is used to detect and ignore the bot's own actions
    - The mention alias is derived as `@ai-code-reviewer`
+   - Optional: set **Code Review Skip Text** (for example `[skip review]`) to suppress automatic reviews while the PR title contains that text. Matching is case-insensitive substring matching.
 
 ## GitHub Enterprise Server
 
@@ -216,12 +217,14 @@ Switched workspace/context branch to 'develop' for issue #42
 ---
 ## Verification
 
-After setup, create a test pull request. The bot should:
+After setup, create a test pull request and request a review from the bot. The bot should:
 
-1. Automatically post an AI-generated code review
-2. Respond when mentioned in PR comments (e.g., `@ai-code-reviewer explain this`)
-3. Respond to inline review comments mentioning the bot
-4. React with 👀 to acknowledge commands
+1. Not post a code review just because the PR was opened
+2. Automatically post an AI-generated code review when added as a reviewer
+3. Automatically post one new review for each later push while still assigned as reviewer
+4. Respond when mentioned in PR comments (e.g., `@ai-code-reviewer explain this`)
+5. Respond to inline review comments mentioning the bot
+6. React with 👀 to acknowledge commands
 
 Check the bot's application logs for troubleshooting if reviews don't appear.
 
@@ -264,4 +267,3 @@ Assign the bot to an issue and it will autonomously create a PR with the impleme
 - Check the bot's application logs for error messages
 - Verify the AI integration is configured correctly
 - Ensure the bot is enabled in the bot settings
-

@@ -136,6 +136,7 @@ In the bot's web UI:
    - Set the **Username** to match the bot's GitLab username (e.g., `ai-code-reviewer`)
    - This is used to detect and ignore the bot's own actions
    - The mention alias is derived as `@ai-code-reviewer`
+   - Optional: set **Code Review Skip Text** (for example `[skip review]`) to suppress automatic reviews while the MR title contains that text. Matching is case-insensitive substring matching.
 
 ## Self-Managed GitLab
 
@@ -161,11 +162,13 @@ Self-managed GitLab instances may have different rate limits than gitlab.com. Mo
 
 ## Verification
 
-After setup, create a test merge request. The bot should:
+After setup, create a test merge request and add the bot as a reviewer. The bot should:
 
-1. Automatically post an AI-generated code review as a comment
-2. Respond when mentioned in MR comments (e.g., `@ai-code-reviewer explain this`)
-3. Respond to inline discussion comments mentioning the bot
+1. Not post a code review just because the MR was opened
+2. Automatically post an AI-generated code review when added as a reviewer
+3. Automatically post one new review for each later source-branch push while still assigned as reviewer
+4. Respond when mentioned in MR comments (e.g., `@ai-code-reviewer explain this`)
+5. Respond to inline discussion comments mentioning the bot
 
 > **Note:** The bot will **not** add 👀 reaction acknowledgements due to the GitLab API limitation mentioned above.
 
@@ -175,7 +178,7 @@ Check the bot's application logs for troubleshooting if reviews don't appear.
 
 ### Merge Request Code Review
 
-The bot automatically reviews merge requests and posts AI-generated feedback:
+After the bot is assigned as reviewer, the bot reviews merge request updates and posts AI-generated feedback:
 
 <img src="screenshots/gitlab/gitlab-pull-request-with-code-review.png" alt="GitLab — Merge Request Code Review" width="700"/>
 

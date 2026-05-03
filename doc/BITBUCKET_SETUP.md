@@ -37,6 +37,8 @@ Create a new Bot in the admin UI and link it to:
 - Your Bitbucket Git Integration
 - Your AI Integration (e.g., Anthropic)
 
+Optional: set **Code Review Skip Text** (for example `[skip review]`) to suppress automatic reviews while the pull request title contains that text. Matching is case-insensitive substring matching.
+
 Note the **Webhook Secret** that is generated — you'll need this for the next step.
 
 ## Step 4: Configure the Webhook in Bitbucket
@@ -57,14 +59,16 @@ Note the **Webhook Secret** that is generated — you'll need this for the next 
 ## Step 5: Test the Integration
 
 1. Create a new Pull Request in your repository
-2. The bot should automatically post a code review comment
-3. If it doesn't work, check the bot's logs for error messages
+2. Add the bot as a reviewer
+3. Push a new commit to the pull request branch
+4. The bot should post one code review comment for that qualifying update
+5. If it doesn't work, check the bot's logs for error messages
 
 ## Screenshots
 
 ### Pull Request Code Review
 
-The bot automatically reviews pull requests and posts AI-generated feedback:
+After the bot is assigned as reviewer, the bot reviews qualifying pull request updates and posts AI-generated feedback:
 
 <img src="screenshots/bitbucket/bitbucket-code-review.png" alt="Bitbucket — Pull Request Code Review" width="700"/>
 
@@ -96,5 +100,3 @@ The minimum required permissions for the API token:
 | Repository: Read | Fetching PR diffs, reading file contents |
 | Pull requests: Read | Reading PR information |
 | Pull requests: Write | Posting review comments |
-
-
