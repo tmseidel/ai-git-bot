@@ -99,7 +99,7 @@ http://vllm:8000
 
 ## Model Guidance
 
-vLLM can serve many chat-capable models, but compatibility depends on the model, tokenizer, chat template, context length, and vLLM version. Use a model that supports chat/instruction-following and verify that `/v1/chat/completions` works with your served model before connecting AI-Git-Bot.
+vLLM can serve many chat-capable models, but compatibility depends on the model, tokenizer, chat template, context length, and vLLM version. Use a model that supports chat/instruction following and verify that `/v1/chat/completions` works with your served model before connecting AI-Git-Bot.
 
 For code reviews, smaller coding or instruction models may be sufficient. For issue implementation and writer-agent workflows, prefer larger models with strong instruction following and reliable structured JSON output. If a local model returns malformed JSON in agent workflows, reduce prompt sizes or use a stronger model.
 

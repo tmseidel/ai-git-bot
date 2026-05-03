@@ -26,7 +26,7 @@ class VllmClientTest {
         try {
             VllmProviderMetadata metadata = new VllmProviderMetadata();
             RestClient restClient = metadata.buildRestClient(createIntegration(server.baseUrl()), null);
-            VllmClient client = new VllmClient(restClient, "served-model", 1024, 10, 2, 6);
+            VllmClient client = new VllmClient(restClient, "configured-model", 1024, 10, 2, 6);
 
             String response = client.sendReviewRequest("system prompt", "served-model", 123, "review this");
 
