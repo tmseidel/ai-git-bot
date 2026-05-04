@@ -510,17 +510,13 @@ public class GitLabWebhookHandler {
             return false;
         }
         List<Map<String, Object>> currentReviewers = (List<Map<String, Object>>) payload.get("reviewers");
-        List<Map<String, Object>> previousReviewers = null;
         if (changes != null) {
             if (!(changes.get("reviewers") instanceof Map<?, ?> reviewersChange)) {
                 return false;
             }
             currentReviewers = (List<Map<String, Object>>) reviewersChange.get("current");
-            previousReviewers = (List<Map<String, Object>>) reviewersChange.get("previous");
         }
-        boolean inCurrent = containsGitLabUser(currentReviewers, bot.getUsername());
-        boolean inPrevious = containsGitLabUser(previousReviewers, bot.getUsername());
-        return inCurrent && !inPrevious;
+        return containsGitLabUser(currentReviewers, bot.getUsername());
     }
 
     private boolean isBotReviewerReRequestEvent(Bot bot, Map<String, Object> payload, String gitlabAction) {
