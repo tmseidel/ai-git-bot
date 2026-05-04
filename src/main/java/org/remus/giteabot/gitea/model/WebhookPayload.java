@@ -25,6 +25,9 @@ public class WebhookPayload {
 
     private Owner sender;
 
+    @JsonProperty("requested_reviewer")
+    private Owner requestedReviewer;
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PullRequest {
@@ -40,6 +43,11 @@ public class WebhookPayload {
 
         private Head head;
         private Head base;
+
+        private Owner user;
+
+        @JsonProperty("requested_reviewers")
+        private java.util.List<Owner> requestedReviewers;
     }
 
     @Data
@@ -105,6 +113,8 @@ public class WebhookPayload {
         private Owner assignee;
 
         private java.util.List<Owner> assignees;
+
+        private Owner user;
     }
 
     @Data

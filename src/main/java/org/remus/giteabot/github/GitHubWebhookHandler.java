@@ -76,7 +76,8 @@ public class GitHubWebhookHandler {
 
     private ResponseEntity<String> handlePullRequestEvent(Bot bot, WebhookPayload payload) {
         String action = payload.getAction();
-        if ("opened".equals(action) || "synchronized".equals(action)) {
+        if (("opened".equals(action) && hasBotReviewer(bot, payload))
+                || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
         }
@@ -98,6 +99,9 @@ public class GitHubWebhookHandler {
         }
         // Check if the comment is on a PR (issue with pull_request link)
         if (payload.getIssue() != null && payload.getIssue().getPullRequest() != null) {
+            if (!botWebhookService.isPullRequestAuthor(payload)) {
+                return ResponseEntity.ok("ignored");
+            }
             botWebhookService.handleBotCommand(bot, payload);
             return ResponseEntity.ok("command received");
         }
@@ -122,6 +126,9 @@ public class GitHubWebhookHandler {
         }
         if (payload.getComment() != null && payload.getComment().getBody() != null
                 && payload.getComment().getBody().contains(botAlias)) {
+            if (!botWebhookService.isPullRequestAuthor(payload)) {
+                return ResponseEntity.ok("ignored");
+            }
             botWebhookService.handleInlineComment(bot, payload);
             return ResponseEntity.ok("inline comment response triggered");
         }
@@ -163,6 +170,7 @@ public class GitHubWebhookHandler {
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setPullRequest(extractPullRequest((Map<String, Object>) raw.get("pull_request")));
+        payload.setRequestedReviewer(extractOwner((Map<String, Object>) raw.get("requested_reviewer")));
         if (payload.getPullRequest() != null) {
             payload.setNumber(payload.getPullRequest().getNumber());
         }
@@ -263,6 +271,8 @@ public class GitHubWebhookHandler {
         pullRequest.setState((String) pr.get("state"));
         pullRequest.setMerged(pr.get("merged") instanceof Boolean b ? b : null);
         pullRequest.setDiffUrl((String) pr.get("diff_url"));
+        pullRequest.setUser(extractOwner((Map<String, Object>) pr.get("user")));
+        pullRequest.setRequestedReviewers(extractOwners((List<Map<String, Object>>) pr.get("requested_reviewers")));
         Map<String, Object> head = (Map<String, Object>) pr.get("head");
         if (head != null) {
             WebhookPayload.Head h = new WebhookPayload.Head();
@@ -313,6 +323,7 @@ public class GitHubWebhookHandler {
         i.setNumber(toLong(issue.get("number")));
         i.setTitle((String) issue.get("title"));
         i.setBody((String) issue.get("body"));
+        i.setUser(extractOwner((Map<String, Object>) issue.get("user")));
         // Native GitHub "issues" payloads do not include "ref". We still map it when present
         // to support translated/custom payloads that supply an explicit issue base branch.
         i.setRef((String) issue.get("ref"));
@@ -337,6 +348,19 @@ public class GitHubWebhookHandler {
             }).toList());
         }
         return i;
+    }
+
+    private WebhookPayload.Owner extractOwner(Map<String, Object> owner) {
+        if (owner == null) return null;
+        WebhookPayload.Owner o = new WebhookPayload.Owner();
+        o.setLogin((String) owner.get("login"));
+        return o;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<WebhookPayload.Owner> extractOwners(List<Map<String, Object>> owners) {
+        if (owners == null) return null;
+        return owners.stream().map(this::extractOwner).toList();
     }
 
     @SuppressWarnings("unchecked")
@@ -368,5 +392,19 @@ public class GitHubWebhookHandler {
             return n.longValue();
         }
         return null;
+    }
+
+    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
+        return bot.getUsername() != null
+                && payload.getPullRequest() != null
+                && payload.getPullRequest().getRequestedReviewers() != null
+                && payload.getPullRequest().getRequestedReviewers().stream()
+                .anyMatch(reviewer -> bot.getUsername().equalsIgnoreCase(reviewer.getLogin()));
+    }
+
+    private boolean isRequestedReviewer(Bot bot, WebhookPayload payload) {
+        return bot.getUsername() != null
+                && payload.getRequestedReviewer() != null
+                && bot.getUsername().equalsIgnoreCase(payload.getRequestedReviewer().getLogin());
     }
 }

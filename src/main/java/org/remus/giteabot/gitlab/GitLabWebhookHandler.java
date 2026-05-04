@@ -83,13 +83,20 @@ public class GitLabWebhookHandler {
         return switch (gitlabAction != null ? gitlabAction : "") {
             case "open" -> {
                 webhookPayload.setAction("opened");
-                botWebhookService.reviewPullRequest(bot, webhookPayload);
-                yield ResponseEntity.ok("review triggered");
+                if (hasBotReviewer(bot, payload, null)) {
+                    botWebhookService.reviewPullRequest(bot, webhookPayload);
+                    yield ResponseEntity.ok("review triggered");
+                }
+                yield ResponseEntity.ok("ignored");
             }
             case "update" -> {
                 webhookPayload.setAction("synchronized");
-                botWebhookService.reviewPullRequest(bot, webhookPayload);
-                yield ResponseEntity.ok("review triggered");
+                Map<String, Object> changes = (Map<String, Object>) payload.get("changes");
+                if (changes != null && hasBotReviewer(bot, payload, changes)) {
+                    botWebhookService.reviewPullRequest(bot, webhookPayload);
+                    yield ResponseEntity.ok("review triggered");
+                }
+                yield ResponseEntity.ok("ignored");
             }
             case "close", "merge" -> {
                 webhookPayload.setAction("closed");
@@ -147,6 +154,9 @@ public class GitLabWebhookHandler {
         if (position != null) {
             String path = (String) position.get("new_path");
             if (path != null && !path.isBlank()) {
+                if (!botWebhookService.isPullRequestAuthor(webhookPayload)) {
+                    return ResponseEntity.ok("ignored");
+                }
                 webhookPayload.getComment().setPath(path);
                 Object newLine = position.get("new_line");
                 if (newLine instanceof Number n) {
@@ -162,6 +172,14 @@ public class GitLabWebhookHandler {
             WebhookPayload.IssuePullRequest issuePr = new WebhookPayload.IssuePullRequest();
             issuePr.setMerged(false);
             webhookPayload.getIssue().setPullRequest(issuePr);
+        }
+
+        if (!botWebhookService.isPullRequestAuthor(webhookPayload)) {
+            return ResponseEntity.ok("ignored");
+        }
+        if (isReviewAgainRequest(webhookPayload.getComment().getBody(), botWebhookService.getBotAlias(bot))) {
+            botWebhookService.reviewPullRequest(bot, webhookPayload);
+            return ResponseEntity.ok("review triggered");
         }
 
         botWebhookService.handleBotCommand(bot, webhookPayload);
@@ -268,6 +286,11 @@ public class GitLabWebhookHandler {
         pr.setTitle((String) attrs.get("title"));
         pr.setBody((String) attrs.get("description"));
         pr.setState(mapMrState((String) attrs.get("state")));
+        pr.setUser(extractGitLabOwner((Map<String, Object>) gitlabPayload.get("object_attributes"), "author"));
+        if (pr.getUser() == null) {
+            pr.setUser(extractGitLabOwner((Map<String, Object>) gitlabPayload.get("merge_request"), "author"));
+        }
+        pr.setRequestedReviewers(extractGitLabOwners((List<Map<String, Object>>) gitlabPayload.get("reviewers")));
 
         // Head and base
         WebhookPayload.Head head = new WebhookPayload.Head();
@@ -397,6 +420,7 @@ public class GitLabWebhookHandler {
                 issue.setNumber(toLong(mr.get("iid")));
                 issue.setTitle((String) mr.get("title"));
                 issue.setBody((String) mr.get("description"));
+                issue.setUser(extractGitLabOwner(mr, "author"));
                 payload.setIssue(issue);
 
                 // Also set pullRequest for context
@@ -405,6 +429,7 @@ public class GitLabWebhookHandler {
                 pr.setNumber(toLong(mr.get("iid")));
                 pr.setTitle((String) mr.get("title"));
                 pr.setBody((String) mr.get("description"));
+                pr.setUser(extractGitLabOwner(mr, "author"));
                 payload.setPullRequest(pr);
             }
         } else if ("Issue".equals(noteableType)) {
@@ -466,5 +491,58 @@ public class GitLabWebhookHandler {
             return n.longValue();
         }
         return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean hasBotReviewer(Bot bot, Map<String, Object> payload, Map<String, Object> changes) {
+        if (bot.getUsername() == null) {
+            return false;
+        }
+        List<Map<String, Object>> currentReviewers = (List<Map<String, Object>>) payload.get("reviewers");
+        List<Map<String, Object>> previousReviewers = null;
+        if (changes != null) {
+            if (!(changes.get("reviewers") instanceof Map<?, ?> reviewersChange)) {
+                return false;
+            }
+            currentReviewers = (List<Map<String, Object>>) reviewersChange.get("current");
+            previousReviewers = (List<Map<String, Object>>) reviewersChange.get("previous");
+        }
+        boolean inCurrent = containsGitLabUser(currentReviewers, bot.getUsername());
+        boolean inPrevious = containsGitLabUser(previousReviewers, bot.getUsername());
+        return inCurrent && !inPrevious;
+    }
+
+    private boolean containsGitLabUser(List<Map<String, Object>> users, String username) {
+        return users != null && users.stream()
+                .anyMatch(user -> username.equalsIgnoreCase((String) user.get("username")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private WebhookPayload.Owner extractGitLabOwner(Map<String, Object> source, String key) {
+        if (source == null || !(source.get(key) instanceof Map<?, ?> ownerMap)) {
+            return null;
+        }
+        WebhookPayload.Owner owner = new WebhookPayload.Owner();
+        owner.setLogin((String) ((Map<String, Object>) ownerMap).get("username"));
+        return owner;
+    }
+
+    private List<WebhookPayload.Owner> extractGitLabOwners(List<Map<String, Object>> owners) {
+        if (owners == null) return null;
+        return owners.stream()
+                .map(ownerMap -> {
+                    WebhookPayload.Owner owner = new WebhookPayload.Owner();
+                    owner.setLogin((String) ownerMap.get("username"));
+                    return owner;
+                })
+                .toList();
+    }
+
+    private boolean isReviewAgainRequest(String body, String botAlias) {
+        if (body == null || botAlias == null || !body.contains(botAlias)) {
+            return false;
+        }
+        String normalized = body.toLowerCase();
+        return normalized.contains("review") && (normalized.contains("again") || normalized.contains("re-review"));
     }
 }

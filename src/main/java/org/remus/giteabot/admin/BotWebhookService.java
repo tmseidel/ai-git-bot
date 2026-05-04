@@ -275,6 +275,24 @@ public class BotWebhookService {
         return "@" + username;
     }
 
+    public boolean isPullRequestAuthor(WebhookPayload payload) {
+        String author = null;
+        if (payload.getPullRequest() != null && payload.getPullRequest().getUser() != null) {
+            author = payload.getPullRequest().getUser().getLogin();
+        } else if (payload.getIssue() != null && payload.getIssue().getUser() != null) {
+            author = payload.getIssue().getUser().getLogin();
+        }
+
+        String commenter = null;
+        if (payload.getComment() != null && payload.getComment().getUser() != null) {
+            commenter = payload.getComment().getUser().getLogin();
+        } else if (payload.getSender() != null) {
+            commenter = payload.getSender().getLogin();
+        }
+
+        return author != null && commenter != null && author.equalsIgnoreCase(commenter);
+    }
+
     /**
      * Creates a per-bot {@link CodeReviewService} using the bot's AI and Git integrations.
      */
