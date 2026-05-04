@@ -175,7 +175,7 @@ class CodeReviewServiceTest {
         codeReviewService.handleBotCommand(payload, null);
 
         verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
-        verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
+        verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
     }
 
     @Test
@@ -252,7 +252,7 @@ class CodeReviewServiceTest {
 
         verify(repositoryClient, never()).postInlineReviewComment(anyString(), anyString(), anyLong(),
                 anyString(), anyInt(), anyString());
-        verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(1L),
+        verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L),
                 contains("Explanation without line"));
     }
 

@@ -50,21 +50,33 @@ Note the **Webhook Secret** that is generated — you'll need this for the next 
      - Replace `{webhook_secret}` with your bot's webhook secret
    - **Triggers**: Select the following:
      - Pull request: Created
-     - Pull request: Updated
-     - Pull request: Comment created (optional, for bot commands)
+     - Pull request: Updated (for reviewer-list changes only; pushes alone are ignored)
+     - Pull request: Comment created (for bot commands and comment-based re-review)
 5. Click **Save**
+
+## Review Workflow
+
+- First review: create the pull request with the bot already listed as a reviewer, or add the bot as a reviewer after opening the PR.
+- Re-review: Bitbucket Cloud does not provide the same reviewer re-request workflow as GitHub/Gitea. The PR author can request another review by adding a PR comment that mentions the bot and asks for another review, for example:
+
+  ```text
+  @ai_bot - Review the Pull-Request again
+  ```
+
+- New commits: pushing to the PR does not run another review. Add the comment above when you want a fresh review.
+- PR and inline comments that mention the bot are handled only when they are written by the pull request author.
 
 ## Step 5: Test the Integration
 
-1. Create a new Pull Request in your repository
-2. The bot should automatically post a code review comment
+1. Create a new Pull Request with the bot selected as reviewer
+2. The bot should post a code review comment
 3. If it doesn't work, check the bot's logs for error messages
 
 ## Screenshots
 
 ### Pull Request Code Review
 
-The bot automatically reviews pull requests and posts AI-generated feedback:
+The bot reviews pull requests when explicitly requested and posts AI-generated feedback:
 
 <img src="screenshots/bitbucket/bitbucket-code-review.png" alt="Bitbucket — Pull Request Code Review" width="700"/>
 
@@ -96,5 +108,4 @@ The minimum required permissions for the API token:
 | Repository: Read | Fetching PR diffs, reading file contents |
 | Pull requests: Read | Reading PR information |
 | Pull requests: Write | Posting review comments |
-
 

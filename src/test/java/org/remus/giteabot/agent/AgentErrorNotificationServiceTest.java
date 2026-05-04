@@ -24,7 +24,7 @@ class AgentErrorNotificationServiceTest {
                 "AI Agent", "Please try again.",
                 new RuntimeException("bad `message`\nwith details\rhere"));
 
-        verify(repositoryClient).postComment(eq("owner"), eq("repo"), eq(42L),
+        verify(repositoryClient).postIssueComment(eq("owner"), eq("repo"), eq(42L),
                 contains("I hit an internal error while processing this request: `bad 'message' with details here`"));
     }
 
@@ -36,7 +36,7 @@ class AgentErrorNotificationServiceTest {
                 "AI Technical Writer", "Please try again.",
                 new RuntimeException((String) null));
 
-        verify(repositoryClient).postComment(eq("owner"), eq("repo"), eq(42L),
+        verify(repositoryClient).postIssueComment(eq("owner"), eq("repo"), eq(42L),
                 contains("`unknown internal error`"));
     }
 }

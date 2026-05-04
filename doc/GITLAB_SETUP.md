@@ -84,6 +84,8 @@ You'll enter this token when creating a **Git Integration** in the bot's web UI.
 
 Webhooks tell GitLab to notify the bot when merge request events occur. Each bot has a unique webhook URL.
 
+Code reviews are explicit-request only: pushes to an existing merge request do not trigger another review by themselves.
+
 ### Getting the Webhook URL
 
 1. In the bot's web UI, go to **Bots**
@@ -99,8 +101,8 @@ Webhooks tell GitLab to notify the bot when merge request events occur. Each bot
    - **URL:** Paste the bot's webhook URL
    - **Secret token:** (leave empty — authentication is via the URL path)
 4. Under **Trigger**, enable:
-   - ✅ **Merge request events**
-   - ✅ **Comments** (for bot commands in MR comments)
+   - ✅ **Merge request events** (MR opened, reviewer added/re-requested, MR closed/merged)
+   - ✅ **Comments** (for bot commands in MR comments and review-request fallback comments)
    - ✅ **Issues events** (only if using the agent feature)
 5. Ensure **Enable SSL verification** is checked (if applicable)
 6. Click **Add webhook**
@@ -129,13 +131,31 @@ In the bot's web UI:
    - Enter your GitLab URL:
      - For gitlab.com: `https://gitlab.com`
      - For self-managed: `https://gitlab.yourdomain.com`
-   - Enter the Personal Access Token you created above
-   - Click **Save**
+    - Enter the Personal Access Token you created above
+    - Leave **Post-review Action** as **None** unless you explicitly want the bot to approve the MR or post a request-changes note after each review
+    - Click **Save**
 
 2. **Create or Edit a Bot:**
    - Set the **Username** to match the bot's GitLab username (e.g., `ai-code-reviewer`)
    - This is used to detect and ignore the bot's own actions
-   - The mention alias is derived as `@ai-code-reviewer`
+    - The mention alias is derived as `@ai-code-reviewer`
+
+## Review Workflow
+
+- First review: create the merge request with the bot already listed as a reviewer, or add the bot as a reviewer after opening the MR.
+- Re-review: re-request the bot as reviewer. If your GitLab version or workflow cannot re-request a reviewer, the MR author can comment with the bot mention and review intent, for example `@ai-code-reviewer please review this again`.
+- New commits: pushing to the MR does not run another review. Re-request the bot when you want a fresh review.
+- MR and inline comments that mention the bot are handled only when they are written by the merge request author.
+
+### Post-review Action
+
+GitLab integrations support the optional **Post-review Action** setting:
+
+- **None** (default): post the AI review only.
+- **Approve merge request**: call GitLab's approve endpoint after the AI review is posted.
+- **Request changes**: post a request-changes note after the AI review is posted.
+
+Existing integrations default to **None** after migration.
 
 ## Self-Managed GitLab
 
@@ -163,9 +183,10 @@ Self-managed GitLab instances may have different rate limits than gitlab.com. Mo
 
 After setup, create a test merge request. The bot should:
 
-1. Automatically post an AI-generated code review as a comment
-2. Respond when mentioned in MR comments (e.g., `@ai-code-reviewer explain this`)
-3. Respond to inline discussion comments mentioning the bot
+1. Post an AI-generated code review when the bot is requested as reviewer
+2. Ignore pushes to the MR until the bot is explicitly re-requested
+3. Respond when the MR author mentions the bot in MR comments (e.g., `@ai-code-reviewer explain this`)
+4. Respond to inline discussion comments from the MR author that mention the bot
 
 > **Note:** The bot will **not** add 👀 reaction acknowledgements due to the GitLab API limitation mentioned above.
 
@@ -175,7 +196,7 @@ Check the bot's application logs for troubleshooting if reviews don't appear.
 
 ### Merge Request Code Review
 
-The bot automatically reviews merge requests and posts AI-generated feedback:
+The bot reviews merge requests when explicitly requested and posts AI-generated feedback:
 
 <img src="screenshots/gitlab/gitlab-pull-request-with-code-review.png" alt="GitLab — Merge Request Code Review" width="700"/>
 

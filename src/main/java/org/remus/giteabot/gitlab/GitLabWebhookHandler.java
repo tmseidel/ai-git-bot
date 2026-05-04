@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
@@ -74,8 +75,11 @@ public class GitLabWebhookHandler {
         String gitlabAction = (String) attrs.get("action");
         WebhookPayload webhookPayload = translateMergeRequestPayload(payload, attrs);
 
-        // Ignore events from the bot itself
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
+        boolean botUserEvent = botWebhookService.isBotUser(bot, webhookPayload);
+        boolean botReviewerReRequestEvent = isBotReviewerReRequestEvent(bot, payload, gitlabAction);
+
+        // Ignore events from the bot itself, except GitLab reviewer re-request events.
+        if (botUserEvent && !botReviewerReRequestEvent) {
             log.debug("Ignoring GitLab event from bot's own user '{}'", bot.getUsername());
             return ResponseEntity.ok("ignored");
         }
@@ -83,18 +87,33 @@ public class GitLabWebhookHandler {
         return switch (gitlabAction != null ? gitlabAction : "") {
             case "open" -> {
                 webhookPayload.setAction("opened");
-                botWebhookService.reviewPullRequest(bot, webhookPayload);
-                yield ResponseEntity.ok("review triggered");
+                if (hasBotReviewer(bot, payload, null)) {
+                    botWebhookService.reviewPullRequest(bot, webhookPayload);
+                    yield ResponseEntity.ok("review triggered");
+                }
+                yield ResponseEntity.ok("ignored");
             }
             case "update" -> {
                 webhookPayload.setAction("synchronized");
-                botWebhookService.reviewPullRequest(bot, webhookPayload);
-                yield ResponseEntity.ok("review triggered");
+                Map<String, Object> changes = (Map<String, Object>) payload.get("changes");
+                if (changes != null && hasBotReviewer(bot, payload, changes)) {
+                    botWebhookService.reviewPullRequest(bot, webhookPayload);
+                    yield ResponseEntity.ok("review triggered");
+                }
+                yield ResponseEntity.ok("ignored");
             }
             case "close", "merge" -> {
                 webhookPayload.setAction("closed");
                 botWebhookService.handlePrClosed(bot, webhookPayload);
                 yield ResponseEntity.ok("session closed");
+            }
+            case "approved" -> {
+                if (botUserEvent && botReviewerReRequestEvent) {
+                    webhookPayload.setAction("review_requested");
+                    botWebhookService.reviewPullRequest(bot, webhookPayload);
+                    yield ResponseEntity.ok("review triggered");
+                }
+                yield ResponseEntity.ok("ignored");
             }
             default -> ResponseEntity.ok("ignored");
         };
@@ -162,6 +181,15 @@ public class GitLabWebhookHandler {
             WebhookPayload.IssuePullRequest issuePr = new WebhookPayload.IssuePullRequest();
             issuePr.setMerged(false);
             webhookPayload.getIssue().setPullRequest(issuePr);
+        }
+
+        String botAlias = botWebhookService.getBotAlias(bot);
+        if (botWebhookService.isReviewAgainRequest(webhookPayload, botAlias)) {
+            if (botWebhookService.isReviewAgainRequestFromPullRequestAuthor(webhookPayload, botAlias)) {
+                botWebhookService.reviewPullRequest(bot, webhookPayload);
+                return ResponseEntity.ok("review triggered");
+            }
+            return ResponseEntity.ok("ignored");
         }
 
         botWebhookService.handleBotCommand(bot, webhookPayload);
@@ -268,6 +296,11 @@ public class GitLabWebhookHandler {
         pr.setTitle((String) attrs.get("title"));
         pr.setBody((String) attrs.get("description"));
         pr.setState(mapMrState((String) attrs.get("state")));
+        pr.setUser(extractGitLabOwner((Map<String, Object>) gitlabPayload.get("object_attributes"), "author"));
+        if (pr.getUser() == null) {
+            pr.setUser(extractGitLabOwner((Map<String, Object>) gitlabPayload.get("merge_request"), "author"));
+        }
+        pr.setRequestedReviewers(extractGitLabOwners((List<Map<String, Object>>) gitlabPayload.get("reviewers")));
 
         // Head and base
         WebhookPayload.Head head = new WebhookPayload.Head();
@@ -366,9 +399,12 @@ public class GitLabWebhookHandler {
         comment.setId(toLong(noteAttrs.get("id")));
         comment.setBody((String) noteAttrs.get("note"));
         Map<String, Object> author = (Map<String, Object>) noteAttrs.get("author");
-        if (author != null) {
-            WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
-            commentUser.setLogin((String) author.get("username"));
+        Map<String, Object> user = (Map<String, Object>) gitlabPayload.get("user");
+        WebhookPayload.Owner commentUser = toGitLabOwner(author);
+        if (commentUser == null) {
+            commentUser = toGitLabOwner(user);
+        }
+        if (commentUser != null) {
             comment.setUser(commentUser);
         }
         payload.setComment(comment);
@@ -380,10 +416,8 @@ public class GitLabWebhookHandler {
         }
 
         // Sender
-        Map<String, Object> user = (Map<String, Object>) gitlabPayload.get("user");
         if (user != null) {
-            WebhookPayload.Owner sender = new WebhookPayload.Owner();
-            sender.setLogin((String) user.get("username"));
+            WebhookPayload.Owner sender = toGitLabOwner(user);
             payload.setSender(sender);
         }
 
@@ -397,6 +431,7 @@ public class GitLabWebhookHandler {
                 issue.setNumber(toLong(mr.get("iid")));
                 issue.setTitle((String) mr.get("title"));
                 issue.setBody((String) mr.get("description"));
+                issue.setUser(extractGitLabAuthor(mr, user));
                 payload.setIssue(issue);
 
                 // Also set pullRequest for context
@@ -405,6 +440,7 @@ public class GitLabWebhookHandler {
                 pr.setNumber(toLong(mr.get("iid")));
                 pr.setTitle((String) mr.get("title"));
                 pr.setBody((String) mr.get("description"));
+                pr.setUser(extractGitLabAuthor(mr, user));
                 payload.setPullRequest(pr);
             }
         } else if ("Issue".equals(noteableType)) {
@@ -467,4 +503,80 @@ public class GitLabWebhookHandler {
         }
         return null;
     }
+
+    @SuppressWarnings("unchecked")
+    private boolean hasBotReviewer(Bot bot, Map<String, Object> payload, Map<String, Object> changes) {
+        if (bot.getUsername() == null) {
+            return false;
+        }
+        List<Map<String, Object>> currentReviewers = (List<Map<String, Object>>) payload.get("reviewers");
+        if (changes != null) {
+            if (!(changes.get("reviewers") instanceof Map<?, ?> reviewersChange)) {
+                return false;
+            }
+            currentReviewers = (List<Map<String, Object>>) reviewersChange.get("current");
+        }
+        return containsGitLabUser(currentReviewers, bot.getUsername());
+    }
+
+    private boolean isBotReviewerReRequestEvent(Bot bot, Map<String, Object> payload, String gitlabAction) {
+        return "approved".equals(gitlabAction)
+                && hasBotReviewer(bot, payload, null)
+                && !isApprovePostReviewActionConfigured(bot);
+    }
+
+    private boolean isApprovePostReviewActionConfigured(Bot bot) {
+        return bot.getGitIntegration() != null
+                && bot.getGitIntegration().getPostReviewAction() == PostReviewAction.APPROVE;
+    }
+
+    private boolean containsGitLabUser(List<Map<String, Object>> users, String username) {
+        return users != null && users.stream()
+                .anyMatch(user -> username.equalsIgnoreCase((String) user.get("username")));
+    }
+
+    @SuppressWarnings("unchecked")
+    private WebhookPayload.Owner extractGitLabOwner(Map<String, Object> source, String key) {
+        if (source == null || !(source.get(key) instanceof Map<?, ?> ownerMap)) {
+            return null;
+        }
+        return toGitLabOwner((Map<String, Object>) ownerMap);
+    }
+
+    private WebhookPayload.Owner extractGitLabAuthor(Map<String, Object> source, Map<String, Object> fallbackUser) {
+        WebhookPayload.Owner owner = extractGitLabOwner(source, "author");
+        if (owner != null) {
+            return owner;
+        }
+        if (source == null || fallbackUser == null) {
+            return null;
+        }
+        Long authorId = toLong(source.get("author_id"));
+        Long userId = toLong(fallbackUser.get("id"));
+        if (authorId != null && authorId.equals(userId)) {
+            return toGitLabOwner(fallbackUser);
+        }
+        return null;
+    }
+
+    private WebhookPayload.Owner toGitLabOwner(Map<String, Object> user) {
+        if (user == null || user.get("username") == null) {
+            return null;
+        }
+        WebhookPayload.Owner owner = new WebhookPayload.Owner();
+        owner.setLogin((String) user.get("username"));
+        return owner;
+    }
+
+    private List<WebhookPayload.Owner> extractGitLabOwners(List<Map<String, Object>> owners) {
+        if (owners == null) return null;
+        return owners.stream()
+                .map(ownerMap -> {
+                    WebhookPayload.Owner owner = new WebhookPayload.Owner();
+                    owner.setLogin((String) ownerMap.get("username"));
+                    return owner;
+                })
+                .toList();
+    }
+
 }

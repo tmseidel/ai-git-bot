@@ -16,7 +16,7 @@ public class AgentErrorNotificationService {
                                          String agentDisplayName, String retryGuidance,
                                          Exception exception) {
         try {
-            repositoryClient.postComment(owner, repo, issueNumber,
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "⚠️ **" + agentDisplayName + "**: I hit an internal error while processing this request: `"
                             + sanitizeErrorMessage(exception) + "`\n\n"
                             + retryGuidance);

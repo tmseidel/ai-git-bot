@@ -45,6 +45,7 @@ class GiteaWebhookHandlerTest {
         // isBotUser to return true and never reach getBotAlias.
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
         lenient().when(botWebhookService.getBotAlias(bot)).thenReturn(BOT_ALIAS);
+        lenient().when(botWebhookService.isPullRequestAuthor(any(WebhookPayload.class))).thenReturn(true);
     }
 
     // ---- PR comment routing ----
@@ -158,6 +159,28 @@ class GiteaWebhookHandlerTest {
     @Test
     void prSynchronizedEvent_routesToReviewPullRequest() {
         Map<String, Object> payload = buildPrEventPayload("synchronized");
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void prOpenedEvent_withoutBotReviewer_isIgnored() {
+        Map<String, Object> payload = buildPrEventPayload("opened");
+        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void prReviewRequestedForBot_routesToReviewPullRequest() {
+        Map<String, Object> payload = buildPrEventPayload("review_requested");
+        payload.put("requested_reviewer", ownerMap(BOT_USERNAME));
 
         ResponseEntity<String> response = handler.handleWebhook(bot, payload);
 
@@ -294,6 +317,8 @@ class GiteaWebhookHandlerTest {
         m.put("state", "open");
         m.put("merged", false);
         m.put("diff_url", "http://localhost:3000/Test/my-repo/pulls/" + number + ".diff");
+        m.put("user", ownerMap("tom"));
+        m.put("requested_reviewers", java.util.List.of(ownerMap(BOT_USERNAME)));
         Map<String, Object> head = new HashMap<>();
         head.put("ref", "feature/branch");
         head.put("sha", "abc123");
@@ -311,6 +336,7 @@ class GiteaWebhookHandlerTest {
         m.put("number", number);
         m.put("title", "Some issue");
         m.put("body", "");
+        m.put("user", ownerMap("tom"));
         if (isPr) {
             Map<String, Object> prLink = new HashMap<>();
             prLink.put("merged", false);
@@ -336,5 +362,3 @@ class GiteaWebhookHandlerTest {
         return m;
     }
 }
-
-

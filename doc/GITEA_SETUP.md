@@ -60,6 +60,8 @@ You'll enter this token when creating a **Git Integration** in the bot's web UI.
 
 Webhooks tell Gitea to notify the bot when pull request events occur. Each bot has a unique webhook URL.
 
+Code reviews are explicit-request only: pushes to an existing pull request do not trigger another review by themselves.
+
 ### Getting the Webhook URL
 
 1. In the bot's web UI, go to **Bots**
@@ -76,16 +78,14 @@ Webhooks tell Gitea to notify the bot when pull request events occur. Each bot h
    - **Content Type:** application/json
    - **Secret:** (leave empty — authentication is via the URL path)
 3. Under **Trigger On**, select **Custom Events**, then enable:
-   - ✅ **Pull Request** — triggers automatic review on PR open/update and handles review requests
+   - ✅ **Pull Request** — handles PR open/close events and reviewer requests/re-requests
    - ✅ **Issue Comment** — allows the bot to respond to `@bot` mentions in PR and issue comments
    - ✅ **Pull Request Comment** — allows the bot to respond to inline code review comments
    - ✅ **Issues** (only if using the agent feature)
 
 > **Note:** The "Pull Request Review" event listed in older documentation does not exist in
-> recent Gitea versions. The **Pull Request** event covers all pull request actions including
-> `opened`, `synchronized`, `closed`, and `review_requested` (when the bot is added as a reviewer).
-> Enable **Pull Request Review Requested** if you want the bot to automatically trigger a review
-> when added as a reviewer — this is handled by the same **Pull Request** webhook event.
+> recent Gitea versions. The **Pull Request** event covers pull request actions including
+> `opened`, `closed`, and `review_requested` (when the bot is added or re-requested as a reviewer).
 4. Click **Add Webhook**
 
 ### Organization-level Webhook
@@ -113,14 +113,21 @@ In the bot's web UI:
 2. **Create or Edit a Bot:**
    - Set the **Username** to match the bot's Gitea username (e.g., `ai_bot`)
    - This is used to detect and ignore the bot's own actions
-   - The mention alias is derived as `@ai_bot`
+    - The mention alias is derived as `@ai_bot`
+
+## Review Workflow
+
+- First review: create the pull request with the bot already listed as a reviewer, or add the bot as a reviewer after opening the PR.
+- Re-review: re-request the bot as reviewer using Gitea's reviewer workflow.
+- New commits: pushing to the PR does not run another review. Re-request the bot when you want a fresh review.
+- PR and inline comments that mention the bot are handled only when they are written by the pull request author.
 
 ## Verification
 
 After setup, create a test pull request. The bot should:
 
-1. Automatically post an AI-generated code review when a PR is opened or updated
-2. Automatically post an AI-generated code review when added as a reviewer on a PR
+1. Post an AI-generated code review when the PR is opened with the bot reviewer or the bot is added/re-requested as reviewer
+2. Ignore pushes to the PR until the bot is explicitly re-requested
 3. Respond when mentioned in PR comments (e.g., `@ai_bot explain this`)
 4. Respond to inline review comments mentioning the bot
 5. React with 👀 to acknowledge commands
@@ -129,9 +136,9 @@ Check the bot's application logs for troubleshooting if reviews don't appear.
 
 ## Screenshots
 
-### Automatic Code Review
+### Requested Code Review
 
-When a PR is opened, the bot posts an AI-generated review:
+When the bot is requested as reviewer, it posts an AI-generated review:
 
 <img src="screenshots/gitea/screenshot_initial_code_review.png" alt="Gitea — Automatic Code Review" width="700"/>
 
@@ -146,4 +153,3 @@ Mention the bot in a PR comment to ask follow-up questions:
 Mention the bot in an inline code comment for context-aware answers:
 
 <img src="screenshots/gitea/screenshot_code_review_with_inline_comment.png" alt="Gitea — Inline Review Comment" width="700"/>
-

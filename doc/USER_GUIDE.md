@@ -127,12 +127,13 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
      | `bitbucket` | `https://bitbucket.org` | App Password / API Token |
      
-   - **URL**: The Git server URL:
+    - **URL**: The Git server URL:
      - For Gitea: `https://gitea.example.com`
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
-   - **Token**: Your Git API token (encrypted at rest)
+    - **Token**: Your Git API token (encrypted at rest)
+    - **Post-review Action**: defaults to **None**. Currently GitLab can use it to approve the merge request or post a request-changes note after each bot review.
 3. Click **Save**
 
 ### Provider-Specific Notes
@@ -163,6 +164,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 - API endpoint is at the same base URL with `/api/v4` paths
 - Uses URL-encoded project paths (`owner%2Frepo`) internally
 - Reactions (👀) are not supported — see [GitLab Setup](GITLAB_SETUP.md) for details
+- GitLab integrations default to no automatic approve/request-changes action after reviews
 - See [GitLab Setup](GITLAB_SETUP.md) for token creation instructions
 
 #### Bitbucket Cloud
@@ -215,8 +217,8 @@ Select the following events in your Git provider's webhook configuration:
 
 | Event | Gitea | GitHub | GitLab | Bitbucket | Description |
 |-------|-------|--------|--------|-----------|-------------|
-| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | Triggers on PR/MR open/update |
-| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | Bot mentions in comments |
+| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | PR/MR open/close and reviewer request events |
+| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | Bot mentions in comments; Bitbucket re-review requests |
 | PR Review | ✅ Pull Request Review | ✅ Pull request reviews | — | — | Review submissions |
 | PR Comment | ✅ Pull Request Comment | ✅ Pull request review comments | — | — | Inline code comments |
 | Issues | ✅ Issues | ✅ Issues | ✅ Issues events | — | Agent feature (optional) |
@@ -232,10 +234,11 @@ The dashboard and bot list show per-bot statistics:
 
 #### Coding bot
 
-Coding bots keep the existing behavior:
+Coding bots use an explicit-request review workflow:
 
-- Review pull requests when PR webhooks arrive.
-- Respond to bot mentions in PR comments and inline review comments.
+- Review pull requests only when the PR/MR is created with the bot as reviewer, the bot is added/re-requested as reviewer, or (Bitbucket) the PR author comments a request such as `@ai_bot - Review the Pull-Request again`.
+- Do not automatically re-review when new commits are pushed.
+- Respond to bot mentions in PR comments and inline review comments from the PR/MR author.
 - If **Agent Enabled** is selected, start the issue implementation workflow when the bot is assigned to an issue.
 
 #### Writer bot

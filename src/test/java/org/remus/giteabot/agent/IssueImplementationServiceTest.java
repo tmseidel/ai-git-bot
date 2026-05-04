@@ -134,7 +134,7 @@ class IssueImplementationServiceTest {
         // workspace cleaned up
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
         // at least 2 comments posted
-        verify(repositoryClient, atLeast(2)).postComment(eq("testowner"), eq("testrepo"), eq(42L), anyString());
+        verify(repositoryClient, atLeast(2)).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L), anyString());
     }
 
     @Test
@@ -148,7 +148,7 @@ class IssueImplementationServiceTest {
         service.handleIssueAssigned(payload);
 
         verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
-        verify(repositoryClient, atLeast(1)).postComment(eq("testowner"), eq("testrepo"), eq(42L),
+        verify(repositoryClient, atLeast(1)).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
                 contains("Failed to prepare workspace"));
     }
 
@@ -168,7 +168,7 @@ class IssueImplementationServiceTest {
 
         service.handleIssueAssigned(payload);
 
-        verify(repositoryClient, atLeastOnce()).postComment(eq("testowner"), eq("testrepo"), eq(42L),
+        verify(repositoryClient, atLeastOnce()).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
                 contains("I hit an internal error while processing this request: `simulated coding failure`"));
     }
 
@@ -430,7 +430,7 @@ class IssueImplementationServiceTest {
         // No PR created
         verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
         // Error comment posted
-        verify(repositoryClient, atLeast(1)).postComment(eq("testowner"), eq("testrepo"), eq(42L),
+        verify(repositoryClient, atLeast(1)).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
                 contains("pushing the branch failed"));
     }
 
@@ -594,7 +594,7 @@ class IssueImplementationServiceTest {
 
         service.handleIssueComment(payload);
 
-        verify(repositoryClient).postComment(eq("testowner"), eq("testrepo"), eq(42L),
+        verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
                 contains("I hit an internal error while processing this request: `follow-up coding failure`"));
     }
 

@@ -261,6 +261,8 @@ class WebhookIntegrationTest {
                         "title": "Add user authentication module",
                         "body": "This PR adds JWT-based authentication.",
                         "state": "open",
+                        "user": {"login": "testowner"},
+                        "requested_reviewers": [{"login": "ai_bot"}],
                         "head": {"ref": "feature/auth", "sha": "abc123"},
                         "base": {"ref": "main", "sha": "def456"}
                     },

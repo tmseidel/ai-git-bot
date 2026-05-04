@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -32,6 +33,7 @@ public class GitIntegrationController {
     public String newForm(Model model) {
         model.addAttribute("integration", new GitIntegration());
         model.addAttribute("providerTypes", RepositoryType.values());
+        model.addAttribute("postReviewActions", PostReviewAction.values());
         model.addAttribute("activeNav", "git-integrations");
         return "git-integrations/form";
     }
@@ -42,6 +44,7 @@ public class GitIntegrationController {
                 .map(integration -> {
                     model.addAttribute("integration", integration);
                     model.addAttribute("providerTypes", RepositoryType.values());
+                    model.addAttribute("postReviewActions", PostReviewAction.values());
                     model.addAttribute("activeNav", "git-integrations");
                     return "git-integrations/form";
                 })

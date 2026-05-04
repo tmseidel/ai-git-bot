@@ -124,6 +124,47 @@ class BotWebhookServiceTest {
         assertEquals("", botWebhookService.getBotAlias(bot));
     }
 
+    @Test
+    void isPullRequestAuthor_commentUserMatchesPrAuthor_returnsTrue() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setUser(owner("tom"));
+        payload.setPullRequest(pr);
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setUser(owner("tom"));
+        payload.setComment(comment);
+
+        assertTrue(botWebhookService.isPullRequestAuthor(payload));
+    }
+
+    @Test
+    void isPullRequestAuthor_commentUserDiffersFromPrAuthor_returnsFalse() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setUser(owner("tom"));
+        payload.setPullRequest(pr);
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setUser(owner("sara"));
+        payload.setComment(comment);
+
+        assertFalse(botWebhookService.isPullRequestAuthor(payload));
+    }
+
+    @Test
+    void isReviewAgainRequest_acceptsRepeatCodeReviewIntentFromAuthor() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setUser(owner("tom"));
+        payload.setPullRequest(pr);
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setUser(owner("tom"));
+        comment.setBody("@ai_bot repeat the code-review");
+        payload.setComment(comment);
+
+        assertTrue(botWebhookService.isReviewAgainRequest(payload, "@ai_bot"));
+        assertTrue(botWebhookService.isReviewAgainRequestFromPullRequestAuthor(payload, "@ai_bot"));
+    }
+
     // ---- handlePrComment routing tests ----
 
     @Test
@@ -213,7 +254,7 @@ class BotWebhookServiceTest {
 
         verify(repositoryApiClient).createIssue(eq("Test"), eq("my-repo"),
                 eq("AI Created Issue: Vague issue"), org.mockito.ArgumentMatchers.contains("Originates from #12"));
-        verify(repositoryApiClient, never()).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient, never()).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("I need the issue author to answer these questions"));
         verify(agentSessionService).setGeneratedIssueNumber(session, 99L);
     }
@@ -257,7 +298,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         doThrow(new RuntimeException("kickoff comment failed"))
                 .doNothing()
-                .when(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L), any());
+                .when(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L), any());
 
         botWebhookService.handleIssueAssigned(bot, payload);
 
@@ -346,7 +387,7 @@ class BotWebhookServiceTest {
 
         botWebhookService.handleIssueAssigned(bot, payload);
 
-        verify(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("Please clone the issue"));
         verify(agentSessionService, never()).createSession(any(), any(), any(), any(), any(), any());
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
@@ -382,7 +423,7 @@ class BotWebhookServiceTest {
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
         verify(agentSessionService, never()).setGeneratedIssueNumber(any(), any());
-        verify(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("creating it failed"));
     }
 
@@ -412,7 +453,7 @@ class BotWebhookServiceTest {
         botWebhookService.handleIssueAssigned(bot, payload);
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-        verify(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("simulated loop failure"));
     }
 
@@ -443,7 +484,7 @@ class BotWebhookServiceTest {
         botWebhookService.handleIssueAssigned(bot, payload);
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.IN_PROGRESS);
-        verify(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("What should happen?"));
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
     }
@@ -482,7 +523,7 @@ class BotWebhookServiceTest {
         botWebhookService.handleIssueAssigned(bot, payload);
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.IN_PROGRESS);
-        verify(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("I need more context"));
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
     }
@@ -526,7 +567,7 @@ class BotWebhookServiceTest {
 
         verify(repositoryApiClient).createIssue(eq("Test"), eq("my-repo"),
                 eq("AI Created Issue: Vague issue"), org.mockito.ArgumentMatchers.contains("Originates from #12"));
-        verify(repositoryApiClient, never()).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient, never()).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("I need more context"));
     }
 
@@ -556,7 +597,7 @@ class BotWebhookServiceTest {
         botWebhookService.handleIssueComment(bot, payload);
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.IN_PROGRESS);
-        verify(repositoryApiClient).postComment(eq("Test"), eq("my-repo"), eq(12L),
+        verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("follow-up failure"));
     }
 
@@ -693,6 +734,12 @@ class BotWebhookServiceTest {
         return bot;
     }
 
+    private WebhookPayload.Owner owner(String login) {
+        WebhookPayload.Owner owner = new WebhookPayload.Owner();
+        owner.setLogin(login);
+        return owner;
+    }
+
     /** Overload kept for backward-compat with the existing tests above. */
     private Bot createBot(String name, String username) {
         return createBot(name, username, false);
@@ -743,6 +790,7 @@ class BotWebhookServiceTest {
         pr.setNumber(prNumber);
         pr.setId(80L);
         pr.setState("open");
+        pr.setUser(owner("tom"));
         WebhookPayload.Head head = new WebhookPayload.Head();
         head.setRef("feature/branch");
         pr.setHead(head);

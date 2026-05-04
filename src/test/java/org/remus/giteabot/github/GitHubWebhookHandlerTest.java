@@ -12,6 +12,7 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +41,7 @@ class GitHubWebhookHandlerTest {
         bot.setUsername("ai_bot");
 
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
+        lenient().when(botWebhookService.getBotAlias(bot)).thenReturn("@ai_bot");
     }
 
     @Test
@@ -86,6 +88,47 @@ class GitHubWebhookHandlerTest {
         verify(botWebhookService, never()).handleIssueAssigned(any(), any());
     }
 
+    @Test
+    void pullRequestOpenedWithBotReviewer_triggersReview() {
+        Map<String, Object> payload = prPayload("opened", List.of(ownerMap("ai_bot")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void pullRequestOpenedWithoutBotReviewer_isIgnored() {
+        Map<String, Object> payload = prPayload("opened", List.of(ownerMap("human")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void pullRequestSynchronize_isIgnoredEvenWhenBotReviewer() {
+        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("ai_bot")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void pullRequestReviewRequestedForBot_triggersReview() {
+        Map<String, Object> payload = prPayload("review_requested", List.of(ownerMap("ai_bot")));
+        payload.put("requested_reviewer", ownerMap("ai_bot"));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
     private Map<String, Object> ownerMap(String login) {
         Map<String, Object> m = new HashMap<>();
         m.put("login", login);
@@ -99,6 +142,24 @@ class GitHubWebhookHandlerTest {
         m.put("full_name", "Test/my-repo");
         m.put("owner", ownerMap("Test"));
         return m;
+    }
+
+    private Map<String, Object> prPayload(String action, List<Map<String, Object>> reviewers) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", action);
+        payload.put("sender", ownerMap("tom"));
+        payload.put("repository", repositoryMap());
+        Map<String, Object> pr = new HashMap<>();
+        pr.put("id", 80);
+        pr.put("number", 140);
+        pr.put("title", "Some PR");
+        pr.put("body", "");
+        pr.put("state", "open");
+        pr.put("merged", false);
+        pr.put("user", ownerMap("tom"));
+        pr.put("requested_reviewers", reviewers);
+        payload.put("pull_request", pr);
+        return payload;
     }
 
     private Map<String, Object> issueMapWithAssigneeAndRef(long number, String assigneeLogin, String ref) {

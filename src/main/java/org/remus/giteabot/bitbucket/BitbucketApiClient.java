@@ -113,12 +113,22 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void postComment(String owner, String repo, Long issueNumber, String body) {
-        // Bitbucket Cloud doesn't have a separate issue comment API in the same way.
-        // PR comments are posted via the pullrequests endpoint.
-        log.info("Posting comment on PR #{} in {}/{}", issueNumber, owner, repo);
+    public void postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+        log.info("Posting comment on PR #{} in {}/{}", pullNumber, owner, repo);
         restClient.post()
                 .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}/comments",
+                        owner, repo, pullNumber)
+                .body(Map.of("content", Map.of("raw", body)))
+                .retrieve()
+                .toBodilessEntity();
+        log.info("Comment posted successfully");
+    }
+
+    @Override
+    public void postIssueComment(String owner, String repo, Long issueNumber, String body) {
+        log.info("Posting comment on issue #{} in {}/{}", issueNumber, owner, repo);
+        restClient.post()
+                .uri("/repositories/{workspace}/{repo}/issues/{issue_id}/comments",
                         owner, repo, issueNumber)
                 .body(Map.of("content", Map.of("raw", body)))
                 .retrieve()

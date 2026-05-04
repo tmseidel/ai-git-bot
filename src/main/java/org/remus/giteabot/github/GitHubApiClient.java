@@ -66,8 +66,19 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void postComment(String owner, String repo, Long issueNumber, String body) {
-        log.info("Posting comment on issue/PR #{} in {}/{}", issueNumber, owner, repo);
+    public void postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+        log.info("Posting top-level comment on PR #{} in {}/{}", pullNumber, owner, repo);
+        restClient.post()
+                .uri("/repos/{owner}/{repo}/issues/{issue_number}/comments", owner, repo, pullNumber)
+                .body(new CommentRequest(body))
+                .retrieve()
+                .toBodilessEntity();
+        log.info("Comment posted successfully");
+    }
+
+    @Override
+    public void postIssueComment(String owner, String repo, Long issueNumber, String body) {
+        log.info("Posting comment on issue #{} in {}/{}", issueNumber, owner, repo);
         restClient.post()
                 .uri("/repos/{owner}/{repo}/issues/{issue_number}/comments", owner, repo, issueNumber)
                 .body(new CommentRequest(body))

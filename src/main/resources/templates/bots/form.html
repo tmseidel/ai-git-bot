@@ -45,11 +45,11 @@
                                         th:value="${type}"
                                         th:text="${type == T(org.remus.giteabot.admin.BotType).WRITER ? 'Writer bot' : 'Coding bot'}">
                                 </option>
-                            </select>
-                            <div class="form-text">
-                                Coding bots review pull requests and can implement issues. Writer bots ignore pull requests and draft improved issues.
-                            </div>
-                        </div>
+                             </select>
+                             <div class="form-text">
+                                Coding bots review pull requests when explicitly requested and can implement issues. Writer bots ignore pull requests and draft improved issues.
+                             </div>
+                         </div>
 
                         <div class="col-12">
                             <label for="systemPromptId" class="form-label">System Prompt</label>

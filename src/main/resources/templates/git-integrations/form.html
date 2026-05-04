@@ -68,6 +68,26 @@
                                 The access token for API authentication.
                             </div>
                         </div>
+
+                        <div class="col-12" id="reviewTriggerNotice" style="display: none;">
+                            <div class="alert alert-info mb-0">
+                                Code reviews run only when the bot is explicitly requested as a reviewer.
+                                New commits do not trigger follow-up reviews automatically.
+                            </div>
+                        </div>
+
+                        <div class="col-md-6" id="postReviewActionField" style="display: none;">
+                            <label for="postReviewAction" class="form-label">Post-review Action</label>
+                            <select class="form-select" id="postReviewAction" th:field="*{postReviewAction}">
+                                <option th:each="action : ${postReviewActions}"
+                                        th:value="${action}"
+                                        th:text="${action == T(org.remus.giteabot.repository.PostReviewAction).NONE ? 'None' : (action == T(org.remus.giteabot.repository.PostReviewAction).APPROVE ? 'Approve merge request' : 'Request changes')}">
+                                </option>
+                            </select>
+                            <div class="form-text">
+                                Defaults to no automatic approve or request-changes action. Currently supported by GitLab.
+                            </div>
+                        </div>
                     </div>
 
                     <div class="mt-4">
@@ -92,10 +112,14 @@
                 const usernameInput = document.getElementById('username');
                 const tokenLabel = document.getElementById('tokenLabel');
                 const tokenDescription = document.getElementById('tokenDescription');
+                const reviewTriggerNotice = document.getElementById('reviewTriggerNotice');
+                const postReviewActionField = document.getElementById('postReviewActionField');
 
                 // Reset visibility
                 urlField.style.display = 'block';
                 usernameField.style.display = 'none';
+                reviewTriggerNotice.style.display = 'none';
+                postReviewActionField.style.display = 'none';
 
                 if (providerType === 'GITEA') {
                     // Gitea: URL + Token
@@ -107,6 +131,7 @@
                     usernameInput.required = false;
                     tokenLabel.textContent = 'Token';
                     tokenDescription.textContent = 'A Gitea access token with repository read/write permissions.';
+                    reviewTriggerNotice.style.display = 'block';
                 } else if (providerType === 'GITHUB') {
                     // GitHub: Token only (URL is fixed)
                     urlField.style.display = 'none';
@@ -116,6 +141,7 @@
                     usernameInput.required = false;
                     tokenLabel.textContent = 'Personal Access Token';
                     tokenDescription.textContent = 'A GitHub Personal Access Token (classic) or Fine-grained token with repository permissions.';
+                    reviewTriggerNotice.style.display = 'block';
                 } else if (providerType === 'GITLAB') {
                     // GitLab: URL + Token
                     urlField.style.display = 'block';
@@ -126,6 +152,8 @@
                     usernameInput.required = false;
                     tokenLabel.textContent = 'Personal Access Token';
                     tokenDescription.textContent = 'A GitLab Personal Access Token with api and read_repository scopes. See GitLab Settings → Access Tokens.';
+                    reviewTriggerNotice.style.display = 'block';
+                    postReviewActionField.style.display = 'block';
                 } else if (providerType === 'BITBUCKET') {
                     // Bitbucket: Username + Token (App Password)
                     urlField.style.display = 'none';
@@ -135,6 +163,7 @@
                     usernameInput.required = true;
                     tokenLabel.textContent = 'App Password';
                     tokenDescription.textContent = 'A Bitbucket App Password with repository read/write permissions. Create one at Bitbucket Settings → App passwords.';
+                    reviewTriggerNotice.style.display = 'block';
                 } else {
                     // Default / no selection
                     urlField.style.display = 'block';

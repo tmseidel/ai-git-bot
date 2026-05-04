@@ -7,6 +7,7 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -66,7 +67,7 @@ public class BitbucketWebhookHandler {
 
         return switch (eventKey) {
             case "pullrequest:created", "pullrequest:updated", "pullrequest:open" ->
-                    handlePullRequestOpenedOrUpdated(bot, webhookPayload);
+                    handlePullRequestOpenedOrUpdated(bot, eventKey, webhookPayload, payload);
             case "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:merged", "pullrequest:declined" ->
                     handlePullRequestClosed(bot, webhookPayload);
             case "pullrequest:comment_created" ->
@@ -78,9 +79,15 @@ public class BitbucketWebhookHandler {
         };
     }
 
-    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, WebhookPayload payload) {
-        botWebhookService.reviewPullRequest(bot, payload);
-        return ResponseEntity.ok("review triggered");
+    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, String eventKey, WebhookPayload payload,
+                                                                     Map<String, Object> raw) {
+        if (("pullrequest:created".equals(eventKey) || "pullrequest:open".equals(eventKey))
+                ? hasBotReviewer(bot, payload)
+                : botReviewerWasAdded(bot, raw)) {
+            botWebhookService.reviewPullRequest(bot, payload);
+            return ResponseEntity.ok("review triggered");
+        }
+        return ResponseEntity.ok("ignored");
     }
 
     private ResponseEntity<String> handlePullRequestClosed(Bot bot, WebhookPayload payload) {
@@ -99,6 +106,14 @@ public class BitbucketWebhookHandler {
         if (payload.getComment().getPath() != null) {
             botWebhookService.handleInlineComment(bot, payload);
             return ResponseEntity.ok("inline comment response triggered");
+        }
+
+        if (botWebhookService.isReviewAgainRequest(payload, botAlias)) {
+            if (botWebhookService.isReviewAgainRequestFromPullRequestAuthor(payload, botAlias)) {
+                botWebhookService.reviewPullRequest(bot, payload);
+                return ResponseEntity.ok("review triggered");
+            }
+            return ResponseEntity.ok("ignored");
         }
 
         // General PR comment mentioning the bot
@@ -210,6 +225,8 @@ public class BitbucketWebhookHandler {
         pullRequest.setTitle((String) pr.get("title"));
         pullRequest.setBody((String) pr.get("description"));
         pullRequest.setState((String) pr.get("state"));
+        pullRequest.setUser(extractBitbucketOwner((Map<String, Object>) pr.get("author")));
+        pullRequest.setRequestedReviewers(extractBitbucketOwners((List<Map<String, Object>>) pr.get("reviewers")));
 
         Map<String, Object> source = (Map<String, Object>) pr.get("source");
         if (source != null) {
@@ -278,5 +295,46 @@ public class BitbucketWebhookHandler {
         }
         return null;
     }
-}
 
+    private WebhookPayload.Owner extractBitbucketOwner(Map<String, Object> owner) {
+        if (owner == null) return null;
+        WebhookPayload.Owner o = new WebhookPayload.Owner();
+        String nickname = (String) owner.get("nickname");
+        o.setLogin(nickname != null ? nickname : (String) owner.get("display_name"));
+        return o;
+    }
+
+    private List<WebhookPayload.Owner> extractBitbucketOwners(List<Map<String, Object>> owners) {
+        if (owners == null) return null;
+        return owners.stream().map(this::extractBitbucketOwner).toList();
+    }
+
+    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
+        return bot.getUsername() != null
+                && payload.getPullRequest() != null
+                && payload.getPullRequest().getRequestedReviewers() != null
+                && payload.getPullRequest().getRequestedReviewers().stream()
+                .anyMatch(reviewer -> bot.getUsername().equalsIgnoreCase(reviewer.getLogin()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private boolean botReviewerWasAdded(Bot bot, Map<String, Object> raw) {
+        if (bot.getUsername() == null || !(raw.get("changes") instanceof Map<?, ?> changes)) {
+            return false;
+        }
+        Object reviewers = changes.get("reviewers");
+        if (!(reviewers instanceof Map<?, ?> reviewersChange)) {
+            return false;
+        }
+        List<Map<String, Object>> current = (List<Map<String, Object>>) reviewersChange.get("new");
+        List<Map<String, Object>> previous = (List<Map<String, Object>>) reviewersChange.get("old");
+        return containsBitbucketUser(current, bot.getUsername()) && !containsBitbucketUser(previous, bot.getUsername());
+    }
+
+    private boolean containsBitbucketUser(List<Map<String, Object>> users, String username) {
+        return users != null && users.stream()
+                .map(this::extractBitbucketOwner)
+                .anyMatch(user -> user != null && username.equalsIgnoreCase(user.getLogin()));
+    }
+
+}

@@ -77,7 +77,14 @@ public class BotWebhookService {
             return;
         }
         try {
-            createCodeReviewService(bot).reviewPullRequest(payload, null);
+            RepositoryApiClient repositoryClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            boolean reviewed = createCodeReviewService(bot, repositoryClient).reviewPullRequest(payload, null);
+            if (reviewed && bot.getGitIntegration() != null) {
+                String owner = payload.getRepository().getOwner().getLogin();
+                String repo = payload.getRepository().getName();
+                Long prNumber = payload.getPullRequest().getNumber();
+                repositoryClient.postReviewAction(owner, repo, prNumber, bot.getGitIntegration().getPostReviewAction());
+            }
         } catch (Exception e) {
             log.error("[Bot '{}'] Failed to review PR: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
@@ -90,6 +97,10 @@ public class BotWebhookService {
      */
     @Async
     public void handleBotCommand(Bot bot, WebhookPayload payload) {
+        if (!isPullRequestAuthor(payload)) {
+            log.debug("[Bot '{}'] Ignoring pull request command from non-author", bot.getName());
+            return;
+        }
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request command", bot.getName());
             return;
@@ -110,6 +121,10 @@ public class BotWebhookService {
      */
     @Async
     public void handlePrComment(Bot bot, WebhookPayload payload) {
+        if (!isPullRequestAuthor(payload)) {
+            log.debug("[Bot '{}'] Ignoring pull request comment from non-author", bot.getName());
+            return;
+        }
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request comment", bot.getName());
             return;
@@ -149,6 +164,10 @@ public class BotWebhookService {
      */
     @Async
     public void handleInlineComment(Bot bot, WebhookPayload payload) {
+        if (!isPullRequestAuthor(payload)) {
+            log.debug("[Bot '{}'] Ignoring inline review comment from non-author", bot.getName());
+            return;
+        }
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores inline review comment", bot.getName());
             return;
@@ -275,12 +294,50 @@ public class BotWebhookService {
         return "@" + username;
     }
 
+    public boolean isPullRequestAuthor(WebhookPayload payload) {
+        String author = null;
+        if (payload.getPullRequest() != null && payload.getPullRequest().getUser() != null) {
+            author = payload.getPullRequest().getUser().getLogin();
+        } else if (payload.getIssue() != null && payload.getIssue().getUser() != null) {
+            author = payload.getIssue().getUser().getLogin();
+        }
+
+        String commenter = null;
+        if (payload.getComment() != null && payload.getComment().getUser() != null) {
+            commenter = payload.getComment().getUser().getLogin();
+        } else if (payload.getSender() != null) {
+            commenter = payload.getSender().getLogin();
+        }
+
+        return author != null && commenter != null && author.equalsIgnoreCase(commenter);
+    }
+
+    public boolean isReviewAgainRequestFromPullRequestAuthor(WebhookPayload payload, String botAlias) {
+        if (!isPullRequestAuthor(payload)) {
+            return false;
+        }
+        return isReviewAgainRequest(payload, botAlias);
+    }
+
+    public boolean isReviewAgainRequest(WebhookPayload payload, String botAlias) {
+        String body = payload.getComment() != null ? payload.getComment().getBody() : null;
+        if (body == null || botAlias == null || !body.contains(botAlias)) {
+            return false;
+        }
+        String normalized = body.toLowerCase();
+        return normalized.contains("review")
+                && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
+    }
+
     /**
      * Creates a per-bot {@link CodeReviewService} using the bot's AI and Git integrations.
      */
     private CodeReviewService createCodeReviewService(Bot bot) {
+        return createCodeReviewService(bot, giteaClientFactory.getApiClient(bot.getGitIntegration()));
+    }
+
+    private CodeReviewService createCodeReviewService(Bot bot, RepositoryApiClient repoClient) {
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
         if (bot.getSystemPrompt() == null) {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }

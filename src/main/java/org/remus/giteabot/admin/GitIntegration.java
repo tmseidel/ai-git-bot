@@ -3,6 +3,7 @@ package org.remus.giteabot.admin;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
 
 import java.time.Instant;
@@ -36,6 +37,10 @@ public class GitIntegration {
 
     @Column(nullable = false)
     private String token;
+
+    @Column(nullable = false)
+    @Enumerated(EnumType.STRING)
+    private PostReviewAction postReviewAction = PostReviewAction.NONE;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

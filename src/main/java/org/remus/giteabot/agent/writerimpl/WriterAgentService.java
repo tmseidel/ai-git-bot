@@ -84,7 +84,7 @@ public class WriterAgentService {
         Optional<AgentSession> existingSession = sessionService.getSessionByIssue(owner, repo, issueNumber);
         if (existingSession.isPresent()) {
             if (existingSession.get().getSessionType() != AgentSession.AgentSessionType.WRITER) {
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Technical Writer**: A coding-agent session already exists for this issue. "
                                 + "Please clone the issue if you want the writer agent to draft a separate improved issue.");
             }
@@ -102,14 +102,14 @@ public class WriterAgentService {
                     AgentSession.AgentSessionType.WRITER, issueAuthor);
             sessionService.setBranchName(session, baseBranch);
             sessionService.setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
-            repositoryClient.postComment(owner, repo, issueNumber,
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Technical Writer**: I've been assigned and will review this issue for completeness.");
 
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken());
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Technical Writer**: Failed to prepare read-only repository context: "
                                 + wsResult.error());
                 return;
@@ -145,7 +145,7 @@ public class WriterAgentService {
         }
         AgentSession session = sessionOpt.get();
         if (session.getSessionType() != AgentSession.AgentSessionType.WRITER) {
-            repositoryClient.postComment(owner, repo, issueNumber,
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Technical Writer**: A coding-agent session already exists for this issue. "
                             + "Please clone the issue if you want the writer agent to draft a separate improved issue.");
             return;
@@ -181,7 +181,7 @@ public class WriterAgentService {
                     owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken());
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Technical Writer**: Failed to prepare read-only repository context: "
                                 + wsResult.error());
                 return;
@@ -215,7 +215,7 @@ public class WriterAgentService {
 
             if (plan.hasContextRequests() && round >= MAX_TOOL_ROUNDS) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.IN_PROGRESS);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Technical Writer**: I need more context before I can continue. "
                                 + "Please add more details and mention me again.");
                 return;
@@ -240,7 +240,7 @@ public class WriterAgentService {
 
             if (plan.hasQuestions() || !plan.isReadyToCreate()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.IN_PROGRESS);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         promptBuilder.buildClarifyingQuestionComment(plan));
                 return;
             }
@@ -250,13 +250,13 @@ public class WriterAgentService {
                     promptBuilder.buildIssueBody(issueNumber, plan));
             if (createdIssueNumber == null) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postComment(owner, repo, issueNumber,
+                repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Technical Writer**: I drafted the improved issue, but creating it failed. "
                                 + "Please check the repository provider response and try again.");
                 return;
             }
             sessionService.setGeneratedIssueNumber(session, createdIssueNumber);
-            repositoryClient.postComment(owner, repo, issueNumber,
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Technical Writer**: Created improved issue #" + createdIssueNumber
                             + " from this discussion.");
             return;
