@@ -248,6 +248,7 @@ This starts:
    - The API URL is auto-filled with the provider's default
    - Select a model from the dropdown or enter a custom model name
    - Enter your API key
+   - OpenAI-compatible providers can often be configured by selecting "openai" and entering the provider's custom API URL, API key, and model; see the [User Guide](doc/USER_GUIDE.md#openai-compatible-apis)
 
 2. **Create a Git Integration:**
    - Go to **Git Integrations → New Integration**

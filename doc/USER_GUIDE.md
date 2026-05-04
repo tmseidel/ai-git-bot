@@ -49,7 +49,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
      | Provider | Default API URL | Suggested Models |
      |----------|-----------------|------------------|
      | `anthropic` | `https://api.anthropic.com` | claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001 |
-     | `openai` | `https://api.openai.com` | gpt-5.4, gpt-5.3-codex, gpt-5.1-codex-max, gpt-5-codex |
+     | `openai` | `https://api.openai.com` | gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex |
      | `ollama` | `http://localhost:11434` | *(user-configured)* |
      | `llamacpp` | `http://localhost:8081` | *(user-configured)* |
      
@@ -73,7 +73,48 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 #### OpenAI
 - Requires an API key
 - Compatible with OpenAI API proxies by changing the API URL
-- Suggested models: gpt-5.4, gpt-5.3-codex, gpt-5.1-codex-max, gpt-5-codex
+- Suggested models: gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex
+
+##### OpenAI-Compatible APIs
+
+The `openai` integration uses the OpenAI Chat Completions-compatible request and response format. Third-party hosted providers, API gateways, and self-hosted tools can often be used with this integration when they expose a sufficiently compatible `/v1/chat/completions` endpoint. Compatibility depends on the provider and model; these examples are documented configuration patterns, not a guarantee that every advertised OpenAI-compatible API will work.
+
+Configure OpenAI-compatible providers in **AI Integrations → New Integration**:
+
+| Field | What to enter |
+|-------|---------------|
+| **Provider Type** | Select `openai`. |
+| **API URL** | Enter the provider base URL before the `/v1/chat/completions` path. For example, if provider docs show `https://example.com/api/v1/chat/completions`, enter `https://example.com/api`. |
+| **API Key** | Enter the provider API key. For local tools that do not enforce authentication, enter a placeholder value such as `local` if the server accepts or ignores it. |
+| **API Version** | Leave blank. This field is only used for Anthropic integrations. |
+| **Model** | Enter the provider's exact model identifier, including any provider-specific prefix. |
+| **Max Tokens** and chunk limits | Start with the defaults, then reduce chunk limits if the selected model has a smaller context window. |
+
+Documented examples:
+
+| Provider/tool | API URL | API key | Example model | Notes |
+|---------------|---------|---------|---------------|-------|
+| OpenRouter | `https://openrouter.ai/api` | OpenRouter API key | `openai/gpt-4o-mini` | OpenRouter's endpoint includes `/api/v1/chat/completions`; enter the base URL without the trailing `/v1/chat/completions`. Model names usually include a provider prefix. |
+| LM Studio local server | `http://localhost:1234` | Placeholder such as `local` if authentication is disabled | Model name shown by LM Studio | Enable LM Studio's OpenAI-compatible local server before using the integration. |
+| vLLM OpenAI-compatible server | `http://localhost:8000` | The key configured for the server, or a placeholder if auth is disabled | Served model name, for example `meta-llama/Llama-3.1-8B-Instruct` | Ensure the vLLM server exposes `/v1/chat/completions` from this base URL. |
+
+Other OpenAI-compatible providers may also work if they implement the expected chat completions behavior, accept Bearer-token authentication, and return OpenAI-style chat completion responses.
+
+Known limitations and caveats:
+
+- Some providers support only part of the OpenAI API or return responses that differ from OpenAI's chat completions schema.
+- Model names are provider-specific and must match exactly.
+- Some providers require a provider-specific base path before `/v1/chat/completions`.
+- Local tools may not require authentication, but the integration still requires a non-empty API key value.
+- Compatibility can change if the provider changes its OpenAI-compatible API behavior.
+
+Troubleshooting:
+
+- **404 or "not found"**: Check the **API URL**. It should be the base URL that becomes a valid `/v1/chat/completions` endpoint when the application appends that path.
+- **401 or 403**: Check that the **API Key** is present, valid, and accepted as a Bearer token by the provider.
+- **Model not found**: Copy the exact model identifier from the provider's model list.
+- **Empty or malformed responses**: The provider may not return the expected OpenAI chat completions response format for that model.
+- **Context length or token errors**: Reduce **Max Diff Chars/Chunk**, **Max Diff Chunks**, or **Max Tokens**, or choose a model with a larger context window.
 
 #### Ollama
 - No API key required
