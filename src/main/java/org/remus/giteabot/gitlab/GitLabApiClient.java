@@ -252,6 +252,36 @@ public class GitLabApiClient implements RepositoryApiClient {
         return issue != null ? issue : Map.of();
     }
 
+    @Override
+    public List<Map<String, Object>> searchIssues(String owner, String repo, String query) {
+        log.info("Searching issues in {}/{} for '{}'", owner, repo, query);
+        String projectPath = encodeProjectPath(owner, repo);
+        List<Map<String, Object>> issues = gitlabRestClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v4/projects/{projectPath}/issues")
+                        .queryParam("search", query)
+                        .queryParam("scope", "all")
+                        .build(Map.of("projectPath", projectPath)))
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return issues != null ? issues : List.of();
+    }
+
+    @Override
+    public Long createIssue(String owner, String repo, String title, String body) {
+        log.info("Creating issue '{}' in {}/{}", title, owner, repo);
+        String projectPath = encodeProjectPath(owner, repo);
+        Map<String, Object> result = gitlabRestClient.post()
+                .uri("/api/v4/projects/{projectPath}/issues", projectPath)
+                .body(Map.of("title", title, "description", body))
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (result != null && result.get("iid") instanceof Number iid) {
+            return iid.longValue();
+        }
+        return null;
+    }
+
     // ---- Repository operations ----
 
     @Override
