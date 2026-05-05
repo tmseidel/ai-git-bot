@@ -1,8 +1,5 @@
 package org.remus.giteabot.ai.ollama;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Builder;
 import lombok.Data;
 
@@ -26,10 +23,6 @@ public class OllamaRequest {
      * See: https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-chat-completion
      */
     private String format;
-
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty("mcp_servers")
-    private List<JsonNode> mcpServers;
 
     @Data
     @Builder

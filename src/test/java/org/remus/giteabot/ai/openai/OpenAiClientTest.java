@@ -64,7 +64,6 @@ class OpenAiClientTest {
     }
 
     @Test
-    @SuppressWarnings({"rawtypes", "unchecked"})
     void chat_withMcpConfiguration_forwardsMcpServers() {
         RestClient restClient = mock(RestClient.class);
         RestClient.RequestBodyUriSpec uriSpec = mock(RestClient.RequestBodyUriSpec.class);
@@ -85,9 +84,6 @@ class OpenAiClientTest {
 
         assertEquals("ok", result);
         assertNotNull(requestCaptor.getValue().getMcpServers());
-        assertEquals(1, requestCaptor.getValue().getMcpServers().size());
-        assertEquals("https://api.githubcopilot.com/mcp/",
-                requestCaptor.getValue().getMcpServers().getFirst().get("url").asText());
     }
 
     private OpenAiResponse response(String text) {

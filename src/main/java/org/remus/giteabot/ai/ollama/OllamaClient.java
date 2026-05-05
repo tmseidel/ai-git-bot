@@ -4,10 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.ai.AbstractAiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.McpConfigurationData;
-import org.remus.giteabot.ai.McpConfigurationMapper;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +45,7 @@ public class OllamaClient extends AbstractAiClient {
         messages.add(OllamaRequest.Message.builder().role("user").content(userMessage).build());
 
         boolean useJsonMode = shouldUseJsonMode(systemPrompt);
-        return doRequest(effectiveModel, messages, maxTokens, "review", useJsonMode, mcpConfiguration);
+        return doRequest(effectiveModel, messages, maxTokens, "review", useJsonMode);
     }
 
     @Override
@@ -71,7 +69,7 @@ public class OllamaClient extends AbstractAiClient {
         }
 
         boolean useJsonMode = shouldUseJsonMode(systemPrompt);
-        return doRequest(effectiveModel, messages, maxTokens, "chat", useJsonMode, mcpConfiguration);
+        return doRequest(effectiveModel, messages, maxTokens, "chat", useJsonMode);
     }
 
     @Override
@@ -100,22 +98,16 @@ public class OllamaClient extends AbstractAiClient {
                 || lower.contains("```json");
     }
 
-    private String doRequest(String model, List<OllamaRequest.Message> messages,
-                             int maxTokens, String context, boolean useJsonMode) {
-        return doRequest(model, messages, maxTokens, context, useJsonMode, null);
-    }
 
     private String doRequest(String model, List<OllamaRequest.Message> messages,
-                             int maxTokens, String context, boolean useJsonMode,
-                             McpConfigurationData mcpConfiguration) {
+                             int maxTokens, String context, boolean useJsonMode) {
         OllamaRequest.OllamaRequestBuilder requestBuilder = OllamaRequest.builder()
                 .model(model)
                 .messages(messages)
                 .stream(false)
                 .options(OllamaRequest.Options.builder()
                         .numPredict(maxTokens)
-                        .build())
-                .mcpServers(McpConfigurationMapper.toMcpServers(mcpConfiguration, "Ollama"));
+                        .build());
 
         if (useJsonMode) {
             requestBuilder.format("json");
@@ -124,32 +116,17 @@ public class OllamaClient extends AbstractAiClient {
 
         OllamaRequest request = requestBuilder.build();
 
-        OllamaResponse response = executeRequest(request, mcpConfiguration, context);
+        OllamaResponse response = executeRequest(request);
 
         return extractText(response, context);
     }
 
-    private OllamaResponse executeRequest(OllamaRequest request, McpConfigurationData mcpConfiguration,
-                                          String context) {
-        try {
-            return restClient.post()
-                    .uri("/api/chat")
-                    .body(request)
-                    .retrieve()
-                    .body(OllamaResponse.class);
-        } catch (RestClientException e) {
-            if (mcpConfiguration == null) {
-                throw e;
-            }
-            log.error("MCP configuration '{}' could not be applied to Ollama {} request; retrying without MCP: {}",
-                    mcpConfiguration.name(), context, e.getMessage(), e);
-            request.setMcpServers(null);
-            return restClient.post()
-                    .uri("/api/chat")
-                    .body(request)
-                    .retrieve()
-                    .body(OllamaResponse.class);
-        }
+    private OllamaResponse executeRequest(OllamaRequest request) {
+        return restClient.post()
+                .uri("/api/chat")
+                .body(request)
+                .retrieve()
+                .body(OllamaResponse.class);
     }
 
     private String extractText(OllamaResponse response, String context) {

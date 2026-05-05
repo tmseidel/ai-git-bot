@@ -58,6 +58,7 @@ public class AnthropicProviderMetadata implements AiProviderMetadata {
                 .baseUrl(integration.getApiUrl())
                 .defaultHeader("x-api-key", decryptedApiKey)
                 .defaultHeader("anthropic-version", apiVersion)
+                .defaultHeader("anthropic-beta", "mcp-client-2025-11-20")
                 .defaultHeader("Content-Type", "application/json")
                 .build();
     }

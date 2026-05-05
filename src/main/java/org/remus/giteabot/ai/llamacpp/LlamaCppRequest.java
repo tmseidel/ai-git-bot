@@ -2,7 +2,6 @@ package org.remus.giteabot.ai.llamacpp;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Builder;
 import lombok.Data;
 
@@ -11,7 +10,7 @@ import java.util.List;
 /**
  * Request model for llama.cpp server's native /completion endpoint.
  * Supports the grammar field for structured JSON output constraints.
- * See: https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md
+ * See: <a href="https://github.com/ggerganov/llama.cpp/blob/master/examples/server/README.md">...</a>
  */
 @Data
 @Builder
@@ -68,7 +67,7 @@ public class LlamaCppRequest {
 
     /**
      * GBNF grammar string for constraining output format.
-     * See: https://github.com/ggerganov/llama.cpp/blob/master/grammars/README.md
+     * See: <a href="https://github.com/ggerganov/llama.cpp/blob/master/grammars/README.md">...</a>
      */
     private String grammar;
 
@@ -88,7 +87,4 @@ public class LlamaCppRequest {
     @JsonProperty("cache_prompt")
     private Boolean cachePrompt;
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty("mcp_servers")
-    private List<JsonNode> mcpServers;
 }

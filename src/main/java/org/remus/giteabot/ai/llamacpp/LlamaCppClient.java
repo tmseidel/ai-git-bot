@@ -4,10 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.ai.AbstractAiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.McpConfigurationData;
-import org.remus.giteabot.ai.McpConfigurationMapper;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 import java.util.Locale;
@@ -76,7 +74,7 @@ public class LlamaCppClient extends AbstractAiClient {
                                        McpConfigurationData mcpConfiguration) {
         String prompt = buildChatPrompt(systemPrompt, userMessage);
         String grammar = shouldUseJsonGrammar(systemPrompt) ? AGENT_JSON_GRAMMAR : null;
-        return doRequest(prompt, maxTokens, "review", grammar, mcpConfiguration);
+        return doRequest(prompt, maxTokens, "review", grammar);
     }
 
     @Override
@@ -91,7 +89,7 @@ public class LlamaCppClient extends AbstractAiClient {
                                      McpConfigurationData mcpConfiguration) {
         String prompt = buildChatPrompt(systemPrompt, conversationMessages);
         String grammar = shouldUseJsonGrammar(systemPrompt) ? AGENT_JSON_GRAMMAR : null;
-        return doRequest(prompt, maxTokens, "chat", grammar, mcpConfiguration);
+        return doRequest(prompt, maxTokens, "chat", grammar);
     }
 
     @Override
@@ -150,12 +148,8 @@ public class LlamaCppClient extends AbstractAiClient {
                 || lower.contains("\"runtool\"");
     }
 
-    private String doRequest(String prompt, int maxTokens, String context, String grammar) {
-        return doRequest(prompt, maxTokens, context, grammar, null);
-    }
 
-    private String doRequest(String prompt, int maxTokens, String context, String grammar,
-                             McpConfigurationData mcpConfiguration) {
+    private String doRequest(String prompt, int maxTokens, String context, String grammar) {
         LlamaCppRequest.LlamaCppRequestBuilder requestBuilder = LlamaCppRequest.builder()
                 .prompt(prompt)
                 .nPredict(maxTokens)
@@ -167,8 +161,7 @@ public class LlamaCppClient extends AbstractAiClient {
                 .repeatPenalty(1.1)
                 .frequencyPenalty(0.0)
                 .presencePenalty(0.0)
-                .cachePrompt(true)
-                .mcpServers(McpConfigurationMapper.toMcpServers(mcpConfiguration, "llama.cpp"));
+                .cachePrompt(true);
 
         if (grammar != null) {
             requestBuilder.grammar(grammar);
@@ -180,32 +173,17 @@ public class LlamaCppClient extends AbstractAiClient {
         log.debug("llama.cpp request to /completion: promptLength={}, maxTokens={}, grammar={}",
                 prompt.length(), maxTokens, grammar != null);
 
-        LlamaCppResponse response = executeRequest(request, mcpConfiguration, context);
+        LlamaCppResponse response = executeRequest(request);
 
         return extractText(response, context);
     }
 
-    private LlamaCppResponse executeRequest(LlamaCppRequest request, McpConfigurationData mcpConfiguration,
-                                            String context) {
-        try {
-            return restClient.post()
-                    .uri("/completion")
-                    .body(request)
-                    .retrieve()
-                    .body(LlamaCppResponse.class);
-        } catch (RestClientException e) {
-            if (mcpConfiguration == null) {
-                throw e;
-            }
-            log.error("MCP configuration '{}' could not be applied to llama.cpp {} request; retrying without MCP: {}",
-                    mcpConfiguration.name(), context, e.getMessage(), e);
-            request.setMcpServers(null);
-            return restClient.post()
-                    .uri("/completion")
-                    .body(request)
-                    .retrieve()
-                    .body(LlamaCppResponse.class);
-        }
+    private LlamaCppResponse executeRequest(LlamaCppRequest request) {
+        return restClient.post()
+                .uri("/completion")
+                .body(request)
+                .retrieve()
+                .body(LlamaCppResponse.class);
     }
 
     private String extractText(LlamaCppResponse response, String context) {

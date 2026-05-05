@@ -2,7 +2,7 @@ package org.remus.giteabot.ai.openai;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonRawValue;
 import lombok.Builder;
 import lombok.Data;
 
@@ -19,9 +19,10 @@ public class OpenAiRequest {
 
     private List<Message> messages;
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     @JsonProperty("mcp_servers")
-    private List<JsonNode> mcpServers;
+    @JsonRawValue
+    private String mcpServers;
 
     @Data
     @Builder

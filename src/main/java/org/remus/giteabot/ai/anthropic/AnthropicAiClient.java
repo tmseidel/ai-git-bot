@@ -118,7 +118,7 @@ public class AnthropicAiClient extends AbstractAiClient {
         try {
             return restClient.post()
                     .uri("/v1/messages")
-                    .body(request)
+                    .body(checkMcpTools(request))
                     .retrieve()
                     .body(AnthropicResponse.class);
         } catch (RestClientException e) {
@@ -128,12 +128,24 @@ public class AnthropicAiClient extends AbstractAiClient {
             log.error("MCP configuration '{}' could not be applied to Anthropic {} request; retrying without MCP: {}",
                     mcpConfiguration.name(), context, e.getMessage(), e);
             request.setMcpServers(null);
+            request.setTools(null);
             return restClient.post()
                     .uri("/v1/messages")
                     .body(request)
                     .retrieve()
                     .body(AnthropicResponse.class);
         }
+    }
+
+    private AnthropicRequest checkMcpTools(AnthropicRequest request) {
+        if (request.getMcpServers() != null) {
+            request.setTools(McpConfigurationMapper.extractNamesFromMcpJson(
+                    request.getMcpServers()).stream().map(
+                            name -> AnthropicRequest.Tool.builder()
+                                    .mcpServerName(name)
+                                    .type("mcp_toolset").build()).toList());
+        }
+        return request;
     }
 
 }
