@@ -610,7 +610,7 @@ graph LR
     subgraph "Docker Compose"
         subgraph "App Container"
             App["app.jar<br/>(Spring Boot)"]
-            Prompts["/app/prompts/<br/>Prompt seed files"]
+            Prompts["/app/prompts/<br/>File-based prompt fallbacks"]
         end
         subgraph "DB Container"
             Postgres["PostgreSQL 17<br/>(Config & Sessions)"]
@@ -625,7 +625,7 @@ graph LR
 ```
 
 - All configuration (AI integrations, Git integrations, bots) is stored in the database
-- The `prompts/` directory contains bundled prompt seed files used to initialize default system prompt entries
+- Default `system_prompts` rows are seeded by Flyway migration scripts (`V3__system_prompts.sql`, `V5__technical_writer_agent.sql`); the `prompts/` directory is only used by `PromptService` as a file-based fallback for legacy prompt overrides
 - PostgreSQL persists configuration and review sessions
 - Session data survives container restarts via the `pgdata` volume
 
