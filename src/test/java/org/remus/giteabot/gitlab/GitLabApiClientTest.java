@@ -101,7 +101,7 @@ class GitLabApiClientTest {
     }
 
     @Test
-    void searchIssues_returnsEmptyListOnNullResponse() {
+    void searchIssues_returnsEmptyListForEmptyResults() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
