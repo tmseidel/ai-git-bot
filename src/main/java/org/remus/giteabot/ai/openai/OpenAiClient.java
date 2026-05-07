@@ -69,13 +69,17 @@ public class OpenAiClient extends AbstractAiClient {
                 .messages(messages)
                 .build();
 
-        OpenAiResponse response = restClient.post()
+        OpenAiResponse response = executeRequest(request);
+
+        return extractText(response, context);
+    }
+
+    private OpenAiResponse executeRequest(OpenAiRequest request) {
+        return restClient.post()
                 .uri("/v1/chat/completions")
                 .body(request)
                 .retrieve()
                 .body(OpenAiResponse.class);
-
-        return extractText(response, context);
     }
 
     private String extractText(OpenAiResponse response, String context) {

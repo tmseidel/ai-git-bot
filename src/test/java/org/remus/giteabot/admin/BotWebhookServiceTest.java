@@ -17,9 +17,13 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.session.SessionService;
+import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.SystemPrompt;
+import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.nio.file.Path;
@@ -50,6 +54,8 @@ class BotWebhookServiceTest {
     @Mock private ToolExecutionService toolExecutionService;
     @Mock private WorkspaceService workspaceService;
     @Mock private BotService botService;
+    @Mock private McpOrchestrationService mcpOrchestrationService;
+    @Mock private McpToolSelectionService mcpToolSelectionService;
     @Mock private RepositoryApiClient repositoryApiClient;
     @Mock private AiClient aiClient;
 
@@ -59,7 +65,11 @@ class BotWebhookServiceTest {
     void setUp() {
         botWebhookService = new BotWebhookService(aiClientFactory, giteaClientFactory,
                 promptService, sessionService, agentConfig, new ReviewConfigProperties(),
-                agentSessionService, toolExecutionService, workspaceService, botService);
+                agentSessionService, toolExecutionService, workspaceService, botService,
+                mcpOrchestrationService, mcpToolSelectionService);
+        lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
+        lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
     }
 
     // ---- isBotUser tests ----
@@ -599,6 +609,32 @@ class BotWebhookServiceTest {
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.IN_PROGRESS);
         verify(repositoryApiClient).postIssueComment(eq("Test"), eq("my-repo"), eq(12L),
                 org.mockito.ArgumentMatchers.contains("follow-up failure"));
+    }
+
+    @Test
+    void codingBot_issueComment_appliesMcpToolWhitelistBeforeAgentHandling() {
+        Bot bot = createBot("coder", "coder_bot", true);
+        WebhookPayload payload = buildIssueCommentPayload("Test", "my-repo", 12L,
+                "Implement feature", "Body", "tom", "Please continue");
+        McpConfiguration mcpConfiguration = new McpConfiguration();
+        mcpConfiguration.setId(77L);
+        mcpConfiguration.setName("GitHub MCP");
+        mcpConfiguration.setJsonContent("[{\"name\":\"github\",\"url\":\"https://example.test/mcp\"}]");
+        bot.setMcpConfiguration(mcpConfiguration);
+        McpToolCatalog discovered = new McpToolCatalog(java.util.List.of(
+                new org.remus.giteabot.mcp.McpToolDefinition("github", "search", null, null,
+                        java.util.Map.of(), "mcp:github:search")
+        ));
+
+        when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(aiClientFactory.getClient(any())).thenReturn(aiClient);
+        when(mcpOrchestrationService.discoverTools(mcpConfiguration)).thenReturn(discovered);
+        when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.empty());
+        when(agentSessionService.getSessionByPr("Test", "my-repo", 12L)).thenReturn(Optional.empty());
+
+        botWebhookService.handleIssueComment(bot, payload);
+
+        verify(mcpToolSelectionService).filterCatalogForPrompt(mcpConfiguration, discovered);
     }
 
     @Nested

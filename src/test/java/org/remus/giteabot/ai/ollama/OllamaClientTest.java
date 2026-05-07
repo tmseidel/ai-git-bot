@@ -8,8 +8,9 @@ import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class OllamaClientTest {
 
@@ -59,4 +60,6 @@ class OllamaClientTest {
 
         assertFalse(client.isPromptTooLongError(ex));
     }
+
+
 }

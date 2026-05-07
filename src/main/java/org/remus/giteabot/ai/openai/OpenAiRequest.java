@@ -17,6 +17,7 @@ public class OpenAiRequest {
 
     private List<Message> messages;
 
+
     @Data
     @Builder
     public static class Message {

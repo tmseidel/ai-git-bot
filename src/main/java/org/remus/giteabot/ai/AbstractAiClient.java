@@ -71,7 +71,7 @@ public abstract class AbstractAiClient implements AiClient {
      * @return the assistant's response text
      */
     protected abstract String sendChatRequest(String systemPrompt, String effectiveModel,
-                                              int maxTokens, List<AiMessage> messages);
+                                               int maxTokens, List<AiMessage> messages);
 
     /**
      * Detects whether a client error indicates the prompt exceeded the model's input limit.
@@ -231,6 +231,7 @@ public abstract class AbstractAiClient implements AiClient {
                 isRetry, additionalContext);
         return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage);
     }
+
 
     ChunkingResult splitDiffIntoChunks(String diff) {
         if (diff == null || diff.isBlank()) {

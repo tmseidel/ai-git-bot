@@ -36,11 +36,7 @@ public class AnthropicAiClient extends AbstractAiClient {
                 ))
                 .build();
 
-        AnthropicResponse response = restClient.post()
-                .uri("/v1/messages")
-                .body(request)
-                .retrieve()
-                .body(AnthropicResponse.class);
+        AnthropicResponse response = executeRequest(request);
 
         return extractText(response, "review");
     }
@@ -62,11 +58,7 @@ public class AnthropicAiClient extends AbstractAiClient {
                 .messages(anthropicMessages)
                 .build();
 
-        AnthropicResponse response = restClient.post()
-                .uri("/v1/messages")
-                .body(request)
-                .retrieve()
-                .body(AnthropicResponse.class);
+        AnthropicResponse response = executeRequest(request);
 
         return extractText(response, "chat");
     }
@@ -101,4 +93,13 @@ public class AnthropicAiClient extends AbstractAiClient {
 
         return result;
     }
+
+    private AnthropicResponse executeRequest(AnthropicRequest request) {
+        return restClient.post()
+                .uri("/v1/messages")
+                .body(request)
+                .retrieve()
+                .body(AnthropicResponse.class);
+    }
+
 }

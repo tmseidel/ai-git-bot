@@ -83,6 +83,7 @@ public class OllamaClient extends AbstractAiClient {
                 || lower.contains("```json");
     }
 
+
     private String doRequest(String model, List<OllamaRequest.Message> messages,
                              int maxTokens, String context, boolean useJsonMode) {
         OllamaRequest.OllamaRequestBuilder requestBuilder = OllamaRequest.builder()
@@ -100,13 +101,17 @@ public class OllamaClient extends AbstractAiClient {
 
         OllamaRequest request = requestBuilder.build();
 
-        OllamaResponse response = restClient.post()
+        OllamaResponse response = executeRequest(request);
+
+        return extractText(response, context);
+    }
+
+    private OllamaResponse executeRequest(OllamaRequest request) {
+        return restClient.post()
                 .uri("/api/chat")
                 .body(request)
                 .retrieve()
                 .body(OllamaResponse.class);
-
-        return extractText(response, context);
     }
 
     private String extractText(OllamaResponse response, String context) {

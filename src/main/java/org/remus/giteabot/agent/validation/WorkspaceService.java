@@ -132,6 +132,20 @@ public class WorkspaceService {
         return true;
     }
 
+    /**
+     * Returns whether the workspace contains changes that Git would commit.
+     * Empty directories are intentionally ignored by Git and therefore return {@code false}.
+     */
+    public boolean hasUncommittedChanges(Path workspaceDir) {
+        CommandResult statusResult = runCommand(workspaceDir.toFile(),
+                new String[]{"git", "status", "--porcelain"}, 10);
+        if (!statusResult.success()) {
+            log.warn("Could not inspect workspace git status: {}", statusResult.output());
+            return true;
+        }
+        return !statusResult.output().isBlank();
+    }
+
 
     /**
      * Cleans up a workspace directory by deleting it recursively.

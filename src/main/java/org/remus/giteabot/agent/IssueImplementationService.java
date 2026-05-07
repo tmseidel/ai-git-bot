@@ -16,7 +16,11 @@ import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.mcp.McpToolCatalog;
+import org.remus.giteabot.mcp.McpToolPromptRenderer;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.systemsettings.McpConfiguration;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -54,6 +58,10 @@ public class IssueImplementationService {
     private final ToolExecutionService toolExecutionService;
     private final WorkspaceService workspaceService;
     private final String issueAgentSystemPrompt;
+    private final McpOrchestrationService mcpOrchestrationService;
+    private final McpConfiguration mcpConfiguration;
+    private final McpToolCatalog mcpToolCatalog;
+    private final McpToolPromptRenderer mcpToolPromptRenderer;
 
     // Extracted helpers
     private final AiResponseParser responseParser;
@@ -76,6 +84,20 @@ public class IssueImplementationService {
                                       ToolExecutionService toolExecutionService,
                                       WorkspaceService workspaceService,
                                       String issueAgentSystemPrompt) {
+        this(repositoryClient, aiClient, promptService, agentConfig, sessionService,
+                toolExecutionService, workspaceService, issueAgentSystemPrompt,
+                null, null, McpToolCatalog.empty());
+    }
+
+    public IssueImplementationService(RepositoryApiClient repositoryClient,
+                                      AiClient aiClient, PromptService promptService,
+                                      AgentConfigProperties agentConfig, AgentSessionService sessionService,
+                                      ToolExecutionService toolExecutionService,
+                                      WorkspaceService workspaceService,
+                                      String issueAgentSystemPrompt,
+                                      McpOrchestrationService mcpOrchestrationService,
+                                      McpConfiguration mcpConfiguration,
+                                      McpToolCatalog mcpToolCatalog) {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.promptService = promptService;
@@ -84,6 +106,10 @@ public class IssueImplementationService {
         this.toolExecutionService = toolExecutionService;
         this.workspaceService = workspaceService;
         this.issueAgentSystemPrompt = issueAgentSystemPrompt;
+        this.mcpOrchestrationService = mcpOrchestrationService;
+        this.mcpConfiguration = mcpConfiguration;
+        this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
+        this.mcpToolPromptRenderer = new McpToolPromptRenderer();
 
         this.responseParser = new AiResponseParser();
         this.promptBuilder = new AgentPromptBuilder();
@@ -336,23 +362,45 @@ public class IssueImplementationService {
             // Post only non-silent (validation) tool results as comments
             for (int i = 0; i < requests.size(); i++) {
                 ImplementationPlan.ToolRequest req = requests.get(i);
-                if (!toolExecutionService.isSilentTool(req.getTool())) {
+                if (!toolExecutionService.isSilentTool(req.getTool()) && !isMcpTool(req.getTool())) {
                     notificationService.postToolResultComment(owner, repo, issueNumber, req, results.get(i));
                 }
             }
 
+            if (hasNonValidationToolFailures(requests, results)) {
+                log.info("One or more non-validation tools failed on attempt {}; asking AI to correct", attempt);
+                String feedback = promptBuilder.buildMultiToolFeedback(requests, results);
+                history.add(AiMessage.builder().role("user").content(currentMessage).build());
+                history.add(AiMessage.builder().role("assistant").content(aiResponse).build());
+                currentMessage = feedback;
+                sessionService.addMessage(session, "user", feedback);
+                continue;
+            }
+
             // Validation disabled → treat as success after first tool execution
             if (!agentConfig.getValidation().isEnabled()) {
+                if (!workspaceHasChangesOrPrepareRetry(workspaceDir, requests, results, history, currentMessage, aiResponse, session)) {
+                    currentMessage = buildNoWorkspaceChangesFeedback(requests, results);
+                    continue;
+                }
                 return new ToolImplementationLoopResult(true, currentContextBranch);
             }
 
             // No validation tools present → file-only changes, consider success
             if (!hasValidationTools(requests)) {
+                if (!workspaceHasChangesOrPrepareRetry(workspaceDir, requests, results, history, currentMessage, aiResponse, session)) {
+                    currentMessage = buildNoWorkspaceChangesFeedback(requests, results);
+                    continue;
+                }
                 return new ToolImplementationLoopResult(true, currentContextBranch);
             }
 
             if (allValidationToolsPassed(requests, results)) {
                 log.info("All validation tools passed on attempt {}", attempt);
+                if (!workspaceHasChangesOrPrepareRetry(workspaceDir, requests, results, history, currentMessage, aiResponse, session)) {
+                    currentMessage = buildNoWorkspaceChangesFeedback(requests, results);
+                    continue;
+                }
                 return new ToolImplementationLoopResult(true, currentContextBranch);
             }
 
@@ -389,6 +437,40 @@ public class IssueImplementationService {
                 .filter(i -> toolExecutionService.isValidationTool(requests.get(i).getTool()))
                 .allMatch(i -> results.get(i).success());
     }
+
+    private boolean hasNonValidationToolFailures(List<ImplementationPlan.ToolRequest> requests,
+                                                 List<ToolResult> results) {
+        return IntStream.range(0, requests.size())
+                .filter(i -> !toolExecutionService.isValidationTool(requests.get(i).getTool()))
+                .anyMatch(i -> !results.get(i).success());
+    }
+
+    private boolean workspaceHasChangesOrPrepareRetry(Path workspaceDir,
+                                                      List<ImplementationPlan.ToolRequest> requests,
+                                                      List<ToolResult> results,
+                                                      List<AiMessage> history,
+                                                      String currentMessage,
+                                                      String aiResponse,
+                                                      AgentSession session) {
+        if (workspaceService.hasUncommittedChanges(workspaceDir)) {
+            return true;
+        }
+        log.info("Tool execution produced no Git-detectable workspace changes; asking AI to correct");
+        String feedback = buildNoWorkspaceChangesFeedback(requests, results);
+        history.add(AiMessage.builder().role("user").content(currentMessage).build());
+        history.add(AiMessage.builder().role("assistant").content(aiResponse).build());
+        sessionService.addMessage(session, "user", feedback);
+        return false;
+    }
+
+    private String buildNoWorkspaceChangesFeedback(List<ImplementationPlan.ToolRequest> requests,
+                                                   List<ToolResult> results) {
+        return promptBuilder.buildMultiToolFeedback(requests, results)
+                + "\n\nNo file changes are currently present in the git workspace. "
+                + "Your previous file tools either failed, made no effective change, or only created empty directories. "
+                + "Inspect the files with context tools if needed, then use write-file or patch-file so Git has actual changes to commit.";
+    }
+
     /** Execute each tool and collect results (file tools via executeFileTool, others via context/validation). */
     private List<ToolResult> executeAllTools(Path workspaceDir,
                                               List<ImplementationPlan.ToolRequest> requests) {
@@ -399,6 +481,9 @@ public class IssueImplementationService {
             ToolResult res;
             if (toolExecutionService.isFileTool(req.getTool())) {
                 res = toolExecutionService.executeFileTool(workspaceDir, req.getTool(), req.getArgs());
+            } else if (isMcpTool(req.getTool())) {
+                res = mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog,
+                        req.getTool(), req.getArgs());
             } else if (toolExecutionService.isContextTool(req.getTool())) {
                 res = toolExecutionService.executeContextTool(workspaceDir, req.getTool(), req.getArgs());
             } else {
@@ -539,14 +624,18 @@ public class IssueImplementationService {
                 + "\n**Available context tools** (silent): "
                 + String.join(", ", toolExecutionService.getAvailableContextTools())
                 + "\n**Available validation tools** (results posted as comments): "
-                + String.join(", ", availableTools);
+                + String.join(", ", availableTools)
+                + mcpToolPromptRenderer.render(mcpToolCatalog);
     }
 
     private String resolveAgentSystemPrompt() {
+        String basePrompt;
         if (issueAgentSystemPrompt != null && !issueAgentSystemPrompt.isBlank()) {
-            return issueAgentSystemPrompt;
+            basePrompt = issueAgentSystemPrompt;
+        } else {
+            basePrompt = promptService.getSystemPrompt(AGENT_PROMPT_NAME);
         }
-        return promptService.getSystemPrompt(AGENT_PROMPT_NAME);
+        return basePrompt + mcpToolPromptRenderer.render(mcpToolCatalog);
     }
 
     /**
@@ -634,8 +723,10 @@ public class IssueImplementationService {
                 break;
             }
             toolCount++;
-            ToolResult result = toolExecutionService.executeContextTool(
-                    workspaceDir, toolRequest.getTool(), toolRequest.getArgs());
+            ToolResult result = isMcpTool(toolRequest.getTool())
+                    ? mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog,
+                    toolRequest.getTool(), toolRequest.getArgs())
+                    : toolExecutionService.executeContextTool(workspaceDir, toolRequest.getTool(), toolRequest.getArgs());
             sb.append("### `").append(toolRequest.getTool());
             if (toolRequest.getArgs() != null && !toolRequest.getArgs().isEmpty()) {
                 sb.append(" ").append(String.join(" ", toolRequest.getArgs()));
@@ -724,6 +815,10 @@ public class IssueImplementationService {
             return output;
         }
         return "tool returned no details";
+    }
+
+    private boolean isMcpTool(String toolName) {
+        return mcpOrchestrationService != null && mcpOrchestrationService.isMcpTool(mcpToolCatalog, toolName);
     }
 
     /**

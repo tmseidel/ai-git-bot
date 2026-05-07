@@ -200,6 +200,18 @@ class ToolExecutionServiceTest {
     }
 
     @Test
+    void executeFileTool_writeFile_sameContent_returnsFailure() throws IOException {
+        Path target = tempDir.resolve("Existing.java");
+        Files.writeString(target, "same content");
+
+        ToolResult result = service.executeFileTool(tempDir, "write-file",
+                List.of("Existing.java", "same content"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("would not change file");
+    }
+
+    @Test
     void executeFileTool_patchFile_replacesExactText() throws IOException {
         Path target = tempDir.resolve("Service.java");
         Files.writeString(target, "class Service {\n    private int x = 1;\n}\n");
@@ -224,12 +236,34 @@ class ToolExecutionServiceTest {
     }
 
     @Test
+    void executeFileTool_patchFile_identicalReplacement_returnsFailure() throws IOException {
+        Path target = tempDir.resolve("Service.java");
+        Files.writeString(target, "class Service { int x = 1; }");
+
+        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+                List.of("Service.java", "int x = 1;", "int x = 1;"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("produced no changes");
+    }
+
+    @Test
     void executeFileTool_mkdir_createsDirectory() {
         ToolResult result = service.executeFileTool(tempDir, "mkdir",
                 List.of("new/nested/dir"));
 
         assertThat(result.success()).isTrue();
         assertThat(Files.isDirectory(tempDir.resolve("new/nested/dir"))).isTrue();
+    }
+
+    @Test
+    void executeFileTool_mkdir_existingDirectory_returnsFailure() throws IOException {
+        Files.createDirectories(tempDir.resolve("existing"));
+
+        ToolResult result = service.executeFileTool(tempDir, "mkdir", List.of("existing"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("already exists");
     }
 
     @Test
@@ -245,12 +279,12 @@ class ToolExecutionServiceTest {
     }
 
     @Test
-    void executeFileTool_deleteFile_nonexistent_returnsSuccess() {
+    void executeFileTool_deleteFile_nonexistent_returnsFailure() {
         ToolResult result = service.executeFileTool(tempDir, "delete-file",
                 List.of("DoesNotExist.java"));
 
-        assertThat(result.success()).isTrue();
-        assertThat(result.output()).contains("did not exist");
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("did not exist");
     }
 
     @Test

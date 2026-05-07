@@ -224,11 +224,45 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **Username**: The Git username the bot uses (e.g., "ai_bot"). This is used to detect and ignore the bot's own actions, and as the mention alias (e.g., `@ai_bot`)
    - **Bot Type**: Choose **Coding bot** for pull-request reviews and issue implementation, or **Writer bot** for technical-writing assistance on issues.
    - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, and writer-agent instructions before saving.
+   - **MCP Configuration** *(optional)*: Select a saved MCP configuration. Use **Details** next to the dropdown to open a read-only list of the currently selected MCP tools.
    - **AI Integration**: Select an AI integration from the dropdown
    - **Git Integration**: Select a Git integration from the dropdown
    - **Enabled**: Whether the bot is active
    - **Agent Enabled**: Whether the AI agent feature (issue implementation) is active for a coding bot. This option is hidden for writer bots.
 3. Click **Save**
+
+## MCP Configurations and Tool Selection
+
+MCP support is managed in **System settings → MCP configurations**.
+
+### Create or Edit an MCP Configuration
+
+1. Open **System settings**.
+2. In **MCP configurations**, click **Add** or **Edit**.
+3. Enter a name and your MCP server JSON.
+4. Click **Save and select tools**.
+
+After saving, the application contacts all MCP servers defined in the JSON, discovers tools, and opens the tool selection screen.
+
+### Select Which MCP Tools Are Exposed
+
+The MCP tool selection screen provides:
+
+- server-grouped tool rows
+- free-text filter
+- server filter
+- sortable columns
+- page size + next/previous paging
+- per-row selection and **select all visible** in the table header
+
+Only selected tools are persisted and appended to system prompts (whitelist behavior). Unselected tools are not exposed to the AI agent.
+
+You can open tool selection at any time (without changing JSON) via:
+
+- **System settings → MCP configurations → Tools**
+- **Edit MCP Configuration → Select tools**
+
+For an end-to-end MCP workflow guide (JSON creation, whitelist selection, bot details dialog, and transparency/audit notes), see [MCP Server Handling](MCP_SERVER_HANDLING.md).
 
 ### Webhook URL
 

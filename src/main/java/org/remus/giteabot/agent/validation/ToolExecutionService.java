@@ -276,6 +276,14 @@ public class ToolExecutionService {
             return new ToolResult(false, -1, "", e.getMessage());
         }
         try {
+            if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
+                String existingContent = Files.readString(filePath, StandardCharsets.UTF_8);
+                if (existingContent.equals(content)) {
+                    return new ToolResult(false, 1, "",
+                            "write-file would not change file: " + relativePath
+                                    + ". Provide different content or skip this tool.");
+                }
+            }
             Files.createDirectories(filePath.getParent());
             Files.writeString(filePath, content, StandardCharsets.UTF_8);
             log.info("write-file: wrote {} bytes to {}", content.length(), relativePath);
@@ -320,6 +328,11 @@ public class ToolExecutionService {
                                 + "(use `cat` to identify a unique surrounding context).");
             }
             String newContent = originalContent.replace(searchText, replacementText);
+            if (newContent.equals(originalContent)) {
+                return new ToolResult(false, 1, "",
+                        "patch-file produced no changes in " + relativePath
+                                + ". The replacement is identical to the matched text.");
+            }
             Files.writeString(filePath, newContent, StandardCharsets.UTF_8);
             log.info("patch-file: patched {}", relativePath);
             return new ToolResult(true, 0, "File patched: " + relativePath, "");
@@ -351,6 +364,10 @@ public class ToolExecutionService {
             return new ToolResult(false, -1, "", e.getMessage());
         }
         try {
+            if (Files.isDirectory(dirPath)) {
+                return new ToolResult(false, 1, "",
+                        "mkdir would not change workspace; directory already exists: " + relativePath);
+            }
             Files.createDirectories(dirPath);
             log.info("mkdir: created directory {}", relativePath);
             return new ToolResult(true, 0, "Directory created: " + relativePath, "");
@@ -376,11 +393,9 @@ public class ToolExecutionService {
                 log.info("delete-file: deleted {}", relativePath);
                 return new ToolResult(true, 0, "File deleted: " + relativePath, "");
             } else {
-                // Return a visible warning so the AI notices a potential path typo.
                 log.warn("delete-file: file did not exist: {}", relativePath);
-                return new ToolResult(true, 1,
-                        "Warning: file did not exist, nothing was deleted — verify the path: "
-                                + relativePath, "");
+                return new ToolResult(false, 1, "",
+                        "delete-file would not change workspace; file did not exist: " + relativePath);
             }
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "delete-file failed: " + e.getMessage());

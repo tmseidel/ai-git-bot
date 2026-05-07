@@ -3,6 +3,7 @@ package org.remus.giteabot.admin;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.time.Instant;
@@ -26,6 +27,10 @@ public class Bot {
     @ManyToOne(optional = false)
     @JoinColumn(name = "system_prompt_id", nullable = false)
     private SystemPrompt systemPrompt;
+
+    @ManyToOne
+    @JoinColumn(name = "mcp_configuration_id")
+    private McpConfiguration mcpConfiguration;
 
     private String webhookSecret;
 

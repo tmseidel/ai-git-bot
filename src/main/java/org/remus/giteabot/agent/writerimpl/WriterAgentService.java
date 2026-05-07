@@ -14,7 +14,11 @@ import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.mcp.McpToolCatalog;
+import org.remus.giteabot.mcp.McpToolPromptRenderer;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.springframework.dao.DataIntegrityViolationException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,9 +45,13 @@ public class WriterAgentService {
     private final WorkspaceService workspaceService;
     private final String writerAgentSystemPrompt;
     private final String botUsername;
+    private final McpOrchestrationService mcpOrchestrationService;
+    private final McpConfiguration mcpConfiguration;
+    private final McpToolCatalog mcpToolCatalog;
     private final AgentErrorNotificationService errorNotificationService;
     private final WriterPromptBuilder promptBuilder = new WriterPromptBuilder();
     private final WriterResponseParser responseParser = new WriterResponseParser();
+    private final McpToolPromptRenderer mcpToolPromptRenderer = new McpToolPromptRenderer();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public WriterAgentService(RepositoryApiClient repositoryClient,
@@ -55,6 +63,23 @@ public class WriterAgentService {
                               WorkspaceService workspaceService,
                               String writerAgentSystemPrompt,
                               String botUsername) {
+        this(repositoryClient, aiClient, promptService, agentConfig, sessionService,
+                toolExecutionService, workspaceService, writerAgentSystemPrompt, botUsername,
+                null, null, McpToolCatalog.empty());
+    }
+
+    public WriterAgentService(RepositoryApiClient repositoryClient,
+                              AiClient aiClient,
+                              PromptService promptService,
+                              AgentConfigProperties agentConfig,
+                              AgentSessionService sessionService,
+                              ToolExecutionService toolExecutionService,
+                              WorkspaceService workspaceService,
+                              String writerAgentSystemPrompt,
+                              String botUsername,
+                              McpOrchestrationService mcpOrchestrationService,
+                              McpConfiguration mcpConfiguration,
+                              McpToolCatalog mcpToolCatalog) {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.promptService = promptService;
@@ -64,6 +89,9 @@ public class WriterAgentService {
         this.workspaceService = workspaceService;
         this.writerAgentSystemPrompt = writerAgentSystemPrompt;
         this.botUsername = botUsername;
+        this.mcpOrchestrationService = mcpOrchestrationService;
+        this.mcpConfiguration = mcpConfiguration;
+        this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
         this.errorNotificationService = new AgentErrorNotificationService(repositoryClient);
     }
 
@@ -121,7 +149,6 @@ public class WriterAgentService {
                     promptBuilder.buildInitialPrompt(issueNumber, issueTitle, issueBody, treeContext));
         } catch (DataIntegrityViolationException e) {
             log.info("Writer session was created concurrently for issue #{} in {}/{}", issueNumber, owner, repo);
-            return;
         } catch (Exception e) {
             log.error("Writer failed while handling assignment for issue #{} in {}/{}: {}",
                     issueNumber, owner, repo, e.getMessage(), e);
@@ -339,6 +366,9 @@ public class WriterAgentService {
                                     .limit(10)
                                     .map(this::curateIssue)
                                     .toList()), ""));
+                } else if (isMcpTool(request.getTool())) {
+                    results.add(mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog,
+                            request.getTool(), args));
                 } else if (toolExecutionService.isContextTool(tool)) {
                     results.add(toolExecutionService.executeContextTool(workspaceDir, tool, args));
                 } else {
@@ -466,10 +496,13 @@ public class WriterAgentService {
     }
 
     private String resolveWriterSystemPrompt() {
+        String basePrompt;
         if (writerAgentSystemPrompt != null && !writerAgentSystemPrompt.isBlank()) {
-            return writerAgentSystemPrompt;
+            basePrompt = writerAgentSystemPrompt;
+        } else {
+            basePrompt = promptService.getSystemPrompt(WRITER_PROMPT_NAME);
         }
-        return promptService.getSystemPrompt(WRITER_PROMPT_NAME);
+        return basePrompt + mcpToolPromptRenderer.render(mcpToolCatalog);
     }
 
     private String outputContract() {
@@ -487,6 +520,7 @@ public class WriterAgentService {
                   "readyToCreate": true
                 }
                 Available writer tools: get-issue, search-issues, branch-switcher, rg, ripgrep, grep, find, cat, git-log, git-blame, tree.
+                %s
                 Search-tool args use the shape [pattern, path?, flags?]. Common flags like -i, -n, -l and --include=*.java are supported.
                 `find` supports both [glob, path?] and shell-like forms such as ["src/main/java", "-name", "*.java"].
                 For alternation in rg/ripgrep/grep patterns, use `|` (not `\\|`).
@@ -495,7 +529,7 @@ public class WriterAgentService {
                 Do not request repository write tools, file mutation tools, or build/validation tools.
                 If critical information is missing, set readyToCreate=false and include clarifyingQuestions.
                 If no critical questions remain, set readyToCreate=true and include revisedIssueDraft.
-                """;
+                """.formatted(mcpToolPromptRenderer.render(mcpToolCatalog));
     }
 
     private String normalizeBranchRef(String ref) {
@@ -531,6 +565,10 @@ public class WriterAgentService {
             return result.output();
         }
         return "tool returned no details";
+    }
+
+    private boolean isMcpTool(String toolName) {
+        return mcpOrchestrationService != null && mcpOrchestrationService.isMcpTool(mcpToolCatalog, toolName);
     }
 
     private void handleWriterFailure(AgentSession session, String owner, String repo,

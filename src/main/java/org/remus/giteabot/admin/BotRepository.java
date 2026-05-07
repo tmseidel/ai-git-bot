@@ -10,18 +10,20 @@ import java.util.Optional;
 
 @Repository
 public interface BotRepository extends JpaRepository<Bot, Long> {
-    @Query("SELECT b FROM Bot b LEFT JOIN FETCH b.aiIntegration LEFT JOIN FETCH b.gitIntegration LEFT JOIN FETCH b.systemPrompt WHERE b.webhookSecret = :secret")
+    @Query("SELECT b FROM Bot b LEFT JOIN FETCH b.aiIntegration LEFT JOIN FETCH b.gitIntegration LEFT JOIN FETCH b.systemPrompt LEFT JOIN FETCH b.mcpConfiguration WHERE b.webhookSecret = :secret")
     Optional<Bot> findByWebhookSecret(@Param("secret") String webhookSecret);
 
-    @Query("SELECT b FROM Bot b LEFT JOIN FETCH b.aiIntegration LEFT JOIN FETCH b.gitIntegration LEFT JOIN FETCH b.systemPrompt")
+    @Query("SELECT b FROM Bot b LEFT JOIN FETCH b.aiIntegration LEFT JOIN FETCH b.gitIntegration LEFT JOIN FETCH b.systemPrompt LEFT JOIN FETCH b.mcpConfiguration")
     List<Bot> findAllWithIntegrations();
 
-    @Query("SELECT b FROM Bot b LEFT JOIN FETCH b.aiIntegration LEFT JOIN FETCH b.gitIntegration LEFT JOIN FETCH b.systemPrompt WHERE b.id = :id")
+    @Query("SELECT b FROM Bot b LEFT JOIN FETCH b.aiIntegration LEFT JOIN FETCH b.gitIntegration LEFT JOIN FETCH b.systemPrompt LEFT JOIN FETCH b.mcpConfiguration WHERE b.id = :id")
     Optional<Bot> findByIdWithIntegrations(@Param("id") Long id);
 
     List<Bot> findBySystemPromptId(Long systemPromptId);
 
     long countBySystemPromptId(Long systemPromptId);
+
+    List<Bot> findByMcpConfigurationId(Long mcpConfigurationId);
 
     boolean existsByName(String name);
 }

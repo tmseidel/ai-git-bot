@@ -61,6 +61,8 @@ graph LR
 
     Gateway["🌉 AI-Git-Bot\n(Gateway)"]
     DB["🗄️ PostgreSQL\n(Config & Sessions)"]
+    MCPServers["🔌 Remote MCP Servers"]
+    MCPConfig["🧰 MCP Config +\nTool Whitelist"]
 
     Gitea <--> Gateway
     GitHub <--> Gateway
@@ -70,6 +72,9 @@ graph LR
     Gateway <--> OpenAI
     Gateway <--> Ollama
     Gateway <--> llama.cpp
+    Gateway <--> MCPServers
+    MCPConfig --> Gateway
+    MCPConfig --> DB
     Gateway --> DB
 ```
 
@@ -167,6 +172,17 @@ Typical writer-bot use cases:
 - create a linked `AI Created Issue: ...` once enough context is available
 
 Writer bots are currently intended for providers with issue-assignment workflows such as **Gitea, GitHub, and GitLab**. They ignore pull-request review events and never modify repository files.
+
+### 🧩 MCP Server Orchestration and Tool Whitelisting
+
+Attach remote MCP server configurations to bots and control exactly which MCP tools are exposed to agent prompts:
+
+- discover tools from all configured MCP servers
+- select allowed tools in a pageable/filterable/sortable whitelist UI
+- expose only selected MCP tools to coding and writer agents
+- inspect selected MCP tools in bot configuration via a read-only details dialog
+
+See [MCP Server Handling](doc/MCP_SERVER_HANDLING.md) for the full workflow.
 
 ### 🖥️ Web-Based Management
 
@@ -304,15 +320,20 @@ graph LR
     Git["Git Platform<br/>(Gitea / GitHub / GitLab / Bitbucket)"]
     Bot["AI-Git-Bot<br/>(Gateway)"]
     AI["AI Provider<br/>(Anthropic / OpenAI / Ollama / llama.cpp)"]
+    MCPConfig["MCP Config + Tool Whitelist"]
+    MCPServers["Remote MCP Servers"]
     DB["PostgreSQL"]
 
     Git -- "Webhooks" --> Bot
     Bot -- "Fetch diff, post reviews" --> Git
     Bot -- "AI review requests" --> AI
+    Bot -- "MCP discovery / tool calls" --> MCPServers
+    MCPConfig -- "selected tools" --> Bot
     Bot -- "Configuration & Sessions" --> DB
+    MCPConfig -- "persisted selection" --> DB
 ```
 
-The bot receives webhooks from your Git provider, fetches PR diffs, sends them to the configured AI provider for review, and posts the results back. All configuration (AI integrations, Git integrations, bots) and conversation sessions are persisted in the database.
+The bot receives webhooks from your Git provider, fetches PR diffs, sends them to the configured AI provider for review, and posts the results back. Optional MCP capabilities are orchestrated in the application layer and limited by a persisted per-configuration tool whitelist. All configuration (AI integrations, Git integrations, bots, MCP configurations, MCP selected tools) and conversation sessions are persisted in the database.
 
 ➡️ See the [Architecture Documentation](doc/ARCHITECTURE.md) for detailed component diagrams and request flows.
 
@@ -321,6 +342,7 @@ The bot receives webhooks from your Git provider, fetches PR diffs, sends them t
 | Document | Description |
 |----------|-------------|
 | [User Guide](doc/USER_GUIDE.md) | Web UI usage, creating bots and integrations |
+| [MCP Server Handling](doc/MCP_SERVER_HANDLING.md) | MCP JSON setup, tool whitelist selection, bot details view, and MCP call transparency |
 | [Architecture](doc/ARCHITECTURE.md) | Component diagrams, request flows, webhook routing |
 | [Agent](doc/AGENT.md) | Coding agent and technical writer agent — setup, tools, and workflows |
 | **Git Provider Setup** | |

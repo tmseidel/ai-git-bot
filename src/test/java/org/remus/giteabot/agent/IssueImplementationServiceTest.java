@@ -58,6 +58,7 @@ class IssueImplementationServiceTest {
         // isValidationTool is the authoritative check for validation tools; delegate to getAvailableTools()
         lenient().when(toolExecutionService.isValidationTool(anyString()))
                 .thenAnswer(inv -> Objects.equals("mvn", inv.getArgument(0)));
+        lenient().when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
     }
 
     // ---- handleIssueAssigned tests ----
@@ -135,6 +136,80 @@ class IssueImplementationServiceTest {
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
         // at least 2 comments posted
         verify(repositoryClient, atLeast(2)).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L), anyString());
+    }
+
+    @Test
+    void handleIssueAssigned_fileToolFailureWithPassingValidation_retriesInsteadOfCommittingNoChanges() {
+        WebhookPayload payload = createIssuePayload();
+
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
+                isNull(), isNull()))
+                .thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+
+        String contextResponse = """
+                ```json
+                {"summary": "Need context", "requestFiles": []}
+                ```
+                """;
+        String failedPatchResponse = """
+                ```json
+                {
+                  "summary": "Try patch",
+                  "runTools": [
+                    {"id": "patch-1", "tool": "patch-file", "args": ["README.md", "missing", "replacement"]},
+                    {"id": "validate-1", "tool": "mvn", "args": ["validate", "-q", "-B"]}
+                  ]
+                }
+                ```
+                """;
+        String fixedWriteResponse = """
+                ```json
+                {
+                  "summary": "Write file after patch failed",
+                  "runTools": [
+                    {"id": "write-1", "tool": "write-file", "args": ["README.md", "updated"]},
+                    {"id": "validate-2", "tool": "mvn", "args": ["validate", "-q", "-B"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn(contextResponse, failedPatchResponse, fixedWriteResponse);
+
+        when(toolExecutionService.isFileTool("patch-file")).thenReturn(true);
+        when(toolExecutionService.isFileTool("write-file")).thenReturn(true);
+        when(toolExecutionService.isFileTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isContextTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isSilentTool("patch-file")).thenReturn(true);
+        when(toolExecutionService.isSilentTool("write-file")).thenReturn(true);
+        when(toolExecutionService.isSilentTool("mvn")).thenReturn(false);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("patch-file"), anyList()))
+                .thenReturn(new ToolResult(false, 1, "", "patch-file: search text not found in file: README.md"));
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File written: README.md", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(true)))
+                .thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
+
+        service.handleIssueAssigned(payload);
+
+        verify(toolExecutionService).executeFileTool(eq(FAKE_WORKSPACE), eq("patch-file"),
+                eq(List.of("README.md", "missing", "replacement")));
+        verify(toolExecutionService).executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"),
+                eq(List.of("README.md", "updated")));
+        verify(workspaceService, times(1)).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(true));
+        verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"));
     }
 
     @Test

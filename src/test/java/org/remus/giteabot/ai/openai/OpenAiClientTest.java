@@ -7,6 +7,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -58,5 +59,17 @@ class OpenAiClientTest {
                 StandardCharsets.UTF_8);
 
         assertFalse(client.isPromptTooLongError(ex));
+    }
+
+
+    private OpenAiResponse response(String text) {
+        OpenAiResponse response = new OpenAiResponse();
+        OpenAiResponse.Message message = new OpenAiResponse.Message();
+        message.setRole("assistant");
+        message.setContent(text);
+        OpenAiResponse.Choice choice = new OpenAiResponse.Choice();
+        choice.setMessage(message);
+        response.setChoices(List.of(choice));
+        return response;
     }
 }

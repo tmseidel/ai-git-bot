@@ -39,4 +39,42 @@ class WorkspaceServiceTest {
                 "https://git.example.com/", "tok");
         assertThat(url).isEqualTo("https://oauth2:tok@git.example.com/owner/repo.git");
     }
+
+    @Test
+    void hasUncommittedChanges_detectsModifiedTrackedFile() throws IOException, InterruptedException {
+        initGitRepository(tempDir);
+        Path file = tempDir.resolve("README.md");
+        Files.writeString(file, "changed");
+
+        assertThat(workspaceService.hasUncommittedChanges(tempDir)).isTrue();
+    }
+
+    @Test
+    void hasUncommittedChanges_ignoresEmptyDirectory() throws IOException, InterruptedException {
+        initGitRepository(tempDir);
+        Files.createDirectories(tempDir.resolve("empty-dir"));
+
+        assertThat(workspaceService.hasUncommittedChanges(tempDir)).isFalse();
+    }
+
+    private void initGitRepository(Path dir) throws IOException, InterruptedException {
+        runGit(dir, "init");
+        runGit(dir, "config", "user.email", "test@example.com");
+        runGit(dir, "config", "user.name", "Test User");
+        Files.writeString(dir.resolve("README.md"), "initial");
+        runGit(dir, "add", "README.md");
+        runGit(dir, "commit", "-m", "initial");
+    }
+
+    private void runGit(Path dir, String... args) throws IOException, InterruptedException {
+        String[] command = new String[args.length + 1];
+        command[0] = "git";
+        System.arraycopy(args, 0, command, 1, args.length);
+        Process process = new ProcessBuilder(command)
+                .directory(dir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        int exitCode = process.waitFor();
+        assertThat(exitCode).isZero();
+    }
 }

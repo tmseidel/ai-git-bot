@@ -93,6 +93,25 @@
                             </select>
                         </div>
 
+                        <div class="col-12">
+                            <label for="mcpConfigurationId" class="form-label">MCP Configuration</label>
+                            <div class="input-group">
+                                <select class="form-select" id="mcpConfigurationId" name="mcpConfigurationId">
+                                    <option value="">No MCP configuration</option>
+                                    <option th:each="mcpConfiguration : ${mcpConfigurations}"
+                                            th:value="${mcpConfiguration.id}" th:text="${mcpConfiguration.name}"
+                                            th:selected="${bot.mcpConfiguration != null and bot.mcpConfiguration.id == mcpConfiguration.id}">
+                                    </option>
+                                </select>
+                                <button class="btn btn-outline-secondary" type="button" id="mcpSelectionDetailsBtn">
+                                    <i class="bi bi-eye"></i> Details
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                Optional remote MCP tools. Only selected tools are exposed to the prompt.
+                            </div>
+                        </div>
+
                         <div class="col-md-6">
                             <div class="form-check form-switch mt-3">
                                 <input class="form-check-input" type="checkbox" id="enabled"
@@ -142,11 +161,27 @@
             </div>
         </div>
 
+        <div class="modal fade" id="mcpSelectionDetailsModal" tabindex="-1" aria-labelledby="mcpSelectionDetailsTitle"
+             aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="mcpSelectionDetailsTitle">Selected MCP tools</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="mcpSelectionDetailsBody" class="small"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
         <script th:inline="javascript">
             /*<![CDATA[*/
             const systemPromptPreviewBaseUrl = /*[[@{/system-settings/system-prompts/}]]*/ '/system-settings/system-prompts/';
+            const mcpSelectedToolsBaseUrl = /*[[@{/bots/mcp-configurations/}]]*/ '/bots/mcp-configurations/';
 
             document.addEventListener('DOMContentLoaded', function() {
                 const systemPromptSelect = document.getElementById('systemPromptId');
@@ -159,6 +194,10 @@
                 const agentContainer = document.getElementById('agentEnabledContainer');
                 const agentEnabled = document.getElementById('agentEnabled');
                 const previewModal = new bootstrap.Modal(document.getElementById('systemPromptPreviewModal'));
+                const mcpConfigurationSelect = document.getElementById('mcpConfigurationId');
+                const mcpSelectionDetailsBtn = document.getElementById('mcpSelectionDetailsBtn');
+                const mcpSelectionDetailsBody = document.getElementById('mcpSelectionDetailsBody');
+                const mcpSelectionDetailsModal = new bootstrap.Modal(document.getElementById('mcpSelectionDetailsModal'));
 
                 function renderMarkdown(markdown) {
                     return DOMPurify.sanitize(marked.parse(markdown || ''));
@@ -194,6 +233,61 @@
                             agentPreview.innerHTML = renderMarkdown(selectedPrompt.issueAgentSystemPrompt);
                             writerPreview.innerHTML = renderMarkdown(selectedPrompt.writerAgentSystemPrompt);
                             previewModal.show();
+                        })
+                        .catch(function(error) {
+                            alert(error.message);
+                        });
+                });
+
+                function renderMcpToolTable(tools) {
+                    function escapeHtml(value) {
+                        return String(value || '')
+                            .replace(/&/g, '&amp;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;')
+                            .replace(/\"/g, '&quot;')
+                            .replace(/'/g, '&#39;');
+                    }
+                    if (!tools || tools.length === 0) {
+                        return '<p class="text-muted mb-0">No selected MCP tools.</p>';
+                    }
+                    const rows = tools.map(function(tool) {
+                        const title = tool.title && tool.title.trim() ? escapeHtml(tool.title) : '-';
+                        const description = tool.description && tool.description.trim() ? escapeHtml(tool.description) : '-';
+                        return '<tr>'
+                            + '<td><code>' + escapeHtml(tool.serverName) + '</code></td>'
+                            + '<td><code>' + escapeHtml(tool.toolName) + '</code></td>'
+                            + '<td>' + title + '</td>'
+                            + '<td>' + description + '</td>'
+                            + '</tr>';
+                    }).join('');
+                    return '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">'
+                        + '<thead class="table-light"><tr><th>Server</th><th>Tool</th><th>Title</th><th>Description</th></tr></thead>'
+                        + '<tbody>' + rows + '</tbody></table></div>';
+                }
+
+                function updateMcpDetailButtonState() {
+                    mcpSelectionDetailsBtn.disabled = !mcpConfigurationSelect.value;
+                }
+
+                mcpConfigurationSelect.addEventListener('change', updateMcpDetailButtonState);
+                updateMcpDetailButtonState();
+
+                mcpSelectionDetailsBtn.addEventListener('click', function() {
+                    const selectedMcpId = mcpConfigurationSelect.value;
+                    if (!selectedMcpId) {
+                        return;
+                    }
+                    fetch(mcpSelectedToolsBaseUrl + encodeURIComponent(selectedMcpId) + '/selected-tools')
+                        .then(function(response) {
+                            if (!response.ok) {
+                                throw new Error('MCP tool details could not be loaded.');
+                            }
+                            return response.json();
+                        })
+                        .then(function(tools) {
+                            mcpSelectionDetailsBody.innerHTML = renderMcpToolTable(tools);
+                            mcpSelectionDetailsModal.show();
                         })
                         .catch(function(error) {
                             alert(error.message);

@@ -133,6 +133,7 @@ public class LlamaCppClient extends AbstractAiClient {
                 || lower.contains("\"runtool\"");
     }
 
+
     private String doRequest(String prompt, int maxTokens, String context, String grammar) {
         LlamaCppRequest.LlamaCppRequestBuilder requestBuilder = LlamaCppRequest.builder()
                 .prompt(prompt)
@@ -157,13 +158,17 @@ public class LlamaCppClient extends AbstractAiClient {
         log.debug("llama.cpp request to /completion: promptLength={}, maxTokens={}, grammar={}",
                 prompt.length(), maxTokens, grammar != null);
 
-        LlamaCppResponse response = restClient.post()
+        LlamaCppResponse response = executeRequest(request);
+
+        return extractText(response, context);
+    }
+
+    private LlamaCppResponse executeRequest(LlamaCppRequest request) {
+        return restClient.post()
                 .uri("/completion")
                 .body(request)
                 .retrieve()
                 .body(LlamaCppResponse.class);
-
-        return extractText(response, context);
     }
 
     private String extractText(LlamaCppResponse response, String context) {
@@ -190,4 +195,3 @@ public class LlamaCppClient extends AbstractAiClient {
         return result;
     }
 }
-
