@@ -137,6 +137,26 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
+    public List<Map<String, Object>> getIssueComments(String owner, String repo, Long issueNumber) {
+        log.info("Fetching comments for issue #{} in {}/{}", issueNumber, owner, repo);
+        Map<String, Object> result = restClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/repositories/{workspace}/{repo}/issues/{issue_id}/comments")
+                        .queryParam("pagelen", 50)
+                        .build(owner, repo, issueNumber))
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (result != null && result.get("values") instanceof List<?> values) {
+            return values.stream()
+                    .filter(Map.class::isInstance)
+                    .map(value -> (Map<String, Object>) value)
+                    .toList();
+        }
+        return List.of();
+    }
+
+    @Override
     public void addReaction(String owner, String repo, Long commentId, String reaction) {
         // Bitbucket Cloud does not support reactions on comments.
         log.debug("Reactions not supported on Bitbucket Cloud, ignoring reaction '{}' on comment #{}",
@@ -256,38 +276,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
         return content != null ? content : "";
     }
 
-    @Override
-    @SuppressWarnings("unchecked")
-    public String getFileSha(String owner, String repo, String path, String ref) {
-        log.info("Fetching file SHA for {}/{}/{} at ref={}", owner, repo, path, ref);
-        Map<String, Object> result = restClient.get()
-                .uri(uriBuilder -> uriBuilder
-                        .path("/repositories/{workspace}/{repo}/src/{ref}/")
-                        .path(path)
-                        .queryParam("format", "meta")
-                        .build(owner, repo, ref))
-                .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("commit")) {
-            Map<String, Object> commit = (Map<String, Object>) result.get("commit");
-            return (String) commit.get("hash");
-        }
-        return null;
-    }
 
-    @Override
-    public void createBranch(String owner, String repo, String branchName, String fromRef) {
-        log.info("Creating branch '{}' from '{}' in {}/{}", branchName, fromRef, owner, repo);
-        restClient.post()
-                .uri("/repositories/{workspace}/{repo}/refs/branches", owner, repo)
-                .body(Map.of(
-                        "name", branchName,
-                        "target", Map.of("hash", resolveRef(owner, repo, fromRef))
-                ))
-                .retrieve()
-                .toBodilessEntity();
-        log.info("Branch '{}' created successfully", branchName);
-    }
 
     @Override
     public void createOrUpdateFile(String owner, String repo, String path, String content,
@@ -303,20 +292,6 @@ public class BitbucketApiClient implements RepositoryApiClient {
                 .retrieve()
                 .toBodilessEntity();
         log.info("File {} committed successfully", path);
-    }
-
-    @Override
-    public void deleteFile(String owner, String repo, String path, String message,
-                           String branch, String sha) {
-        log.info("Deleting file {} on branch '{}' in {}/{}", path, branch, owner, repo);
-        restClient.post()
-                .uri("/repositories/{workspace}/{repo}/src", owner, repo)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .body(String.format("message=%s&branch=%s&files=%s",
-                        urlEncode(message), urlEncode(branch), urlEncode(path)))
-                .retrieve()
-                .toBodilessEntity();
-        log.info("File {} deleted successfully", path);
     }
 
     @Override
@@ -342,38 +317,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
         return prId;
     }
 
-    @Override
-    public void deleteBranch(String owner, String repo, String branchName) {
-        log.info("Deleting branch '{}' in {}/{}", branchName, owner, repo);
-        try {
-            restClient.delete()
-                    .uri("/repositories/{workspace}/{repo}/refs/branches/{branch}",
-                            owner, repo, branchName)
-                    .retrieve()
-                    .toBodilessEntity();
-            log.info("Branch '{}' deleted successfully", branchName);
-        } catch (Exception e) {
-            log.warn("Failed to delete branch '{}': {}", branchName, e.getMessage());
-        }
-    }
-
     // ---- Internal helpers ----
-
-    private String resolveRef(String owner, String repo, String ref) {
-        try {
-            Map<String, Object> result = restClient.get()
-                    .uri("/repositories/{workspace}/{repo}/refs/branches/{branch}",
-                            owner, repo, ref)
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<>() {});
-            if (result != null && result.get("target") instanceof Map<?, ?> target) {
-                return (String) target.get("hash");
-            }
-        } catch (Exception e) {
-            log.debug("Could not resolve ref '{}', using as-is: {}", ref, e.getMessage());
-        }
-        return ref;
-    }
 
     private String urlEncode(String value) {
         return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);

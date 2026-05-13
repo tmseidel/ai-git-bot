@@ -3,6 +3,7 @@ package org.remus.giteabot.agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.session.AgentSession;
@@ -28,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
@@ -52,7 +54,9 @@ class IssueImplementationServiceTest {
         agentConfig.setEnabled(true);
         agentConfig.setMaxFiles(10);
         agentConfig.setBranchPrefix("ai-agent/");
-        service = new IssueImplementationService(repositoryClient, aiClient, promptService, agentConfig,
+        IssueImplementationContext context = new IssueImplementationContext(
+                repositoryClient, aiClient, null, null, null, null, McpToolCatalog.empty());
+        service = new IssueImplementationService(context, promptService, agentConfig,
                 sessionService, toolExecutionService, workspaceService);
 
         // Default stubs – marked lenient so tests that don't reach buildToolsInfo() don't fail
@@ -74,6 +78,10 @@ class IssueImplementationServiceTest {
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
                 .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
+                .thenReturn(List.of(
+                        Map.of("body", "Please keep backward compatibility", "user", Map.of("login", "alice")),
+                        Map.of("body", "Also add a migration note", "user", Map.of("login", "bob"))));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
                 isNull(), isNull()))
@@ -140,6 +148,72 @@ class IssueImplementationServiceTest {
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
         // at least 2 comments posted
         verify(repositoryClient, atLeast(2)).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L), anyString());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiClient, times(2)).chat(anyList(), promptCaptor.capture(), anyString(), isNull(), anyInt());
+        assertThat(promptCaptor.getAllValues().get(0)).contains("Please keep backward compatibility");
+        assertThat(promptCaptor.getAllValues().get(1)).contains("Also add a migration note");
+    }
+
+    @Test
+    void handleIssueAssigned_excludesBotAuthoredIssueCommentsFromPromptContext() {
+        IssueImplementationService serviceWithBotUsername = createServiceWithBotUsername("ai_bot");
+        WebhookPayload payload = createIssuePayload();
+
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
+                .thenReturn(List.of(
+                        Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
+                                "user", Map.of("login", "ai_bot")),
+                        Map.of("body", "Human clarification that must be implemented",
+                                "user", Map.of("login", "alice"))));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
+                isNull(), isNull()))
+                .thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+
+        String contextResponse = """
+                ```json
+                {"summary": "Need context", "requestFiles": []}
+                ```
+                """;
+        String implResponse = """
+                ```json
+                {
+                  "summary": "Implemented the feature",
+                  "runTools": [
+                    {"id": "a1", "tool": "write-file", "args": ["src/Feature.java", "public class Feature {}"]},
+                    {"id": "b1", "tool": "mvn", "args": ["compile", "-q", "-B"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn(contextResponse, implResponse);
+        when(toolExecutionService.isFileTool("write-file")).thenReturn(true);
+        when(toolExecutionService.isFileTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isContextTool("mvn")).thenReturn(false);
+        when(toolExecutionService.isSilentTool("write-file")).thenReturn(true);
+        when(toolExecutionService.isSilentTool("mvn")).thenReturn(false);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File written", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(true)))
+                .thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
+
+        serviceWithBotUsername.handleIssueAssigned(payload);
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiClient, times(2)).chat(anyList(), promptCaptor.capture(), anyString(), isNull(), anyInt());
+        assertThat(promptCaptor.getAllValues().get(0)).contains("Human clarification that must be implemented");
+        assertThat(promptCaptor.getAllValues().get(0)).doesNotContain("I've been assigned to this issue");
+        assertThat(promptCaptor.getAllValues().get(1)).contains("Human clarification that must be implemented");
+        assertThat(promptCaptor.getAllValues().get(1)).doesNotContain("I've been assigned to this issue");
     }
 
     @Test
@@ -589,6 +663,8 @@ class IssueImplementationServiceTest {
 
         when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
                 .thenReturn(Optional.of(session));
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
+                .thenReturn(List.of(Map.of("body", "Existing clarification from issue author", "user", Map.of("login", "alice"))));
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(
@@ -650,6 +726,10 @@ class IssueImplementationServiceTest {
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
                 anyString(), anyString(), anyString(), eq(false));
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(aiClient, times(2)).chat(anyList(), promptCaptor.capture(), anyString(), isNull(), anyInt());
+        assertThat(promptCaptor.getAllValues().get(0)).contains("Existing clarification from issue author");
+        assertThat(promptCaptor.getAllValues().get(0)).contains("Please trace where Config is used");
     }
 
     @Test
@@ -867,8 +947,20 @@ class IssueImplementationServiceTest {
                 Map.of(),
                 "mcp:github:list_issues"
         )));
-        return new IssueImplementationService(repositoryClient, aiClient, promptService, agentConfig,
-                sessionService, toolExecutionService, workspaceService, null,
-                mcpOrchestrationService, null, catalog);
+        IssueImplementationContext context = new IssueImplementationContext(
+                repositoryClient, aiClient, null, null, mcpOrchestrationService, null, catalog);
+        return new IssueImplementationService(context, promptService, agentConfig,
+                sessionService, toolExecutionService, workspaceService);
+    }
+
+    private IssueImplementationService createServiceWithBotUsername(String botUsername) {
+        AgentConfigProperties agentConfig = new AgentConfigProperties();
+        agentConfig.setEnabled(true);
+        agentConfig.setMaxFiles(10);
+        agentConfig.setBranchPrefix("ai-agent/");
+        IssueImplementationContext context = new IssueImplementationContext(
+                repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty());
+        return new IssueImplementationService(context, promptService, agentConfig,
+                sessionService, toolExecutionService, workspaceService);
     }
 }

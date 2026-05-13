@@ -12,6 +12,11 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-giteabot}
       # Encryption key for API keys stored in database (optional, but recommended for production)
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      # Optional agent prompt context limits; reduce these for small local LLM context windows
+      AGENT_CONTEXT_MAX_TREE_FILES: ${AGENT_CONTEXT_MAX_TREE_FILES:-500}
+      AGENT_CONTEXT_MAX_ISSUE_COMMENTS: ${AGENT_CONTEXT_MAX_ISSUE_COMMENTS:-50}
+      AGENT_CONTEXT_MAX_ISSUE_COMMENTS_CHARS: ${AGENT_CONTEXT_MAX_ISSUE_COMMENTS_CHARS:-20000}
+      AGENT_CONTEXT_MAX_SINGLE_ISSUE_COMMENT_CHARS: ${AGENT_CONTEXT_MAX_SINGLE_ISSUE_COMMENT_CHARS:-4000}
     depends_on:
       db:
         condition: service_healthy

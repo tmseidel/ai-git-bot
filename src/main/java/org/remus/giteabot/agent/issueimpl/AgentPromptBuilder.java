@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.issueimpl;
 
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.config.AgentConfigProperties;
 
 import java.util.List;
 import java.util.Map;
@@ -12,16 +13,44 @@ import java.util.Map;
  */
 public class AgentPromptBuilder {
 
-    private static final int MAX_TREE_FILES_FOR_CONTEXT = 500;
+    private final int maxTreeFilesForContext;
+    private final int maxIssueCommentsForContext;
+    private final int maxIssueCommentsChars;
+    private final int maxSingleIssueCommentChars;
+
+    public AgentPromptBuilder() {
+        this(new AgentConfigProperties.ContextConfig());
+    }
+
+    public AgentPromptBuilder(AgentConfigProperties.ContextConfig contextConfig) {
+        AgentConfigProperties.ContextConfig config = contextConfig != null
+                ? contextConfig
+                : new AgentConfigProperties.ContextConfig();
+        this.maxTreeFilesForContext = positiveOrDefault(config.getMaxTreeFiles(), 500);
+        this.maxIssueCommentsForContext = positiveOrDefault(config.getMaxIssueComments(), 50);
+        this.maxIssueCommentsChars = positiveOrDefault(config.getMaxIssueCommentsChars(), 20_000);
+        this.maxSingleIssueCommentChars = positiveOrDefault(config.getMaxSingleIssueCommentChars(), 4_000);
+    }
 
     /**
      * Builds a prompt asking the AI which files it needs to see for the task.
      */
     public String buildFileRequestPrompt(String issueTitle, String issueBody, String treeContext) {
+        return buildFileRequestPrompt(issueTitle, issueBody, "", treeContext);
+    }
+
+    /**
+     * Builds a prompt asking the AI which files it needs to see for the task, including issue discussion context.
+     */
+    public String buildFileRequestPrompt(String issueTitle, String issueBody,
+                                         String issueCommentsContext, String treeContext) {
         return String.format("""
                 ## Issue
                 **Title**: %s
                 **Description**: %s
+                
+                ## Issue Comments
+                %s
                 
                 ## Repository Files
                 %s
@@ -45,7 +74,8 @@ public class AgentPromptBuilder {
                 - `git-log`: inspect change history (`["path/file", "10"]`)
                 - `git-blame`: inspect line history (`["path/file", "startLine", "endLine"]`)
                 - `tree`: inspect directories (`["src", "3"]`)
-                """, issueTitle, issueBody != null ? issueBody : "(none)", treeContext);
+                """, issueTitle, issueBody != null ? issueBody : "(none)",
+                normalizeIssueCommentsContext(issueCommentsContext), treeContext);
     }
 
     /**
@@ -53,10 +83,22 @@ public class AgentPromptBuilder {
      */
     public String buildImplementationPromptWithContext(String issueTitle, String issueBody,
                                                        String treeContext, String fileContext) {
+        return buildImplementationPromptWithContext(issueTitle, issueBody, "", treeContext, fileContext);
+    }
+
+    /**
+     * Builds the implementation prompt with issue discussion and file context provided.
+     */
+    public String buildImplementationPromptWithContext(String issueTitle, String issueBody,
+                                                       String issueCommentsContext,
+                                                       String treeContext, String fileContext) {
         return String.format("""
                 ## Issue
                 **Title**: %s
                 **Description**: %s
+                
+                ## Issue Comments
+                %s
                 
                 ## Repository
                 %s
@@ -67,7 +109,8 @@ public class AgentPromptBuilder {
                 If you still need more repository context, you may request additional `requestFiles` or `requestTools`.
                 Otherwise implement the issue via `runTools`. Use `write-file` / `patch-file` to apply changes,
                 then include a validation tool (e.g. `mvn compile`). Output JSON per system prompt format.
-                """, issueTitle, issueBody != null ? issueBody : "(none)", treeContext, fileContext);
+                """, issueTitle, issueBody != null ? issueBody : "(none)",
+                normalizeIssueCommentsContext(issueCommentsContext), treeContext, fileContext);
     }
 
     /**
@@ -75,6 +118,64 @@ public class AgentPromptBuilder {
      */
     public String buildContinuationPrompt(String userComment) {
         return userComment;
+    }
+
+    /**
+     * Builds the continuation prompt for follow-up comments with the current issue discussion included.
+     */
+    public String buildContinuationPrompt(String userComment, String issueCommentsContext) {
+        return String.format("""
+                ## New User Comment
+                %s
+                
+                ## Current Issue Comments
+                %s
+                """, userComment != null ? userComment : "", normalizeIssueCommentsContext(issueCommentsContext));
+    }
+
+    /**
+     * Builds a provider-agnostic, truncated issue-comment context block from native API maps.
+     */
+    public String buildIssueCommentsContext(List<Map<String, Object>> comments) {
+        if (comments == null || comments.isEmpty()) {
+            return "No issue comments were found.";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        int totalChars = 0;
+        int included = 0;
+        for (Map<String, Object> comment : comments) {
+            if (comment == null || included >= maxIssueCommentsForContext
+                    || totalChars >= maxIssueCommentsChars) {
+                break;
+            }
+
+            String body = extractCommentBody(comment);
+            if (body.isBlank()) {
+                continue;
+            }
+
+            body = truncate(body, maxSingleIssueCommentChars);
+            String header = "### Comment " + (included + 1)
+                    + " by " + extractCommentAuthor(comment)
+                    + extractCommentTimestamp(comment) + "\n";
+            if (totalChars + header.length() + body.length() > maxIssueCommentsChars) {
+                sb.append("\n(Issue comment context truncated due to size limits.)\n");
+                break;
+            }
+
+            sb.append(header).append(body).append("\n\n");
+            totalChars += header.length() + body.length() + 2;
+            included++;
+        }
+
+        if (included == 0) {
+            return "No non-empty issue comments were found.";
+        }
+        if (comments.size() > included) {
+            sb.append("(Additional issue comments omitted after including ").append(included).append(" comments.)\n");
+        }
+        return sb.toString().strip();
     }
 
     /**
@@ -87,7 +188,7 @@ public class AgentPromptBuilder {
         StringBuilder sb = new StringBuilder("Repository file tree:\n");
         int count = 0;
         for (Map<String, Object> entry : tree) {
-            if (count >= MAX_TREE_FILES_FOR_CONTEXT) {
+            if (count >= maxTreeFilesForContext) {
                 sb.append("... (truncated, ").append(tree.size() - count).append(" more files)\n");
                 break;
             }
@@ -99,6 +200,81 @@ public class AgentPromptBuilder {
             count++;
         }
         return sb.toString();
+    }
+
+    private String normalizeIssueCommentsContext(String issueCommentsContext) {
+        return issueCommentsContext != null && !issueCommentsContext.isBlank()
+                ? issueCommentsContext
+                : "No issue comments were found.";
+    }
+
+    private int positiveOrDefault(int value, int defaultValue) {
+        return value > 0 ? value : defaultValue;
+    }
+
+    private String extractCommentBody(Map<String, Object> comment) {
+        Object body = comment.get("body");
+        if (body instanceof String text) {
+            return text.strip();
+        }
+        Object content = comment.get("content");
+        if (content instanceof Map<?, ?> contentMap) {
+            Object raw = contentMap.get("raw");
+            if (raw instanceof String text) {
+                return text.strip();
+            }
+            Object html = contentMap.get("html");
+            if (html instanceof String text) {
+                return text.strip();
+            }
+        }
+        return "";
+    }
+
+    private String extractCommentAuthor(Map<String, Object> comment) {
+        Object user = comment.get("user");
+        String fromUser = extractActorName(user);
+        if (!fromUser.isBlank()) {
+            return fromUser;
+        }
+        Object author = comment.get("author");
+        String fromAuthor = extractActorName(author);
+        if (!fromAuthor.isBlank()) {
+            return fromAuthor;
+        }
+        return "unknown";
+    }
+
+    private String extractActorName(Object actor) {
+        if (actor instanceof String text) {
+            return text;
+        }
+        if (actor instanceof Map<?, ?> actorMap) {
+            for (String key : List.of("login", "username", "name", "display_name", "nickname")) {
+                Object value = actorMap.get(key);
+                if (value instanceof String text && !text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
+    }
+
+    private String extractCommentTimestamp(Map<String, Object> comment) {
+        for (String key : List.of("created_at", "created_on", "updated_at", "updated_on")) {
+            Object value = comment.get(key);
+            if (value instanceof String text && !text.isBlank()) {
+                return " at " + text;
+            }
+        }
+        return "";
+    }
+
+    private String truncate(String text, int maxChars) {
+        if (text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, maxChars) + "\n...(comment truncated)";
     }
 
     /**

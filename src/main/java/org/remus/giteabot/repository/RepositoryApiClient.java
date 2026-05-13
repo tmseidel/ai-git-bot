@@ -71,6 +71,17 @@ public interface RepositoryApiClient {
      */
     void postIssueComment(String owner, String repo, Long issueNumber, String body);
 
+    /**
+     * Returns regular top-level comments on an issue or issue-like pull request discussion.
+     * <p>
+     * Implementations return provider-native maps so callers can extract common fields such as
+     * {@code body}, {@code user}, {@code author}, and {@code created_at} without introducing a
+     * provider-specific comment model.
+     */
+    default List<Map<String, Object>> getIssueComments(String owner, String repo, Long issueNumber) {
+        return List.of();
+    }
+
     void addReaction(String owner, String repo, Long commentId, String reaction);
 
     void postInlineReviewComment(String owner, String repo, Long pullNumber,
@@ -114,18 +125,10 @@ public interface RepositoryApiClient {
 
     String getFileContent(String owner, String repo, String path, String ref);
 
-    String getFileSha(String owner, String repo, String path, String ref);
-
-    void createBranch(String owner, String repo, String branchName, String fromRef);
 
     void createOrUpdateFile(String owner, String repo, String path, String content,
                             String message, String branch, String sha);
 
-    void deleteFile(String owner, String repo, String path, String message,
-                    String branch, String sha);
-
     Long createPullRequest(String owner, String repo, String title, String body,
                            String head, String base);
-
-    void deleteBranch(String owner, String repo, String branchName);
 }

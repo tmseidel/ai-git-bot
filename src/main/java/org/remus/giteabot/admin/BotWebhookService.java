@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.IssueImplementationContext;
 import org.remus.giteabot.agent.IssueImplementationService;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
@@ -323,7 +324,7 @@ public class BotWebhookService {
             commenter = payload.getSender().getLogin();
         }
 
-        return author != null && commenter != null && author.equalsIgnoreCase(commenter);
+        return author != null && author.equalsIgnoreCase(commenter);
     }
 
     public boolean isReviewAgainRequestFromPullRequestAuthor(WebhookPayload payload, String botAlias) {
@@ -375,10 +376,16 @@ public class BotWebhookService {
         if (bot.getSystemPrompt() == null) {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
-        return new IssueImplementationService(repoClient, aiClient, promptService, agentConfig,
-                agentSessionService, toolExecutionService, workspaceService,
+        IssueImplementationContext context = new IssueImplementationContext(
+                repoClient,
+                aiClient,
                 bot.getSystemPrompt().getIssueAgentSystemPrompt(),
-                mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog);
+                bot.getUsername(),
+                mcpOrchestrationService,
+                bot.getMcpConfiguration(),
+                mcpToolCatalog);
+        return new IssueImplementationService(context, promptService, agentConfig,
+                agentSessionService, toolExecutionService, workspaceService);
     }
 
     private WriterAgentService createWriterAgentService(Bot bot) {

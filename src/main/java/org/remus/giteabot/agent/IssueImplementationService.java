@@ -44,7 +44,6 @@ import java.util.stream.IntStream;
 public class IssueImplementationService {
 
     private static final String AGENT_PROMPT_NAME = "agent";
-    private static final int MAX_FILE_CONTENT_CHARS = 100_000;
     private static final int MAX_CONTEXT_TOOL_REQUESTS = 5;
     /** Git author identity used for automated commits. */
     private static final String GIT_AUTHOR_NAME  = "AI Agent";
@@ -58,6 +57,7 @@ public class IssueImplementationService {
     private final ToolExecutionService toolExecutionService;
     private final WorkspaceService workspaceService;
     private final String issueAgentSystemPrompt;
+    private final String botUsername;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
@@ -69,52 +69,30 @@ public class IssueImplementationService {
     private final IssueNotificationService notificationService;
     private final AgentErrorNotificationService errorNotificationService;
 
-    public IssueImplementationService(RepositoryApiClient repositoryClient,
-                                       AiClient aiClient, PromptService promptService,
-                                       AgentConfigProperties agentConfig, AgentSessionService sessionService,
-                                       ToolExecutionService toolExecutionService,
-                                       WorkspaceService workspaceService) {
-        this(repositoryClient, aiClient, promptService, agentConfig, sessionService,
-                toolExecutionService, workspaceService, null);
-    }
-
-    public IssueImplementationService(RepositoryApiClient repositoryClient,
-                                      AiClient aiClient, PromptService promptService,
-                                      AgentConfigProperties agentConfig, AgentSessionService sessionService,
+    public IssueImplementationService(IssueImplementationContext context,
+                                      PromptService promptService,
+                                      AgentConfigProperties agentConfig,
+                                      AgentSessionService sessionService,
                                       ToolExecutionService toolExecutionService,
-                                      WorkspaceService workspaceService,
-                                      String issueAgentSystemPrompt) {
-        this(repositoryClient, aiClient, promptService, agentConfig, sessionService,
-                toolExecutionService, workspaceService, issueAgentSystemPrompt,
-                null, null, McpToolCatalog.empty());
-    }
-
-    public IssueImplementationService(RepositoryApiClient repositoryClient,
-                                      AiClient aiClient, PromptService promptService,
-                                      AgentConfigProperties agentConfig, AgentSessionService sessionService,
-                                      ToolExecutionService toolExecutionService,
-                                      WorkspaceService workspaceService,
-                                      String issueAgentSystemPrompt,
-                                      McpOrchestrationService mcpOrchestrationService,
-                                      McpConfiguration mcpConfiguration,
-                                      McpToolCatalog mcpToolCatalog) {
-        this.repositoryClient = repositoryClient;
-        this.aiClient = aiClient;
+                                      WorkspaceService workspaceService) {
+        this.repositoryClient = context.repositoryClient();
+        this.aiClient = context.aiClient();
         this.promptService = promptService;
         this.agentConfig = agentConfig;
         this.sessionService = sessionService;
         this.toolExecutionService = toolExecutionService;
         this.workspaceService = workspaceService;
-        this.issueAgentSystemPrompt = issueAgentSystemPrompt;
-        this.mcpOrchestrationService = mcpOrchestrationService;
-        this.mcpConfiguration = mcpConfiguration;
-        this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
+        this.issueAgentSystemPrompt = context.issueAgentSystemPrompt();
+        this.botUsername = context.botUsername();
+        this.mcpOrchestrationService = context.mcpOrchestrationService();
+        this.mcpConfiguration = context.mcpConfiguration();
+        this.mcpToolCatalog = context.mcpToolCatalog();
         this.mcpToolPromptRenderer = new McpToolPromptRenderer();
 
         this.responseParser = new AiResponseParser();
-        this.promptBuilder = new AgentPromptBuilder();
-        this.notificationService = new IssueNotificationService(repositoryClient, responseParser, toolExecutionService);
-        this.errorNotificationService = new AgentErrorNotificationService(repositoryClient);
+        this.promptBuilder = new AgentPromptBuilder(agentConfig != null ? agentConfig.getContext() : null);
+        this.notificationService = new IssueNotificationService(this.repositoryClient, responseParser, toolExecutionService);
+        this.errorNotificationService = new AgentErrorNotificationService(this.repositoryClient);
     }
 
     public void handleIssueAssigned(WebhookPayload payload) {
@@ -144,6 +122,8 @@ public class IssueImplementationService {
         Path workspaceDir = null;
 
         try {
+            String issueCommentsContext = fetchIssueCommentsContext(owner, repo, issueNumber);
+
             repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Agent**: I've been assigned to this issue. Analyzing repository structure...");
 
@@ -176,7 +156,8 @@ public class IssueImplementationService {
 
             // STEP 1: Ask AI which context it needs
             log.info("Step 1: Asking AI which files are needed for issue #{}", issueNumber);
-            String fileRequestPrompt = promptBuilder.buildFileRequestPrompt(issueTitle, issueBody, treeContext);
+            String fileRequestPrompt = promptBuilder.buildFileRequestPrompt(
+                    issueTitle, issueBody, issueCommentsContext, treeContext);
             sessionService.addMessage(session, "user", fileRequestPrompt);
 
             String fileRequestResponse = aiClient.chat(new ArrayList<>(), fileRequestPrompt, systemPrompt,
@@ -207,7 +188,7 @@ public class IssueImplementationService {
             // STEP 2: Generate implementation via tool requests
             log.info("Step 2: Generating implementation for issue #{}", issueNumber);
             String implementationPrompt = promptBuilder.buildImplementationPromptWithContext(
-                    issueTitle, issueBody, treeContext, fileContext);
+                    issueTitle, issueBody, issueCommentsContext, treeContext, fileContext);
 
             // Add tools info to prompt
             String toolsInfo = buildToolsInfo();
@@ -578,7 +559,8 @@ public class IssueImplementationService {
             workspaceDir = wsResult.workspacePath();
 
             String systemPrompt = resolveAgentSystemPrompt();
-            String userMessage  = promptBuilder.buildContinuationPrompt(commentBody);
+            String issueCommentsContext = fetchIssueCommentsContext(owner, repo, issueNumber);
+            String userMessage  = promptBuilder.buildContinuationPrompt(commentBody, issueCommentsContext);
 
             log.info("Requesting AI to continue implementation for issue #{}", issueNumber);
             // runToolImplementationLoop handles: AI call, context rounds, tool execution, retries
@@ -653,6 +635,62 @@ public class IssueImplementationService {
                 + "\n**Available validation tools** (results posted as comments): "
                 + String.join(", ", availableTools)
                 + mcpToolPromptRenderer.render(mcpToolCatalog);
+    }
+
+    private String fetchIssueCommentsContext(String owner, String repo, Long issueNumber) {
+        try {
+            List<Map<String, Object>> issueComments = repositoryClient.getIssueComments(owner, repo, issueNumber);
+            List<Map<String, Object>> humanIssueComments = filterBotAuthoredComments(issueComments);
+            log.info("Fetched {} issue comments for issue #{} in {}/{}",
+                    issueComments != null ? issueComments.size() : 0, issueNumber, owner, repo);
+            if (issueComments != null && humanIssueComments.size() != issueComments.size()) {
+                log.info("Excluded {} bot-authored issue comments from context for issue #{} in {}/{}",
+                        issueComments.size() - humanIssueComments.size(), issueNumber, owner, repo);
+            }
+            return promptBuilder.buildIssueCommentsContext(humanIssueComments);
+        } catch (Exception e) {
+            log.warn("Failed to fetch issue comments for issue #{} in {}/{}: {}",
+                    issueNumber, owner, repo, e.getMessage());
+            return "Issue comments could not be loaded: " + e.getMessage();
+        }
+    }
+
+    private List<Map<String, Object>> filterBotAuthoredComments(List<Map<String, Object>> issueComments) {
+        if (issueComments == null || issueComments.isEmpty()) {
+            return List.of();
+        }
+        if (botUsername == null || botUsername.isBlank()) {
+            return issueComments;
+        }
+        return issueComments.stream()
+                .filter(comment -> !botUsername.equalsIgnoreCase(extractCommentAuthor(comment)))
+                .toList();
+    }
+
+    private String extractCommentAuthor(Map<String, Object> comment) {
+        if (comment == null) {
+            return "";
+        }
+        String user = extractActorName(comment.get("user"));
+        if (!user.isBlank()) {
+            return user;
+        }
+        return extractActorName(comment.get("author"));
+    }
+
+    private String extractActorName(Object actor) {
+        if (actor instanceof String text) {
+            return text;
+        }
+        if (actor instanceof Map<?, ?> actorMap) {
+            for (String key : List.of("login", "username", "name", "display_name", "nickname")) {
+                Object value = actorMap.get(key);
+                if (value instanceof String text && !text.isBlank()) {
+                    return text;
+                }
+            }
+        }
+        return "";
     }
 
     private String resolveAgentSystemPrompt() {
@@ -778,7 +816,7 @@ public class IssueImplementationService {
         int totalChars = 0;
 
         for (String path : filePaths) {
-            if (totalChars > MAX_FILE_CONTENT_CHARS) {
+            if (totalChars > agentConfig.getMaxFileContentChars()) {
                 sb.append("\n(File context truncated due to size limits)\n");
                 break;
             }

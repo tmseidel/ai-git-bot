@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.config.AgentConfigProperties;
 
 import java.util.List;
 import java.util.Map;
@@ -48,6 +49,22 @@ class AgentPromptBuilderTest {
     }
 
     @Test
+    void buildTreeContext_usesConfiguredMaxTreeFiles() {
+        AgentConfigProperties.ContextConfig contextConfig = new AgentConfigProperties.ContextConfig();
+        contextConfig.setMaxTreeFiles(1);
+        AgentPromptBuilder limitedBuilder = new AgentPromptBuilder(contextConfig);
+
+        String context = limitedBuilder.buildTreeContext(List.of(
+                Map.of("type", "blob", "path", "src/Main.java"),
+                Map.of("type", "blob", "path", "src/Other.java")
+        ));
+
+        assertThat(context).contains("src/Main.java");
+        assertThat(context).doesNotContain("src/Other.java");
+        assertThat(context).contains("truncated");
+    }
+
+    @Test
     void buildFileRequestPrompt_includesIssueAndTree() {
         String prompt = builder.buildFileRequestPrompt("Fix bug", "Description of bug", "  src/Main.java\n");
 
@@ -57,6 +74,15 @@ class AgentPromptBuilderTest {
         assertThat(prompt).contains("requestFiles");
         assertThat(prompt).contains("requestTools");
         assertThat(prompt).contains("git-blame");
+    }
+
+    @Test
+    void buildFileRequestPrompt_withIssueComments_includesComments() {
+        String prompt = builder.buildFileRequestPrompt(
+                "Fix bug", "Description of bug", "Comment by alice: please handle edge case", "  src/Main.java\n");
+
+        assertThat(prompt).contains("## Issue Comments");
+        assertThat(prompt).contains("please handle edge case");
     }
 
     @Test
@@ -79,9 +105,68 @@ class AgentPromptBuilderTest {
     }
 
     @Test
+    void buildImplementationPromptWithContext_withIssueComments_includesComments() {
+        String prompt = builder.buildImplementationPromptWithContext(
+                "Add feature", "Feature description", "Comment by bob: keep compatibility", "tree context", "file contents");
+
+        assertThat(prompt).contains("## Issue Comments");
+        assertThat(prompt).contains("keep compatibility");
+    }
+
+    @Test
     void buildContinuationPrompt_returnsCommentAsIs() {
         String result = builder.buildContinuationPrompt("Please fix the typo");
         assertThat(result).isEqualTo("Please fix the typo");
+    }
+
+    @Test
+    void buildContinuationPrompt_withIssueComments_includesDiscussionContext() {
+        String result = builder.buildContinuationPrompt("Please continue", "Comment by alice: original clarification");
+
+        assertThat(result).contains("## New User Comment");
+        assertThat(result).contains("Please continue");
+        assertThat(result).contains("## Current Issue Comments");
+        assertThat(result).contains("original clarification");
+    }
+
+    @Test
+    void buildIssueCommentsContext_extractsCommonProviderFields() {
+        List<Map<String, Object>> comments = List.of(
+                Map.of(
+                        "body", "Please preserve existing API behavior",
+                        "user", Map.of("login", "alice"),
+                        "created_at", "2026-05-13T10:00:00Z"),
+                Map.of(
+                        "content", Map.of("raw", "Bitbucket-style comment"),
+                        "author", Map.of("display_name", "Bob"),
+                        "created_on", "2026-05-13T11:00:00Z")
+        );
+
+        String result = builder.buildIssueCommentsContext(comments);
+
+        assertThat(result).contains("alice");
+        assertThat(result).contains("Please preserve existing API behavior");
+        assertThat(result).contains("Bob");
+        assertThat(result).contains("Bitbucket-style comment");
+    }
+
+    @Test
+    void buildIssueCommentsContext_usesConfiguredCommentLimits() {
+        AgentConfigProperties.ContextConfig contextConfig = new AgentConfigProperties.ContextConfig();
+        contextConfig.setMaxIssueComments(1);
+        contextConfig.setMaxSingleIssueCommentChars(12);
+        AgentPromptBuilder limitedBuilder = new AgentPromptBuilder(contextConfig);
+
+        String result = limitedBuilder.buildIssueCommentsContext(List.of(
+                Map.of("body", "First comment is very long", "user", Map.of("login", "alice")),
+                Map.of("body", "Second comment", "user", Map.of("login", "bob"))
+        ));
+
+        assertThat(result).contains("alice");
+        assertThat(result).contains("First commen");
+        assertThat(result).contains("comment truncated");
+        assertThat(result).doesNotContain("Second comment");
+        assertThat(result).contains("Additional issue comments omitted");
     }
 
     @Test

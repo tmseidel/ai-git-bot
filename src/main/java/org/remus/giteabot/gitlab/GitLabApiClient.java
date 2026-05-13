@@ -130,6 +130,20 @@ public class GitLabApiClient implements RepositoryApiClient {
     }
 
     @Override
+    public List<Map<String, Object>> getIssueComments(String owner, String repo, Long issueNumber) {
+        log.info("Fetching notes for issue #{} in {}/{}", issueNumber, owner, repo);
+        String projectPath = encodeProjectPath(owner, repo);
+        List<Map<String, Object>> notes = gitlabRestClient.get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/v4/projects/{projectPath}/issues/{iid}/notes")
+                        .queryParam("per_page", 50)
+                        .build(projectPath, issueNumber))
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return notes != null ? notes : List.of();
+    }
+
+    @Override
     public void addReaction(String owner, String repo, Long commentId, String reaction) {
         // GitLab's award emoji API requires the merge request IID in addition to the note ID,
         // but the RepositoryApiClient interface only provides the comment/note ID.
@@ -331,32 +345,7 @@ public class GitLabApiClient implements RepositoryApiClient {
         return content != null ? content : "";
     }
 
-    @Override
-    public String getFileSha(String owner, String repo, String path, String ref) {
-        log.info("Fetching file SHA for {}/{}/{} at ref={}", owner, repo, path, ref);
-        String projectPath = encodeProjectPath(owner, repo);
-        Map<String, Object> result = gitlabRestClient.get()
-                .uri("/api/v4/projects/{projectPath}/repository/files/{filePath}?ref={ref}",
-                        projectPath, path, ref)
-                .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("blob_id")) {
-            return (String) result.get("blob_id");
-        }
-        return null;
-    }
 
-    @Override
-    public void createBranch(String owner, String repo, String branchName, String fromRef) {
-        log.info("Creating branch '{}' from '{}' in {}/{}", branchName, fromRef, owner, repo);
-        String projectPath = encodeProjectPath(owner, repo);
-        gitlabRestClient.post()
-                .uri("/api/v4/projects/{projectPath}/repository/branches", projectPath)
-                .body(Map.of("branch", branchName, "ref", fromRef))
-                .retrieve()
-                .toBodilessEntity();
-        log.info("Branch '{}' created successfully", branchName);
-    }
 
     @Override
     public void createOrUpdateFile(String owner, String repo, String path, String content,
@@ -395,28 +384,6 @@ public class GitLabApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void deleteFile(String owner, String repo, String path, String message,
-                           String branch, String sha) {
-        log.info("Deleting file {} on branch '{}' in {}/{}", path, branch, owner, repo);
-        String projectPath = encodeProjectPath(owner, repo);
-
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("branch", branch);
-        body.put("commit_message", message);
-        if (sha != null) {
-            body.put("last_commit_id", sha);
-        }
-
-        gitlabRestClient.method(org.springframework.http.HttpMethod.DELETE)
-                .uri("/api/v4/projects/{projectPath}/repository/files/{filePath}",
-                        projectPath, path)
-                .body(body)
-                .retrieve()
-                .toBodilessEntity();
-        log.info("File {} deleted successfully", path);
-    }
-
-    @Override
     public Long createPullRequest(String owner, String repo, String title, String body,
                                   String head, String base) {
         log.info("Creating merge request '{}' in {}/{} from {} to {}", title, owner, repo, head, base);
@@ -442,21 +409,6 @@ public class GitLabApiClient implements RepositoryApiClient {
         return mrIid;
     }
 
-    @Override
-    public void deleteBranch(String owner, String repo, String branchName) {
-        log.info("Deleting branch '{}' in {}/{}", branchName, owner, repo);
-        String projectPath = encodeProjectPath(owner, repo);
-        try {
-            gitlabRestClient.delete()
-                    .uri("/api/v4/projects/{projectPath}/repository/branches/{branch}",
-                            projectPath, branchName)
-                    .retrieve()
-                    .toBodilessEntity();
-            log.info("Branch '{}' deleted successfully", branchName);
-        } catch (Exception e) {
-            log.warn("Failed to delete branch '{}': {}", branchName, e.getMessage());
-        }
-    }
 
     // ---- Internal helpers ----
 
