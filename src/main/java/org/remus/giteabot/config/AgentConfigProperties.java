@@ -105,7 +105,8 @@ public class AgentConfigProperties {
                 "gcc",      // C compiler
                 "g++",      // C++ compiler
                 "ruby",     // Ruby
-                "bundle"    // Ruby Bundler
+                "bundle",   // Ruby Bundler
+                "dotnet"    // .NET
         );
     }
 }

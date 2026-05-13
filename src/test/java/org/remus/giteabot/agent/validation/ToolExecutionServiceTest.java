@@ -318,6 +318,7 @@ class ToolExecutionServiceTest {
     void isValidationTool_recognizesConfiguredTools() {
         // mvn is in the configured available-tools list (set up via agentConfig in setUp)
         assertThat(service.isValidationTool("mvn")).isTrue();
+        assertThat(service.isValidationTool("dotnet")).isTrue();
         // file and context tools are NOT validation tools
         assertThat(service.isValidationTool("write-file")).isFalse();
         assertThat(service.isValidationTool("cat")).isFalse();

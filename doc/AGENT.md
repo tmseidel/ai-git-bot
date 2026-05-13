@@ -170,6 +170,16 @@ After making file changes, the coding agent includes validation tools in the **s
 - **Python**: `{"id": "<uuid>", "tool": "python3", "args": ["-m", "py_compile", "file.py"]}`
 - **Make** (`Makefile`): `{"id": "<uuid>", "tool": "make", "args": ["-j4"]}`
 - **CMake** (`CMakeLists.txt`): `{"id": "<uuid>", "tool": "cmake", "args": ["--build", ".", "--config", "Debug"]}`
+- **.NET** (`*.sln`, `*.csproj`): `{"id": "<uuid>", "tool": "dotnet", "args": ["build"]}`
+
+For .NET repositories and solutions, common validation sequences include:
+
+- `dotnet restore`
+- `dotnet build`
+- `dotnet test`
+- `dotnet format --verify-no-changes`
+
+When the repository tree contains `.sln` or `.csproj` files, the coding agent should prefer `dotnet` validation commands.
 
 ## Setup
 
@@ -230,7 +240,7 @@ These settings mainly affect the **coding agent** validation workflow:
 | `AGENT_VALIDATION_MAX_RETRIES` | `agent.validation.max-retries` | `3` | Max AI correction attempts on validation failure |
 | `AGENT_VALIDATION_MAX_TOOL_EXECUTIONS` | `agent.validation.max-tool-executions` | `10` | Max total tool rounds per session |
 | `AGENT_VALIDATION_TOOL_TIMEOUT` | `agent.validation.tool-timeout-seconds` | `300` | Timeout for each tool command |
-| `AGENT_VALIDATION_AVAILABLE_TOOLS` | `agent.validation.available-tools` | `mvn,gradle,npm,...` | Comma-separated list of available validation tools |
+| `AGENT_VALIDATION_AVAILABLE_TOOLS` | `agent.validation.available-tools` | `mvn,gradle,npm,...,dotnet` | Comma-separated list of available validation tools |
 
 ## AI-Driven Code Generation and Validation (Coding Agent)
 
@@ -265,7 +275,7 @@ The coding agent uses AI-driven tool calls where the AI decides which file opera
    ```
 4. The bot executes all tools sequentially in the cloned workspace.
 5. `cat` should not be placed in the same `runTools` batch as a dependent `patch-file`; inspect first, then patch.
-6. File tool results are silent; validation tool output (`mvn`, `npm`, …) is posted as an issue comment.
+6. File tool results are silent; validation tool output (`mvn`, `npm`, `dotnet`, …) is posted as an issue comment.
 7. If there are build/test errors, the AI fixes the code and requests the tools again.
 8. Once all validation tools succeed, the workspace is committed and pushed.
 
@@ -282,6 +292,7 @@ The Docker image includes the following build tools:
 | **Rust** | `cargo`, `rustc` |
 | **C/C++** | `gcc`, `g++`, `make`, `cmake` |
 | **Ruby** | `ruby`, `bundle` |
+| **.NET** | `dotnet` |
 
 ### Configuration
 
@@ -302,6 +313,7 @@ agent:
       - cargo
       - python3
       - make
+      - dotnet
 ```
 
 ## Dynamic File Requests
