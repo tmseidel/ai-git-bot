@@ -55,6 +55,7 @@ graph LR
     subgraph AI Providers
         Anthropic
         OpenAI
+        GoogleAI[Google AI / Gemini]
         Ollama
         llama.cpp
     end
@@ -70,6 +71,7 @@ graph LR
     Bitbucket <--> Gateway
     Gateway <--> Anthropic
     Gateway <--> OpenAI
+    Gateway <--> GoogleAI
     Gateway <--> Ollama
     Gateway <--> llama.cpp
     Gateway <--> MCPServers
@@ -188,7 +190,7 @@ See [MCP Server Handling](doc/MCP_SERVER_HANDLING.md) for the full workflow.
 
 All configuration is managed through a **web-based UI** — no environment variables needed for AI providers, Git connections, or bot settings:
 
-- Create multiple **AI Integrations** (Anthropic, OpenAI, Ollama, llama.cpp)
+- Create multiple **AI Integrations** (Anthropic, OpenAI, Google AI / Gemini, Ollama, llama.cpp)
 - Create multiple **Git Integrations** (Gitea, GitHub, GitHub Enterprise, GitLab, Bitbucket Cloud)
 - Create multiple **Bots**, each with its own webhook URL, AI provider, and system prompt
 - Dashboard with statistics and monitoring
@@ -201,6 +203,7 @@ All configuration is managed through a **web-based UI** — no environment varia
 |----------|-----------------|------------------|
 | **Anthropic** | `https://api.anthropic.com` | claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001 |
 | **OpenAI** | `https://api.openai.com` | gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex |
+| **Google AI / Gemini** | `https://generativelanguage.googleapis.com` | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash |
 | **Ollama** | `http://localhost:11434` | User-configured local models |
 | **llama.cpp** | `http://localhost:8081` | User-configured GGUF models |
 
@@ -288,6 +291,7 @@ This starts:
    - Select a model from the dropdown or enter a custom model name
    - Enter your API key
    - OpenAI-compatible providers can often be configured by selecting "openai" and entering the provider's custom API URL, API key, and model; see the [User Guide](doc/USER_GUIDE.md#openai-compatible-apis)
+   - For Gemini, select **gemini** in the UI and use a Gemini API key from Google AI Studio; see the [User Guide](doc/USER_GUIDE.md#google-ai)
 
 2. **Create a Git Integration:**
    - Go to **Git Integrations → New Integration**
@@ -319,7 +323,7 @@ See the [User Guide](doc/USER_GUIDE.md) for detailed instructions.
 graph LR
    Git["Git Platform<br/>(Gitea / GitHub / GitLab / Bitbucket)"]
    Bot["AI-Git-Bot<br/>(Gateway)"]
-   AI["AI Provider<br/>(Anthropic / OpenAI / Ollama / llama.cpp)"]
+   AI["AI Provider<br/>(Anthropic / OpenAI / Google AI / Gemini / Ollama / llama.cpp)"]
    MCPConfig["MCP Config + Tool Whitelist"]
    MCPServers["Remote MCP Servers"]
    DB["PostgreSQL"]

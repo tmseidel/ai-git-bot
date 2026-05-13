@@ -2,7 +2,7 @@
 
 > **Half Bot, half Agent** — The intelligent Gateway between Git platforms and AI providers. 🤖🧠
 
-AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powered code reviews, issue implementation, and technical-writing issue drafting. Connects **Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud** with **Anthropic Claude, OpenAI, Ollama (local LLMs), and llama.cpp** — all managed through a **web-based UI**.
+AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powered code reviews, issue implementation, and technical-writing issue drafting. Connects **Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud** with **Anthropic Claude, OpenAI, Google AI / Gemini, Ollama (local LLMs), and llama.cpp** — all managed through a **web-based UI**.
 
 ## Features
 
@@ -10,7 +10,7 @@ AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powere
 - **Web-Based Management** — Configure bots, AI providers, and Git connections through a browser UI
 - **Multi-Bot Support** — Create multiple bots with different AI providers, prompts, and personas
 - **Multiple Git Providers** — Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud support
-- **Multiple AI Providers** — Anthropic, OpenAI, Ollama, and llama.cpp support
+- **Multiple AI Providers** — Anthropic, OpenAI, Google AI / Gemini, Ollama, and llama.cpp support
 - **Reviewer-Triggered PR Reviews** — Reviews diffs when the bot is assigned or re-requested as reviewer
 - **Interactive Bot Commands** — Mention the bot in PR comments to ask questions
 - **Inline Review Comments** — Context-aware answers to code-level review comments
@@ -101,6 +101,7 @@ volumes:
 |----------|-----------------|------------------|
 | **Anthropic** | `https://api.anthropic.com` | claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001 |
 | **OpenAI** | `https://api.openai.com` | gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex |
+| **Google AI / Gemini** | `https://generativelanguage.googleapis.com` | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash |
 | **Ollama** | `http://localhost:11434` | User-configured local models |
 | **llama.cpp** | `http://localhost:8081` | User-configured GGUF models |
 
