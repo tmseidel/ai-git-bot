@@ -16,26 +16,17 @@ FROM eclipse-temurin:21-jre-alpine
 
 # Install build tools for AI agent validation
 # This allows the agent to compile and validate code in various languages
+# Includes base utilities, Java/Maven/Gradle, Node.js/npm, Python, Go,
+# C/C++, Ruby, and the .NET SDK for restore/build/test/format validation.
 RUN apk add --no-cache \
-    # Base utilities
     ca-certificates curl git bash \
-    # Java/Maven/Gradle
     maven openjdk21-jdk \
-    # Node.js / npm (for JavaScript/TypeScript projects)
     nodejs npm \
-    # Python
     python3 py3-pip \
-    # Go
     go \
-    # Rust (via rustup in a separate step)
-    # C/C++
     gcc g++ make cmake \
-    # Ruby
     ruby ruby-bundler \
-    # .NET SDK (provides the dotnet CLI for restore/build/test/format)
-    dotnet8-sdk \
-    && \
-    # Create app user
+    dotnet10-sdk && \
     addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -D appuser && \
     mkdir -p /app /app/prompts && chown -R appuser:appgroup /app
 
