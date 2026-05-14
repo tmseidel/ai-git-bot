@@ -32,6 +32,8 @@ RUN apk add --no-cache \
     gcc g++ make cmake \
     # Ruby
     ruby ruby-bundler \
+    # .NET SDK (provides the dotnet CLI for restore/build/test/format)
+    dotnet8-sdk \
     && \
     # Create app user
     addgroup -g 1000 appgroup && adduser -u 1000 -G appgroup -D appuser && \

@@ -172,15 +172,6 @@ After making file changes, the coding agent includes validation tools in the **s
 - **CMake** (`CMakeLists.txt`): `{"id": "<uuid>", "tool": "cmake", "args": ["--build", ".", "--config", "Debug"]}`
 - **.NET** (`*.sln`, `*.csproj`): `{"id": "<uuid>", "tool": "dotnet", "args": ["build"]}`
 
-For .NET repositories and solutions, common validation sequences include:
-
-- `dotnet restore`
-- `dotnet build`
-- `dotnet test`
-- `dotnet format --verify-no-changes`
-
-When the repository tree contains `.sln` or `.csproj` files, the coding agent should prefer `dotnet` validation commands.
-
 ## Setup
 
 ### 1. Coding Agent is Enabled by Default
@@ -292,7 +283,7 @@ The Docker image includes the following build tools:
 | **Rust** | `cargo`, `rustc` |
 | **C/C++** | `gcc`, `g++`, `make`, `cmake` |
 | **Ruby** | `ruby`, `bundle` |
-| **.NET** | `dotnet` |
+| **.NET** | `dotnet` (.NET SDK) |
 
 ### Configuration
 

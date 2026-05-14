@@ -45,10 +45,6 @@ public class AgentPromptBuilder {
                 - `git-log`: inspect change history (`["path/file", "10"]`)
                 - `git-blame`: inspect line history (`["path/file", "startLine", "endLine"]`)
                 - `tree`: inspect directories (`["src", "3"]`)
-                
-                Detect the repository build system from the file tree before choosing validation tools.
-                Examples: `pom.xml`, `build.gradle`, `package.json`, `Cargo.toml`, `go.mod`, `Makefile`, `CMakeLists.txt`, `.sln`, `.csproj`.
-                For .NET repositories, prefer `dotnet` validation workflows.
                 """, issueTitle, issueBody != null ? issueBody : "(none)", treeContext);
     }
 
@@ -70,11 +66,7 @@ public class AgentPromptBuilder {
                 
                 If you still need more repository context, you may request additional `requestFiles` or `requestTools`.
                 Otherwise implement the issue via `runTools`. Use `write-file` / `patch-file` to apply changes,
-                then include a validation tool appropriate for the detected build system.
-                Examples: `mvn compile` for Maven, `npm run build` for npm, `cargo build` for Cargo,
-                and for .NET repositories (`.sln` / `.csproj`) prefer `dotnet restore`, `dotnet build`,
-                `dotnet test`, or `dotnet format --verify-no-changes` as appropriate.
-                Output JSON per system prompt format.
+                then include a validation tool (e.g. `mvn compile`). Output JSON per system prompt format.
                 """, issueTitle, issueBody != null ? issueBody : "(none)", treeContext, fileContext);
     }
 
@@ -176,7 +168,7 @@ public class AgentPromptBuilder {
                 
                 **Please provide a response with `runTools`** that:
                 1. Write/modify files using `write-file` or `patch-file`
-                2. Validate the changes using a build/test tool that matches the detected repository build system
+                2. Validate the changes using a build/test tool
                 
                 Example:
                 ```json
@@ -187,9 +179,7 @@ public class AgentPromptBuilder {
                 ```
                 
                 Available file tools: `write-file`, `patch-file`, `mkdir`, `delete-file`
-                Available build tools (configured by admin): see system prompt.
-                For .NET repositories, use `dotnet` commands such as `restore`, `build`, `test`, or `format --verify-no-changes`.
-                """;
+                Available build tools (configured by admin): see system prompt.""";
     }
 
     /**

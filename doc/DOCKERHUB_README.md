@@ -16,7 +16,7 @@ AI-Git-Bot is a lightweight, self-hostable **Gateway application** for AI-powere
 - **Inline Review Comments** — Context-aware answers to code-level review comments
 - **Coding Agent** — Assign a coding bot to an issue for autonomous code generation and PR creation
 - **Technical Writer Agent** — Assign a writer bot to improve vague issues into actionable, testable follow-up issues
-- **AI-Driven Code Validation** — Agent validates generated code with build tools (Maven, Gradle, npm, etc.)
+- **AI-Driven Code Validation** — Agent validates generated code with build tools (Maven, Gradle, npm, .NET, etc.)
 - **Read-Only Issue Drafting Workflow** — Writer bots can inspect repository context without modifying repository files
 - **Session Management** — Maintains conversation history per PR
 - **Smart Diff Chunking** — Splits large diffs into chunks with retry on token limits

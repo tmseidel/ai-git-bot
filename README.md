@@ -218,7 +218,7 @@ All configuration is managed through a **web-based UI** — no environment varia
 
 - **Session Management** — Maintains conversation history per PR, persisted in the database, enabling context-aware follow-up reviews
 - **Configurable System Prompts** — Manage reusable review, coding-agent, and writer-agent prompt entries in System settings and assign them per bot
-- **AI-Driven Code Validation** — The agent validates generated code with build tools (Maven, Gradle, npm, Go, Cargo, etc.)
+- **AI-Driven Code Validation** — The agent validates generated code with build tools (Maven, Gradle, npm, Go, Cargo, .NET, etc.)
 - **Health Endpoint** — `/actuator/health` for monitoring and orchestration
 
 ## Docker

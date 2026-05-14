@@ -457,6 +457,8 @@ Use model-based prompt evaluation before rolling out a new prompt entry broadly:
 
 This is a breaking configuration change for deployments that previously edited prompt text directly in bot configuration. Existing bots are automatically assigned to the new **Default** system prompt entry during Flyway migration. Legacy per-bot prompt text is not preserved when the obsolete bot prompt column is removed, so copy any custom prompts before upgrading if you need to recreate them as system prompt entries. After upgrading, customize prompts under **System settings → System prompts** and select the desired entry on each bot.
 
+The migration that adds .NET validation support overwrites the **Default** coding-agent system prompt with the bundled prompt so it can detect `.sln` / `.csproj` repositories and use `dotnet restore`, `dotnet build`, `dotnet test`, and `dotnet format --verify-no-changes`. If you edited the **Default** coding-agent prompt in-place, back it up or clone it to a custom prompt entry before upgrading.
+
 ## Security
 
 ### Data Encryption

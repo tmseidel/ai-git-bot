@@ -60,15 +60,6 @@ class AgentPromptBuilderTest {
     }
 
     @Test
-    void buildFileRequestPrompt_mentionsDotNetBuildDetection() {
-        String prompt = builder.buildFileRequestPrompt("Fix bug", "Description", "  app.sln\n  src/App/App.csproj\n");
-
-        assertThat(prompt).contains(".sln");
-        assertThat(prompt).contains(".csproj");
-        assertThat(prompt).contains("dotnet");
-    }
-
-    @Test
     void buildFileRequestPrompt_nullBody_usesNone() {
         String prompt = builder.buildFileRequestPrompt("Fix bug", null, "  src/Main.java\n");
 
@@ -88,17 +79,6 @@ class AgentPromptBuilderTest {
     }
 
     @Test
-    void buildImplementationPromptWithContext_mentionsDotNetValidationOptions() {
-        String prompt = builder.buildImplementationPromptWithContext(
-                "Add feature", "Feature description", "repo contains app.sln", "file contents");
-
-        assertThat(prompt).contains("dotnet restore");
-        assertThat(prompt).contains("dotnet build");
-        assertThat(prompt).contains("dotnet test");
-        assertThat(prompt).contains("dotnet format --verify-no-changes");
-    }
-
-    @Test
     void buildContinuationPrompt_returnsCommentAsIs() {
         String result = builder.buildContinuationPrompt("Please fix the typo");
         assertThat(result).isEqualTo("Please fix the typo");
@@ -111,15 +91,6 @@ class AgentPromptBuilderTest {
         assertThat(result).contains("Missing Tool Requests");
         assertThat(result).contains("runTools");
         assertThat(result).contains("write-file");
-    }
-
-    @Test
-    void buildMissingToolFeedback_mentionsDotNetForDotNetRepos() {
-        String result = builder.buildMissingToolFeedback();
-
-        assertThat(result).contains(".NET repositories");
-        assertThat(result).contains("dotnet");
-        assertThat(result).contains("format --verify-no-changes");
     }
 
     // ---- buildMultiToolFeedback tests ----

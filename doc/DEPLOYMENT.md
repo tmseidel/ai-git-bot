@@ -125,6 +125,8 @@ All AI provider and Git configuration is managed through the web interface:
 
 System prompts are stored in the database and managed in **System settings → System prompts**. On migration, Flyway creates a default prompt entry from the bundled prompt files and assigns it to all existing bots. The migration removes the legacy per-bot prompt column; copy any custom per-bot prompt text before upgrading if you need to recreate it as a reusable system prompt entry.
 
+When upgrading to the version that adds .NET validation support, Flyway overwrites the **Default** coding-agent system prompt so it includes `.sln` / `.csproj` detection and `dotnet restore`, `dotnet build`, `dotnet test`, and `dotnet format --verify-no-changes` guidance. Back up changes made directly to the **Default** prompt before upgrading, or clone it to a custom prompt entry and assign that entry to your bots.
+
 The `prompts/` directory is still copied into the image as the source for default prompt content:
 
 ```yaml
