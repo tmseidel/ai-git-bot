@@ -97,7 +97,7 @@ class GitLabApiClientTest {
 
         server.verify();
         assertEquals(1, issues.size());
-        assertEquals("Auth bug", issues.get(0).get("title"));
+        assertEquals("Auth bug", issues.getFirst().get("title"));
     }
 
     @Test
@@ -115,6 +115,25 @@ class GitLabApiClientTest {
 
         server.verify();
         assertTrue(issues.isEmpty());
+    }
+
+    @Test
+    void getIssueComments_fetchesIssueNotesWithPageLimit() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo(
+                        "https://gitlab.example.com/api/v4/projects/owner%2Frepo/issues/42/notes?per_page=50"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("[{\"id\":201,\"body\":\"First note\"}]", MediaType.APPLICATION_JSON));
+
+        List<Map<String, Object>> comments = client.getIssueComments("owner", "repo", 42L);
+
+        server.verify();
+        assertEquals(1, comments.size());
+        assertEquals(201, ((Number) comments.getFirst().get("id")).intValue());
+        assertEquals("First note", comments.getFirst().get("body"));
     }
 
     @Test
