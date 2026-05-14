@@ -162,6 +162,8 @@ The writer agent can additionally request `branch-switcher` before any further r
 
 After making file changes, the coding agent includes validation tools in the **same `runTools` array**:
 
+The examples below show common defaults; the coding agent should choose the tool arguments that best validate the actual changes (for example `mvn compile`, `mvn test`, `mvn verify`, `dotnet build`, or `dotnet test`).
+
 - **Maven** (`pom.xml`): `{"id": "<uuid>", "tool": "mvn", "args": ["compile", "-q", "-B"]}`
 - **Gradle** (`build.gradle`): `{"id": "<uuid>", "tool": "gradle", "args": ["compileJava", "-q"]}`
 - **npm** (`package.json`): `{"id": "<uuid>", "tool": "npm", "args": ["run", "build"]}`

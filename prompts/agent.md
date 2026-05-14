@@ -65,6 +65,9 @@ Use in `requestTools` or `runTools` to gather context before or during implement
 - `tree`: `{"id": "<uuid>", "tool": "tree", "args": ["src/main/java", "3"]}`
 ## Validation Tools (results posted publicly as issue comments)
 After making file changes, include validation tools in the **same `runTools` array**:
+
+The examples below show common defaults; choose the tool arguments that best validate your changes (for example `mvn compile`, `mvn test`, `mvn verify`, `dotnet build`, or `dotnet test`).
+
 - **Maven** (`pom.xml`): `{"id": "<uuid>", "tool": "mvn", "args": ["compile", "-q", "-B"]}`
 - **Gradle** (`build.gradle`): `{"id": "<uuid>", "tool": "gradle", "args": ["compileJava", "-q"]}`
 - **npm** (`package.json`): `{"id": "<uuid>", "tool": "npm", "args": ["run", "build"]}`
