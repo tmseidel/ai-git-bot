@@ -176,14 +176,13 @@ public class IssueImplementationService {
             // Fetch repository tree for context
             List<Map<String, Object>> tree = repositoryClient.getRepositoryTree(owner, repo, baseBranch);
             String treeContext  = promptBuilder.buildTreeContext(tree);
-            // Step 1 ("which files do you need?") is a one-shot text round that always
-            // expects a JSON envelope back, regardless of whether the loop will later run
-            // in native mode — so this call uses the LEGACY-flavoured prompt with the
-            // JSON-protocol guidance, while the implementation loop below picks the prompt
-            // that matches the actual transport (NATIVE when the operator left the
-            // "use legacy tool calling" toggle off and the client supports it).
-            String fileRequestSystemPrompt = resolveAgentSystemPrompt(ToolingMode.LEGACY);
-            String loopSystemPrompt = resolveAgentSystemPrompt();
+            // Both Step 1 (one-shot "which files do you need?") and Step 2 (implementation loop)
+            // use the same system prompt: the native short prompt when the operator left the
+            // `use_legacy_tool_calling` toggle off, the long legacy prompt otherwise. Step 1's
+            // user message already carries the JSON output template and the available-tools
+            // list, so the short native system prompt does not strand the model — and matches
+            // what the user actually expects to see in the log when "use legacy" is off.
+            String systemPrompt = resolveAgentSystemPrompt();
 
             // STEP 1: Ask AI which context it needs
             log.info("Step 1: Asking AI which files are needed for issue #{}", issueNumber);
@@ -191,7 +190,7 @@ public class IssueImplementationService {
                     issueTitle, issueBody, issueCommentsContext, treeContext);
             sessionService.addMessage(session, "user", fileRequestPrompt);
 
-            String fileRequestResponse = aiClient.chat(new ArrayList<>(), fileRequestPrompt, fileRequestSystemPrompt,
+            String fileRequestResponse = aiClient.chat(new ArrayList<>(), fileRequestPrompt, systemPrompt,
                     null, agentConfig.getBudget().getMaxTokensPerCall());
             sessionService.addMessage(session, "assistant", fileRequestResponse);
 
@@ -226,7 +225,7 @@ public class IssueImplementationService {
             String fullPrompt = implementationPrompt + toolsInfo;
 
             ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                    session, fullPrompt, loopSystemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
+                    session, fullPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
             boolean implementationSucceeded = implementationResult.success();
             baseBranch = implementationResult.selectedBranch();
 
