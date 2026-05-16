@@ -16,9 +16,11 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * AI client implementation for Anthropic's Messages API.
@@ -167,6 +169,16 @@ public class AnthropicAiClient extends AbstractAiClient {
      * single {@code user}-role message holding {@code tool_result} blocks,
      * because the Anthropic API requires tool results to live in a
      * {@code user} turn.
+     *
+     * <p>Defensive sanitisation: Anthropic strictly requires every
+     * {@code tool_use} block in an assistant turn to be matched 1:1 by a
+     * {@code tool_result} with the same {@code tool_use_id} in the
+     * immediately following user turn — and rejects {@code tool_result}
+     * blocks without a {@code tool_use_id}. Replayed session history can
+     * violate either rule (older messages persisted before the native flow
+     * had stable ids, or a tool message dropped because the run crashed),
+     * so we drop orphan blocks on both sides instead of letting the API
+     * 400 the whole request.</p>
      */
     private List<AnthropicRequest.Message> buildToolMessages(List<AiMessage> history) {
         List<AnthropicRequest.Message> out = new ArrayList<>();
@@ -174,10 +186,17 @@ public class AnthropicAiClient extends AbstractAiClient {
 
         for (AiMessage m : history) {
             if ("tool".equals(m.getRole())) {
+                String toolCallId = m.getToolCallId();
+                if (toolCallId == null || toolCallId.isBlank()) {
+                    log.warn("Dropping tool-role history message without tool_use_id "
+                            + "(would be rejected by Anthropic)");
+                    continue;
+                }
+                String resultText = m.getToolResult() != null ? m.getToolResult() : m.getContent();
                 AnthropicRequest.ContentBlock block = AnthropicRequest.ContentBlock.builder()
                         .type("tool_result")
-                        .toolUseId(m.getToolCallId())
-                        .text(m.getToolResult() != null ? m.getToolResult() : m.getContent())
+                        .toolUseId(toolCallId)
+                        .content(resultText != null ? resultText : "")
                         .build();
                 pendingToolResults.add(block);
                 continue;
@@ -197,6 +216,11 @@ public class AnthropicAiClient extends AbstractAiClient {
                             .type("text").text(m.getContent()).build());
                 }
                 for (ToolCall call : m.getToolCalls()) {
+                    if (call.id() == null || call.id().isBlank()) {
+                        log.warn("Dropping tool_use block without id in assistant history message "
+                                + "(would be rejected by Anthropic)");
+                        continue;
+                    }
                     blocks.add(AnthropicRequest.ContentBlock.builder()
                             .type("tool_use")
                             .id(call.id())
@@ -205,6 +229,9 @@ public class AnthropicAiClient extends AbstractAiClient {
                                     ? jackson.convertValue(call.args(), Map.class)
                                     : Map.of())
                             .build());
+                }
+                if (blocks.isEmpty()) {
+                    continue;
                 }
                 out.add(AnthropicRequest.Message.builder()
                         .role("assistant")
@@ -223,7 +250,107 @@ public class AnthropicAiClient extends AbstractAiClient {
                     .content(new ArrayList<>(pendingToolResults))
                     .build());
         }
+        return reconcileToolCallPairs(out);
+    }
+
+    /**
+     * Walk the assembled message list and drop {@code tool_use} blocks whose
+     * id is not answered by a {@code tool_result} in the very next user turn,
+     * and {@code tool_result} blocks whose id has no preceding {@code tool_use}.
+     * If reconciling leaves an assistant message with only orphan tool calls,
+     * the whole message is dropped to keep the conversation well-formed.
+     */
+    private List<AnthropicRequest.Message> reconcileToolCallPairs(List<AnthropicRequest.Message> msgs) {
+        List<AnthropicRequest.Message> out = new ArrayList<>(msgs.size());
+        for (int i = 0; i < msgs.size(); i++) {
+            AnthropicRequest.Message m = msgs.get(i);
+            if ("assistant".equals(m.getRole()) && m.getContent() instanceof List<?> blocks) {
+                Set<String> answeredIds = collectToolResultIds(i + 1 < msgs.size() ? msgs.get(i + 1) : null);
+                List<AnthropicRequest.ContentBlock> kept = new ArrayList<>();
+                int droppedToolUses = 0;
+                for (Object o : blocks) {
+                    if (!(o instanceof AnthropicRequest.ContentBlock cb)) {
+                        continue;
+                    }
+                    if ("tool_use".equals(cb.getType()) && !answeredIds.contains(cb.getId())) {
+                        droppedToolUses++;
+                        continue;
+                    }
+                    kept.add(cb);
+                }
+                if (droppedToolUses > 0) {
+                    log.warn("Dropped {} unmatched tool_use block(s) from replayed assistant turn",
+                            droppedToolUses);
+                }
+                boolean anyToolUseLeft = kept.stream().anyMatch(cb -> "tool_use".equals(cb.getType()));
+                boolean anyTextLeft = kept.stream().anyMatch(cb -> "text".equals(cb.getType()));
+                if (!anyToolUseLeft && !anyTextLeft) {
+                    continue;
+                }
+                out.add(AnthropicRequest.Message.builder()
+                        .role("assistant")
+                        .content(kept)
+                        .build());
+            } else if ("user".equals(m.getRole()) && m.getContent() instanceof List<?> blocks) {
+                Set<String> requestedIds = collectToolUseIds(out.isEmpty() ? null : out.get(out.size() - 1));
+                List<AnthropicRequest.ContentBlock> kept = new ArrayList<>();
+                int droppedToolResults = 0;
+                for (Object o : blocks) {
+                    if (!(o instanceof AnthropicRequest.ContentBlock cb)) {
+                        continue;
+                    }
+                    if ("tool_result".equals(cb.getType()) && !requestedIds.contains(cb.getToolUseId())) {
+                        droppedToolResults++;
+                        continue;
+                    }
+                    kept.add(cb);
+                }
+                if (droppedToolResults > 0) {
+                    log.warn("Dropped {} orphan tool_result block(s) from replayed user turn",
+                            droppedToolResults);
+                }
+                if (kept.isEmpty()) {
+                    continue;
+                }
+                out.add(AnthropicRequest.Message.builder()
+                        .role("user")
+                        .content(kept)
+                        .build());
+            } else {
+                out.add(m);
+            }
+        }
         return out;
+    }
+
+    private Set<String> collectToolResultIds(AnthropicRequest.Message m) {
+        if (m == null || !"user".equals(m.getRole()) || !(m.getContent() instanceof List<?> blocks)) {
+            return Set.of();
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        for (Object o : blocks) {
+            if (o instanceof AnthropicRequest.ContentBlock cb
+                    && "tool_result".equals(cb.getType())
+                    && cb.getToolUseId() != null) {
+                ids.add(cb.getToolUseId());
+            }
+        }
+        return ids;
+    }
+
+    private Set<String> collectToolUseIds(AnthropicRequest.Message m) {
+        if (m == null || !"assistant".equals(m.getRole()) || !(m.getContent() instanceof List<?> blocks)) {
+            return Set.of();
+        }
+        Set<String> ids = new LinkedHashSet<>();
+        for (Object o : blocks) {
+            if (o instanceof AnthropicRequest.ContentBlock cb
+                    && "tool_use".equals(cb.getType())
+                    && cb.getId() != null) {
+                ids.add(cb.getId());
+            }
+        }
+        return ids;
     }
 
     private AnthropicRequest.Tool toToolPayload(ToolDescriptor descriptor) {

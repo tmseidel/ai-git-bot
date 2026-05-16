@@ -235,6 +235,18 @@ public final class CodingAgentStrategy implements AgentStrategy {
                 log.info("All validation tools passed on attempt {} (native)", attempt);
             }
             if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+                // Validation is mandatory: if validation is enabled but the model
+                // never called a build/test tool, do NOT finish silently. Hand the
+                // tool results back together with an explicit instruction to run
+                // the project's build (mvn / gradle / npm / ...). This counts as
+                // an attempt so we don't loop forever.
+                if (agentConfig.getValidation().isEnabled() && !hasValidationTools) {
+                    log.info("Workspace changed but no validation tool was called on attempt {}; "
+                                    + "asking AI to run the project build (native)", attempt);
+                    attempt++;
+                    return new StepDecision.ContinueWithToolResults(packaged,
+                            promptBuilder.buildMissingValidationFeedback());
+                }
                 ImplementationPlan plan = ImplementationPlan.builder()
                         .summary(turn.assistantText() == null || turn.assistantText().isBlank()
                                 ? "Implementation produced workspace changes."

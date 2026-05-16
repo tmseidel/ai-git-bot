@@ -5,9 +5,13 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Step 7.2 — sanity-checks for the new {@link AgentConfigProperties.BudgetConfig}
- * and the legacy migration performed by
- * {@link AgentConfigProperties#applyLegacyBudgetDefaults()}.
+ * Step 7.2 — sanity-checks for {@link AgentConfigProperties.BudgetConfig}
+ * defaults and {@link AgentConfigProperties.CriticConfig} defaults.
+ *
+ * <p>The previous legacy-migration tests (covering the long-since-removed
+ * {@code agent.max-tokens} / {@code agent.validation.max-retries} fields
+ * and the {@code applyLegacyBudgetDefaults()} @PostConstruct hook) have
+ * been dropped together with the migration itself.</p>
  */
 class AgentConfigPropertiesBudgetTest {
 
@@ -21,31 +25,6 @@ class AgentConfigPropertiesBudgetTest {
         assertThat(b.getMaxTokensPerCall()).isEqualTo(16384);
     }
 
-    @Test
-    void legacyMaxTokensPropagatesIntoBudgetWhenBudgetIsAtDefault() {
-        AgentConfigProperties props = new AgentConfigProperties();
-        props.setMaxTokens(4096);                     // legacy field still set
-        props.applyLegacyBudgetDefaults();             // simulate @PostConstruct
-        assertThat(props.getBudget().getMaxTokensPerCall()).isEqualTo(4096);
-    }
-
-    @Test
-    void explicitBudgetOverridesLegacyMaxTokens() {
-        AgentConfigProperties props = new AgentConfigProperties();
-        props.setMaxTokens(4096);
-        props.getBudget().setMaxTokensPerCall(9999);   // operator opted into the new knob
-        props.applyLegacyBudgetDefaults();
-        assertThat(props.getBudget().getMaxTokensPerCall()).isEqualTo(9999);
-    }
-
-    @Test
-    void legacyValidationRetriesPropagateWhenEnabled() {
-        AgentConfigProperties props = new AgentConfigProperties();
-        props.getValidation().setEnabled(true);
-        props.getValidation().setMaxRetries(7);
-        props.applyLegacyBudgetDefaults();
-        assertThat(props.getBudget().getMaxValidationRetries()).isEqualTo(7);
-    }
 
     @Test
     void criticDefaultsAreOff() {

@@ -359,6 +359,30 @@ public class AgentPromptBuilder {
     }
 
     /**
+     * Feedback message used by the native-tooling strategy when the model
+     * mutated files but did not call a build/test tool in the same round.
+     * Validation is mandatory: the agent must run the project's own build to
+     * prove the change compiles and tests still pass before we open the PR.
+     */
+    public String buildMissingValidationFeedback() {
+        return """
+                ## Validation is mandatory
+                
+                You modified files but did not call any build / test tool in this round, \
+                so the change is unverified. Before we can open the pull request you must \
+                run the project's own build through a validation tool call (for example \
+                `mvn test -q -B`, `gradle build -q`, `npm test`, `cargo build`, `go build ./...`, \
+                `dotnet test`, etc.), with arguments appropriate for this repository.
+                
+                Please issue one more round that:
+                1. Runs the build / tests (preferring tests over compile-only when the project has them).
+                2. If the build fails, reads the actual error, locates the cause and applies the necessary fix \
+                   in the same round before re-running validation.
+                
+                Do not finish with "done" — wait for a green build first.""";
+    }
+
+    /**
      * Builds the pull request body text.
      */
     public String buildPrBody(Long issueNumber, ImplementationPlan plan) {

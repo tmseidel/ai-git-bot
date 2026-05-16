@@ -50,6 +50,14 @@ public class AnthropicRequest {
         private String toolUseId;
         @JsonProperty("is_error")
         private Boolean isError;
+        /**
+         * Payload of a {@code tool_result} block. Per the Anthropic Messages
+         * API this must be sent as {@code content} (string or list of nested
+         * content blocks), NOT as {@code text} — {@code text} is reserved for
+         * the {@code text} block type and is rejected with
+         * "Extra inputs are not permitted" on {@code tool_result} blocks.
+         */
+        private Object content;
     }
     @Data
     @Builder
