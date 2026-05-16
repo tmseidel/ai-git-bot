@@ -31,6 +31,8 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolPromptRenderer;
+import org.remus.giteabot.agent.shared.SystemPromptAssembler;
+import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
@@ -72,6 +74,7 @@ public class IssueImplementationService {
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
     private final McpToolPromptRenderer mcpToolPromptRenderer;
+    private final SystemPromptAssembler systemPromptAssembler;
 
     // Extracted helpers
     private final AiResponseParser responseParser;
@@ -101,6 +104,7 @@ public class IssueImplementationService {
         this.mcpConfiguration = context.mcpConfiguration();
         this.mcpToolCatalog = context.mcpToolCatalog();
         this.mcpToolPromptRenderer = new McpToolPromptRenderer();
+        this.systemPromptAssembler = new SystemPromptAssembler(this.mcpToolPromptRenderer);
 
         this.responseParser = new AiResponseParser();
         this.promptBuilder = new AgentPromptBuilder(agentConfig != null ? agentConfig.getContext() : null);
@@ -172,7 +176,14 @@ public class IssueImplementationService {
             // Fetch repository tree for context
             List<Map<String, Object>> tree = repositoryClient.getRepositoryTree(owner, repo, baseBranch);
             String treeContext  = promptBuilder.buildTreeContext(tree);
-            String systemPrompt = resolveAgentSystemPrompt();
+            // Step 1 ("which files do you need?") is a one-shot text round that always
+            // expects a JSON envelope back, regardless of whether the loop will later run
+            // in native mode — so this call uses the LEGACY-flavoured prompt with the
+            // JSON-protocol guidance, while the implementation loop below picks the prompt
+            // that matches the actual transport (NATIVE when the operator left the
+            // "use legacy tool calling" toggle off and the client supports it).
+            String fileRequestSystemPrompt = resolveAgentSystemPrompt(ToolingMode.LEGACY);
+            String loopSystemPrompt = resolveAgentSystemPrompt();
 
             // STEP 1: Ask AI which context it needs
             log.info("Step 1: Asking AI which files are needed for issue #{}", issueNumber);
@@ -180,7 +191,7 @@ public class IssueImplementationService {
                     issueTitle, issueBody, issueCommentsContext, treeContext);
             sessionService.addMessage(session, "user", fileRequestPrompt);
 
-            String fileRequestResponse = aiClient.chat(new ArrayList<>(), fileRequestPrompt, systemPrompt,
+            String fileRequestResponse = aiClient.chat(new ArrayList<>(), fileRequestPrompt, fileRequestSystemPrompt,
                     null, agentConfig.getBudget().getMaxTokensPerCall());
             sessionService.addMessage(session, "assistant", fileRequestResponse);
 
@@ -215,7 +226,7 @@ public class IssueImplementationService {
             String fullPrompt = implementationPrompt + toolsInfo;
 
             ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                    session, fullPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
+                    session, fullPrompt, loopSystemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
             boolean implementationSucceeded = implementationResult.success();
             baseBranch = implementationResult.selectedBranch();
 
@@ -535,13 +546,29 @@ public class IssueImplementationService {
     }
 
     private String resolveAgentSystemPrompt() {
+        // Drive the prompt mode purely off the configured client (i.e. the operator's
+        // `use_legacy_tool_calling` toggle). The coding strategy advertises native
+        // function-calling whenever the client supports it, so the prompt and the
+        // transport stay in sync without a separate static hint.
+        ToolingMode mode = (aiClient != null && aiClient.supportsNativeTools())
+                ? ToolingMode.NATIVE : ToolingMode.LEGACY;
+        return resolveAgentSystemPrompt(mode);
+    }
+
+    /**
+     * Variant used by Step 1 (one-shot file-context request) which always wants the
+     * JSON-protocol guidance regardless of whether the implementation loop later runs
+     * in native mode.
+     */
+    private String resolveAgentSystemPrompt(ToolingMode mode) {
         String basePrompt;
         if (issueAgentSystemPrompt != null && !issueAgentSystemPrompt.isBlank()) {
             basePrompt = issueAgentSystemPrompt;
         } else {
             basePrompt = promptService.getSystemPrompt(AGENT_PROMPT_NAME);
         }
-        return basePrompt + mcpToolPromptRenderer.render(mcpToolCatalog);
+        return systemPromptAssembler.assemble(basePrompt, mcpToolCatalog, mode,
+                org.remus.giteabot.agent.shared.SystemPromptAssembler.PromptKind.ISSUE_AGENT);
     }
 
     /**

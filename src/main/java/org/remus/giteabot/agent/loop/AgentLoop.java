@@ -110,11 +110,45 @@ public final class AgentLoop {
                         round, budget.maxRounds(), ctx.issueNumber());
                 return finish.outcome();
             }
+            // The user message that drove this round and the assistant turn must always be
+            // recorded in the in-flight history so the next AI call sees them. For native
+            // rounds the assistant turn additionally carries the tool_calls payload so the
+            // following tool-role messages can correlate by id (Anthropic/OpenAI both reject
+            // tool messages whose call id is unknown to the preceding assistant message).
+            if (currentMessage != null && !currentMessage.isEmpty()) {
+                history.add(AiMessage.builder().role("user").content(currentMessage).build());
+            }
+            history.add(AiMessage.builder()
+                    .role("assistant")
+                    .content(aiResponse)
+                    .toolCalls(turn.toolCalls().isEmpty() ? null : turn.toolCalls())
+                    .build());
+
+            if (decision instanceof StepDecision.ContinueWithToolResults nativeContinue) {
+                log.debug("AgentLoop round {}/{} for issue #{}: strategy decided CONTINUE_WITH_TOOL_RESULTS ({} results)",
+                        round, budget.maxRounds(), ctx.issueNumber(), nativeContinue.results().size());
+                for (StepDecision.ToolCallResult r : nativeContinue.results()) {
+                    history.add(AiMessage.builder()
+                            .role("tool")
+                            .toolCallId(r.toolCallId())
+                            .toolResult(r.resultText())
+                            .build());
+                    // Persist a textual marker in the session log so post-hoc review still shows
+                    // the tool flow. Full structured replay is intentionally out of scope here.
+                    sessionService.addMessage(ctx.session(), "tool",
+                            "[" + r.toolCallId() + "] " + r.resultText());
+                }
+                String follow = nativeContinue.nextUserMessage();
+                currentMessage = (follow == null || follow.isEmpty()) ? "" : follow;
+                if (!currentMessage.isEmpty()) {
+                    sessionService.addMessage(ctx.session(), "user", currentMessage);
+                }
+                continue;
+            }
+
             log.debug("AgentLoop round {}/{} for issue #{}: strategy decided CONTINUE",
                     round, budget.maxRounds(), ctx.issueNumber());
             String next = ((StepDecision.Continue) decision).nextUserMessage();
-            history.add(AiMessage.builder().role("user").content(currentMessage).build());
-            history.add(AiMessage.builder().role("assistant").content(aiResponse).build());
             currentMessage = next;
             sessionService.addMessage(ctx.session(), "user", currentMessage);
         }
@@ -125,19 +159,20 @@ public final class AgentLoop {
     }
 
     private ToolingMode resolveMode(AgentStrategy strategy) {
-        if (strategy.preferredToolMode() != ToolingMode.NATIVE) {
-            return ToolingMode.LEGACY;
+        boolean clientSupportsNative = aiClient != null && aiClient.supportsNativeTools();
+        ToolingMode resolved = ToolingMode.resolve(
+                strategy.preferredToolMode(),
+                clientSupportsNative,
+                !strategy.toolDescriptors().isEmpty());
+        if (strategy.preferredToolMode() == ToolingMode.NATIVE && resolved == ToolingMode.LEGACY) {
+            if (!clientSupportsNative) {
+                log.debug("Strategy requested NATIVE tools but client {} does not support them; "
+                        + "falling back to LEGACY", providerTag);
+            } else {
+                log.debug("Strategy requested NATIVE tools but supplied no descriptors; falling back to LEGACY");
+            }
         }
-        if (aiClient == null || !aiClient.supportsNativeTools()) {
-            log.debug("Strategy requested NATIVE tools but client {} does not support them; falling back to LEGACY",
-                    providerTag);
-            return ToolingMode.LEGACY;
-        }
-        if (strategy.toolDescriptors().isEmpty()) {
-            log.debug("Strategy requested NATIVE tools but supplied no descriptors; falling back to LEGACY");
-            return ToolingMode.LEGACY;
-        }
-        return ToolingMode.NATIVE;
+        return resolved;
     }
 
     private static String modeTag(ToolingMode mode) {

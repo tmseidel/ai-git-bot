@@ -9,6 +9,8 @@ import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.shared.BranchRefs;
 import org.remus.giteabot.agent.shared.BranchSwitcher;
+import org.remus.giteabot.agent.shared.SystemPromptAssembler;
+import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
@@ -56,6 +58,7 @@ public class WriterAgentService {
     private final WriterPromptBuilder promptBuilder = new WriterPromptBuilder();
     private final WriterResponseParser responseParser = new WriterResponseParser();
     private final McpToolPromptRenderer mcpToolPromptRenderer = new McpToolPromptRenderer();
+    private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler(mcpToolPromptRenderer);
 
     public WriterAgentService(RepositoryApiClient repositoryClient,
                               AiClient aiClient,
@@ -241,6 +244,7 @@ public class WriterAgentService {
                 repositoryClient,
                 branchSwitcher,
                 toolRouter,
+                mcpToolCatalog,
                 maxToolRounds());
         // The historic loop ran for-each `round in 0..maxToolRounds` (inclusive), i.e. one extra
         // iteration beyond the context-round limit so the AI gets a chance to produce a
@@ -330,7 +334,14 @@ public class WriterAgentService {
         } else {
             basePrompt = promptService.getSystemPrompt(WRITER_PROMPT_NAME);
         }
-        return basePrompt + mcpToolPromptRenderer.render(mcpToolCatalog);
+        // Drive the prompt mode purely off the configured client (i.e. the operator's
+        // `use_legacy_tool_calling` toggle). The writer strategy advertises native
+        // function-calling whenever the client supports it, so the prompt and the
+        // transport stay in sync.
+        ToolingMode mode = (aiClient != null && aiClient.supportsNativeTools())
+                ? ToolingMode.NATIVE : ToolingMode.LEGACY;
+        return systemPromptAssembler.assemble(basePrompt, mcpToolCatalog, mode,
+                org.remus.giteabot.agent.shared.SystemPromptAssembler.PromptKind.WRITER_AGENT);
     }
 
     private String outputContract() {

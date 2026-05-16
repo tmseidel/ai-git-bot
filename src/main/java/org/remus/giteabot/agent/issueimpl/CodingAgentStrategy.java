@@ -5,8 +5,10 @@ import org.remus.giteabot.agent.loop.AgentRunContext;
 import org.remus.giteabot.agent.loop.AgentStrategy;
 import org.remus.giteabot.agent.loop.LoopOutcome;
 import org.remus.giteabot.agent.loop.StepDecision;
+import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.shared.AgentNativeTools;
 import org.remus.giteabot.agent.shared.BranchSwitcher;
 import org.remus.giteabot.agent.shared.McpTools;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
@@ -14,9 +16,13 @@ import org.remus.giteabot.agent.tools.ToolCallContext;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.ToolCall;
+import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
+import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,6 +45,23 @@ import java.util.stream.IntStream;
  */
 @Slf4j
 public final class CodingAgentStrategy implements AgentStrategy {
+
+    /**
+     * Static capability declarations kept for backwards-compatible call sites
+     * that still consult them. The runtime mode is now driven by
+     * {@link #preferredToolMode()} (NATIVE) combined with
+     * {@link #toolDescriptors()} (non-empty when an MCP catalog is supplied or
+     * the built-in coding toolbox is exposed); the loop transparently falls
+     * back to LEGACY when {@link org.remus.giteabot.ai.AiClient#supportsNativeTools()}
+     * returns false (operator flipped the {@code use_legacy_tool_calling} toggle).
+     *
+     * @deprecated callers should rely on {@code aiClient.supportsNativeTools()}
+     *             directly, not on these constants.
+     */
+    @Deprecated
+    public static final ToolingMode STATIC_PREFERRED_TOOL_MODE = ToolingMode.NATIVE;
+    @Deprecated
+    public static final boolean STATIC_HAS_TOOL_DESCRIPTORS = true;
 
     private final String systemPrompt;
     private final AgentPromptBuilder promptBuilder;
@@ -107,6 +130,202 @@ public final class CodingAgentStrategy implements AgentStrategy {
         return systemPrompt;
     }
 
+    // ---------------------------------------------------------------------
+    // Step 6 follow-up: native function-calling opt-in.
+    // ---------------------------------------------------------------------
+
+    /** Coding agent advertises NATIVE; the loop falls back to LEGACY when the
+     *  client doesn't support native tools (i.e. operator toggled
+     *  {@code use_legacy_tool_calling=true}) or the descriptor list is empty. */
+    @Override
+    public ToolingMode preferredToolMode() {
+        return ToolingMode.NATIVE;
+    }
+
+    /** Full coding toolbox (file mutations + repository exploration + validation
+     *  + MCP), reused as JSON-schema descriptors for the provider's function
+     *  calling API. */
+    @Override
+    public List<ToolDescriptor> toolDescriptors() {
+        return AgentNativeTools.codingTools(mcpToolCatalog);
+    }
+
+    /**
+     * Native-mode step: translate the model's {@code tool_calls} into the
+     * existing {@link ImplementationPlan.ToolRequest} pipeline, reuse the
+     * legacy execution / validation / retry logic, and report results back
+     * as {@code tool}-role messages.
+     */
+    @Override
+    public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
+        if (!turn.hasToolCalls()) {
+            // Model returned text only — defer to the legacy parser, which
+            // covers the "no tool calls but a final summary" case and the
+            // "model emitted a JSON envelope despite NATIVE" fallback.
+            return step(ctx, turn.assistantText(), round);
+        }
+        if (attempt > maxRetries) {
+            log.warn("Tool implementation loop exhausted {} attempts without full success", maxRetries);
+            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()));
+        }
+        log.info("Tool implementation loop for issue #{}, attempt {}/{} (native, {} calls)",
+                ctx.issueNumber(), attempt, maxRetries, turn.toolCalls().size());
+
+        if (turn.assistantText() != null && !turn.assistantText().isBlank()) {
+            notificationService.postAiThinkingComment(ctx.owner(), ctx.repo(), ctx.issueNumber(),
+                    turn.assistantText());
+        }
+
+        // 1) Resolve branch-switcher requests up-front (same precedence as legacy).
+        List<ImplementationPlan.ToolRequest> requests = new ArrayList<>();
+        for (ToolCall call : turn.toolCalls()) {
+            requests.add(toRequest(call));
+        }
+        BranchSwitcher.Result branchSwitchResult = branchSwitcher.apply(
+                ctx.workspaceDir(), ctx.baseBranch(), requests, ctx.issueNumber());
+        ctx.setBaseBranch(branchSwitchResult.selectedBranch());
+        List<ImplementationPlan.ToolRequest> remaining = branchSwitchResult.remainingToolRequests();
+
+        // 2) Distinguish context-only rounds (cat/rg/find/...) from mutation/validation rounds.
+        boolean hasMutationOrValidation = remaining.stream().anyMatch(this::isMutationOrValidation);
+        if (!hasMutationOrValidation && fileRequestRounds < maxContextRounds && !remaining.isEmpty()) {
+            fileRequestRounds++;
+            log.info("AI requested native context tools (round {}/{}, {} call(s))",
+                    fileRequestRounds, maxContextRounds, remaining.size());
+            List<StepDecision.ToolCallResult> results = executeAndPackage(ctx, remaining, turn.toolCalls());
+            return new StepDecision.ContinueWithToolResults(results, null);
+        }
+
+        // 3) Tool-execution round: respect the retry cap.
+        if (toolRounds >= maxToolRounds) {
+            log.warn("Reached max tool rounds ({}) — returning current result", maxToolRounds);
+            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()));
+        }
+        toolRounds++;
+
+        List<ToolResult> rawResults = executeAllTools(ctx.workspaceDir(), remaining);
+        boolean hasValidationTools = hasValidationTools(remaining);
+        boolean validationPassed = !hasValidationTools || allValidationToolsPassed(remaining, rawResults);
+
+        // 4) Surface non-silent results as issue comments (mirror legacy behaviour).
+        for (int i = 0; i < remaining.size(); i++) {
+            ImplementationPlan.ToolRequest req = remaining.get(i);
+            if (!toolExecutionService.isSilentTool(req.getTool()) && !isMcpTool(req.getTool())) {
+                notificationService.postToolResultComment(ctx.owner(), ctx.repo(), ctx.issueNumber(),
+                        req, rawResults.get(i));
+            }
+        }
+
+        // 5) Always report tool results back to the model via tool-role messages so
+        //    Anthropic/OpenAI/Google can correlate call ids; the assistant turn after
+        //    a tool round is implicit (no user message).
+        List<StepDecision.ToolCallResult> packaged = packageResults(remaining, rawResults, turn.toolCalls());
+
+        // 6) Decide whether to finish, retry, or simply hand back the results for another round.
+        if (hasBlockingNonValidationToolFailures(remaining, rawResults, validationPassed)) {
+            log.info("Non-validation tools failed on attempt {}; asking AI to correct (native)", attempt);
+            attempt++;
+            return new StepDecision.ContinueWithToolResults(packaged, null);
+        }
+        if (!agentConfig.getValidation().isEnabled() || !hasValidationTools || validationPassed) {
+            if (hasValidationTools && validationPassed) {
+                log.info("All validation tools passed on attempt {} (native)", attempt);
+            }
+            if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+                ImplementationPlan plan = ImplementationPlan.builder()
+                        .summary(turn.assistantText() == null || turn.assistantText().isBlank()
+                                ? "Implementation produced workspace changes."
+                                : turn.assistantText())
+                        .toolRequests(remaining)
+                        .build();
+                sessionService.recordPlan(ctx.session(), plan.getSummary(), turn.assistantText());
+                lastSuccessfulPlan = plan;
+                return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
+            }
+            log.info("Native tool round produced no Git-detectable workspace changes; continuing");
+            attempt++;
+            return new StepDecision.ContinueWithToolResults(packaged, null);
+        }
+        attempt++;
+        return new StepDecision.ContinueWithToolResults(packaged, null);
+    }
+
+    /** Convert a single native {@link ToolCall} into a positional-args
+     *  {@link ImplementationPlan.ToolRequest} compatible with the existing
+     *  {@link AgentToolRouter}. */
+    private ImplementationPlan.ToolRequest toRequest(ToolCall call) {
+        List<String> args = new ArrayList<>();
+        JsonNode root = call.args();
+        if (root != null && root.isObject()) {
+            // 1) varargs convention: a top-level "args" array.
+            JsonNode varargs = root.get("args");
+            if (varargs != null && varargs.isArray()) {
+                varargs.forEach(node -> args.add(asString(node)));
+            } else {
+                // 2) Typed schema (write-file/patch-file/mkdir/delete-file/cat/branch-switcher):
+                //    flatten the known property order into positional args. We honour the
+                //    schema ordering documented in AgentNativeTools so the existing executors
+                //    keep working unchanged.
+                addIfPresent(root, "path", args);
+                addIfPresent(root, "branch", args);
+                addIfPresent(root, "content", args);
+                addIfPresent(root, "search", args);
+                addIfPresent(root, "replacement", args);
+                addIfPresent(root, "startLine", args);
+                addIfPresent(root, "endLine", args);
+            }
+        }
+        return ImplementationPlan.ToolRequest.builder()
+                .id(call.id() == null || call.id().isBlank() ? java.util.UUID.randomUUID().toString() : call.id())
+                .tool(call.name())
+                .args(args)
+                .build();
+    }
+
+    private static void addIfPresent(JsonNode root, String field, List<String> out) {
+        JsonNode v = root.get(field);
+        if (v != null && !v.isMissingNode() && !v.isNull()) {
+            out.add(asString(v));
+        }
+    }
+
+    private static String asString(JsonNode node) {
+        return node.isTextual() ? node.asString() : node.toString();
+    }
+
+    /** Decide whether a tool request mutates the workspace or validates. */
+    private boolean isMutationOrValidation(ImplementationPlan.ToolRequest req) {
+        return toolExecutionService.isFileTool(req.getTool())
+                || toolExecutionService.isValidationTool(req.getTool());
+    }
+
+    /** Execute {@code requests} and turn the results into
+     *  {@link StepDecision.ToolCallResult} entries keyed by the original
+     *  {@link ToolCall#id()} so providers can correlate. */
+    private List<StepDecision.ToolCallResult> executeAndPackage(AgentRunContext ctx,
+                                                                List<ImplementationPlan.ToolRequest> requests,
+                                                                List<ToolCall> originalCalls) {
+        List<ToolResult> raw = executeAllTools(ctx.workspaceDir(), requests);
+        return packageResults(requests, raw, originalCalls);
+    }
+
+    private List<StepDecision.ToolCallResult> packageResults(List<ImplementationPlan.ToolRequest> requests,
+                                                             List<ToolResult> rawResults,
+                                                             List<ToolCall> originalCalls) {
+        List<StepDecision.ToolCallResult> out = new ArrayList<>(rawResults.size());
+        // Map request id -> result text, then iterate originalCalls so every call id
+        // gets a tool-result message (some providers reject unmatched ids).
+        java.util.Map<String, String> byId = new java.util.HashMap<>();
+        for (int i = 0; i < requests.size(); i++) {
+            byId.put(requests.get(i).getId(), rawResults.get(i).formatForAi());
+        }
+        for (ToolCall call : originalCalls) {
+            String text = byId.getOrDefault(call.id(),
+                    "[branch-switcher handled inline — no separate result]");
+            out.add(new StepDecision.ToolCallResult(call.id(), text));
+        }
+        return out;
+    }
 
     @Override
     public StepDecision step(AgentRunContext ctx, String aiResponse, int round) {
@@ -281,6 +500,9 @@ public final class CodingAgentStrategy implements AgentStrategy {
         return McpTools.isMcpTool(mcpOrchestrationService, mcpToolCatalog, toolName);
     }
 }
+
+
+
 
 
 

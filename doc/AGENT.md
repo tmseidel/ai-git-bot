@@ -322,7 +322,7 @@ successful `AiResponseParser.parseAiResponse`. Three new columns store
 `last_plan_at` (TIMESTAMP). Downstream callers (PR-body generation, follow-up
 comments) read the plan in O(1) instead of walking the conversation history.
 A history-walk fallback remains for sessions created before Flyway migration
-`V11__agent_session_last_plan.sql`.
+`V10__step6_step7_schema_and_prompt_updates.sql`.
 
 #### Consolidated budget config
 

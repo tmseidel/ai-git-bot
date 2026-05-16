@@ -5,14 +5,21 @@ import org.remus.giteabot.agent.loop.AgentRunContext;
 import org.remus.giteabot.agent.loop.AgentStrategy;
 import org.remus.giteabot.agent.loop.LoopOutcome;
 import org.remus.giteabot.agent.loop.StepDecision;
+import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.shared.AgentNativeTools;
 import org.remus.giteabot.agent.shared.BranchSwitcher;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.tools.ToolCallContext;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.ToolCall;
+import org.remus.giteabot.ai.ToolDescriptor;
+import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +34,20 @@ import java.util.List;
 @Slf4j
 public final class WriterAgentStrategy implements AgentStrategy {
 
+    /**
+     * Kept for backwards-compatible call sites that may still consult these
+     * constants. Runtime mode is now driven by {@link #preferredToolMode()}
+     * + {@link #toolDescriptors()}; the loop falls back to LEGACY when
+     * {@link org.remus.giteabot.ai.AiClient#supportsNativeTools()} returns
+     * false (operator flipped the {@code use_legacy_tool_calling} toggle).
+     *
+     * @deprecated rely on {@code aiClient.supportsNativeTools()} directly.
+     */
+    @Deprecated
+    public static final ToolingMode STATIC_PREFERRED_TOOL_MODE = ToolingMode.NATIVE;
+    @Deprecated
+    public static final boolean STATIC_HAS_TOOL_DESCRIPTORS = true;
+
     private final String systemPrompt;
     private final WriterPromptBuilder promptBuilder;
     private final WriterResponseParser responseParser;
@@ -34,6 +55,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
     private final RepositoryApiClient repositoryClient;
     private final BranchSwitcher branchSwitcher;
     private final AgentToolRouter toolRouter;
+    private final McpToolCatalog mcpToolCatalog;
     private final int maxToolRounds;
 
     public WriterAgentStrategy(String systemPrompt,
@@ -43,6 +65,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
                                RepositoryApiClient repositoryClient,
                                BranchSwitcher branchSwitcher,
                                AgentToolRouter toolRouter,
+                               McpToolCatalog mcpToolCatalog,
                                int maxToolRounds) {
         this.systemPrompt = systemPrompt;
         this.promptBuilder = promptBuilder;
@@ -51,12 +74,119 @@ public final class WriterAgentStrategy implements AgentStrategy {
         this.repositoryClient = repositoryClient;
         this.branchSwitcher = branchSwitcher;
         this.toolRouter = toolRouter;
+        this.mcpToolCatalog = mcpToolCatalog;
         this.maxToolRounds = maxToolRounds;
+    }
+
+    /** Backwards-compatible ctor for callers (and tests) that haven't been
+     *  updated to pass an {@link McpToolCatalog}. Defaults to an empty catalog,
+     *  which means no MCP tools are exposed via the native function-calling API. */
+    public WriterAgentStrategy(String systemPrompt,
+                               WriterPromptBuilder promptBuilder,
+                               WriterResponseParser responseParser,
+                               AgentSessionService sessionService,
+                               RepositoryApiClient repositoryClient,
+                               BranchSwitcher branchSwitcher,
+                               AgentToolRouter toolRouter,
+                               int maxToolRounds) {
+        this(systemPrompt, promptBuilder, responseParser, sessionService, repositoryClient,
+                branchSwitcher, toolRouter, McpToolCatalog.empty(), maxToolRounds);
     }
 
     @Override
     public String systemPrompt() {
         return systemPrompt;
+    }
+
+    // ---------------------------------------------------------------------
+    // Step 6 follow-up: native function-calling opt-in.
+    // ---------------------------------------------------------------------
+
+    @Override
+    public ToolingMode preferredToolMode() {
+        return ToolingMode.NATIVE;
+    }
+
+    @Override
+    public List<ToolDescriptor> toolDescriptors() {
+        return AgentNativeTools.writerTools(mcpToolCatalog);
+    }
+
+    /**
+     * Native-mode step: translate the model's read-only {@code tool_calls}
+     * into the existing {@link ImplementationPlan.ToolRequest} pipeline.
+     * When the model returns text-only (no tool calls), defer to the legacy
+     * JSON-parsing path so the terminal "create-issue" decision still works.
+     */
+    @Override
+    public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
+        if (!turn.hasToolCalls()) {
+            return step(ctx, turn.assistantText(), round);
+        }
+        int writerRound = round - 1;
+        if (writerRound >= maxToolRounds) {
+            sessionService.setStatus(ctx.session(), AgentSession.AgentSessionStatus.IN_PROGRESS);
+            repositoryClient.postIssueComment(ctx.owner(), ctx.repo(), ctx.issueNumber(),
+                    "⚠️ **AI Technical Writer**: I need more context before I can continue. "
+                            + "Please add more details and mention me again.");
+            return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), null));
+        }
+
+        List<ImplementationPlan.ToolRequest> requests = new ArrayList<>();
+        for (ToolCall call : turn.toolCalls()) {
+            requests.add(toRequest(call));
+        }
+        BranchSwitcher.Result branchSwitch = branchSwitcher.apply(
+                ctx.workspaceDir(), ctx.session().getBranchName(), requests, ctx.issueNumber());
+        if (branchSwitch.selectedBranch() != null
+                && !branchSwitch.selectedBranch().equals(ctx.session().getBranchName())) {
+            sessionService.setBranchName(ctx.session(), branchSwitch.selectedBranch());
+            ctx.setBaseBranch(branchSwitch.selectedBranch());
+        }
+        List<ImplementationPlan.ToolRequest> remaining = branchSwitch.remainingToolRequests();
+        List<ToolResult> rawResults = executeTools(ctx, remaining);
+
+        // Map id -> result text, then iterate over the original calls to ensure
+        // every tool_call gets a paired tool_result (Anthropic/OpenAI reject otherwise).
+        java.util.Map<String, String> byId = new java.util.HashMap<>();
+        for (int i = 0; i < remaining.size(); i++) {
+            byId.put(remaining.get(i).getId(), rawResults.get(i).formatForAi());
+        }
+        List<StepDecision.ToolCallResult> packaged = new ArrayList<>(turn.toolCalls().size());
+        for (ToolCall call : turn.toolCalls()) {
+            packaged.add(new StepDecision.ToolCallResult(call.id(),
+                    byId.getOrDefault(call.id(),
+                            "[branch-switcher handled inline — no separate result]")));
+        }
+        return new StepDecision.ContinueWithToolResults(packaged, null);
+    }
+
+    private ImplementationPlan.ToolRequest toRequest(ToolCall call) {
+        List<String> args = new ArrayList<>();
+        JsonNode root = call.args();
+        if (root != null && root.isObject()) {
+            JsonNode varargs = root.get("args");
+            if (varargs != null && varargs.isArray()) {
+                varargs.forEach(node -> args.add(node.isTextual() ? node.asString() : node.toString()));
+            } else {
+                addIfPresent(root, "path", args);
+                addIfPresent(root, "branch", args);
+                addIfPresent(root, "startLine", args);
+                addIfPresent(root, "endLine", args);
+            }
+        }
+        return ImplementationPlan.ToolRequest.builder()
+                .id(call.id() == null || call.id().isBlank() ? java.util.UUID.randomUUID().toString() : call.id())
+                .tool(call.name())
+                .args(args)
+                .build();
+    }
+
+    private static void addIfPresent(JsonNode root, String field, List<String> out) {
+        JsonNode v = root.get(field);
+        if (v != null && !v.isMissingNode() && !v.isNull()) {
+            out.add(v.isTextual() ? v.asString() : v.toString());
+        }
     }
 
     @Override
