@@ -79,13 +79,13 @@ Code reviews are explicit-request only: pushes to an existing pull request do no
    - **Secret:** (leave empty — authentication is via the URL path)
 3. Under **Trigger On**, select **Custom Events**, then enable:
    - ✅ **Pull Request** — handles PR open/close events and reviewer requests/re-requests
-   - ✅ **Issue Comment** — allows the bot to respond to `@bot` mentions in PR and issue comments
    - ✅ **Pull Request Comment** — allows the bot to respond to inline code review comments
+   - ✅ **Pull Request Review Requested** — allows the bot to respond when added as a reviewer
+   - ✅ **Pull Request Assigned** — allows the bot to respond when assigned as a reviewer
+   - ✅ **Issue Comment** — allows the bot to respond to `@bot` mentions in PR and issue comments
+   - ✅ **Issue Assigned** — allows the bot to start either as coding or writer bot (if using the agent feature)
    - ✅ **Issues** (only if using the agent feature)
 
-> **Note:** The "Pull Request Review" event listed in older documentation does not exist in
-> recent Gitea versions. The **Pull Request** event covers pull request actions including
-> `opened`, `closed`, and `review_requested` (when the bot is added or re-requested as a reviewer).
 4. Click **Add Webhook**
 
 ### Organization-level Webhook
