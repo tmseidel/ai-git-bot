@@ -341,9 +341,9 @@ All numeric loop budgets are now grouped under `agent.budget.*`:
 agent:
   budget:
     max-rounds: 10                          # AgentLoop hard cap
-    max-context-rounds: 3                   # pure context-fetch rounds
+    max-context-rounds: 5                   # pure context-fetch rounds
     max-validation-retries: 3               # validation/correction iterations
-    max-context-tool-requests-per-round: 5  # ls/cat/find calls per AI turn
+    max-context-tool-requests-per-round: 10 # ls/cat/find calls per AI turn
     max-tokens-per-call: 16384              # passed to chat / chatWithTools
 ```
 

@@ -90,7 +90,8 @@ public class AgentConfigProperties {
     }
 
     @Data
-    public static class ContextConfig {        /**
+    public static class ContextConfig {
+        /**
          * Maximum number of repository-tree file entries included in agent prompts.
          */
         private int maxTreeFiles = 500;
@@ -147,9 +148,7 @@ public class AgentConfigProperties {
         private int maxContextRounds = 3;
 
         /**
-         * Maximum number of validation/correction iterations. Mirrors
-         * {@link ValidationConfig#getMaxRetries()} but lives on the budget so
-         * future strategies can reuse it.
+         * Maximum number of validation/correction iterations.
          */
         private int maxValidationRetries = 3;
 

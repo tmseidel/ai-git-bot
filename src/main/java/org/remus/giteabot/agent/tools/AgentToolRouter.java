@@ -52,31 +52,6 @@ public class AgentToolRouter {
         this.repositoryClient = repositoryClient;
     }
 
-    /** Returns the kind for the given tool name in the given mode. */
-    public ToolKind classify(Mode mode, String toolName) {
-        if (toolName == null || toolName.isBlank()) {
-            return ToolKind.UNKNOWN;
-        }
-        String normalised = toolName.strip();
-        String lower = normalised.toLowerCase();
-        if (mode == Mode.WRITER && ("get-issue".equals(lower) || "search-issues".equals(lower))) {
-            return ToolKind.REPOSITORY;
-        }
-        if (mode == Mode.CODING && toolExecutionService.isFileTool(normalised)) {
-            return ToolKind.FILE;
-        }
-        if (McpTools.isMcpTool(mcpOrchestrationService, mcpToolCatalog, normalised)) {
-            return ToolKind.MCP;
-        }
-        if (toolExecutionService.isContextTool(lower)) {
-            return ToolKind.CONTEXT;
-        }
-        if (mode == Mode.CODING && toolExecutionService.isValidationTool(normalised)) {
-            return ToolKind.VALIDATION;
-        }
-        return ToolKind.UNKNOWN;
-    }
-
     public boolean isMcpTool(String toolName) {
         return McpTools.isMcpTool(mcpOrchestrationService, mcpToolCatalog, toolName);
     }
@@ -103,7 +78,7 @@ public class AgentToolRouter {
     private ToolResult executeCoding(ToolCallContext ctx) {
         String tool = ctx.tool();
         List<String> args = ctx.args();
-        log.info("Executing tool: {} {}", tool, String.join(" ", args));
+        log.debug("Executing tool: {} {}", tool, String.join(" ", args));
         if (toolExecutionService.isFileTool(tool)) {
             return toolExecutionService.executeFileTool(ctx.workspaceDir(), tool, args);
         }
@@ -120,6 +95,7 @@ public class AgentToolRouter {
         String original = ctx.tool();
         String lower = original.strip().toLowerCase();
         List<String> args = ctx.args();
+        log.debug("Executing tool: {} {}", original, String.join(" ", args));
         if ("get-issue".equals(lower)) {
             Long issue = parseIssueNumber(args, ctx.issueNumber());
             return new ToolResult(true, 0,
