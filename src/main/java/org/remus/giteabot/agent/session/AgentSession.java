@@ -10,7 +10,6 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Lob;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
@@ -18,6 +17,8 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import org.remus.giteabot.session.ConversationMessage;
 
 import java.time.Instant;
@@ -105,8 +106,11 @@ public class AgentSession {
 
     /**
      * Step 7.1 — raw JSON of the most recently parsed implementation plan.
+     * <p>Mapped via {@link SqlTypes#LONG32VARCHAR} (rather than {@code @Lob})
+     * so PostgreSQL produces a plain {@code text} column instead of an
+     * {@code oid}/Large-Object, matching the Flyway migration (V10).
      */
-    @Lob
+    @JdbcTypeCode(SqlTypes.LONG32VARCHAR)
     @Column(name = "last_plan_json")
     private String lastPlanJson;
 
