@@ -18,6 +18,7 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.review.CodeReviewService;
 import org.remus.giteabot.session.SessionService;
+import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -51,6 +52,7 @@ public class BotWebhookService {
     private final BotService botService;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpToolSelectionService mcpToolSelectionService;
+    private final BotToolSelectionService botToolSelectionService;
 
     public BotWebhookService(AiClientFactory aiClientFactory,
                              GiteaClientFactory giteaClientFactory,
@@ -64,7 +66,8 @@ public class BotWebhookService {
                              WorkspaceService workspaceService,
                               BotService botService,
                               McpOrchestrationService mcpOrchestrationService,
-                              McpToolSelectionService mcpToolSelectionService) {
+                              McpToolSelectionService mcpToolSelectionService,
+                              BotToolSelectionService botToolSelectionService) {
         this.aiClientFactory = aiClientFactory;
         this.giteaClientFactory = giteaClientFactory;
         this.promptService = promptService;
@@ -78,6 +81,7 @@ public class BotWebhookService {
         this.botService = botService;
         this.mcpOrchestrationService = mcpOrchestrationService;
         this.mcpToolSelectionService = mcpToolSelectionService;
+        this.botToolSelectionService = botToolSelectionService;
     }
 
     /**
@@ -387,7 +391,8 @@ public class BotWebhookService {
                 bot.getUsername(),
                 mcpOrchestrationService,
                 bot.getMcpConfiguration(),
-                mcpToolCatalog);
+                mcpToolCatalog,
+                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
         return new IssueImplementationService(context, promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService);
     }
@@ -404,7 +409,8 @@ public class BotWebhookService {
         return new WriterAgentService(repoClient, aiClient, promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService,
                 bot.getSystemPrompt().getWriterAgentSystemPrompt(), bot.getUsername(),
-                mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog);
+                mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
+                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
     }
 
     private AiClient getAiClient(Bot bot) {

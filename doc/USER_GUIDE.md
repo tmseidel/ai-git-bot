@@ -245,6 +245,7 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **Bot Type**: Choose **Coding bot** for pull-request reviews and issue implementation, or **Writer bot** for technical-writing assistance on issues.
    - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, and writer-agent instructions before saving.
    - **MCP Configuration** *(optional)*: Select a saved MCP configuration. Use **Details** next to the dropdown to open a read-only list of the currently selected MCP tools.
+   - **Tool Configuration** *(required)*: Select a saved built-in tool configuration. New bots default to **Default** (all built-in tools enabled). Use **Details** next to the dropdown to open a read-only list of the built-in tools enabled for the selected configuration. See [Tool Configurations](#tool-configurations) below and [Bot Tool Configurations](BOT_TOOL_CONFIGURATIONS.md) for the full reference.
    - **AI Integration**: Select an AI integration from the dropdown
    - **Git Integration**: Select a Git integration from the dropdown
    - **Enabled**: Whether the bot is active
@@ -283,6 +284,69 @@ You can open tool selection at any time (without changing JSON) via:
 - **Edit MCP Configuration → Select tools**
 
 For an end-to-end MCP workflow guide (JSON creation, whitelist selection, bot details dialog, and transparency/audit notes), see [MCP Server Handling](MCP_SERVER_HANDLING.md).
+
+## Tool Configurations
+
+Built-in agent tools (file mutation, repository context, repository helpers,
+and validation tools such as `mvn`, `npm`, `dotnet`) are controlled per bot via
+reusable **Tool configurations** under **System settings → Tool configurations**.
+
+### Why use tool configurations?
+
+A single instance often runs bots with different responsibilities. A
+Java/Maven coding bot has no use for `npm`, `dotnet`, or `cargo`; a writer bot
+must never see file-mutation tools. Tool configurations let you opt each bot
+into the subset of built-in tools it actually needs, which keeps the AI focused,
+reduces prompt size, and shrinks the surface for accidental side effects.
+
+### Create or edit a tool configuration
+
+1. Open **System settings → Tool configurations**.
+2. Click **Add**, **Clone**, or **Edit**.
+3. Pick a descriptive name such as *Java/Maven*, *Node.js*, or *Writer-only*.
+4. Click **Save and select tools**.
+
+### Select which built-in tools are enabled
+
+The tool-selection screen mirrors the MCP whitelist UX:
+
+- rows grouped by **Kind** (FILE, CONTEXT, REPOSITORY, VALIDATION)
+- free-text filter
+- kind filter
+- sortable columns
+- page size + paging
+- per-row checkbox and **select all visible** in the table header
+
+Only checked tools are persisted (whitelist behavior). Anything else is
+rejected at runtime — the agent's router refuses the call and the AI receives
+an error explaining that the tool is disabled for this bot.
+
+You can open tool selection at any time via:
+
+- **System settings → Tool configurations → Tools**
+- **Edit tool configuration → Select tools**
+
+### The Default tool configuration
+
+A configuration named **Default** is always present:
+
+- It cannot be renamed or deleted.
+- It always enables every built-in tool known to the catalog at the time of
+  application startup, so new tools shipped in a release stay enabled there.
+- New bots are pre-selected to use Default — existing behavior is preserved
+  until you opt a bot into a narrower configuration.
+
+A tool configuration referenced by at least one bot cannot be deleted —
+reassign those bots first.
+
+### Assigning a tool configuration to a bot
+
+Pick the configuration in the **Tool Configuration** dropdown on the bot form
+(see [Managing Bots](#managing-bots)). Use the **Details** button to verify
+which built-in tools the bot will see before saving.
+
+For data model details, migration notes, and the runtime enforcement layers,
+see [Bot Tool Configurations](BOT_TOOL_CONFIGURATIONS.md).
 
 ### Webhook URL
 

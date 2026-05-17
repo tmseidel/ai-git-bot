@@ -1,6 +1,9 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.systemsettings.BotToolConfiguration;
+import org.remus.giteabot.systemsettings.BotToolConfigurationService;
+import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.McpConfigurationService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
@@ -26,19 +29,25 @@ public class BotController {
     private final SystemPromptService systemPromptService;
     private final McpConfigurationService mcpConfigurationService;
     private final McpToolSelectionService mcpToolSelectionService;
+    private final BotToolConfigurationService botToolConfigurationService;
+    private final BotToolSelectionService botToolSelectionService;
 
     public BotController(BotService botService,
                          AiIntegrationService aiIntegrationService,
                          GitIntegrationService gitIntegrationService,
                          SystemPromptService systemPromptService,
                          McpConfigurationService mcpConfigurationService,
-                         McpToolSelectionService mcpToolSelectionService) {
+                         McpToolSelectionService mcpToolSelectionService,
+                         BotToolConfigurationService botToolConfigurationService,
+                         BotToolSelectionService botToolSelectionService) {
         this.botService = botService;
         this.aiIntegrationService = aiIntegrationService;
         this.gitIntegrationService = gitIntegrationService;
         this.systemPromptService = systemPromptService;
         this.mcpConfigurationService = mcpConfigurationService;
         this.mcpToolSelectionService = mcpToolSelectionService;
+        this.botToolConfigurationService = botToolConfigurationService;
+        this.botToolSelectionService = botToolSelectionService;
     }
 
     @GetMapping
@@ -53,6 +62,7 @@ public class BotController {
     public String newForm(Model model) {
         Bot bot = new Bot();
         systemPromptService.findDefault().ifPresent(bot::setSystemPrompt);
+        botToolConfigurationService.findDefault().ifPresent(bot::setToolConfiguration);
         model.addAttribute("bot", bot);
         addFormAttributes(model);
         return "bots/form";
@@ -78,6 +88,7 @@ public class BotController {
                         @RequestParam Long gitIntegrationId,
                         @RequestParam Long systemPromptId,
                         @RequestParam(required = false) Long mcpConfigurationId,
+                        @RequestParam Long toolConfigurationId,
                         Model model,
                         RedirectAttributes redirectAttributes) {
         try {
@@ -92,11 +103,14 @@ public class BotController {
                 mcpConfiguration = mcpConfigurationService.findById(mcpConfigurationId)
                         .orElseThrow(() -> new IllegalArgumentException("MCP configuration not found"));
             }
+            BotToolConfiguration toolConfiguration = botToolConfigurationService.findById(toolConfigurationId)
+                    .orElseThrow(() -> new IllegalArgumentException("Tool configuration not found"));
 
             bot.setAiIntegration(aiIntegration);
             bot.setGitIntegration(gitIntegration);
             bot.setSystemPrompt(systemPrompt);
             bot.setMcpConfiguration(mcpConfiguration);
+            bot.setToolConfiguration(toolConfiguration);
             botService.save(bot);
             redirectAttributes.addFlashAttribute("success", "Bot saved successfully");
         } catch (Exception e) {
@@ -114,6 +128,7 @@ public class BotController {
         model.addAttribute("gitIntegrations", gitIntegrationService.findAll());
         model.addAttribute("systemPrompts", systemPrompts);
         model.addAttribute("mcpConfigurations", mcpConfigurationService.findAll());
+        model.addAttribute("toolConfigurations", botToolConfigurationService.findAll());
         model.addAttribute("botTypes", BotType.values());
         model.addAttribute("activeNav", "bots");
     }
@@ -142,6 +157,21 @@ public class BotController {
                         "serverName", tool.serverName(),
                         "toolName", tool.toolName(),
                         "title", tool.title() == null ? "" : tool.title(),
+                        "description", tool.description() == null ? "" : tool.description()))
+                .toList();
+        return ResponseEntity.ok(rows);
+    }
+
+    @GetMapping("/bot-tools/{id}/selected-tools")
+    @ResponseBody
+    public ResponseEntity<List<Map<String, String>>> selectedBuiltinTools(@PathVariable Long id) {
+        if (botToolConfigurationService.findById(id).isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        List<Map<String, String>> rows = botToolSelectionService.loadSelectedTools(id).stream()
+                .map(tool -> Map.of(
+                        "toolName", tool.toolName(),
+                        "toolKind", tool.toolKind(),
                         "description", tool.description() == null ? "" : tool.description()))
                 .toList();
         return ResponseEntity.ok(rows);

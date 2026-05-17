@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<body>
+<div th:replace="~{layout :: layout('Select built-in tools', ~{::pageContent})}">
+    <div th:fragment="pageContent">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-list-check"></i> Select built-in tools</h2>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <p class="mb-2">
+                    Configuration: <strong th:text="${botToolConfiguration.name}"></strong>
+                    <span th:if="${botToolConfiguration.defaultEntry}" class="badge bg-primary ms-2">Default</span>
+                </p>
+                <p class="text-muted mb-4">
+                    Whitelist of built-in agent tools (file, context, validation, repository) that bots assigned
+                    to this configuration may expose to the AI. Disabled tools are excluded from both native
+                    tool calling and legacy prompt-based tool instructions, and any attempt to invoke them at
+                    runtime is rejected.
+                </p>
+
+                <div th:if="${botToolConfiguration.defaultEntry}" class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    The <strong>default</strong> tool configuration always contains every registered built-in
+                    tool and is read-only. Clone it to create a customised subset.
+                </div>
+
+                <div class="row g-3 mb-3">
+                    <div class="col-md-5">
+                        <label for="toolFilter" class="form-label">Filter</label>
+                        <input id="toolFilter" type="text" class="form-control"
+                               placeholder="Filter by tool name or description">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="kindFilter" class="form-label">Kind</label>
+                        <select id="kindFilter" class="form-select">
+                            <option value="">All kinds</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="pageSize" class="form-label">Rows per page</label>
+                        <select id="pageSize" class="form-select">
+                            <option value="10">10</option>
+                            <option value="25" selected>25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Selected</label>
+                        <div class="form-control bg-light" id="selectedCount">0</div>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-2">
+                        <thead class="table-light">
+                        <tr>
+                            <th style="width: 48px;">
+                                <input id="selectAllVisible" type="checkbox" class="form-check-input"
+                                       title="Select all visible rows"
+                                       th:disabled="${botToolConfiguration.defaultEntry}">
+                            </th>
+                            <th>
+                                <button type="button" class="btn btn-link p-0 text-decoration-none" data-sort="toolKind">Kind</button>
+                            </th>
+                            <th>
+                                <button type="button" class="btn btn-link p-0 text-decoration-none" data-sort="toolName">Tool</button>
+                            </th>
+                            <th>Description</th>
+                        </tr>
+                        </thead>
+                        <tbody id="toolRows"></tbody>
+                    </table>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div class="text-muted" id="paginationInfo"></div>
+                    <div class="btn-group">
+                        <button type="button" id="prevPage" class="btn btn-outline-secondary btn-sm">Previous</button>
+                        <button type="button" id="nextPage" class="btn btn-outline-secondary btn-sm">Next</button>
+                    </div>
+                </div>
+
+                <form id="selectionForm"
+                      th:action="@{/system-settings/bot-tools/{id}/tools/save(id=${botToolConfiguration.id})}"
+                      method="post">
+                    <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                    <div id="selectionInputs"></div>
+                    <button type="submit" class="btn btn-primary"
+                            th:disabled="${botToolConfiguration.defaultEntry}">
+                        <i class="bi bi-check-lg"></i> Save selection
+                    </button>
+                    <a th:href="@{/system-settings}" class="btn btn-secondary ms-2">
+                        <i class="bi bi-x-lg"></i> Cancel
+                    </a>
+                </form>
+            </div>
+        </div>
+
+        <script th:inline="javascript">
+            /*<![CDATA[*/
+            const allTools = /*[[${tools}]]*/ [];
+            const readOnly = /*[[${botToolConfiguration.defaultEntry}]]*/ false;
+
+            document.addEventListener('DOMContentLoaded', function() {
+                const selected = new Set(allTools.filter(t => t.selected).map(t => t.toolName));
+                const filterInput = document.getElementById('toolFilter');
+                const kindFilter = document.getElementById('kindFilter');
+                const pageSizeSelect = document.getElementById('pageSize');
+                const rowsBody = document.getElementById('toolRows');
+                const selectedCount = document.getElementById('selectedCount');
+                const paginationInfo = document.getElementById('paginationInfo');
+                const prevPage = document.getElementById('prevPage');
+                const nextPage = document.getElementById('nextPage');
+                const selectAllVisible = document.getElementById('selectAllVisible');
+                const selectionInputs = document.getElementById('selectionInputs');
+                const sortButtons = document.querySelectorAll('[data-sort]');
+
+                let currentPage = 1;
+                let sortField = 'toolKind';
+                let sortDirection = 'asc';
+
+                const kinds = Array.from(new Set(allTools.map(t => t.toolKind))).sort();
+                kinds.forEach(kind => {
+                    const option = document.createElement('option');
+                    option.value = kind;
+                    option.textContent = kind;
+                    kindFilter.appendChild(option);
+                });
+
+                function compareText(a, b) {
+                    return (a || '').localeCompare((b || ''), undefined, { sensitivity: 'base' });
+                }
+
+                function filteredTools() {
+                    const text = filterInput.value.trim().toLowerCase();
+                    const kind = kindFilter.value;
+                    return allTools.filter(tool => {
+                        if (kind && tool.toolKind !== kind) {
+                            return false;
+                        }
+                        if (!text) {
+                            return true;
+                        }
+                        const haystack = [tool.toolName, tool.description, tool.toolKind]
+                            .map(value => (value || '').toLowerCase())
+                            .join(' ');
+                        return haystack.includes(text);
+                    });
+                }
+
+                function sortedTools(items) {
+                    return [...items].sort((a, b) => {
+                        const first = compareText(a[sortField], b[sortField]);
+                        if (first !== 0) {
+                            return sortDirection === 'asc' ? first : -first;
+                        }
+                        const second = compareText(a.toolKind, b.toolKind);
+                        if (second !== 0) {
+                            return second;
+                        }
+                        return compareText(a.toolName, b.toolName);
+                    });
+                }
+
+                function pagedTools(items) {
+                    const pageSize = Number(pageSizeSelect.value);
+                    const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+                    currentPage = Math.min(currentPage, totalPages);
+                    const start = (currentPage - 1) * pageSize;
+                    return {
+                        rows: items.slice(start, start + pageSize),
+                        totalPages,
+                        totalItems: items.length,
+                        start: items.length === 0 ? 0 : start + 1,
+                        end: Math.min(start + pageSize, items.length)
+                    };
+                }
+
+                function renderSelectionInputs() {
+                    selectionInputs.innerHTML = '';
+                    Array.from(selected).sort().forEach(name => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'selectedToolNames';
+                        input.value = name;
+                        selectionInputs.appendChild(input);
+                    });
+                }
+
+                function updateSelectedCount() {
+                    selectedCount.textContent = String(selected.size);
+                }
+
+                function render() {
+                    const filtered = sortedTools(filteredTools());
+                    const page = pagedTools(filtered);
+
+                    rowsBody.innerHTML = '';
+                    if (page.rows.length === 0) {
+                        const tr = document.createElement('tr');
+                        const td = document.createElement('td');
+                        td.colSpan = 4;
+                        td.className = 'text-center text-muted py-4';
+                        td.textContent = 'No tools found for current filter.';
+                        tr.appendChild(td);
+                        rowsBody.appendChild(tr);
+                    } else {
+                        let previousKind = null;
+                        page.rows.forEach(tool => {
+                            if (sortField === 'toolKind' && tool.toolKind !== previousKind) {
+                                const groupTr = document.createElement('tr');
+                                groupTr.className = 'table-light';
+                                const groupTd = document.createElement('td');
+                                groupTd.colSpan = 4;
+                                const strong = document.createElement('strong');
+                                strong.textContent = tool.toolKind;
+                                groupTd.appendChild(strong);
+                                groupTr.appendChild(groupTd);
+                                rowsBody.appendChild(groupTr);
+                                previousKind = tool.toolKind;
+                            }
+
+                            const tr = document.createElement('tr');
+
+                            const selectTd = document.createElement('td');
+                            const checkbox = document.createElement('input');
+                            checkbox.type = 'checkbox';
+                            checkbox.className = 'form-check-input';
+                            checkbox.checked = selected.has(tool.toolName);
+                            checkbox.disabled = readOnly;
+                            checkbox.addEventListener('change', function() {
+                                if (checkbox.checked) {
+                                    selected.add(tool.toolName);
+                                } else {
+                                    selected.delete(tool.toolName);
+                                }
+                                updateSelectedCount();
+                                renderSelectionInputs();
+                                syncSelectAllVisible(page.rows);
+                            });
+                            selectTd.appendChild(checkbox);
+                            tr.appendChild(selectTd);
+
+                            const kindTd = document.createElement('td');
+                            const kindBadge = document.createElement('span');
+                            kindBadge.className = 'badge text-bg-secondary';
+                            kindBadge.textContent = tool.toolKind;
+                            kindTd.appendChild(kindBadge);
+                            tr.appendChild(kindTd);
+
+                            const toolTd = document.createElement('td');
+                            const code = document.createElement('code');
+                            code.textContent = tool.toolName;
+                            toolTd.appendChild(code);
+                            tr.appendChild(toolTd);
+
+                            const descriptionTd = document.createElement('td');
+                            descriptionTd.textContent = tool.description || '-';
+                            tr.appendChild(descriptionTd);
+
+                            rowsBody.appendChild(tr);
+                        });
+                    }
+
+                    paginationInfo.textContent = page.totalItems === 0
+                        ? '0 tools'
+                        : page.start + '-' + page.end + ' of ' + page.totalItems + ' tools';
+                    prevPage.disabled = currentPage <= 1;
+                    nextPage.disabled = currentPage >= page.totalPages;
+                    syncSelectAllVisible(page.rows);
+                }
+
+                function syncSelectAllVisible(visibleRows) {
+                    if (visibleRows.length === 0) {
+                        selectAllVisible.checked = false;
+                        selectAllVisible.indeterminate = false;
+                        return;
+                    }
+                    const selectedCountVisible = visibleRows.filter(tool => selected.has(tool.toolName)).length;
+                    selectAllVisible.checked = selectedCountVisible === visibleRows.length;
+                    selectAllVisible.indeterminate = selectedCountVisible > 0 && selectedCountVisible < visibleRows.length;
+                }
+
+                filterInput.addEventListener('input', function() {
+                    currentPage = 1;
+                    render();
+                });
+
+                kindFilter.addEventListener('change', function() {
+                    currentPage = 1;
+                    render();
+                });
+
+                pageSizeSelect.addEventListener('change', function() {
+                    currentPage = 1;
+                    render();
+                });
+
+                prevPage.addEventListener('click', function() {
+                    currentPage = Math.max(1, currentPage - 1);
+                    render();
+                });
+
+                nextPage.addEventListener('click', function() {
+                    currentPage += 1;
+                    render();
+                });
+
+                sortButtons.forEach(button => {
+                    button.addEventListener('click', function() {
+                        const field = button.getAttribute('data-sort');
+                        if (sortField === field) {
+                            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                        } else {
+                            sortField = field;
+                            sortDirection = 'asc';
+                        }
+                        currentPage = 1;
+                        render();
+                    });
+                });
+
+                if (!readOnly) {
+                    selectAllVisible.addEventListener('change', function() {
+                        const visible = pagedTools(sortedTools(filteredTools())).rows;
+                        visible.forEach(tool => {
+                            if (selectAllVisible.checked) {
+                                selected.add(tool.toolName);
+                            } else {
+                                selected.delete(tool.toolName);
+                            }
+                        });
+                        updateSelectedCount();
+                        renderSelectionInputs();
+                        render();
+                    });
+                }
+
+                updateSelectedCount();
+                renderSelectionInputs();
+                render();
+            });
+            /*]]>*/
+        </script>
+
+    </div>
+</div>
+</body>
+</html>

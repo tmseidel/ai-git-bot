@@ -59,6 +59,8 @@ graph TD
             SessionService["SessionService<br/><i>Session lifecycle</i>"]
             McpToolSelectionService["McpToolSelectionService<br/><i>Whitelist persistence/filtering</i>"]
             McpOrchestrationService["McpOrchestrationService<br/><i>MCP discovery + execution</i>"]
+            BotToolConfigurationService["BotToolConfigurationService<br/><i>Built-in tool config CRUD/clone</i>"]
+            BotToolSelectionService["BotToolSelectionService<br/><i>Built-in tool whitelist persistence/filtering</i>"]
             EncryptionService["EncryptionService<br/><i>API key encryption</i>"]
         end
 
@@ -105,6 +107,8 @@ graph TD
             GitIntegrationRepo["GitIntegrationRepository"]
             McpConfigurationRepo["McpConfigurationRepository"]
             McpSelectedToolRepo["McpSelectedToolRepository"]
+            BotToolConfigurationRepo["BotToolConfigurationRepository"]
+            BotToolSelectionRepo["BotToolSelectionRepository"]
             SessionRepo["ReviewSessionRepository"]
             AdminRepo["AdminUserRepository"]
         end
@@ -179,6 +183,8 @@ graph TD
     SessionRepo --> DB
     McpConfigurationRepo --> DB
     McpSelectedToolRepo --> DB
+    BotToolConfigurationRepo --> DB
+    BotToolSelectionRepo --> DB
 ```
 
 ## AI Provider Architecture
@@ -366,6 +372,7 @@ erDiagram
         BotType botType
         Long systemPromptId FK
         Long mcpConfigurationId FK
+        Long toolConfigurationId FK
         String webhookSecret UK
         boolean enabled
         boolean agentEnabled
@@ -411,10 +418,26 @@ erDiagram
       String description
     }
 
+    BotToolConfiguration {
+      Long id PK
+      String name UK
+      boolean defaultEntry
+      Instant createdAt
+      Instant updatedAt
+    }
+
+    BotToolSelection {
+      Long id PK
+      Long botToolConfigurationId FK
+      String toolName
+    }
+
   Bot ||--o{ AiIntegration : "uses"
   Bot ||--o{ GitIntegration : "uses"
   Bot ||--o| McpConfiguration : "optional"
+  Bot ||--|| BotToolConfiguration : "uses (mandatory)"
   McpConfiguration ||--|{ McpSelectedTool : "contains whitelist"
+  BotToolConfiguration ||--|{ BotToolSelection : "contains whitelist"
   ReviewSession ||--|{ ConversationMessage : "contains"
 ```
 
@@ -497,6 +520,56 @@ flowchart LR
     BotForm["Bots form (Details)"] --> BotCtrl["BotController selected-tools endpoint"]
     BotCtrl --> SelSvc
 ```
+
+### Built-in Tool Whitelisting (per Bot)
+
+Built-in agent tools (file, context, repository, validation) are filtered per
+bot via reusable `BotToolConfiguration` entries. Unlike MCP, this whitelist is
+**mandatory** — every `Bot` references exactly one configuration.
+
+- `ToolCatalog` is the single source of truth for built-in tools and exposes
+  filtering overloads (`nativeDescriptors(role, mcpCatalog, allowedBuiltinTools)`,
+  `fileToolNames(allowed)`, `contextToolNames(allowed)`, …) so callers
+  cannot accidentally bypass the whitelist.
+- `BotToolConfigurationService` provides CRUD + clone with guards: the
+  Default configuration is non-deletable and non-renameable, and any
+  configuration in use by at least one bot cannot be deleted.
+- `BotToolSelectionService` persists per-configuration whitelist rows and
+  resolves them into a `Set<String>` of allowed built-in tool names for the
+  runtime.
+- `DefaultBotToolConfigurationInitializer` is an `ApplicationRunner` that
+  ensures a Default configuration exists on every startup and additively
+  enables any new built-in tool shipped by the catalog (it never removes
+  selections).
+- `BotWebhookService` resolves the whitelist for the bot and threads it
+  through `IssueImplementationContext` / `WriterAgentService` to both the
+  prompt builders and `AgentToolRouter`.
+- `AgentToolRouter.execute(...)` rejects built-in tool calls that are not on
+  the whitelist with a `ToolResult` that tells the model the tool is disabled
+  for this bot. MCP tools are exempt (governed by `McpToolSelectionService`).
+
+```mermaid
+flowchart LR
+    Admin["Admin UI"] --> SysCtrl["SystemSettingsController"]
+    SysCtrl --> CfgSvc["BotToolConfigurationService"]
+    SysCtrl --> SelSvc2["BotToolSelectionService"]
+    CfgSvc --> CfgRepo["BotToolConfigurationRepository"]
+    SelSvc2 --> SelRepo2["BotToolSelectionRepository"]
+    SelSvc2 --> Registry["BuiltinToolRegistry"]
+    Registry --> Catalog["ToolCatalog"]
+
+    BotForm2["Bots form (Details modal)"] --> BotCtrl2["BotController selected-tools endpoint"]
+    BotCtrl2 --> SelSvc2
+
+    BotWebhook2["BotWebhookService"] --> SelSvc2
+    SelSvc2 --> Allowed["Set<String> allowed built-in tools"]
+    Allowed --> Router["AgentToolRouter (guard)"]
+    Allowed --> Strategies["Coding/Writer strategies (descriptor filter)"]
+    Allowed --> Prompts["IssueImplementationService / WriterAgentService prompt builders"]
+```
+
+For the end-to-end workflow, data model, and migration notes see
+[Bot Tool Configurations](BOT_TOOL_CONFIGURATIONS.md).
 
 ### AiClientFactory
 

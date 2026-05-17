@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,9 +16,12 @@ import java.util.UUID;
 public class BotService {
 
     private final BotRepository botRepository;
+    private final BotToolConfigurationRepository botToolConfigurationRepository;
 
-    public BotService(BotRepository botRepository) {
+    public BotService(BotRepository botRepository,
+                      BotToolConfigurationRepository botToolConfigurationRepository) {
         this.botRepository = botRepository;
+        this.botToolConfigurationRepository = botToolConfigurationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -41,6 +45,16 @@ public class BotService {
         }
         if (bot.getBotType() == BotType.WRITER) {
             bot.setAgentEnabled(false);
+        }
+        if (bot.getToolConfiguration() == null) {
+            // Defensive fallback: assign the auto-generated default tool
+            // configuration so the mandatory FK is always satisfied. In
+            // production this branch only fires for callers that bypass the
+            // BotController (integration tests, scripts). The default is
+            // bootstrapped by DefaultBotToolConfigurationInitializer on
+            // application startup.
+            botToolConfigurationRepository.findByDefaultEntryTrue()
+                    .ifPresent(bot::setToolConfiguration);
         }
         return botRepository.save(bot);
     }

@@ -22,7 +22,6 @@ import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
-import org.remus.giteabot.mcp.McpToolPromptRenderer;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -57,25 +56,11 @@ public class WriterAgentService {
     private final BranchSwitcher branchSwitcher;
     private final AgentToolRouter toolRouter;
     private final ToolCatalog toolCatalog;
+    private final java.util.Set<String> allowedBuiltinTools;
     private final WriterPromptBuilder promptBuilder = new WriterPromptBuilder();
     private final WriterResponseParser responseParser = new WriterResponseParser();
-    private final McpToolPromptRenderer mcpToolPromptRenderer = new McpToolPromptRenderer();
-    private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler(mcpToolPromptRenderer);
+    private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler();
 
-    public WriterAgentService(RepositoryApiClient repositoryClient,
-                              AiClient aiClient,
-                              PromptService promptService,
-                              AgentConfigProperties agentConfig,
-                              AgentSessionService sessionService,
-                              ToolExecutionService toolExecutionService,
-                              ToolCatalog toolCatalog,
-                              WorkspaceService workspaceService,
-                              String writerAgentSystemPrompt,
-                              String botUsername) {
-        this(repositoryClient, aiClient, promptService, agentConfig, sessionService,
-                toolExecutionService, toolCatalog, workspaceService, writerAgentSystemPrompt, botUsername,
-                null, null, McpToolCatalog.empty());
-    }
 
     public WriterAgentService(RepositoryApiClient repositoryClient,
                               AiClient aiClient,
@@ -89,7 +74,8 @@ public class WriterAgentService {
                               String botUsername,
                               McpOrchestrationService mcpOrchestrationService,
                               McpConfiguration mcpConfiguration,
-                              McpToolCatalog mcpToolCatalog) {
+                              McpToolCatalog mcpToolCatalog,
+                              java.util.Set<String> allowedBuiltinTools) {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.promptService = promptService;
@@ -100,10 +86,11 @@ public class WriterAgentService {
         this.botUsername = botUsername;
         this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
         this.toolCatalog = toolCatalog;
+        this.allowedBuiltinTools = allowedBuiltinTools;
         this.errorNotificationService = new AgentErrorNotificationService(repositoryClient);
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog, mcpOrchestrationService,
-                mcpConfiguration, this.mcpToolCatalog, repositoryClient);
+                mcpConfiguration, this.mcpToolCatalog, repositoryClient, allowedBuiltinTools);
     }
 
     public void handleIssueAssigned(WebhookPayload payload) {
@@ -251,6 +238,7 @@ public class WriterAgentService {
                 toolRouter,
                 mcpToolCatalog,
                 toolCatalog,
+                allowedBuiltinTools,
                 maxToolRounds());
         // The historic loop ran for-each `round in 0..maxToolRounds` (inclusive), i.e. one extra
         // iteration beyond the context-round limit so the AI gets a chance to produce a
@@ -346,7 +334,8 @@ public class WriterAgentService {
         // transport stay in sync.
         ToolingMode mode = (aiClient != null && aiClient.supportsNativeTools())
                 ? ToolingMode.NATIVE : ToolingMode.LEGACY;
-        return systemPromptAssembler.assemble(basePrompt, mcpToolCatalog, mode,
+        return systemPromptAssembler.assemble(basePrompt, toolCatalog, allowedBuiltinTools,
+                mcpToolCatalog, mode,
                 org.remus.giteabot.agent.shared.SystemPromptAssembler.PromptKind.WRITER_AGENT);
     }
 
@@ -364,17 +353,14 @@ public class WriterAgentService {
                   "openQuestions": ["remaining non-critical question"],
                   "readyToCreate": true
                 }
-                Available writer tools: get-issue, search-issues, branch-switcher, rg, ripgrep, grep, find, cat, git-log, git-blame, tree.
-                %s
                 Search-tool args use the shape [pattern, path?, flags?]. Common flags like -i, -n, -l and --include=*.java are supported.
                 `find` supports both [glob, path?] and shell-like forms such as ["src/main/java", "-name", "*.java"].
                 For alternation in rg/ripgrep/grep patterns, use `|` (not `\\|`).
                 You may use requestFiles or read-only repository requestTools when existing issue or repository context is needed before asking or finalizing.
-                If you need another base branch, request `branch-switcher` first and wait for its result before requesting files or search results from that branch.
                 Do not request repository write tools, file mutation tools, or build/validation tools.
                 If critical information is missing, set readyToCreate=false and include clarifyingQuestions.
                 If no critical questions remain, set readyToCreate=true and include revisedIssueDraft.
-                """.formatted(mcpToolPromptRenderer.render(mcpToolCatalog));
+                """;
     }
 
     private void handleWriterFailure(AgentSession session, String owner, String repo,

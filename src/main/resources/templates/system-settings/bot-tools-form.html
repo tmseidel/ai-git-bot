@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+<body>
+<div th:replace="~{layout :: layout(${botToolConfiguration.id != null ? 'Edit Tool Configuration' : 'New Tool Configuration'}, ~{::pageContent})}">
+    <div th:fragment="pageContent">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>
+                <i class="bi bi-tools"></i>
+                <span th:if="${botToolConfiguration.id != null}">Edit Tool Configuration</span>
+                <span th:if="${botToolConfiguration.id == null}">New Tool Configuration</span>
+            </h2>
+            <a th:if="${botToolConfiguration.id != null}"
+               th:href="@{/system-settings/bot-tools/{id}/tools(id=${botToolConfiguration.id})}"
+               class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-list-check"></i> Select tools
+            </a>
+        </div>
+
+        <div th:if="${botToolConfiguration.defaultEntry}" class="alert alert-info">
+            <i class="bi bi-info-circle"></i>
+            This is the <strong>default</strong> tool configuration. It always contains every registered built-in
+            tool and cannot be renamed or deleted. Its tool selection is managed automatically; create a new
+            configuration to restrict the tools exposed to a bot.
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <form th:action="@{/system-settings/bot-tools/save}" method="post" th:object="${botToolConfiguration}">
+                    <input type="hidden" th:if="${botToolConfiguration.id != null}" th:field="*{id}"/>
+                    <input type="hidden" th:field="*{defaultEntry}"/>
+
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label for="name" class="form-label">Name</label>
+                            <input type="text" class="form-control" id="name" th:field="*{name}"
+                                   placeholder="e.g. Java/Maven only" required
+                                   th:readonly="${botToolConfiguration.defaultEntry}"/>
+                            <div class="form-text">
+                                A descriptive name shown in the bot configuration page.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary"
+                                th:disabled="${botToolConfiguration.defaultEntry}">
+                            <i class="bi bi-check-lg"></i> Save and select tools
+                        </button>
+                        <a th:href="@{/system-settings}" class="btn btn-secondary ms-2">
+                            <i class="bi bi-x-lg"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+</body>
+</html>

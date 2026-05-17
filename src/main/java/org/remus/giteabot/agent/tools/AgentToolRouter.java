@@ -13,6 +13,7 @@ import org.remus.giteabot.systemsettings.McpConfiguration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Per-bot router that decides which executor handles a given AI tool request.
@@ -41,19 +42,24 @@ public class AgentToolRouter {
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
     private final RepositoryApiClient repositoryClient;
+    /** Whitelist of built-in tool names; {@code null} disables enforcement (test paths only). */
+    private final Set<String> allowedBuiltinTools;
+
 
     public AgentToolRouter(ToolExecutionService toolExecutionService,
                            ToolCatalog catalog,
                            McpOrchestrationService mcpOrchestrationService,
                            McpConfiguration mcpConfiguration,
                            McpToolCatalog mcpToolCatalog,
-                           RepositoryApiClient repositoryClient) {
+                           RepositoryApiClient repositoryClient,
+                           Set<String> allowedBuiltinTools) {
         this.toolExecutionService = toolExecutionService;
         this.catalog = catalog;
         this.mcpOrchestrationService = mcpOrchestrationService;
         this.mcpConfiguration = mcpConfiguration;
         this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
         this.repositoryClient = repositoryClient;
+        this.allowedBuiltinTools = allowedBuiltinTools;
     }
 
     public boolean isMcpTool(String toolName) {
@@ -69,6 +75,10 @@ public class AgentToolRouter {
         if (tool.isBlank()) {
             return new ToolResult(false, -1, "", "Empty tool name");
         }
+        ToolResult denied = enforceWhitelist(tool);
+        if (denied != null) {
+            return denied;
+        }
         try {
             return switch (mode) {
                 case CODING -> executeCoding(context);
@@ -77,6 +87,32 @@ public class AgentToolRouter {
         } catch (Exception e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
+    }
+
+    /**
+     * Blocks built-in tools that are not on the bot's configured whitelist.
+     * MCP tools are exempt — they have their own selection layer in
+     * {@code McpToolSelectionService}.
+     */
+    private ToolResult enforceWhitelist(String tool) {
+        if (allowedBuiltinTools == null) {
+            return null;
+        }
+        if (isMcpTool(tool)) {
+            return null;
+        }
+        ToolKind kind = catalog.kindOf(tool);
+        if (kind == ToolKind.UNKNOWN || kind == ToolKind.MCP) {
+            return null;
+        }
+        String normalized = tool.strip().toLowerCase();
+        if (allowedBuiltinTools.contains(normalized)) {
+            return null;
+        }
+        log.warn("Tool '{}' is not on this bot's whitelist; refusing to execute", tool);
+        return new ToolResult(false, -1, "",
+                "Tool '" + tool + "' is not enabled for this bot. Choose another tool from the "
+                        + "available list or ask the operator to enable it in the bot's tool configuration.");
     }
 
     private ToolResult executeCoding(ToolCallContext ctx) {
@@ -124,7 +160,7 @@ public class AgentToolRouter {
         }
         return new ToolResult(false, -1, "",
                 "Writer tool '" + original + "' is not available. Available tools: get-issue, "
-                        + "search-issues, " + String.join(", ", catalog.contextToolNames()));
+                        + "search-issues, " + String.join(", ", catalog.contextToolNames(allowedBuiltinTools)));
     }
 
     private Long parseIssueNumber(List<String> args, Long defaultIssueNumber) {

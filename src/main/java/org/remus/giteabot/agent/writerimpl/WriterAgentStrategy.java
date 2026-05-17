@@ -35,19 +35,6 @@ import java.util.List;
 @Slf4j
 public final class WriterAgentStrategy implements AgentStrategy {
 
-    /**
-     * Kept for backwards-compatible call sites that may still consult these
-     * constants. Runtime mode is now driven by {@link #preferredToolMode()}
-     * + {@link #toolDescriptors()}; the loop falls back to LEGACY when
-     * {@link org.remus.giteabot.ai.AiClient#supportsNativeTools()} returns
-     * false (operator flipped the {@code use_legacy_tool_calling} toggle).
-     *
-     * @deprecated rely on {@code aiClient.supportsNativeTools()} directly.
-     */
-    @Deprecated
-    public static final ToolingMode STATIC_PREFERRED_TOOL_MODE = ToolingMode.NATIVE;
-    @Deprecated
-    public static final boolean STATIC_HAS_TOOL_DESCRIPTORS = true;
 
     private final String systemPrompt;
     private final WriterPromptBuilder promptBuilder;
@@ -58,6 +45,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
     private final AgentToolRouter toolRouter;
     private final McpToolCatalog mcpToolCatalog;
     private final ToolCatalog catalog;
+    private final java.util.Set<String> allowedBuiltinTools;
     private final int maxToolRounds;
 
     public WriterAgentStrategy(String systemPrompt,
@@ -69,6 +57,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
                                AgentToolRouter toolRouter,
                                McpToolCatalog mcpToolCatalog,
                                ToolCatalog catalog,
+                               java.util.Set<String> allowedBuiltinTools,
                                int maxToolRounds) {
         this.systemPrompt = systemPrompt;
         this.promptBuilder = promptBuilder;
@@ -79,24 +68,10 @@ public final class WriterAgentStrategy implements AgentStrategy {
         this.toolRouter = toolRouter;
         this.mcpToolCatalog = mcpToolCatalog;
         this.catalog = catalog;
+        this.allowedBuiltinTools = allowedBuiltinTools;
         this.maxToolRounds = maxToolRounds;
     }
 
-    /** Backwards-compatible ctor for callers (and tests) that haven't been
-     *  updated to pass an {@link McpToolCatalog}. Defaults to an empty catalog,
-     *  which means no MCP tools are exposed via the native function-calling API. */
-    public WriterAgentStrategy(String systemPrompt,
-                               WriterPromptBuilder promptBuilder,
-                               WriterResponseParser responseParser,
-                               AgentSessionService sessionService,
-                               RepositoryApiClient repositoryClient,
-                               BranchSwitcher branchSwitcher,
-                               AgentToolRouter toolRouter,
-                               ToolCatalog catalog,
-                               int maxToolRounds) {
-        this(systemPrompt, promptBuilder, responseParser, sessionService, repositoryClient,
-                branchSwitcher, toolRouter, McpToolCatalog.empty(), catalog, maxToolRounds);
-    }
 
     @Override
     public String systemPrompt() {
@@ -114,7 +89,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
 
     @Override
     public List<ToolDescriptor> toolDescriptors() {
-        return catalog.nativeDescriptors(ToolCatalog.Role.WRITER, mcpToolCatalog);
+        return catalog.nativeDescriptors(ToolCatalog.Role.WRITER, mcpToolCatalog, allowedBuiltinTools);
     }
 
     /**

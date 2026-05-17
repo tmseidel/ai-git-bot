@@ -347,6 +347,7 @@ The bot receives webhooks from your Git provider, fetches PR diffs, sends them t
 |----------|-------------|
 | [User Guide](doc/USER_GUIDE.md) | Web UI usage, creating bots and integrations |
 | [MCP Server Handling](doc/MCP_SERVER_HANDLING.md) | MCP JSON setup, tool whitelist selection, bot details view, and MCP call transparency |
+| [Bot Tool Configurations](doc/BOT_TOOL_CONFIGURATIONS.md) | Per-bot whitelist of built-in agent tools — admin UI, runtime enforcement, default config, migration |
 | [Architecture](doc/ARCHITECTURE.md) | Component diagrams, request flows, webhook routing |
 | [Agent](doc/AGENT.md) | Coding agent and technical writer agent — setup, tools, and workflows |
 | [Tool Calling KB](doc/TOOL_CALLING.md) | Why provider tool APIs differ, abstractions, fallbacks, and what to do when a model misbehaves (incl. the legacy tool-calling switch) |

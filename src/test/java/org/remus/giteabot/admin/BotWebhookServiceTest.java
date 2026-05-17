@@ -57,6 +57,7 @@ class BotWebhookServiceTest {
     @Mock private BotService botService;
     @Mock private McpOrchestrationService mcpOrchestrationService;
     @Mock private McpToolSelectionService mcpToolSelectionService;
+    @Mock private org.remus.giteabot.systemsettings.BotToolSelectionService botToolSelectionService;
     @Mock private RepositoryApiClient repositoryApiClient;
     @Mock private AiClient aiClient;
 
@@ -70,10 +71,13 @@ class BotWebhookServiceTest {
         botWebhookService = new BotWebhookService(aiClientFactory, giteaClientFactory,
                 promptService, sessionService, agentConfig, new ReviewConfigProperties(),
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService, botService,
-                mcpOrchestrationService, mcpToolSelectionService);
+                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
+        // Built-in tool whitelist: tests don't exercise the gating layer, so return
+        // null (= unrestricted) to keep the historic test surface.
+        lenient().when(botToolSelectionService.allowedBuiltinTools(any())).thenReturn(null);
         // Step 7.2 — provide a real BudgetConfig so production code that reads
         // agentConfig.getBudget().getMaxTokensPerCall() does not NPE on the mock.
         AgentConfigProperties.BudgetConfig budget = new AgentConfigProperties.BudgetConfig();

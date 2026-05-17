@@ -244,6 +244,55 @@ class ToolExecutionServiceTest {
     }
 
     @Test
+    void executeFileTool_patchFile_crlfFile_lfSearch_appliesWithLineEndingTier() throws IOException {
+        Path target = tempDir.resolve("Service.java");
+        // File on disk uses CRLF (e.g. checked out on Windows or a .gitattributes rule).
+        Files.writeString(target, "class Service {\r\n    private int x = 1;\r\n}\r\n");
+
+        // LLM submits the search/replacement with LF (typical model output).
+        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+                List.of("Service.java", "private int x = 1;\n", "private int x = 42;\n"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("normalized line endings");
+        // CRLF is preserved on write.
+        assertThat(Files.readString(target)).isEqualTo(
+                "class Service {\r\n    private int x = 42;\r\n}\r\n");
+    }
+
+    @Test
+    void executeFileTool_patchFile_trailingWhitespaceMismatch_appliesWithToleranceTier() throws IOException {
+        Path target = tempDir.resolve("Service.java");
+        // File has trailing whitespace on the indented line that the LLM omitted.
+        Files.writeString(target, "class Service {\n    private int x = 1;   \n}\n");
+
+        // Search spans two lines so trailing whitespace on the first line breaks exact match.
+        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+                List.of("Service.java",
+                        "    private int x = 1;\n}",
+                        "    private int x = 42;\n}"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("whitespace-tolerant");
+        assertThat(Files.readString(target)).isEqualTo("class Service {\n    private int x = 42;\n}\n");
+    }
+
+    @Test
+    void executeFileTool_patchFile_collapsedInteriorWhitespace_appliesWithToleranceTier() throws IOException {
+        Path target = tempDir.resolve("Service.java");
+        Files.writeString(target, "class   Service { int    x = 1; }\n");
+
+        // LLM normalized interior whitespace to a single space.
+        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+                List.of("Service.java", "class Service { int x = 1; }", "class Service { int x = 42; }"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("whitespace-tolerant");
+        // Replacement line is written verbatim (LLM-provided form).
+        assertThat(Files.readString(target)).isEqualTo("class Service { int x = 42; }\n");
+    }
+
+    @Test
     void executeFileTool_mkdir_createsDirectory() {
         ToolResult result = service.executeFileTool(tempDir, "mkdir",
                 List.of("new/nested/dir"));

@@ -31,7 +31,6 @@ import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
-import org.remus.giteabot.mcp.McpToolPromptRenderer;
 import org.remus.giteabot.agent.shared.SystemPromptAssembler;
 import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -74,8 +73,8 @@ public class IssueImplementationService {
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
-    private final McpToolPromptRenderer mcpToolPromptRenderer;
     private final SystemPromptAssembler systemPromptAssembler;
+    private final java.util.Set<String> allowedBuiltinTools;
 
     // Extracted helpers
     private final AiResponseParser responseParser;
@@ -106,8 +105,8 @@ public class IssueImplementationService {
         this.mcpOrchestrationService = context.mcpOrchestrationService();
         this.mcpConfiguration = context.mcpConfiguration();
         this.mcpToolCatalog = context.mcpToolCatalog();
-        this.mcpToolPromptRenderer = new McpToolPromptRenderer();
-        this.systemPromptAssembler = new SystemPromptAssembler(this.mcpToolPromptRenderer);
+        this.systemPromptAssembler = new SystemPromptAssembler();
+        this.allowedBuiltinTools = context.allowedBuiltinTools();
 
         this.responseParser = new AiResponseParser();
         this.promptBuilder = new AgentPromptBuilder(agentConfig != null ? agentConfig.getContext() : null);
@@ -115,7 +114,7 @@ public class IssueImplementationService {
         this.errorNotificationService = new AgentErrorNotificationService(this.repositoryClient);
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog, this.mcpOrchestrationService,
-                this.mcpConfiguration, this.mcpToolCatalog, this.repositoryClient);
+                this.mcpConfiguration, this.mcpToolCatalog, this.repositoryClient, this.allowedBuiltinTools);
         this.criticAgent = new CriticAgent(
                 agentConfig != null ? agentConfig.getCritic() : null,
                 agentConfig != null ? agentConfig.getBudget() : null,
@@ -192,13 +191,12 @@ public class IssueImplementationService {
                     "(no files preloaded — request more via `requestFiles`/`requestTools` or "
                             + "use context tools like `cat`, `rg`, `find`, `tree` if you need to inspect specific files)");
 
-            // Add tools info to prompt
-            String toolsInfo = buildToolsInfo();
-            String fullPrompt = implementationPrompt + toolsInfo;
-
+            // Tool listings are now part of the system prompt (rendered dynamically
+            // by SystemPromptAssembler in LEGACY mode / advertised via the function-calling
+            // API in NATIVE mode), so the implementation prompt no longer duplicates them.
             log.info("Starting implementation loop for issue #{}", issueNumber);
             ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                    session, fullPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
+                    session, implementationPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
             boolean implementationSucceeded = implementationResult.success();
             baseBranch = implementationResult.selectedBranch();
 
@@ -307,6 +305,7 @@ public class IssueImplementationService {
                 agentConfig,
                 mcpOrchestrationService,
                 mcpToolCatalog,
+                allowedBuiltinTools,
                 this::fetchRequestedContext);
 
         // Step 7.2 — budgets are now sourced from BudgetConfig. Validation
@@ -450,16 +449,6 @@ public class IssueImplementationService {
 
     // ---- helpers ---------------------------------------------------------
 
-    private String buildToolsInfo() {
-        return "\n\n**Available file tools** (all silent — results go back to you only): "
-                + String.join(", ", toolCatalog.fileToolNames())
-                + "\n**Available context tools** (silent): "
-                + String.join(", ", toolCatalog.contextToolNames())
-                + "\n**Available validation tools** (results posted as comments): "
-                + String.join(", ", toolCatalog.validationToolNames())
-                + mcpToolPromptRenderer.render(mcpToolCatalog);
-    }
-
     private String fetchIssueCommentsContext(String owner, String repo, Long issueNumber) {
         try {
             List<Map<String, Object>> issueComments = repositoryClient.getIssueComments(owner, repo, issueNumber);
@@ -538,7 +527,8 @@ public class IssueImplementationService {
         } else {
             basePrompt = promptService.getSystemPrompt(AGENT_PROMPT_NAME);
         }
-        return systemPromptAssembler.assemble(basePrompt, mcpToolCatalog, mode,
+        return systemPromptAssembler.assemble(basePrompt, toolCatalog, allowedBuiltinTools,
+                mcpToolCatalog, mode,
                 org.remus.giteabot.agent.shared.SystemPromptAssembler.PromptKind.ISSUE_AGENT);
     }
 

@@ -45,22 +45,6 @@ import java.util.stream.IntStream;
 @Slf4j
 public final class CodingAgentStrategy implements AgentStrategy {
 
-    /**
-     * Static capability declarations kept for backwards-compatible call sites
-     * that still consult them. The runtime mode is now driven by
-     * {@link #preferredToolMode()} (NATIVE) combined with
-     * {@link #toolDescriptors()} (non-empty when an MCP catalog is supplied or
-     * the built-in coding toolbox is exposed); the loop transparently falls
-     * back to LEGACY when {@link org.remus.giteabot.ai.AiClient#supportsNativeTools()}
-     * returns false (operator flipped the {@code use_legacy_tool_calling} toggle).
-     *
-     * @deprecated callers should rely on {@code aiClient.supportsNativeTools()}
-     *             directly, not on these constants.
-     */
-    @Deprecated
-    public static final ToolingMode STATIC_PREFERRED_TOOL_MODE = ToolingMode.NATIVE;
-    @Deprecated
-    public static final boolean STATIC_HAS_TOOL_DESCRIPTORS = true;
 
     private final String systemPrompt;
     private final AgentPromptBuilder promptBuilder;
@@ -74,6 +58,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
     private final AgentConfigProperties agentConfig;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpToolCatalog mcpToolCatalog;
+    private final java.util.Set<String> allowedBuiltinTools;
     private final ContextFetcher fetchContext;
 
     private final int maxToolRounds;
@@ -91,6 +76,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
                      java.nio.file.Path workspaceDir);
     }
 
+
     public CodingAgentStrategy(String systemPrompt,
                                AgentPromptBuilder promptBuilder,
                                AiResponseParser responseParser,
@@ -103,6 +89,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
                                AgentConfigProperties agentConfig,
                                McpOrchestrationService mcpOrchestrationService,
                                McpToolCatalog mcpToolCatalog,
+                               java.util.Set<String> allowedBuiltinTools,
                                ContextFetcher contextFetcher) {
         this.systemPrompt = systemPrompt;
         this.promptBuilder = promptBuilder;
@@ -116,6 +103,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         this.agentConfig = agentConfig;
         this.mcpOrchestrationService = mcpOrchestrationService;
         this.mcpToolCatalog = mcpToolCatalog;
+        this.allowedBuiltinTools = allowedBuiltinTools;
         this.fetchContext = contextFetcher;
         this.maxRetries =  agentConfig.getBudget().getMaxValidationRetries();
         this.maxToolRounds = agentConfig.getValidation().getMaxToolExecutions();
@@ -144,7 +132,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
      *  calling API. */
     @Override
     public List<ToolDescriptor> toolDescriptors() {
-        return catalog.nativeDescriptors(ToolCatalog.Role.CODING, mcpToolCatalog);
+        return catalog.nativeDescriptors(ToolCatalog.Role.CODING, mcpToolCatalog, allowedBuiltinTools);
     }
 
     /**

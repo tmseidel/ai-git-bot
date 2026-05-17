@@ -95,7 +95,7 @@ class ToolCatalogTest {
 
     @Test
     void nativeDescriptors_coding_exposesFullCodingSurface() {
-        List<ToolDescriptor> tools = catalog.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty());
+        List<ToolDescriptor> tools = catalog.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty(), null);
         Set<String> names = tools.stream().map(ToolDescriptor::name).collect(Collectors.toSet());
         assertThat(names).contains("write-file", "patch-file", "mkdir", "delete-file");
         assertThat(names).contains("branch-switcher", "rg", "find", "cat", "git-log", "git-blame", "tree");
@@ -112,7 +112,7 @@ class ToolCatalogTest {
 
     @Test
     void nativeDescriptors_writer_isReadOnlySurface() {
-        List<ToolDescriptor> tools = catalog.nativeDescriptors(ToolCatalog.Role.WRITER, McpToolCatalog.empty());
+        List<ToolDescriptor> tools = catalog.nativeDescriptors(ToolCatalog.Role.WRITER, McpToolCatalog.empty(), null);
         Set<String> names = tools.stream().map(ToolDescriptor::name).collect(Collectors.toSet());
         assertThat(names).contains("branch-switcher", "rg", "find", "cat", "git-log", "git-blame", "tree",
                 "get-issue", "search-issues");
@@ -123,7 +123,7 @@ class ToolCatalogTest {
 
     @Test
     void nativeDescriptors_patchFileSchemaHasRequiredTypedProperties() {
-        ToolDescriptor patch = catalog.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty())
+        ToolDescriptor patch = catalog.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty(), null)
                 .stream().filter(d -> d.name().equals("patch-file")).findFirst().orElseThrow();
         assertThat(patch.jsonSchema().get("properties").get("path").get("type").asString()).isEqualTo("string");
         assertThat(patch.jsonSchema().get("properties").get("search").get("type").asString()).isEqualTo("string");
@@ -135,7 +135,7 @@ class ToolCatalogTest {
 
     @Test
     void nativeDescriptors_varargsToolHasArgsArray() {
-        ToolDescriptor mvn = catalog.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty())
+        ToolDescriptor mvn = catalog.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty(), null)
                 .stream().filter(d -> d.name().equals("mvn")).findFirst().orElseThrow();
         assertThat(mvn.jsonSchema().get("properties").get("args").get("type").asString()).isEqualTo("array");
         assertThat(mvn.jsonSchema().get("properties").get("args").get("items").get("type").asString())
@@ -148,9 +148,9 @@ class ToolCatalogTest {
                 "fake-server", "do-thing", "Do Thing", "Does a thing",
                 Map.of("type", "object"), "fake-server.do-thing");
         McpToolCatalog mcp = new McpToolCatalog(List.of(mcpDef));
-        Set<String> coding = catalog.nativeDescriptors(ToolCatalog.Role.CODING, mcp).stream()
+        Set<String> coding = catalog.nativeDescriptors(ToolCatalog.Role.CODING, mcp, null).stream()
                 .map(ToolDescriptor::name).collect(Collectors.toSet());
-        Set<String> writer = catalog.nativeDescriptors(ToolCatalog.Role.WRITER, mcp).stream()
+        Set<String> writer = catalog.nativeDescriptors(ToolCatalog.Role.WRITER, mcp, null).stream()
                 .map(ToolDescriptor::name).collect(Collectors.toSet());
         assertThat(coding).contains("fake-server.do-thing");
         assertThat(writer).contains("fake-server.do-thing");
@@ -161,8 +161,51 @@ class ToolCatalogTest {
         AgentConfigProperties cfg = new AgentConfigProperties();
         cfg.getValidation().setAvailableTools(List.of("kubectl"));
         ToolCatalog c2 = new ToolCatalog(cfg);
-        ToolDescriptor kubectl = c2.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty())
+        ToolDescriptor kubectl = c2.nativeDescriptors(ToolCatalog.Role.CODING, McpToolCatalog.empty(), null)
                 .stream().filter(d -> d.name().equals("kubectl")).findFirst().orElseThrow();
         assertThat(kubectl.description()).contains("kubectl");
+    }
+
+    // ---------- Built-in tool whitelist filtering (PR 4) ----------
+
+    @Test
+    void nativeDescriptors_whitelist_filtersBuiltinAndValidationButKeepsMcp() {
+        McpToolDefinition mcpDef = new McpToolDefinition(
+                "fake-server", "do-thing", "Do Thing", "Does a thing",
+                Map.of("type", "object"), "fake-server.do-thing");
+        McpToolCatalog mcp = new McpToolCatalog(List.of(mcpDef));
+        Set<String> allowed = Set.of("cat", "rg", "mvn"); // arbitrary subset
+        List<ToolDescriptor> coding = catalog.nativeDescriptors(ToolCatalog.Role.CODING, mcp, allowed);
+        Set<String> names = coding.stream().map(ToolDescriptor::name).collect(Collectors.toSet());
+        assertThat(names).contains("cat", "rg", "mvn", "fake-server.do-thing");
+        assertThat(names).doesNotContain("write-file", "patch-file", "mkdir", "delete-file",
+                "find", "tree", "git-log", "git-blame", "branch-switcher", "gradle", "npm");
+    }
+
+    @Test
+    void nativeDescriptors_emptyWhitelist_returnsOnlyMcp() {
+        McpToolDefinition mcpDef = new McpToolDefinition(
+                "srv", "tool", "T", "d", Map.of("type", "object"), "srv.tool");
+        McpToolCatalog mcp = new McpToolCatalog(List.of(mcpDef));
+        List<ToolDescriptor> coding = catalog.nativeDescriptors(
+                ToolCatalog.Role.CODING, mcp, Set.of());
+        assertThat(coding).extracting(ToolDescriptor::name).containsExactly("srv.tool");
+    }
+
+    @Test
+    void nameAccessors_whitelist_intersectAgainstAllowedSet() {
+        Set<String> allowed = Set.of("write-file", "cat", "mvn", "get-issue");
+        assertThat(catalog.fileToolNames(allowed)).containsExactly("write-file");
+        assertThat(catalog.contextToolNames(allowed)).containsExactly("cat");
+        assertThat(catalog.validationToolNames(allowed)).containsExactly("mvn");
+        assertThat(catalog.writerRepositoryToolNames(allowed)).containsExactly("get-issue");
+    }
+
+    @Test
+    void nameAccessors_nullWhitelist_returnsAllNames() {
+        assertThat(catalog.fileToolNames(null)).isEqualTo(catalog.fileToolNames());
+        assertThat(catalog.contextToolNames(null)).isEqualTo(catalog.contextToolNames());
+        assertThat(catalog.validationToolNames(null)).isEqualTo(catalog.validationToolNames());
+        assertThat(catalog.writerRepositoryToolNames(null)).isEqualTo(catalog.writerRepositoryToolNames());
     }
 }

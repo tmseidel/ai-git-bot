@@ -73,7 +73,7 @@ class CodingAgentStrategyTest {
     private CodingAgentStrategy newStrategy() {
         return new CodingAgentStrategy("sys", promptBuilder, responseParser, notificationService,
                 sessionService, branchSwitcher, toolRouter, toolCatalog,
-                workspaceService, agentConfig, null, McpToolCatalog.empty(),
+                workspaceService, agentConfig, null, McpToolCatalog.empty(), null,
                 (owner, repo, branch, files, tools, ws) -> "fetched-context");
     }
 
@@ -118,7 +118,7 @@ class CodingAgentStrategyTest {
         lenient().when(orchestration.isMcpTool(any(), eq("write-file"))).thenReturn(false);
         CodingAgentStrategy strategy = new CodingAgentStrategy("sys", promptBuilder, responseParser,
                 notificationService, sessionService, branchSwitcher, toolRouter,
-                toolCatalog, workspaceService, agentConfig, orchestration, catalog,
+                toolCatalog, workspaceService, agentConfig, orchestration, catalog, null,
                 (a, b, c, d, e, f) -> "ctx");
 
         String response = """

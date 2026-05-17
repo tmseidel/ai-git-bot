@@ -3,6 +3,7 @@ package org.remus.giteabot.admin;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.remus.giteabot.systemsettings.BotToolConfiguration;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
@@ -31,6 +32,16 @@ public class Bot {
     @ManyToOne
     @JoinColumn(name = "mcp_configuration_id")
     private McpConfiguration mcpConfiguration;
+
+    /**
+     * Whitelist of built-in agent tools (file, context, validation,
+     * writer-repository) that may be exposed to the AI for this bot. Mandatory
+     * — every bot is associated with at least the auto-generated default
+     * configuration, which contains all currently registered built-in tools.
+     */
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "bot_tool_configuration_id", nullable = false)
+    private BotToolConfiguration toolConfiguration;
 
     private String webhookSecret;
 

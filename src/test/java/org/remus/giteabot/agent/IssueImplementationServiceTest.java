@@ -71,7 +71,7 @@ class IssueImplementationServiceTest {
         // TES is mocked only for execution methods.
         toolCatalog = new org.remus.giteabot.agent.tools.ToolCatalog(agentConfig);
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, null, null, null, McpToolCatalog.empty());
+                repositoryClient, aiClient, null, null, null, null, McpToolCatalog.empty(), null);
         service = new IssueImplementationService(context, promptService, agentConfig,
                 sessionService, toolExecutionService, toolCatalog, workspaceService);
 
@@ -864,7 +864,7 @@ class IssueImplementationServiceTest {
                 "mcp:github:list_issues"
         )));
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, null, mcpOrchestrationService, null, catalog);
+                repositoryClient, aiClient, null, null, mcpOrchestrationService, null, catalog, null);
         return new IssueImplementationService(context, promptService, agentConfig,
                 sessionService, toolExecutionService, toolCatalog, workspaceService);
     }
@@ -875,7 +875,7 @@ class IssueImplementationServiceTest {
         agentConfig.setMaxFiles(10);
         agentConfig.setBranchPrefix("ai-agent/");
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty());
+                repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty(), null);
         return new IssueImplementationService(context, promptService, agentConfig,
                 sessionService, toolExecutionService, toolCatalog, workspaceService);
     }

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
 
 import java.util.Optional;
 
@@ -16,6 +17,9 @@ class BotServiceTest {
 
     @Mock
     private BotRepository botRepository;
+
+    @Mock
+    private BotToolConfigurationRepository botToolConfigurationRepository;
 
     @InjectMocks
     private BotService botService;

@@ -65,6 +65,9 @@ public class ToolCatalog {
                             required("path", "content"))),
             entry("patch-file", ToolKind.FILE, EnumSet.of(Role.CODING),
                     "Replace exact text inside a file. The search text must match exactly once. "
+                            + "Matching is tolerant of CRLF vs LF line endings and of trailing "
+                            + "whitespace differences, so you do not need a perfect byte-for-byte "
+                            + "copy — but indentation and the actual content of each line must match. "
                             + "If you have not seen the file yet, call `cat` in a previous turn first.",
                     objectSchema(
                             prop("path",        "string", "Repository-relative path to the file."),
@@ -170,11 +173,47 @@ public class ToolCatalog {
         return agentConfig.getValidation().getAvailableTools();
     }
 
+    /**
+     * Filtered variants returning only those names that intersect with
+     * {@code allowedBuiltinTools}. A {@code null} {@code allowed} set means
+     * "no whitelist configured — return everything" (used by tests and the
+     * pre-bot-tool-configuration code paths). An empty non-null set returns
+     * an empty list (bot operator explicitly disabled every built-in).
+     */
+    public List<String> contextToolNames(Set<String> allowed) {
+        return filterNames(contextToolNames(), allowed);
+    }
+
+    public List<String> fileToolNames(Set<String> allowed) {
+        return filterNames(fileToolNames(), allowed);
+    }
+
+    public List<String> writerRepositoryToolNames(Set<String> allowed) {
+        return filterNames(writerRepositoryToolNames(), allowed);
+    }
+
+    public List<String> validationToolNames(Set<String> allowed) {
+        return filterNames(validationToolNames(), allowed);
+    }
+
     private List<String> namesOf(ToolKind kind) {
         List<String> out = new ArrayList<>();
         for (Entry e : STATIC_TOOLS) {
             if (e.kind() == kind) {
                 out.add(e.name());
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    private static List<String> filterNames(List<String> names, Set<String> allowed) {
+        if (allowed == null) {
+            return names;
+        }
+        List<String> out = new ArrayList<>();
+        for (String name : names) {
+            if (allowed.contains(name)) {
+                out.add(name);
             }
         }
         return List.copyOf(out);
@@ -236,11 +275,14 @@ public class ToolCatalog {
     /**
      * The JSON-schema surface advertised via the AI provider's native
      * function-calling API for the given role. Built-in tools come from
-     * {@link #STATIC_TOOLS}; validation tools come from the
-     * {@link AgentConfigProperties.ValidationConfig#getAvailableTools()} list
-     * (coding only); MCP tools come from {@code mcpCatalog}.
+     * {@link #STATIC_TOOLS} and are filtered through {@code allowedBuiltinTools}
+     * (a {@code null} set disables filtering — test paths only). Validation
+     * tools come from {@link AgentConfigProperties.ValidationConfig#getAvailableTools()}
+     * (coding only); MCP tools come from {@code mcpCatalog} and are passed
+     * through unchanged — MCP filtering happens via {@code McpToolSelectionService}.
      */
-    public List<ToolDescriptor> nativeDescriptors(Role role, McpToolCatalog mcpCatalog) {
+    public List<ToolDescriptor> nativeDescriptors(Role role, McpToolCatalog mcpCatalog,
+                                                  Set<String> allowedBuiltinTools) {
         List<ToolDescriptor> out = new ArrayList<>();
         for (Entry e : STATIC_TOOLS) {
             if (e.schema() == null) {                 // silent alias — never advertised
@@ -249,10 +291,16 @@ public class ToolCatalog {
             if (!e.roles().contains(role)) {
                 continue;
             }
+            if (allowedBuiltinTools != null && !allowedBuiltinTools.contains(e.name())) {
+                continue;
+            }
             out.add(new ToolDescriptor(e.name(), e.description(), e.schema()));
         }
         if (role == Role.CODING) {
             for (String name : validationToolNames()) {
+                if (allowedBuiltinTools != null && !allowedBuiltinTools.contains(name)) {
+                    continue;
+                }
                 String description = VALIDATION_DESCRIPTIONS.getOrDefault(name,
                         "Run `" + name + "` in the workspace root with the given positional arguments.");
                 out.add(new ToolDescriptor(name, description, varargsSchema()));
@@ -343,5 +391,63 @@ public class ToolCatalog {
             return Optional.ofNullable(VALIDATION_DESCRIPTIONS.get(normalize(toolName)));
         }
         return Optional.empty();
+    }
+
+    /**
+     * Returns a legacy-protocol JSON example for the named tool, derived from its
+     * schema. Object-schema tools produce positional {@code args} with one
+     * {@code "<propertyName>"} placeholder per declared property (required first,
+     * then optional, preserving insertion order). Vararg tools (and validation
+     * tools, which are vararg by construction) produce {@code ["<arg>", "..."]}.
+     * Unknown tools fall back to a single placeholder.
+     */
+    public String legacyUsageExample(String toolName) {
+        String name = normalize(toolName);
+        Entry entry = byName.get(name);
+        JsonNode schema = entry != null ? entry.schema() : null;
+        String argsJson = renderArgsExample(schema);
+        return "{\"id\": \"<uuid>\", \"tool\": \"" + name + "\", \"args\": " + argsJson + "}";
+    }
+
+    private static String renderArgsExample(JsonNode schema) {
+        if (schema == null) {
+            return "[\"<arg>\", \"...\"]";
+        }
+        JsonNode properties = schema.get("properties");
+        if (properties == null || properties.isEmpty()) {
+            return "[]";
+        }
+        // Varargs shape: a single `args` array property.
+        if (properties.size() == 1 && properties.get("args") != null
+                && "array".equals(textOrNull(properties.get("args").get("type")))) {
+            return "[\"<arg>\", \"...\"]";
+        }
+        // Object schema: emit positional placeholders. Required properties first
+        // (in schema order), then any remaining optional properties.
+        List<String> ordered = new ArrayList<>();
+        JsonNode requiredNode = schema.get("required");
+        if (requiredNode != null && requiredNode.isArray()) {
+            for (JsonNode req : requiredNode) {
+                String reqName = req.asString();
+                if (reqName != null && properties.get(reqName) != null) {
+                    ordered.add(reqName);
+                }
+            }
+        }
+        for (Map.Entry<String, JsonNode> prop : properties.properties()) {
+            if (!ordered.contains(prop.getKey())) {
+                ordered.add(prop.getKey());
+            }
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < ordered.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append('"').append('<').append(ordered.get(i)).append('>').append('"');
+        }
+        return sb.append(']').toString();
+    }
+
+    private static String textOrNull(JsonNode n) {
+        return n == null ? null : n.asString();
     }
 }

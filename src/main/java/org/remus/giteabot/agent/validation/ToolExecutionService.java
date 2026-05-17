@@ -249,33 +249,202 @@ public class ToolExecutionService {
         }
         try {
             String originalContent = Files.readString(filePath, StandardCharsets.UTF_8);
-            if (!originalContent.contains(searchText)) {
-                return new ToolResult(false, 1, "",
+            PatchAttempt attempt = tryPatch(originalContent, searchText, replacementText);
+            return switch (attempt.status()) {
+                case OK -> {
+                    Files.writeString(filePath, attempt.newContent(), StandardCharsets.UTF_8);
+                    log.info("patch-file: patched {} ({})", relativePath, attempt.matchTier());
+                    String hint = attempt.matchTier() == MatchTier.EXACT
+                            ? ""
+                            : " (matched via " + attempt.matchTier().label()
+                                    + " — line endings/trailing whitespace normalized)";
+                    yield new ToolResult(true, 0, "File patched: " + relativePath + hint, "");
+                }
+                case NOT_FOUND -> new ToolResult(false, 1, "",
                         "patch-file: search text not found in file: " + relativePath
-                                + ". Use `cat` to inspect the exact current content first.");
-            }
-            // Count occurrences to detect ambiguous patches — replacing >1 occurrence is
-            // almost always a mistake (e.g. duplicated method signatures, repeated imports).
-            int occurrences = countOccurrences(originalContent, searchText);
-            if (occurrences > 1) {
-                return new ToolResult(false, 1, "",
-                        "patch-file: search text matches " + occurrences + " locations in "
+                                + ". The search was tried as-is, with normalized line endings, "
+                                + "and with whitespace-tolerant matching. Use `cat` to inspect "
+                                + "the exact current content first.");
+                case AMBIGUOUS -> new ToolResult(false, 1, "",
+                        "patch-file: search text matches " + attempt.occurrences() + " locations in "
                                 + relativePath + " — the replacement would be ambiguous. "
                                 + "Provide a more specific search string that matches exactly once "
                                 + "(use `cat` to identify a unique surrounding context).");
-            }
-            String newContent = originalContent.replace(searchText, replacementText);
-            if (newContent.equals(originalContent)) {
-                return new ToolResult(false, 1, "",
+                case NO_CHANGE -> new ToolResult(false, 1, "",
                         "patch-file produced no changes in " + relativePath
                                 + ". The replacement is identical to the matched text.");
-            }
-            Files.writeString(filePath, newContent, StandardCharsets.UTF_8);
-            log.info("patch-file: patched {}", relativePath);
-            return new ToolResult(true, 0, "File patched: " + relativePath, "");
+            };
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "patch-file failed: " + e.getMessage());
         }
+    }
+
+    // ---- patch-file matching tiers --------------------------------------
+
+    private enum MatchTier {
+        EXACT("exact match"),
+        NORMALIZED_LINE_ENDINGS("normalized line endings"),
+        WHITESPACE_TOLERANT("whitespace-tolerant line match");
+
+        private final String label;
+        MatchTier(String label) { this.label = label; }
+        String label() { return label; }
+    }
+
+    private enum PatchStatus { OK, NOT_FOUND, AMBIGUOUS, NO_CHANGE }
+
+    private record PatchAttempt(PatchStatus status, String newContent, MatchTier matchTier, int occurrences) {
+        static PatchAttempt ok(String newContent, MatchTier tier) {
+            return new PatchAttempt(PatchStatus.OK, newContent, tier, 1);
+        }
+        static PatchAttempt notFound() {
+            return new PatchAttempt(PatchStatus.NOT_FOUND, null, null, 0);
+        }
+        static PatchAttempt ambiguous(int occurrences) {
+            return new PatchAttempt(PatchStatus.AMBIGUOUS, null, null, occurrences);
+        }
+        static PatchAttempt noChange() {
+            return new PatchAttempt(PatchStatus.NO_CHANGE, null, null, 1);
+        }
+    }
+
+    /**
+     * Tries to apply a patch with progressively more tolerant matching, so the LLM does not
+     * waste a round-trip when its search text differs from the file only in line endings
+     * (CRLF vs LF) or trailing whitespace.
+     *
+     * <ol>
+     *   <li><b>Tier 1 — exact:</b> {@code String.contains} / {@code replace}.</li>
+     *   <li><b>Tier 2 — normalized line endings:</b> CRLF/CR are folded to LF in both file
+     *       and search text before matching. The replacement is spliced in and the file's
+     *       original dominant line-ending style is restored before writing.</li>
+     *   <li><b>Tier 3 — whitespace-tolerant line match:</b> compare line-by-line ignoring
+     *       trailing whitespace (and collapsing runs of horizontal whitespace within a
+     *       line). On a unique match the original line range is replaced verbatim with the
+     *       replacement text (line endings normalized to the file's dominant style).</li>
+     * </ol>
+     *
+     * Tiers stop as soon as a unique match is found.
+     */
+    private PatchAttempt tryPatch(String original, String search, String replacement) {
+        // ---- Tier 1: exact ----
+        if (original.contains(search)) {
+            int occurrences = countOccurrences(original, search);
+            if (occurrences > 1) return PatchAttempt.ambiguous(occurrences);
+            String patched = original.replace(search, replacement);
+            return patched.equals(original) ? PatchAttempt.noChange()
+                    : PatchAttempt.ok(patched, MatchTier.EXACT);
+        }
+
+        // ---- Tier 2: normalized line endings ----
+        String dominantEol = detectDominantLineEnding(original);
+        String origLf   = normalizeToLf(original);
+        String searchLf = normalizeToLf(search);
+        String replLf   = normalizeToLf(replacement);
+        if (!searchLf.equals(search) || !origLf.equals(original)) {
+            if (origLf.contains(searchLf)) {
+                int occurrences = countOccurrences(origLf, searchLf);
+                if (occurrences > 1) return PatchAttempt.ambiguous(occurrences);
+                String patchedLf = origLf.replace(searchLf, replLf);
+                if (patchedLf.equals(origLf)) return PatchAttempt.noChange();
+                return PatchAttempt.ok(applyLineEnding(patchedLf, dominantEol),
+                        MatchTier.NORMALIZED_LINE_ENDINGS);
+            }
+        }
+
+        // ---- Tier 3: whitespace-tolerant line match ----
+        String[] fileLines   = origLf.split("\n", -1);
+        String[] searchLines = searchLf.split("\n", -1);
+        // Drop trailing empty lines from the search (LLM often pads its search text with
+        // a final newline that the file does not have at that position).
+        int searchLen = trimTrailingEmpty(searchLines);
+        if (searchLen == 0) return PatchAttempt.notFound();
+
+        List<Integer> matches = findWhitespaceTolerantMatches(fileLines, searchLines, searchLen);
+        if (matches.isEmpty())   return PatchAttempt.notFound();
+        if (matches.size() > 1)  return PatchAttempt.ambiguous(matches.size());
+
+        int startLine = matches.getFirst();
+        String[] replLines = replLf.split("\n", -1);
+        int replLen = trimTrailingEmpty(replLines);
+
+        StringBuilder sb = new StringBuilder(origLf.length() + replLf.length());
+        for (int i = 0; i < startLine; i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(fileLines[i]);
+        }
+        if (startLine > 0) sb.append('\n');
+        for (int i = 0; i < replLen; i++) {
+            if (i > 0) sb.append('\n');
+            sb.append(replLines[i]);
+        }
+        for (int i = startLine + searchLen; i < fileLines.length; i++) {
+            sb.append('\n').append(fileLines[i]);
+        }
+        String patchedLf = sb.toString();
+        if (patchedLf.equals(origLf)) return PatchAttempt.noChange();
+        return PatchAttempt.ok(applyLineEnding(patchedLf, dominantEol),
+                MatchTier.WHITESPACE_TOLERANT);
+    }
+
+    private static String normalizeToLf(String s) {
+        return s.replace("\r\n", "\n").replace('\r', '\n');
+    }
+
+    /** Returns {@code "\r\n"} if CRLF dominates in the original content, otherwise {@code "\n"}. */
+    private static String detectDominantLineEnding(String content) {
+        int crlf = 0;
+        int lf   = 0;
+        for (int i = 0; i < content.length(); i++) {
+            char c = content.charAt(i);
+            if (c == '\n') {
+                if (i > 0 && content.charAt(i - 1) == '\r') crlf++;
+                else lf++;
+            }
+        }
+        return crlf > lf ? "\r\n" : "\n";
+    }
+
+    private static String applyLineEnding(String lfContent, String eol) {
+        return "\n".equals(eol) ? lfContent : lfContent.replace("\n", eol);
+    }
+
+    /** Collapses runs of horizontal whitespace and trims trailing whitespace for comparison only. */
+    private static String normalizeWhitespaceForCompare(String line) {
+        return line.replaceAll("[ \t]+", " ").stripTrailing();
+    }
+
+    /** Returns the effective length of {@code lines} after dropping trailing empty entries. */
+    private static int trimTrailingEmpty(String[] lines) {
+        int len = lines.length;
+        while (len > 0 && lines[len - 1].isEmpty()) len--;
+        return len;
+    }
+
+    /**
+     * Returns every starting index in {@code fileLines} where {@code searchLen} consecutive
+     * lines match {@code searchLines[0..searchLen)} under
+     * {@link #normalizeWhitespaceForCompare(String) whitespace-tolerant} comparison.
+     */
+    private static List<Integer> findWhitespaceTolerantMatches(String[] fileLines,
+                                                                String[] searchLines,
+                                                                int searchLen) {
+        List<Integer> matches = new ArrayList<>();
+        String[] normSearch = new String[searchLen];
+        for (int i = 0; i < searchLen; i++) {
+            normSearch[i] = normalizeWhitespaceForCompare(searchLines[i]);
+        }
+        int upper = fileLines.length - searchLen;
+        outer:
+        for (int i = 0; i <= upper; i++) {
+            for (int j = 0; j < searchLen; j++) {
+                if (!normalizeWhitespaceForCompare(fileLines[i + j]).equals(normSearch[j])) {
+                    continue outer;
+                }
+            }
+            matches.add(i);
+        }
+        return matches;
     }
 
     /** Counts the number of non-overlapping occurrences of {@code needle} in {@code haystack}. */
