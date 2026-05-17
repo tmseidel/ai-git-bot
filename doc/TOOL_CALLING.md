@@ -16,8 +16,16 @@ on top of those.
 
 ## TL;DR — “Something is broken, what do I do?”
 
+> **New defaults**: Since the current release, **legacy tool calling is
+> the default** for every newly created AI integration, and existing
+> integrations are migrated to legacy as well. Native function calling
+> is opt-in via the **"Enable experimental native tool calling"**
+> switch in the integration editor. The recovery playbook below applies
+> whenever you have opted in and run into trouble.
+
 1. Open **AI Integrations → Edit** for the affected integration.
-2. Switch **Tool calling → "Use legacy chat-based tool calling"** to **on**.
+2. Switch **"Enable experimental native tool calling"** to **off**
+   (which sets the underlying `use_legacy_tool_calling=true`).
 3. Re-run the failing operation (or comment `try again` on the issue/PR).
 4. If it now works, you are done. Native tool calling for that
    model/provider combination is currently unreliable; please open an
@@ -120,8 +128,12 @@ with three opt-in hooks:
 3. At least one `ToolDescriptor` is supplied.
 
 Otherwise it transparently falls back to the legacy text path. Operators
-get a per-integration override (the `use_legacy_tool_calling` flag) that
-forces step 2 to `false` regardless of model defaults.
+get a per-integration override (the `use_legacy_tool_calling` flag,
+**defaulting to `true` since the current release** so that legacy mode
+is in effect unless opt-in) that forces step 2 to `false` regardless of
+model defaults. The admin UI exposes the inverse switch as "Enable
+experimental native tool calling" so the positive label matches the
+opt-in semantics.
 
 ### 2.4 `ToolNameSanitizer` — one safe name for every provider
 
@@ -265,14 +277,15 @@ Why this often works:
 - Sanitisation passes drop any leftover invalid tool blocks before the
   retry hits the provider.
 
-### Step 1 — Flip the legacy toggle
+### Step 1 — Disable the experimental native toggle
 
-If retrying does not help, flip
-**AI Integrations → Edit → Tool calling → Use legacy chat-based tool calling**
-to **on**. This forces `chatWithTools` to delegate to the textual
-`chat(...)` path: the tool catalogue is described inside the system
-prompt, and the model is asked to reply with a JSON block the agent
-parses itself.
+If retrying does not help, open
+**AI Integrations → Edit → Tool calling** and switch
+**"Enable experimental native tool calling"** to **off** (which sets
+the underlying `use_legacy_tool_calling=true`). This forces
+`chatWithTools` to delegate to the textual `chat(...)` path: the tool
+catalogue is described inside the system prompt, and the model is asked
+to reply with a JSON block the agent parses itself.
 
 The legacy path:
 
@@ -380,7 +393,7 @@ fix is not to debug the native API but to:
 | Situation | First action |
 |---|---|
 | Single failed run, otherwise stable | Comment `try again` on the issue/PR. |
-| Repeated failures on the same integration | Toggle **Use legacy chat-based tool calling** on. |
+| Repeated failures on the same integration | Turn **"Enable experimental native tool calling"** off (= legacy mode). |
 | `400 tool_result.tool_use_id` from Anthropic | Make sure you are on the current release (history sanitisation fix); then retry. |
 | `400 BAD_REQUEST: Function call is missing a thought_signature` from Gemini | Make sure you are on the current release (Gemini 3.x metadata round-trip); then retry. |
 | Gemini `400 Invalid function name` | Update to the current release (`ToolNameSanitizer` is now applied everywhere); retry. |

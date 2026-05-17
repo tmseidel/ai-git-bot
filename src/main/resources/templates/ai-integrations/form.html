@@ -99,9 +99,10 @@
                             </h5>
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch"
-                                       id="useLegacyToolCalling" th:field="*{useLegacyToolCalling}"/>
-                                <label class="form-check-label" for="useLegacyToolCalling">
-                                    Use legacy chat-based tool calling
+                                       id="enableNativeToolCalling" th:field="*{enableNativeToolCalling}"/>
+                                <label class="form-check-label" for="enableNativeToolCalling">
+                                    Enable experimental native tool calling
+                                    <span class="badge bg-warning text-dark ms-1">experimental</span>
                                     <button type="button" class="btn btn-link btn-sm p-0 align-baseline ms-1"
                                             tabindex="0"
                                             data-bs-toggle="popover"
@@ -109,13 +110,14 @@
                                             data-bs-placement="right"
                                             data-bs-html="true"
                                             data-bs-title="Tool calling mode"
-                                            data-bs-content="<p><strong>Off (default)</strong>: tool descriptors are sent through the provider's native function-calling API (Anthropic <code>tools</code>, OpenAI/Ollama <code>tool_calls</code>, Google <code>functionDeclarations</code>). The model returns structured tool invocations that the agent loop dispatches directly &mdash; no JSON parsing of free text.</p><p><strong>On (legacy)</strong>: tools are described inside the system prompt and the model is asked to reply with a JSON object the agent then parses. Use this when your model does not understand native function calling, or to reproduce the pre-1.1 behaviour.</p><p>Anthropic, OpenAI, Google and Ollama integrations support native tool calling out of the box. llama.cpp always runs in legacy mode regardless of this switch.">
+                                            data-bs-content="<p><strong>Off (default)</strong>: <em>legacy</em> tool calling. The tool catalogue is described inside the system prompt and the model is asked to reply with a JSON block the agent parses itself. This path uses more tokens but has proven extremely robust across every provider, model version and self-hosted backend we test against — it is the recommended default.</p><p><strong>On (experimental)</strong>: tool descriptors are sent through the provider's native function-calling API (Anthropic <code>tools</code>, OpenAI/Ollama <code>tool_calls</code>, Google <code>functionDeclarations</code>). The model returns structured tool invocations that the agent loop dispatches directly. This saves tokens and is the future default, but is currently sensitive to upstream API changes and to weaker models that misuse tools.</p><p><strong>When in doubt, leave this off.</strong> If a run misbehaves in native mode, switch back to legacy and the bot will keep working. See <code>doc/TOOL_CALLING.md</code> for the full troubleshooting playbook.</p><p>llama.cpp always runs in legacy mode regardless of this switch.">
                                         <i class="bi bi-question-circle"></i>
                                     </button>
                                 </label>
                                 <div class="form-text">
-                                    Default is the native tools API. Switch to legacy if your model does not
-                                    support it.
+                                    Default is the robust legacy (JSON-in-prompt) tool-calling path.
+                                    Enable native function calling only if you want to opt into the
+                                    experimental, more token-efficient route.
                                 </div>
                             </div>
                         </div>

@@ -280,12 +280,16 @@ support behave exactly as before.
 | llama.cpp | ❌ stays on `/completion` with GBNF; opt out — falls back to legacy chat path |
 
 Each AI integration carries a per-row toggle
-`use_legacy_tool_calling` (boolean, default `false`). The admin form
-(`/ai-integrations/new` and edit) exposes it under "Tool calling" with a
-popover explaining both modes. When the operator turns the switch on, the
-provider-specific factory passes `nativeToolsEnabled=false` to the client
-and `chatWithTools` automatically delegates to `chat(...)` — useful for
-older models or self-hosted setups whose tool support is unreliable.
+`use_legacy_tool_calling` (boolean, **default `true`** — legacy mode is the
+current default). The admin form (`/ai-integrations/new` and edit) exposes
+the **inverse** as a positively-phrased switch labelled "Enable
+experimental native tool calling" with a popover explaining both modes.
+When the operator leaves the switch off (default), the provider-specific
+factory passes `nativeToolsEnabled=false` to the client and
+`chatWithTools` automatically delegates to `chat(...)`. Native function
+calling is currently considered experimental and is expected to become
+the default once the upstream provider APIs stabilise further — see
+[TOOL_CALLING.md](TOOL_CALLING.md).
 
 #### AgentLoop integration
 

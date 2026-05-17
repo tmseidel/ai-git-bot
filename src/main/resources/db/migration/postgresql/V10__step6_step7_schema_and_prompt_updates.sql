@@ -14,9 +14,13 @@
 
 ------------------------------------------------------------------------
 -- 1) Native function/tool-calling toggle per AI integration.
+--    Default is TRUE (= legacy JSON-in-prompt tool calling) so that
+--    upgraded installations keep the battle-tested behaviour. Native
+--    function calling is opt-in and currently considered experimental
+--    (see doc/TOOL_CALLING.md).
 ------------------------------------------------------------------------
 ALTER TABLE ai_integrations
-    ADD COLUMN IF NOT EXISTS use_legacy_tool_calling BOOLEAN NOT NULL DEFAULT FALSE;
+    ADD COLUMN IF NOT EXISTS use_legacy_tool_calling BOOLEAN NOT NULL DEFAULT TRUE;
 
 ------------------------------------------------------------------------
 -- 2) Persist the latest parsed implementation plan on the agent session.
