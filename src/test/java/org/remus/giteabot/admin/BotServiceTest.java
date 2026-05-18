@@ -1,15 +1,18 @@
 package org.remus.giteabot.admin;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.systemsettings.BotToolConfiguration;
 import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -24,9 +27,25 @@ class BotServiceTest {
     @InjectMocks
     private BotService botService;
 
+    private BotToolConfiguration defaultConfig;
+
+    @BeforeEach
+    void setUp() {
+        defaultConfig = new BotToolConfiguration();
+        defaultConfig.setId(1L);
+        defaultConfig.setName("Default");
+        defaultConfig.setDefaultEntry(true);
+    }
+
+    private Bot newBotWithDefaultToolConfig() {
+        Bot bot = new Bot();
+        bot.setToolConfiguration(defaultConfig);
+        return bot;
+    }
+
     @Test
     void save_generatesWebhookSecret_whenNull() {
-        Bot bot = new Bot();
+        Bot bot = newBotWithDefaultToolConfig();
         bot.setWebhookSecret(null);
         when(botRepository.save(any(Bot.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -41,7 +60,7 @@ class BotServiceTest {
 
     @Test
     void save_keepsExistingWebhookSecret() {
-        Bot bot = new Bot();
+        Bot bot = newBotWithDefaultToolConfig();
         bot.setWebhookSecret("existing-secret");
         when(botRepository.save(any(Bot.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -52,7 +71,7 @@ class BotServiceTest {
 
     @Test
     void save_writerBotDisablesCodingAgentCheckbox() {
-        Bot bot = new Bot();
+        Bot bot = newBotWithDefaultToolConfig();
         bot.setWebhookSecret("existing-secret");
         bot.setBotType(BotType.WRITER);
         bot.setAgentEnabled(true);
@@ -61,6 +80,34 @@ class BotServiceTest {
         Bot result = botService.save(bot);
 
         assertFalse(result.isAgentEnabled());
+    }
+
+    @Test
+    void save_assignsDefaultToolConfiguration_whenMissing() {
+        Bot bot = new Bot();
+        bot.setWebhookSecret("existing-secret");
+        when(botToolConfigurationRepository.findByDefaultEntryTrue())
+                .thenReturn(Optional.of(defaultConfig));
+        when(botRepository.save(any(Bot.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        Bot result = botService.save(bot);
+
+        assertSame(defaultConfig, result.getToolConfiguration());
+        verify(botToolConfigurationRepository).findByDefaultEntryTrue();
+    }
+
+    @Test
+    void save_failsFast_whenNoToolConfigurationAndNoDefault() {
+        Bot bot = new Bot();
+        bot.setWebhookSecret("existing-secret");
+        when(botToolConfigurationRepository.findByDefaultEntryTrue())
+                .thenReturn(Optional.empty());
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> botService.save(bot));
+        assertTrue(ex.getMessage().contains("No tool configuration"),
+                "Expected fail-fast message, got: " + ex.getMessage());
+        verify(botRepository, never()).save(any(Bot.class));
     }
 
     @Test
