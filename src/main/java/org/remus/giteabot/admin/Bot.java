@@ -60,9 +60,8 @@ public class Bot {
      * a bot without an explicit {@link WorkflowConfiguration} behaves as if
      * it referenced the auto-bootstrapped {@code Default} configuration
      * (which always has at least the legacy {@code review} workflow enabled).
-     * Existing rows are backfilled to the default by
-     * {@link org.remus.giteabot.prworkflow.config.DefaultWorkflowConfigurationInitializer}
-     * on startup.
+     * Existing rows are backfilled to the default by Flyway migration
+     * {@code V15__workflow_configurations_default.sql}.
      */
     @ManyToOne
     @JoinColumn(name = "workflow_configuration_id")

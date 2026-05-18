@@ -96,9 +96,11 @@ Operators create reusable workflow configurations (named whitelists of workflows
 
 **Key Deliverables:**
 - `WorkflowConfiguration` + `WorkflowSelection` JPA entities (mirrors `BotToolConfiguration`)
-- Flyway `V14__workflow_configurations.sql`
+- Flyway `V14__workflow_configurations.sql` (tables + FK) and
+  `V15__workflow_configurations_default.sql` (idempotent seed of the
+  `Default` configuration, enables the built-in `review` workflow on it, and
+  backfills existing bots — no startup-time Java bootstrap)
 - `WorkflowConfigurationService` (CRUD + clone + guards)
-- `DefaultWorkflowConfigurationInitializer` (ensures a `Default` config on startup; additively enables new workflows)
 - New UI: **System settings → Workflow configurations** (list, new, edit, delete, clone, "select workflows" sub-page)
 - Updated bot form: new dropdown **Workflow configuration** + **Details** modal
 - Per-workflow params form (JSON Schema → HTML inputs)

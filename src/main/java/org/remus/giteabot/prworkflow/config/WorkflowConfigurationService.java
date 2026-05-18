@@ -16,9 +16,11 @@ import java.util.Optional;
  * "kinds" of bot configurations.
  *
  * <p>The default configuration is protected: it cannot be renamed, deleted,
- * nor have its default flag cleared. The default row itself is bootstrapped
- * (and additively kept up to date with newly registered REVIEW workflows) by
- * {@link DefaultWorkflowConfigurationInitializer}.</p>
+ * nor have its default flag cleared. The default row itself is seeded by
+ * Flyway migration {@code V15__workflow_configurations_default.sql}; any
+ * additional REVIEW workflows shipped in later releases must add their own
+ * follow-up migration — the application does not auto-extend the Default at
+ * runtime.</p>
  */
 @Service
 @Transactional

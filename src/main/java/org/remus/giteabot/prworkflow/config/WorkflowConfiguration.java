@@ -26,8 +26,8 @@ import java.util.List;
  * the pluggable PR workflows introduced in M1/M2.
  *
  * <p>Exactly one configuration is flagged as the {@link #isDefaultEntry()
- * default entry}; the default is bootstrapped/maintained by
- * {@link DefaultWorkflowConfigurationInitializer} and is protected against
+ * default entry}; the default row is seeded by Flyway migration
+ * {@code V15__workflow_configurations_default.sql} and is protected against
  * deletion/renaming.</p>
  */
 @Data

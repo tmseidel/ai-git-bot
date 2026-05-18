@@ -217,13 +217,14 @@ Three touchpoints, all reusing the existing table-plus-modal pattern:
 
 ### Upgrade behaviour
 
-- The Flyway migration only adds the column `bots.workflow_configuration_id`
-  as nullable — it does **not** backfill existing rows.
-- On the first startup after upgrade, `DefaultWorkflowConfigurationInitializer`
-  creates the `Default` row and assigns it to every bot whose
-  `workflow_configuration_id` is still null. The log line
-  `Backfilled N bot(s) to the default workflow configuration` confirms the
-  one-time migration.
+- `V14__workflow_configurations.sql` adds the `workflow_configurations` /
+  `workflow_selections` tables and the nullable `bots.workflow_configuration_id`
+  column.
+- `V15__workflow_configurations_default.sql` (idempotent) seeds the `Default`
+  configuration, enables the built-in `review` workflow on it and backfills
+  every bot whose `workflow_configuration_id` is still null. After the two
+  migrations run, every existing bot keeps behaving exactly as before
+  (running only the `review` workflow); no startup-time Java code is involved.
 
 ## See also
 

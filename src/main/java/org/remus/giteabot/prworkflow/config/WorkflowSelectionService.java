@@ -153,8 +153,8 @@ public class WorkflowSelectionService {
 
     /**
      * Adds (or replaces) a single workflow selection on the configuration.
-     * Useful for the {@link DefaultWorkflowConfigurationInitializer} to
-     * additively enable newly registered REVIEW workflows on startup.
+     * Used by the admin UI and by callers that want to programmatically
+     * enable an additional workflow on an existing configuration.
      */
     public void enableWorkflow(Long configurationId, String workflowKey, String paramsJson) {
         WorkflowConfiguration configuration = requireConfiguration(configurationId);
