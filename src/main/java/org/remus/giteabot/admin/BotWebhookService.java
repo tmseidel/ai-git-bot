@@ -45,9 +45,7 @@ public class BotWebhookService {
     private final AiClientFactory aiClientFactory;
     private final GiteaClientFactory giteaClientFactory;
     private final PromptService promptService;
-    private final SessionService sessionService;
     private final AgentConfigProperties agentConfig;
-    private final ReviewConfigProperties reviewConfig;
     private final AgentSessionService agentSessionService;
     private final ToolExecutionService toolExecutionService;
     private final ToolCatalog toolCatalog;
@@ -62,9 +60,7 @@ public class BotWebhookService {
     public BotWebhookService(AiClientFactory aiClientFactory,
                              GiteaClientFactory giteaClientFactory,
                              PromptService promptService,
-                             SessionService sessionService,
                              AgentConfigProperties agentConfig,
-                             ReviewConfigProperties reviewConfig,
                              AgentSessionService agentSessionService,
                              ToolExecutionService toolExecutionService,
                              ToolCatalog toolCatalog,
@@ -78,9 +74,7 @@ public class BotWebhookService {
         this.aiClientFactory = aiClientFactory;
         this.giteaClientFactory = giteaClientFactory;
         this.promptService = promptService;
-        this.sessionService = sessionService;
         this.agentConfig = agentConfig;
-        this.reviewConfig = reviewConfig;
         this.agentSessionService = agentSessionService;
         this.toolExecutionService = toolExecutionService;
         this.toolCatalog = toolCatalog;

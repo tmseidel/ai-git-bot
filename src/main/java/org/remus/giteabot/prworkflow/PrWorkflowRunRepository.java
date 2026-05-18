@@ -8,10 +8,6 @@ import java.util.List;
 @Repository
 public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Long> {
 
-    List<PrWorkflowRun> findByRepoOwnerAndRepoNameAndPrNumber(String repoOwner,
-                                                              String repoName,
-                                                              Long prNumber);
-
     List<PrWorkflowRun> findByBotIdAndRepoOwnerAndRepoNameAndPrNumberAndWorkflowKeyAndStatusIn(
             Long botId,
             String repoOwner,
