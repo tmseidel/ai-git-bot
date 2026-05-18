@@ -471,11 +471,21 @@ erDiagram
   - `CODING` → `IssueImplementationService` (when `agentEnabled` is true)
   - `WRITER` → `WriterAgentService`
 - Handles:
-  - PR reviews when a provider-specific review trigger is detected (for example opened-with-reviewer or reviewer re-requested)
+  - PR reviews when a provider-specific review trigger is detected (for example opened-with-reviewer or reviewer re-requested) — delegated to `PrWorkflowOrchestrator` since 1.7 (see [PR_WORKFLOWS.md](PR_WORKFLOWS.md))
   - Bot commands (PR comments with mention)
   - Inline review comments
   - Review submitted events
   - Issue assignments and issue-comment follow-ups for both issue-based agent modes
+
+### PrWorkflowOrchestrator (since 1.7)
+
+- **Package:** `org.remus.giteabot.prworkflow`
+- Central dispatcher for all PR follow-up workflows
+- Looks up `PrWorkflow` implementations via `PrWorkflowRegistry` (Spring DI auto-discovery)
+- Persists a `pr_workflow_runs` row per invocation and cancels superseded in-flight runs on PR resynchronise
+- Captures runtime exceptions, records a `FAILED` terminal state and Prometheus metrics (`prworkflow.run_total`, `prworkflow.run_duration_seconds`)
+- First implementation: `ReviewWorkflow` (key `review`) — wraps the legacy code-review path with byte-identical behaviour
+- See [PR_WORKFLOWS.md](PR_WORKFLOWS.md) for the full SPI and how to add new workflows
 
 ### IssueImplementationService
 

@@ -60,6 +60,8 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.systemsettings.BotToolSelectionService botToolSelectionService;
     @Mock private RepositoryApiClient repositoryApiClient;
     @Mock private AiClient aiClient;
+    @Mock private org.remus.giteabot.prworkflow.PrWorkflowOrchestrator prWorkflowOrchestrator;
+    @Mock private org.remus.giteabot.prworkflow.review.CodeReviewServiceFactory codeReviewServiceFactory;
 
     private BotWebhookService botWebhookService;
 
@@ -71,13 +73,28 @@ class BotWebhookServiceTest {
         botWebhookService = new BotWebhookService(aiClientFactory, giteaClientFactory,
                 promptService, sessionService, agentConfig, new ReviewConfigProperties(),
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService, botService,
-                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService);
+                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
+                prWorkflowOrchestrator, codeReviewServiceFactory);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
         // Built-in tool whitelist: tests don't exercise the gating layer, so return
         // null (= unrestricted) to keep the historic test surface.
         lenient().when(botToolSelectionService.allowedBuiltinTools(any())).thenReturn(null);
+        // M1: the CodeReviewService construction was extracted into
+        // CodeReviewServiceFactory. Reproduce the legacy behaviour (real
+        // CodeReviewService built from mocked AI/Git/session deps) here so
+        // the existing handlePrComment / handleBotCommand routing tests
+        // keep observing the same downstream side-effects on `sessionService`.
+        lenient().when(codeReviewServiceFactory.create(any(Bot.class)))
+                .thenAnswer(invocation -> {
+                    Bot b = invocation.getArgument(0);
+                    return new org.remus.giteabot.review.CodeReviewService(
+                            repositoryApiClient, aiClient, sessionService,
+                            b.getUsername(), new ReviewConfigProperties(),
+                            "system-prompt:" + b.getSystemPrompt().getId(),
+                            b.getSystemPrompt().getReviewSystemPrompt());
+                });
         // Step 7.2 — provide a real BudgetConfig so production code that reads
         // agentConfig.getBudget().getMaxTokensPerCall() does not NPE on the mock.
         AgentConfigProperties.BudgetConfig budget = new AgentConfigProperties.BudgetConfig();
