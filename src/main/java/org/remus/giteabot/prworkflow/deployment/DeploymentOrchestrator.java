@@ -7,6 +7,7 @@ import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 import org.remus.giteabot.prworkflow.config.DeploymentTarget;
+import org.remus.giteabot.prworkflow.config.DeploymentTargetService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -34,15 +35,18 @@ public class DeploymentOrchestrator {
     private final DeploymentStrategyRegistry strategyRegistry;
     private final DeploymentCallbackNotifier callbackNotifier;
     private final PrWorkflowRunService runService;
+    private final DeploymentTargetService deploymentTargetService;
     private final String callbackBaseUrl;
 
     public DeploymentOrchestrator(DeploymentStrategyRegistry strategyRegistry,
                                   DeploymentCallbackNotifier callbackNotifier,
                                   PrWorkflowRunService runService,
+                                  DeploymentTargetService deploymentTargetService,
                                   @Value("${app.public-url:http://localhost:8080}") String callbackBaseUrl) {
         this.strategyRegistry = strategyRegistry;
         this.callbackNotifier = callbackNotifier;
         this.runService = runService;
+        this.deploymentTargetService = deploymentTargetService;
         this.callbackBaseUrl = callbackBaseUrl == null ? "" : callbackBaseUrl.replaceAll("/+$", "");
     }
 
@@ -53,10 +57,19 @@ public class DeploymentOrchestrator {
      */
     public DeploymentResult requestDeployment(PrWorkflowContext context) {
         Bot bot = context.bot();
-        DeploymentTarget target = bot.getDeploymentTarget();
-        if (target == null) {
+        DeploymentTarget assigned = bot.getDeploymentTarget();
+        if (assigned == null) {
             return DeploymentResult.rejected(
                     "Bot '" + bot.getName() + "' has no deployment target configured");
+        }
+        // Re-fetch through the service so configJson is decrypted AND the
+        // returned entity is detached from the persistence context — the
+        // strategy must operate on plaintext, and we must never let a stray
+        // flush write the cleartext back to the database.
+        DeploymentTarget target = deploymentTargetService.findById(assigned.getId()).orElse(null);
+        if (target == null) {
+            return DeploymentResult.rejected(
+                    "Deployment target id=" + assigned.getId() + " no longer exists");
         }
         DeploymentStrategy strategy = strategyRegistry.find(target.getStrategyType()).orElse(null);
         if (strategy == null) {
@@ -79,18 +92,23 @@ public class DeploymentOrchestrator {
                 buildCallbackUrl(run));
 
         DeploymentResult triggered = strategy.trigger(request);
-        if (triggered.handleJson() != null) {
-            runService.markWaitingDeploy(run.getId(), triggered.handleJson());
-        }
 
         if (triggered.status() == DeploymentStatus.READY) {
-            runService.resumeFromDeploy(run.getId(), triggered.previewUrl());
+            // Synchronous success: record the preview URL but keep the run in
+            // RUNNING — never flip through WAITING_DEPLOY for an instant.
+            runService.setPreviewUrl(run.getId(), triggered.previewUrl());
             return triggered;
         }
         if (triggered.status() != DeploymentStatus.PENDING) {
-            // FAILED / REJECTED — surface to the workflow, do not block.
+            // FAILED / REJECTED — surface to the workflow without persisting
+            // WAITING_DEPLOY (the run stays RUNNING and the workflow will
+            // complete it with the appropriate failure status).
             return triggered;
         }
+
+        // PENDING — persist the handle and the WAITING_DEPLOY transition
+        // before we start awaiting the inbound callback.
+        runService.markWaitingDeploy(run.getId(), triggered.handleJson());
 
         if (!strategy.awaitsCallback()) {
             return triggered;
@@ -122,4 +140,3 @@ public class DeploymentOrchestrator {
         return callbackBaseUrl + "/api/workflow-callback/" + run.getId() + "/" + run.getCallbackSecret();
     }
 }
-

@@ -45,4 +45,3 @@ ALTER TABLE bots
 ALTER TABLE pr_workflow_runs ADD COLUMN IF NOT EXISTS preview_url VARCHAR(2048);
 ALTER TABLE pr_workflow_runs ADD COLUMN IF NOT EXISTS callback_secret VARCHAR(128);
 ALTER TABLE pr_workflow_runs ADD COLUMN IF NOT EXISTS deployment_handle_json TEXT;
-

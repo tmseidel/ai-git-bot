@@ -64,4 +64,3 @@ public class DeploymentCallbackNotifier {
     public record CallbackResult(DeploymentStatus status, String previewUrl, String errorMessage) {
     }
 }
-

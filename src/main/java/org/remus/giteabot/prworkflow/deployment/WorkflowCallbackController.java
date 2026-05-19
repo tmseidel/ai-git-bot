@@ -107,8 +107,14 @@ public class WorkflowCallbackController {
         String previewUrl = textOrNull(payload, "previewUrl");
         String errorMessage = textOrNull(payload, "errorMessage");
 
-        if (status == DeploymentStatus.READY && previewUrl != null) {
-            runService.setPreviewUrl(runId, previewUrl);
+        if (status == DeploymentStatus.READY) {
+            // Persist the state transition WAITING_DEPLOY → RUNNING (and the
+            // preview URL) unconditionally, so the DB is consistent even if
+            // no orchestrator thread is waiting on this instance (restart,
+            // multi-instance deployment, callback arriving just after the
+            // orchestrator's await timeout). resumeFromDeploy is a no-op
+            // when the run is not currently WAITING_DEPLOY.
+            runService.resumeFromDeploy(runId, previewUrl);
         }
         if (status == DeploymentStatus.FAILED || status == DeploymentStatus.REJECTED) {
             // Persist the failure even if no orchestrator thread is waiting.

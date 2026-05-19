@@ -316,6 +316,11 @@ Content-Type: text/plain
 Authentication: the `{secret}` path segment is compared to the per-run
 `pr_workflow_runs.callback_secret` in constant time; mutating endpoints also
 HMAC-verify the body via `X-AI-Bot-Signature` when the header is present.
+**The HMAC key for inbound callbacks is the per-run `callbackSecret`** (also
+delivered to the CI side in the outbound trigger payload), *not* the
+target's `sharedSecret`. Using the per-run secret means a leaked signature
+cannot be replayed against other runs and the bot does not have to re-load
+the (encrypted) target config to verify.
 Once a run reaches a terminal status the callback is a no-op (HTTP 409) so a
 replayed `SUCCESS` cannot flip a `FAILED` run back to green.
 
@@ -323,14 +328,15 @@ replayed `SUCCESS` cannot flip a `FAILED` run back to green.
 
 ```bash
 RUN_ID=42
-SECRET="cb-secret-from-trigger-payload"
+# Both delivered to the CI side in the trigger payload.
+CALLBACK_URL="https://bot.acme.io/api/workflow-callback/$RUN_ID/$CALLBACK_SECRET"
 BODY='{"status":"READY","previewUrl":"https://pr-1234.preview.acme.io"}'
-SIG="sha256=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SHARED_SECRET" -hex | awk '{print $2}')"
+SIG="sha256=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$CALLBACK_SECRET" -hex | awk '{print $2}')"
 curl -fsS -X POST \
   -H "Content-Type: application/json" \
   -H "X-AI-Bot-Signature: $SIG" \
   --data "$BODY" \
-  "https://bot.acme.io/api/workflow-callback/$RUN_ID/$SECRET"
+  "$CALLBACK_URL"
 ```
 
 ### Operator UI

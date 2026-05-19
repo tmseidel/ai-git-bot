@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.config;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.EncryptionService;
@@ -16,6 +18,13 @@ import java.util.Optional;
  * Hibernate persists; callers receive cleartext through {@link #findById}
  * and {@link #findAll}.
  *
+ * <p>Read methods <strong>detach</strong> the loaded entities from the JPA
+ * persistence context before decrypting the {@code configJson} field. This
+ * guarantees the plaintext can never be flushed back to the database by a
+ * later transaction in the same context — the "encrypted at rest"
+ * invariant only holds because nothing mutates a managed entity in-place
+ * with the cleartext value.</p>
+ *
  * <p>Guards:</p>
  * <ul>
  *     <li>Name uniqueness (case-sensitive — DB UK).</li>
@@ -31,6 +40,9 @@ public class DeploymentTargetService {
     private final BotRepository botRepository;
     private final EncryptionService encryptionService;
 
+    @PersistenceContext
+    private EntityManager entityManager;
+
     public DeploymentTargetService(DeploymentTargetRepository repository,
                                    BotRepository botRepository,
                                    EncryptionService encryptionService) {
@@ -39,17 +51,22 @@ public class DeploymentTargetService {
         this.encryptionService = encryptionService;
     }
 
+    /** Test seam: lets unit tests inject a mock EntityManager. */
+    void setEntityManager(EntityManager entityManager) {
+        this.entityManager = entityManager;
+    }
+
     @Transactional(readOnly = true)
     public List<DeploymentTarget> findAll() {
         List<DeploymentTarget> all = repository.findAll();
-        all.forEach(this::decryptInPlace);
+        all.forEach(this::detachAndDecrypt);
         return all;
     }
 
     @Transactional(readOnly = true)
     public Optional<DeploymentTarget> findById(Long id) {
         return repository.findById(id).map(target -> {
-            decryptInPlace(target);
+            detachAndDecrypt(target);
             return target;
         });
     }
@@ -78,7 +95,11 @@ public class DeploymentTargetService {
         String plaintext = target.getConfigJson();
         target.setConfigJson(encryptionService.encrypt(plaintext));
         DeploymentTarget saved = repository.save(target);
-        // Return cleartext to the caller — never leak the cipher text upwards.
+        // Detach before exposing cleartext to the caller so callers cannot
+        // accidentally re-flush the plaintext value back to the database.
+        if (entityManager != null) {
+            entityManager.detach(saved);
+        }
         saved.setConfigJson(plaintext);
         return saved;
     }
@@ -109,10 +130,18 @@ public class DeploymentTargetService {
         return List.of(DeploymentStrategyType.WEBHOOK, DeploymentStrategyType.STATIC);
     }
 
-    private void decryptInPlace(DeploymentTarget target) {
+    /**
+     * Detaches the entity from the persistence context, then replaces the
+     * encrypted {@code configJson} with its plaintext value. The detach
+     * step is what makes the in-place mutation safe — once detached, no
+     * subsequent flush can write the plaintext back to the database.
+     */
+    private void detachAndDecrypt(DeploymentTarget target) {
+        if (entityManager != null) {
+            entityManager.detach(target);
+        }
         if (target.getConfigJson() != null) {
             target.setConfigJson(encryptionService.decrypt(target.getConfigJson()));
         }
     }
 }
-

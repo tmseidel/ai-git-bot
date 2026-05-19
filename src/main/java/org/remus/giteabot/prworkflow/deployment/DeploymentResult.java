@@ -39,4 +39,3 @@ public record DeploymentResult(
         return new DeploymentResult(DeploymentStatus.REJECTED, null, null, errorMessage);
     }
 }
-

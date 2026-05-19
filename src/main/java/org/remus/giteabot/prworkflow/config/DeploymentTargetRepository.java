@@ -10,4 +10,3 @@ public interface DeploymentTargetRepository extends JpaRepository<DeploymentTarg
 
     boolean existsByNameAndIdNot(String name, Long id);
 }
-

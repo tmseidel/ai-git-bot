@@ -15,4 +15,3 @@ public enum DeploymentStatus {
     /** Strategy could not even start the deployment (config error, network). */
     REJECTED
 }
-

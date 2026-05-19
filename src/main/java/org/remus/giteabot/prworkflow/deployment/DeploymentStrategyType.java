@@ -44,4 +44,3 @@ public enum DeploymentStrategyType {
         throw new IllegalArgumentException("Unknown deployment strategy type: " + value);
     }
 }
-

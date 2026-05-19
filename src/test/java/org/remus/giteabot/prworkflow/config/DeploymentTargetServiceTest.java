@@ -40,7 +40,11 @@ class DeploymentTargetServiceTest {
         });
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         service = new DeploymentTargetService(repository, botRepository, encryptionService);
+        entityManager = mock(jakarta.persistence.EntityManager.class);
+        service.setEntityManager(entityManager);
     }
+
+    private jakarta.persistence.EntityManager entityManager;
 
     private DeploymentTarget newTarget() {
         DeploymentTarget t = new DeploymentTarget();
@@ -160,6 +164,42 @@ class DeploymentTargetServiceTest {
     void availableStrategyTypesIsM3Subset() {
         assertThat(service.availableStrategyTypes())
                 .containsExactly(DeploymentStrategyType.WEBHOOK, DeploymentStrategyType.STATIC);
+    }
+
+    @Test
+    void findByIdDetachesEntityBeforeDecrypting() {
+        DeploymentTarget enc = newTarget();
+        enc.setId(1L);
+        enc.setConfigJson("ENC({\"k\":\"v\"})");
+        when(repository.findById(1L)).thenReturn(Optional.of(enc));
+        service.findById(1L).orElseThrow();
+        // Must detach BEFORE we mutate configJson, so a later flush in the
+        // same persistence context cannot write the plaintext back.
+        verify(entityManager).detach(enc);
+    }
+
+    @Test
+    void findAllDetachesEveryEntityBeforeDecrypting() {
+        DeploymentTarget enc1 = newTarget();
+        enc1.setId(1L);
+        enc1.setConfigJson("ENC({\"k\":\"v\"})");
+        DeploymentTarget enc2 = newTarget();
+        enc2.setId(2L);
+        enc2.setName("ci2");
+        enc2.setConfigJson("ENC({\"k\":\"v2\"})");
+        when(repository.findAll()).thenReturn(java.util.List.of(enc1, enc2));
+        service.findAll();
+        verify(entityManager).detach(enc1);
+        verify(entityManager).detach(enc2);
+    }
+
+    @Test
+    void saveDetachesReturnedEntityBeforeExposingPlaintext() {
+        DeploymentTarget t = newTarget();
+        DeploymentTarget saved = service.save(t);
+        // Whatever the repository returned must have been detached before the
+        // service replaced its (cipher) configJson with the cleartext.
+        verify(entityManager).detach(saved);
     }
 }
 

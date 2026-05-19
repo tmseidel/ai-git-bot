@@ -71,12 +71,39 @@ class WorkflowCallbackControllerTest {
                 "{\"status\":\"READY\",\"previewUrl\":\"https://pr-42.preview.io\"}");
 
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
-        verify(runService).setPreviewUrl(42L, "https://pr-42.preview.io");
+        // The controller must persist the WAITING_DEPLOY → RUNNING transition
+        // (incl. the preview URL) BEFORE notifying the in-process queue, so
+        // the DB stays consistent even when no orchestrator thread is around.
+        verify(runService).resumeFromDeploy(42L, "https://pr-42.preview.io");
         ArgumentCaptor<DeploymentCallbackNotifier.CallbackResult> cap =
                 ArgumentCaptor.forClass(DeploymentCallbackNotifier.CallbackResult.class);
         verify(notifier).notifyResult(eq(42L), cap.capture());
         assertThat(cap.getValue().status()).isEqualTo(DeploymentStatus.READY);
         assertThat(cap.getValue().previewUrl()).isEqualTo("https://pr-42.preview.io");
+    }
+
+    @Test
+    void readyCallbackPersistsTransitionEvenWithoutWaitingThread() {
+        // Reproduces the multi-instance / post-timeout case described in
+        // doc/PR_WORKFLOWS.md: the notifier has no consumer, but the DB
+        // must still leave WAITING_DEPLOY behind.
+        when(runService.getById(42L)).thenReturn(runWith("s", PrWorkflowRunStatus.WAITING_DEPLOY));
+        when(notifier.notifyResult(eq(42L), any())).thenReturn(false);
+
+        ResponseEntity<String> r = controller.callback(42L, "s", null,
+                "{\"status\":\"READY\",\"previewUrl\":\"https://pr-42.preview.io\"}");
+
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(runService).resumeFromDeploy(42L, "https://pr-42.preview.io");
+    }
+
+    @Test
+    void readyCallbackWithoutPreviewUrlStillResumes() {
+        when(runService.getById(42L)).thenReturn(runWith("s", PrWorkflowRunStatus.WAITING_DEPLOY));
+        ResponseEntity<String> r = controller.callback(42L, "s", null,
+                "{\"status\":\"READY\"}");
+        assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(runService).resumeFromDeploy(42L, null);
     }
 
     @Test
@@ -87,7 +114,7 @@ class WorkflowCallbackControllerTest {
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.OK);
         verify(runService).complete(eq(42L), eq(PrWorkflowRunStatus.FAILED),
                 org.mockito.ArgumentMatchers.contains("build broke"));
-        verify(runService, never()).setPreviewUrl(any(), any());
+        verify(runService, never()).resumeFromDeploy(any(), any());
     }
 
     @Test

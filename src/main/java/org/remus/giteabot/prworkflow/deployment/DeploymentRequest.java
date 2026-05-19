@@ -31,4 +31,3 @@ public record DeploymentRequest(
         String branch,
         String callbackUrl) {
 }
-

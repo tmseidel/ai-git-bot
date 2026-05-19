@@ -47,4 +47,3 @@ public class DeploymentStrategyRegistry {
                 "No DeploymentStrategy registered for type " + type));
     }
 }
-

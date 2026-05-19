@@ -1,13 +1,26 @@
 # Webhook recipes for deployment-target callbacks
 
 > Companion to [`PR_WORKFLOWS.md` → Deployment targets](PR_WORKFLOWS.md#deployment-targets-m3).
-> All snippets assume the bot's public base URL is `https://bot.acme.io` and
-> the shared HMAC secret is stored as `$SHARED_SECRET` on the CI side.
+> All snippets assume the bot's public base URL is `https://bot.acme.io`.
 
-For every recipe the bot POSTs a JSON envelope first (signed with
-`X-AI-Bot-Signature: sha256=<hex>`); the CI side is responsible for calling
-back to `POST /api/workflow-callback/{runId}/{secret}` once the preview
-environment is ready.
+For every recipe the bot POSTs a JSON envelope first, signed with the
+target's `sharedSecret` (`X-AI-Bot-Signature: sha256=<hex>` — verify the
+header on the CI side if you need defence-in-depth). The CI side is then
+responsible for calling back to
+`POST /api/workflow-callback/{runId}/{callbackSecret}` once the preview
+environment is ready, signing the callback body with the per-run
+`callbackSecret` that the bot delivered in the trigger payload — **never the
+`sharedSecret`**. Using the per-run secret means a leaked signature cannot
+be replayed across runs.
+
+The trigger payload that the bot sends to your CI:
+
+```json
+{ "runId": 42, "prNumber": 1234, "sha": "abc…", "branch": "feature/x",
+  "repoOwner": "acme", "repoName": "web",
+  "callbackUrl":    "https://bot.acme.io/api/workflow-callback/42/<callbackSecret>",
+  "callbackSecret": "<callbackSecret>" }
+```
 
 ---
 
@@ -33,7 +46,7 @@ pipeline {
         stage('Notify bot') { steps {
             script {
                 def body  = "{\"status\":\"READY\",\"previewUrl\":\"https://pr-${params.prNumber}.preview.acme.io\"}"
-                def sig   = sh(returnStdout: true, script: "printf %s '${body}' | openssl dgst -sha256 -hmac \"$SHARED_SECRET\" -hex | awk '{print \$2}'").trim()
+                def sig   = sh(returnStdout: true, script: "printf %s '${body}' | openssl dgst -sha256 -hmac \"${params.callbackSecret}\" -hex | awk '{print \$2}'").trim()
                 sh "curl -fsS -X POST -H 'Content-Type: application/json' -H 'X-AI-Bot-Signature: sha256=${sig}' --data '${body}' '${params.callbackUrl}'"
             }
         } }
@@ -64,7 +77,7 @@ preview:
     - ./scripts/deploy-preview.sh "$PR_NUMBER" "$SHA"
     - >
       BODY="{\"status\":\"READY\",\"previewUrl\":\"https://pr-${PR_NUMBER}.preview.acme.io\"}";
-      SIG="sha256=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SHARED_SECRET" -hex | awk '{print $2}')";
+      SIG="sha256=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$CALLBACK_SECRET" -hex | awk '{print $2}')";
       curl -fsS -X POST -H "Content-Type: application/json" -H "X-AI-Bot-Signature: $SIG" --data "$BODY" "$CALLBACK_URL"
 ```
 
@@ -101,7 +114,7 @@ jobs:
       - name: Notify ai-git-bot
         env:
           CB:      ${{ github.event.client_payload.callbackUrl }}
-          SECRET:  ${{ secrets.AI_BOT_SHARED_SECRET }}
+          SECRET:  ${{ github.event.client_payload.callbackSecret }}
           PR:      ${{ github.event.client_payload.prNumber }}
         run: |
           BODY='{"status":"READY","previewUrl":"https://pr-'"$PR"'.preview.acme.io"}'
@@ -122,9 +135,16 @@ Bot target config (the bot's envelope is delivered verbatim as
 
 ## 4. Argo CD ApplicationSet (PR generator)
 
-Argo CD's PR generator auto-provisions a per-PR app — there is nothing to
-trigger, but the bot still needs a callback once the rollout is healthy.
-Use a tiny `PostSync` hook job that pings the bot:
+Argo CD's PR generator auto-provisions a per-PR app — there is nothing for
+the bot to trigger, so the recommended setup is the `STATIC` strategy with
+the bot's own readiness probe (see below).
+
+If you do want an explicit callback (instead of polling), have Argo CD's
+`PostSync` hook fire a Job that calls back. Because this path does **not**
+go through a `WEBHOOK` deployment-target, the bot has not seeded a per-run
+`callbackSecret` for the Job — pass the full `callbackUrl` (which embeds
+the secret as path segment) into the Job from an external orchestrator and
+HMAC-sign the body with that same per-run secret:
 
 ```yaml
 apiVersion: batch/v1
@@ -141,19 +161,20 @@ spec:
         - name: notify
           image: curlimages/curl:8
           env:
-            - { name: CB,     value: "$(CALLBACK_URL)" }
-            - { name: SECRET, valueFrom: { secretKeyRef: { name: ai-bot, key: shared } } }
-            - { name: URL,    value: "https://pr-$(PR_NUMBER).preview.acme.io" }
+            - { name: CB,             value: "$(CALLBACK_URL)" }
+            - { name: CALLBACK_SECRET, value: "$(CALLBACK_SECRET)" }
+            - { name: URL,            value: "https://pr-$(PR_NUMBER).preview.acme.io" }
           command: ["sh","-c"]
           args:
             - |
               BODY='{"status":"READY","previewUrl":"'"$URL"'"}'
-              SIG="sha256=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $2}')"
+              SIG="sha256=$(printf %s "$BODY" | openssl dgst -sha256 -hmac "$CALLBACK_SECRET" -hex | awk '{print $2}')"
               curl -fsS -X POST -H "Content-Type: application/json" -H "X-AI-Bot-Signature: $SIG" --data "$BODY" "$CB"
 ```
 
-Bot target: use `STATIC` instead of `WEBHOOK` (the ApplicationSet already
-provisions) — the readiness probe is then handled by the bot itself:
+Recommended bot target: use `STATIC` instead of `WEBHOOK` (the
+ApplicationSet already provisions) — the readiness probe is then handled by
+the bot itself:
 ```json
 { "healthcheckPath": "/healthz", "expectedStatus": 200, "intervalSeconds": 10 }
 ```
@@ -165,7 +186,7 @@ with `previewUrlTemplate = https://pr-{prNumber}.preview.acme.io`.
 
 | Symptom | Likely cause |
 |---|---|
-| HTTP 401 from callback | Wrong `{secret}` path segment, or signature header doesn't match the body byte-for-byte (watch out for trailing newlines added by `echo` — use `printf %s`). |
+| HTTP 401 from callback | Wrong `{secret}` path segment, signature header signed with the target's `sharedSecret` instead of the per-run `callbackSecret`, or body doesn't match the signature byte-for-byte (watch out for trailing newlines added by `echo` — use `printf %s`). |
 | HTTP 409 from callback | The run already transitioned to a terminal status (timeout, superseded by a newer PR-synchronize). |
 | Bot keeps waiting forever | The trigger response was 2xx but no callback ever arrived. Raise `timeoutSeconds` on the target or check the CI side for swallowed errors. |
 | Signature header missing | Optional but recommended; without it the callback only relies on the URL secret. Enforce by setting `requireSignature=true` (M4). |
