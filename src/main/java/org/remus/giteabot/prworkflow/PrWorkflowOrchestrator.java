@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Coordinates one invocation of a registered {@link PrWorkflow}.
@@ -110,6 +111,19 @@ public class PrWorkflowOrchestrator {
      *         {@code FAILED} or {@code WAITING_DEPLOY})
      */
     public PrWorkflowRun run(Bot bot, WebhookPayload payload, String workflowKey) {
+        return run(bot, payload, workflowKey, Map.of());
+    }
+
+    /**
+     * Runs the workflow identified by {@code workflowKey}, threading the
+     * given {@code hints} map into the {@link PrWorkflowContext}. Hints are
+     * an opt-in side-channel used by slash commands (e.g. the E2E
+     * {@code @bot regenerate-tests <feedback>} dispatcher) to pass
+     * free-form operator input to the workflow without polluting the
+     * webhook payload model.
+     */
+    public PrWorkflowRun run(Bot bot, WebhookPayload payload, String workflowKey,
+                             Map<String, String> hints) {
         if (bot == null) {
             throw new IllegalArgumentException("bot must not be null");
         }
@@ -135,7 +149,8 @@ public class PrWorkflowOrchestrator {
         PrWorkflowContext context = new PrWorkflowContext(
                 bot, payload, run.getId(),
                 (name, log) -> runService.appendStep(run.getId(), name, "INFO", log),
-                () -> !runService.isActive(run.getId()));
+                () -> !runService.isActive(run.getId()),
+                hints == null ? Map.of() : hints);
 
         try {
             WorkflowResult result = workflow.run(context);

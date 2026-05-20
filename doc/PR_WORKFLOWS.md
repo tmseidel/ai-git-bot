@@ -229,17 +229,17 @@ Three touchpoints, all reusing the existing table-plus-modal pattern:
 
 ## Deployment targets (M3)
 
-Workflows that need a per-PR preview environment (e.g. the upcoming
-`E2ETestWorkflow` in M4) do not deploy anything themselves — they delegate to
-an operator-managed **deployment target** that wraps a pluggable
-`DeploymentStrategy`. M3 ships two strategies:
+Workflows that need a per-PR preview environment (e.g. the `E2ETestWorkflow`
+in M4) do not deploy anything themselves — they delegate to an
+operator-managed **deployment target** that wraps a pluggable
+`DeploymentStrategy`. Four strategies ship today:
 
 | Strategy | Awaits callback? | Use case |
 |---|---|---|
 | `WEBHOOK` | yes | Bot POSTs a signed JSON envelope to a CI job (Jenkins, GitLab pipeline trigger, GitHub `repository_dispatch`, Argo CD). The CI side calls back when the preview URL is ready. |
 | `STATIC`  | no  | Provider already auto-provisions a per-PR preview (Vercel, Netlify, Render, GitLab review apps). The bot expands a URL template, optionally probes a `/healthz` until reachable, then proceeds synchronously. |
-
-The remaining strategy values (`CI_ACTION`, `MCP`) are reserved for M5/M6.
+| `MCP` (M5) | no  | Internal platform MCP server already exposes deploy / status / teardown tools. The bot calls them like any other MCP tool and polls via the status tool. See [MCP_SERVER_HANDLING.md → Exposing deployment tools](MCP_SERVER_HANDLING.md#6-exposing-deployment-style-tools-m5). |
+| `CI_ACTION` (M6) | yes (poller-driven) | Bot dispatches the Git host's native CI (GitHub Actions, Gitea Actions, GitLab CI, Bitbucket Pipelines) using the existing integration token. A scheduled poller drives the run forward; workflows may additionally POST to the bot's `callbackUrl` to expose a dynamic preview URL. See [PR_WORKFLOWS_CI_ACTIONS.md](PR_WORKFLOWS_CI_ACTIONS.md). |
 
 ### Lifecycle
 
@@ -291,6 +291,51 @@ X-AI-Bot-Run-Id:   {runId}
 `previewUrlTemplate` (configured on the target row, not in the JSON) supports
 the placeholders `{prNumber}`, `{sha}` and `{branch}`. Set
 `"healthcheckPath": ""` to skip the readiness probe entirely.
+
+**`MCP`** (M5)
+```json
+{
+  "mcpConfigurationId": 7,
+  "deployTool":   "platform/deploy_pr_preview",
+  "statusTool":   "platform/get_preview_status",
+  "teardownTool": "platform/teardown_preview",
+  "argsTemplate": {
+    "project": "shop-web",
+    "branch":  "{branch}",
+    "ref":     "{sha}",
+    "pr":      "{prNumber}"
+  }
+}
+```
+- `mcpConfigurationId` references a row from **System settings → MCP
+  configurations**. Every referenced tool name **must** be on that MCP
+  configuration's whitelist (`McpToolSelectionService`); the save is
+  rejected otherwise. The strategy enforces the same check a second time
+  at runtime, so disabling a tool after the fact safely degrades to a
+  `REJECTED` deployment.
+- `statusTool` and `teardownTool` are optional. Omit them when the deploy
+  tool returns a ready preview URL synchronously (the strategy then reports
+  `READY` directly) or when the MCP side cleans up on its own.
+- `argsTemplate` is the **raw argument document** passed to the deploy
+  tool. Any string leaf is run through a `{placeholder}` substitution with
+  the same keys exposed by the webhook envelope (`prNumber`, `sha`,
+  `branch`, `repoOwner`, `repoName`, `runId`, `callbackUrl`,
+  `callbackSecret`). Numbers, booleans and nested maps/lists pass through
+  unchanged. Omit `argsTemplate` to fall back to a flat envelope of all
+  placeholders.
+- The strategy is **poll-based** (`awaitsCallback == false`): the bot's
+  scheduled poller calls `statusTool` with `{ runId, prNumber, repoOwner,
+  repoName, handle }` and upgrades the run from `PENDING` → `READY` when
+  the response contains a `previewUrl` (or `status: "ready"|"succeeded"`).
+  An MCP server is therefore not required to deliver an HTTP callback into
+  the bot.
+
+The deploy tool may return any of these shapes (all keys optional):
+```json
+{ "previewUrl": "https://pr-42.preview.acme.io" }   // READY
+{ "handle": { "deploymentId": "d-1" } }              // PENDING
+{ "status": "failed", "error": "quota exceeded" }    // FAILED
+```
 
 ### Callback channel
 

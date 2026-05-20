@@ -21,9 +21,10 @@ import java.util.List;
  *
  * <p>The strategy-type dropdown is restricted to the strategies that ship
  * with the current milestone via
- * {@link DeploymentTargetService#availableStrategyTypes()}; future
- * strategies ({@code CI_ACTION}, {@code MCP}) will appear automatically
- * once their service method is extended.</p>
+ * {@link DeploymentTargetService#availableStrategyTypes()} —
+ * {@code WEBHOOK}, {@code STATIC} (M3) and {@code MCP} (M5). The remaining
+ * {@code CI_ACTION} value will appear automatically once M6 wires its
+ * strategy bean.</p>
  */
 @Slf4j
 @Controller
@@ -114,10 +115,6 @@ public class DeploymentTargetController {
         return base + "/api/workflow-callback/{runId}/{secret}";
     }
 
-    /** Exposed for tests that want to assert the URL composition. */
-    List<DeploymentStrategyType> availableStrategyTypes() {
-        return service.availableStrategyTypes();
-    }
 }
 
 

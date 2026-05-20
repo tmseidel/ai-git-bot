@@ -6,9 +6,13 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.prworkflow.deployment.DeploymentStrategyType;
+import org.remus.giteabot.systemsettings.McpConfiguration;
+import org.remus.giteabot.systemsettings.McpConfigurationRepository;
+import org.remus.giteabot.systemsettings.McpToolSelectionService;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,6 +27,8 @@ class DeploymentTargetServiceTest {
     private DeploymentTargetRepository repository;
     private BotRepository botRepository;
     private EncryptionService encryptionService;
+    private McpConfigurationRepository mcpConfigurationRepository;
+    private McpToolSelectionService mcpToolSelectionService;
     private DeploymentTargetService service;
 
     @BeforeEach
@@ -30,6 +36,8 @@ class DeploymentTargetServiceTest {
         repository = mock(DeploymentTargetRepository.class);
         botRepository = mock(BotRepository.class);
         encryptionService = mock(EncryptionService.class);
+        mcpConfigurationRepository = mock(McpConfigurationRepository.class);
+        mcpToolSelectionService = mock(McpToolSelectionService.class);
         when(encryptionService.encrypt(any())).thenAnswer(inv -> "ENC(" + inv.getArgument(0) + ")");
         when(encryptionService.decrypt(any())).thenAnswer(inv -> {
             String v = inv.getArgument(0);
@@ -39,7 +47,8 @@ class DeploymentTargetServiceTest {
             return v;
         });
         when(repository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        service = new DeploymentTargetService(repository, botRepository, encryptionService);
+        service = new DeploymentTargetService(repository, botRepository, encryptionService,
+                mcpConfigurationRepository, mcpToolSelectionService);
         entityManager = mock(jakarta.persistence.EntityManager.class);
         service.setEntityManager(entityManager);
     }
@@ -161,9 +170,81 @@ class DeploymentTargetServiceTest {
     }
 
     @Test
-    void availableStrategyTypesIsM3Subset() {
+    void availableStrategyTypesIncludesMcpFromM5() {
         assertThat(service.availableStrategyTypes())
-                .containsExactly(DeploymentStrategyType.WEBHOOK, DeploymentStrategyType.STATIC);
+                .containsExactly(
+                        DeploymentStrategyType.WEBHOOK,
+                        DeploymentStrategyType.STATIC,
+                        DeploymentStrategyType.MCP,
+                        DeploymentStrategyType.CI_ACTION);
+    }
+
+    @Test
+    void saveAcceptsMcpTargetWhenAllToolsAreWhitelisted() {
+        McpConfiguration mcp = new McpConfiguration();
+        mcp.setId(7L);
+        mcp.setName("platform");
+        when(mcpConfigurationRepository.findById(7L)).thenReturn(Optional.of(mcp));
+        when(mcpToolSelectionService.selectedQualifiedToolNameSet(7L))
+                .thenReturn(Set.of("platform/deploy", "platform/status", "platform/teardown"));
+
+        DeploymentTarget t = newTarget();
+        t.setName("mcp-target");
+        t.setStrategyType(DeploymentStrategyType.MCP);
+        t.setConfigJson("""
+                { "mcpConfigurationId": 7,
+                  "deployTool":   "platform/deploy",
+                  "statusTool":   "platform/status",
+                  "teardownTool": "platform/teardown" }
+                """);
+
+        DeploymentTarget saved = service.save(t);
+        assertThat(saved.getStrategyType()).isEqualTo(DeploymentStrategyType.MCP);
+    }
+
+    @Test
+    void saveRejectsMcpTargetWhenDeployToolNotWhitelisted() {
+        McpConfiguration mcp = new McpConfiguration();
+        mcp.setId(7L);
+        when(mcpConfigurationRepository.findById(7L)).thenReturn(Optional.of(mcp));
+        when(mcpToolSelectionService.selectedQualifiedToolNameSet(7L)).thenReturn(Set.of());
+
+        DeploymentTarget t = newTarget();
+        t.setName("mcp-target");
+        t.setStrategyType(DeploymentStrategyType.MCP);
+        t.setConfigJson("{ \"mcpConfigurationId\": 7, \"deployTool\": \"platform/deploy\" }");
+
+        assertThatThrownBy(() -> service.save(t))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not whitelisted")
+                .hasMessageContaining("deployTool");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void saveRejectsMcpTargetWhenMcpConfigurationMissing() {
+        when(mcpConfigurationRepository.findById(7L)).thenReturn(Optional.empty());
+
+        DeploymentTarget t = newTarget();
+        t.setName("mcp-target");
+        t.setStrategyType(DeploymentStrategyType.MCP);
+        t.setConfigJson("{ \"mcpConfigurationId\": 7, \"deployTool\": \"platform/deploy\" }");
+
+        assertThatThrownBy(() -> service.save(t))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not found");
+    }
+
+    @Test
+    void saveRejectsMcpTargetWithMalformedConfig() {
+        DeploymentTarget t = newTarget();
+        t.setName("mcp-target");
+        t.setStrategyType(DeploymentStrategyType.MCP);
+        t.setConfigJson("{ \"deployTool\": \"x\" }"); // missing mcpConfigurationId
+
+        assertThatThrownBy(() -> service.save(t))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid MCP deployment target config");
     }
 
     @Test

@@ -99,6 +99,17 @@ public class PrWorkflowRun {
     @Column(name = "deployment_handle_json", columnDefinition = "TEXT")
     private String deploymentHandleJson;
 
+    /**
+     * M7 (suite promotion). When the workflow's {@code suiteLifecycle} is
+     * {@code offer-as-pr} or {@code promote-on-merge} and the bot has
+     * successfully opened a follow-up PR carrying the generated tests, the
+     * resulting PR / MR number is stored here. Used as an idempotency
+     * guard — {@code SuitePromotionService} skips its work whenever this
+     * column is already populated for the run.
+     */
+    @Column(name = "follow_up_pr_number")
+    private Long followUpPrNumber;
+
     @OneToMany(mappedBy = "run", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("stepOrder ASC")
     @ToString.Exclude

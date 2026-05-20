@@ -22,8 +22,8 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.session.SessionService;
 import org.remus.giteabot.systemsettings.McpConfiguration;
-import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
+import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.nio.file.Path;
@@ -62,6 +62,8 @@ class BotWebhookServiceTest {
     @Mock private AiClient aiClient;
     @Mock private org.remus.giteabot.prworkflow.PrWorkflowOrchestrator prWorkflowOrchestrator;
     @Mock private org.remus.giteabot.prworkflow.review.CodeReviewServiceFactory codeReviewServiceFactory;
+    @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler e2eTestPrCloseHandler;
+    @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
 
     private BotWebhookService botWebhookService;
 
@@ -74,7 +76,8 @@ class BotWebhookServiceTest {
                 promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService, botService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
-                prWorkflowOrchestrator, codeReviewServiceFactory);
+                prWorkflowOrchestrator, codeReviewServiceFactory, e2eTestPrCloseHandler,
+                e2eTestSlashCommandHandler);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));

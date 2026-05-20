@@ -15,6 +15,8 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
+import org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler;
+import org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.review.CodeReviewServiceFactory;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -54,6 +56,8 @@ public class BotWebhookService {
     private final BotToolSelectionService botToolSelectionService;
     private final PrWorkflowOrchestrator prWorkflowOrchestrator;
     private final CodeReviewServiceFactory codeReviewServiceFactory;
+    private final E2eTestPrCloseHandler e2eTestPrCloseHandler;
+    private final E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
 
     public BotWebhookService(AiClientFactory aiClientFactory,
                              GiteaClientFactory giteaClientFactory,
@@ -68,7 +72,9 @@ public class BotWebhookService {
                               McpToolSelectionService mcpToolSelectionService,
                               BotToolSelectionService botToolSelectionService,
                               PrWorkflowOrchestrator prWorkflowOrchestrator,
-                              CodeReviewServiceFactory codeReviewServiceFactory) {
+                              CodeReviewServiceFactory codeReviewServiceFactory,
+                              E2eTestPrCloseHandler e2eTestPrCloseHandler,
+                              E2eTestSlashCommandHandler e2eTestSlashCommandHandler) {
         this.aiClientFactory = aiClientFactory;
         this.giteaClientFactory = giteaClientFactory;
         this.promptService = promptService;
@@ -83,6 +89,8 @@ public class BotWebhookService {
         this.botToolSelectionService = botToolSelectionService;
         this.prWorkflowOrchestrator = prWorkflowOrchestrator;
         this.codeReviewServiceFactory = codeReviewServiceFactory;
+        this.e2eTestPrCloseHandler = e2eTestPrCloseHandler;
+        this.e2eTestSlashCommandHandler = e2eTestSlashCommandHandler;
     }
 
     /**
@@ -119,6 +127,9 @@ public class BotWebhookService {
             return;
         }
         try {
+            if (e2eTestSlashCommandHandler.tryHandle(bot, payload)) {
+                return;
+            }
             createCodeReviewService(bot).handleBotCommand(payload, null);
         } catch (Exception e) {
             log.error("[Bot '{}'] Failed to handle command: {}", bot.getName(), e.getMessage(), e);
@@ -168,6 +179,9 @@ public class BotWebhookService {
             log.debug("[Bot '{}'] No agent session for PR #{}, routing to code-review handler",
                     bot.getName(), prNumber);
             try {
+                if (e2eTestSlashCommandHandler.tryHandle(bot, payload)) {
+                    return;
+                }
                 createCodeReviewService(bot).handleBotCommand(payload, null);
             } catch (Exception e) {
                 log.error("[Bot '{}'] Failed to handle PR comment via review handler: {}", bot.getName(), e.getMessage(), e);
@@ -219,13 +233,43 @@ public class BotWebhookService {
     /**
      * Handles PR closed event by cleaning up the session.
      * Delegates to {@link CodeReviewService#handlePrClosed(WebhookPayload)}.
+     *
+     * <p>Also invokes {@link E2eTestPrCloseHandler#onPrClosed} so the M4
+     * {@code E2ETestWorkflow} can release any preview deployments,
+     * sandbox workspaces and ephemeral test suites it created for the PR.
+     * Both close-handlers are wrapped in their own try/catch so a failure
+     * in one (e.g. the review-session cleanup) never blocks the other
+     * (e.g. the E2E preview teardown) — leaked preview envs and stale
+     * test suites on PR close would otherwise accumulate silently.</p>
      */
     public void handlePrClosed(Bot bot, WebhookPayload payload) {
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request closed event", bot.getName());
             return;
         }
-        createCodeReviewService(bot).handlePrClosed(payload);
+        try {
+            createCodeReviewService(bot).handlePrClosed(payload);
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] CodeReviewService.handlePrClosed threw {} — continuing with E2E teardown",
+                    bot.getName(), e.toString());
+        }
+        try {
+            Long prNumber = payload.getPullRequest() == null
+                    ? null
+                    : payload.getPullRequest().getNumber();
+            String owner = payload.getRepository() == null || payload.getRepository().getOwner() == null
+                    ? null
+                    : payload.getRepository().getOwner().getLogin();
+            String repoName = payload.getRepository() == null
+                    ? null
+                    : payload.getRepository().getName();
+            boolean merged = payload.getPullRequest() != null
+                    && Boolean.TRUE.equals(payload.getPullRequest().getMerged());
+            e2eTestPrCloseHandler.onPrClosed(bot.getId(), owner, repoName, prNumber, merged, payload);
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] E2eTestPrCloseHandler threw {} — ignoring",
+                    bot.getName(), e.toString());
+        }
     }
 
     /**

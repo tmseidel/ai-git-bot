@@ -1,0 +1,14 @@
+{
+  "name": "sample-ci-action-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tiny mock GitHub-Actions-style dispatch+poll server demonstrating CiActionTriggerStrategy / CiActionPoller for AI-Git-Bot M6.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
+

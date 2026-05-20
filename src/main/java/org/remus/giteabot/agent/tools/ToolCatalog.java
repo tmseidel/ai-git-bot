@@ -1,5 +1,6 @@
 package org.remus.giteabot.agent.tools;
 
+import org.remus.giteabot.agent.issueimpl.IssueNotificationService;
 import org.remus.giteabot.agent.shared.McpTools;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
@@ -11,6 +12,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,7 +43,7 @@ import java.util.Set;
 public class ToolCatalog {
 
     /** Which agent role(s) may invoke a tool. */
-    public enum Role { CODING, WRITER }
+    public enum Role { CODING, WRITER, E2E }
 
     /** Internal record per built-in (non-validation) tool. */
     private record Entry(String name, ToolKind kind, Set<Role> roles,
@@ -122,7 +124,45 @@ public class ToolCatalog {
                     varargsSchema()),
             entry("search-issues", ToolKind.REPOSITORY, EnumSet.of(Role.WRITER),
                     "Search issues by free-text query (args: query string).",
-                    varargsSchema())
+                    varargsSchema()),
+
+            // ---- PR-workflow E2E tools (E2E role only) ----
+            entry("pr-test-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+                    "Write a generated test file into the sandboxed PR test workspace and persist "
+                            + "(or update) the matching PrTestCase row. Path is workspace-relative; "
+                            + "absolute paths or `..` traversal are rejected.",
+                    objectSchema(
+                            prop("path",    "string", "Workspace-relative path of the test file (e.g. \"tests/login.spec.ts\")."),
+                            prop("content", "string", "Full UTF-8 file content."),
+                            prop("title",   "string", "Optional human-readable test-case title; used in the PR comment summary."),
+                            required("path", "content"))),
+            entry("pr-test-run", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+                    "Execute the chosen test framework inside the PR test workspace. For Playwright "
+                            + "this runs `npx playwright test` with the JSON reporter and parses per-test "
+                            + "results back into PrTestCase rows. Returns a textual summary plus the raw "
+                            + "stdout/stderr (truncated).",
+                    objectSchema(
+                            prop("framework", "string", "One of: playwright, pytest, k6, cypress."),
+                            arrayProp("args", "Additional CLI arguments forwarded verbatim to the runner."),
+                            required("framework", "args"))),
+            entry("preview-url", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+                    "Return the reachable preview URL the deployment strategy produced for the current PR.",
+                    objectSchema()),
+            entry("preview-status", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+                    "HTTP-probe the preview deployment. Returns status code, latency and a short body "
+                            + "excerpt. Use this to verify the preview is responsive before running tests.",
+                    objectSchema(
+                            prop("path",           "string",  "Optional URL path appended to the preview URL (defaults to \"/\")."),
+                            prop("expectedStatus", "integer", "Optional expected HTTP status (defaults to 200). Probe is reported as failed when it differs."))),
+            entry("attach-artifact", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+                    "Attach a workspace-relative file as a Markdown comment on the current PR. "
+                            + "Images are inlined as a data URI; other files are inlined as a fenced "
+                            + "code block (truncated at 64 KiB). The path must resolve inside the PR "
+                            + "test workspace.",
+                    objectSchema(
+                            prop("path",  "string", "Workspace-relative path of the artifact to attach."),
+                            prop("title", "string", "Optional comment header; defaults to the file name."),
+                            required("path")))
     );
 
     /**
@@ -169,6 +209,7 @@ public class ToolCatalog {
         return namesOf(ToolKind.REPOSITORY);
     }
 
+
     public List<String> validationToolNames() {
         return agentConfig.getValidation().getAvailableTools();
     }
@@ -191,6 +232,7 @@ public class ToolCatalog {
     public List<String> writerRepositoryToolNames(Set<String> allowed) {
         return filterNames(writerRepositoryToolNames(), allowed);
     }
+
 
     public List<String> validationToolNames(Set<String> allowed) {
         return filterNames(validationToolNames(), allowed);
@@ -247,23 +289,36 @@ public class ToolCatalog {
 
     /**
      * Whether the tool's output should be hidden from public issue/PR comments.
-     * Validation tools' output is shown (build/test logs); everything else is silent.
+     * Validation tools' output is shown (build/test logs); the
+     * PR-workflow test runner ({@code pr-test-run}) is also shown so operators
+     * see the framework's output; everything else is silent.
      */
     public boolean isSilent(String tool) {
         ToolKind kind = kindOf(tool);
+        if (kind == ToolKind.PR_WORKFLOW) {
+            return !"pr-test-run".equals(normalize(tool));
+        }
         return kind != ToolKind.VALIDATION && kind != ToolKind.UNKNOWN;
     }
 
     /**
      * Maps a tool to one of the visual buckets used by
-     * {@link org.remus.giteabot.agent.issueimpl.IssueNotificationService}.
+     * {@link IssueNotificationService}.
      */
     public DisplayBucket bucketOf(String tool) {
-        return switch (kindOf(tool)) {
+        ToolKind kind = kindOf(tool);
+        if (kind == ToolKind.PR_WORKFLOW) {
+            return switch (normalize(tool)) {
+                case "pr-test-write" -> DisplayBucket.MUTATION;
+                case "pr-test-run"   -> DisplayBucket.VALIDATION;
+                default              -> DisplayBucket.CONTEXT;
+            };
+        }
+        return switch (kind) {
             case CONTEXT, REPOSITORY, MCP -> DisplayBucket.CONTEXT;
             case FILE -> DisplayBucket.MUTATION;
-            case VALIDATION -> DisplayBucket.VALIDATION;
-            case UNKNOWN -> DisplayBucket.VALIDATION;
+            case VALIDATION, UNKNOWN -> DisplayBucket.VALIDATION;
+            default -> throw new IllegalStateException("Unexpected value: " + kind);
         };
     }
 
@@ -355,8 +410,15 @@ public class ToolCatalog {
                 if (description != null) {
                     node.put("description", description);
                 }
+            } else if (part instanceof ArrayProp(String name, String description)) {
+                ObjectNode node = props.putObject(name);
+                node.put("type", "array");
+                if (description != null) {
+                    node.put("description", description);
+                }
+                node.putObject("items").put("type", "string");
             } else if (part instanceof Required(String[] names)) {
-                java.util.Collections.addAll(req, names);
+                Collections.addAll(req, names);
             }
         }
         if (!req.isEmpty()) {
@@ -370,11 +432,16 @@ public class ToolCatalog {
         return new Prop(name, type, description);
     }
 
+    private static ArrayProp arrayProp(String name, String description) {
+        return new ArrayProp(name, description);
+    }
+
     private static Required required(String... names) {
         return new Required(names);
     }
 
     private record Prop(String name, String type, String description) { }
+    private record ArrayProp(String name, String description) { }
     private record Required(String[] names) { }
 
     private static String normalize(String tool) {

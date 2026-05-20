@@ -1,0 +1,67 @@
+# M6 (CI_ACTION deployment strategy) end-to-end recipe.
+#
+# Boots:
+#   - sample-e2e-app          — the M4 login app, plays the role of the
+#                               already-deployed PR preview build.
+#   - sample-ci-action-server — a tiny mock GitHub-Actions-style API
+#                               implementing the 3 endpoints
+#                               CiActionTriggerStrategy / CiActionPoller
+#                               actually use:
+#                                 POST /repos/:o/:r/actions/workflows/:w/dispatches
+#                                 GET  /repos/:o/:r/actions/workflows/:w/runs
+#                                 GET  /repos/:o/:r/actions/runs/:id
+#
+# Usage:
+#   docker compose -f systemtest/docker-compose-ci-action.yml up --build
+#
+# Then follow systemtest/README-ci-action.md for the UI walkthrough,
+# including the happy-path, failure-path, and re-dispatch scenarios.
+#
+# Both containers join the shared `ai-git-bot-e2e` network so you can
+# attach an already-running AI-Git-Bot to the same network and point its
+# `github.api-base-url` at http://sample-ci-action-server:8091, or talk
+# to the mock from the host on port 8091.
+
+services:
+  sample-e2e-app:
+    build:
+      context: ./sample-e2e-app
+    image: ai-git-bot/sample-e2e-app:dev
+    container_name: ai-git-bot-sample-e2e-app
+    ports:
+      - "3030:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ai-git-bot-e2e
+
+  sample-ci-action-server:
+    build:
+      context: ./sample-ci-action-server
+    image: ai-git-bot/sample-ci-action-server:dev
+    container_name: ai-git-bot-sample-ci-action-server
+    environment:
+      PORT: "8091"
+      # How long a dispatched run stays "in_progress" before flipping to
+      # "completed". 5s gives CiActionPoller (10s tick, 15s default
+      # pollIntervalSeconds) one or two polls of PENDING before READY.
+      RUN_DURATION_MS: "5000"
+      # When "true", every run completes with conclusion "failure" so
+      # you can exercise the FAILED path without admin calls.
+      FAIL_ALL: "false"
+    ports:
+      - "8091:8091"
+    depends_on:
+      sample-e2e-app:
+        condition: service_healthy
+    networks:
+      - ai-git-bot-e2e
+
+networks:
+  ai-git-bot-e2e:
+    name: ai-git-bot-e2e
+    driver: bridge
+

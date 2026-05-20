@@ -1,0 +1,301 @@
+# PR Workflows: E2E Tests (M4)
+
+The `E2ETestWorkflow` is the first non-review workflow shipped on top of the
+M1–M3 platform. It runs after a pull request is opened or synchronised and
+follows the four-stage pipeline described in
+[`PR_REVIEW_AGENTIC_WORKFLOWS.md`](./refactoring/PR_REVIEW_AGENTIC_WORKFLOWS.md):
+
+```
+plan → deploy → author → run → comment
+```
+
+> **Status — M4 wave 2 ✅ shipped (iterations 1 – 4).** The full
+> agentic pipeline (planner → author → runner) is wired through
+> `PlaywrightTestSuiteRunner`. Operators drive it via the seeded
+> `Full-stack QA` workflow configuration (Flyway `V18`), the two
+> slash commands `@bot rerun-tests` and `@bot regenerate-tests
+> [feedback]`, and PR-close teardown that honours
+> `SuiteLifecycleMode.EPHEMERAL`. The sample app under
+> `systemtest/sample-e2e-app/` is in place, all four repository
+> providers ship a per-provider implementation of
+> `attachPullRequestArtifact` (GitLab uploads, Gitea issue assets,
+> Bitbucket downloads; GitHub keeps the inline default — see below),
+> and the `regenerate-tests` feedback is threaded into the planner's
+> user message via `PrWorkflowContext.hints`. The composite
+> WireMock-based end-to-end system test is intentionally deferred — the
+> existing per-component tests cover all building blocks. For the
+> per-release regression-test counts see the version history in
+> [`doc/refactoring/README.md`](./refactoring/README.md).
+
+## Enabling the workflow on a bot
+
+1. Make sure the bot has a **deployment target** configured under
+   *System settings → Deployment targets* (see [`PR_WORKFLOWS.md`](./PR_WORKFLOWS.md)
+   for the available strategies — `STATIC`, `WEBHOOK`, `MCP`, and
+   `CI_ACTION`, all shipped; cross-reference the persona-driven
+   walk-throughs under [`doc/refactoring/`](./refactoring/README.md) if
+   you're unsure which one to pick). Without a target the workflow
+   aborts immediately and posts a clearly labelled skip-comment.
+2. Open the bot's *Workflow configuration*. Either pick the **seeded
+   `Full-stack QA` configuration** (shipped by Flyway `V18`, has
+   `review` + `e2e-test` pre-enabled with `framework=playwright`,
+   `maxRetries=1`, `maxTestCases=10`) or toggle the `E2E Tests` workflow
+   on your own configuration (the workflow is listed under **TESTING**
+   and is **disabled by default** on the seeded `Default` configuration).
+   Tune the per-workflow parameters as needed:
+
+   | Field            | Type    | Default      | Notes                                                                |
+   |------------------|---------|--------------|----------------------------------------------------------------------|
+   | `framework`      | string  | `playwright` | One of `playwright`, `pytest`, `k6`, `cypress`. Wave 1 ships only `playwright`. |
+   | `maxRetries`     | integer | `1`          | Per-test retry budget. A test that passes after retry is tagged `FLAKY`. Capped at 5. |
+   | `maxTestCases`   | integer | `20`         | Hard cost guard. Capped at 100 server-side regardless of the configured value. |
+
+3. Save. The next PR-open / PR-synchronise webhook triggers the workflow.
+
+## What it does (per run)
+
+1. Resolves the workflow parameters from the bot's configuration.
+2. Aborts cleanly (PR comment + `WorkflowResult.SKIPPED`) if no deployment
+   target is configured on the bot.
+3. Persists a draft `pr_test_suites` row tied to the active
+   `PrWorkflowRun`.
+4. Hands off to `DeploymentOrchestrator.requestDeployment(...)`. Failure /
+   timeout / rejection are surfaced as a "❌ Failed" PR comment.
+5. Allocates a sandboxed workspace under
+   `${ai-git-bot.e2e.workspace-root:${java.io.tmpdir}/ai-bot-pr-tests}/run-<id>/`
+   with framework-specific scaffolding (`package.json` +
+   `playwright.config.ts` for Playwright). Path traversal is denied by
+   `PrTestWorkspaceManager.resolveInsideWorkspace(...)`.
+6. Dispatches to the registered `TestSuiteRunner` for the chosen framework
+   — `PlaywrightTestSuiteRunner` in wave 2, which drives the three agents
+   (`TestPlannerAgent`, `TestAuthorAgent`, `TestRunnerAgent`) through the
+   existing `AgentLoop` / `chatWithTools` infrastructure. The agents use
+   only the `PR_WORKFLOW`-category tools registered in `ToolCatalog`
+   (`pr-test-write`, `pr-test-run`, `preview-url`, `preview-status`,
+   `attach-artifact`).
+7. Posts the run summary as a PR comment, e.g.:
+
+   ```markdown
+   ## E2E Test Run for PR #42
+
+   **Framework:** `playwright`
+   **Preview environment:** https://preview-42.example.com
+   **Source SHA:** `abc12345`
+   **Outcome:** ❌ FAILED (1/2 passed)
+
+   | Test | Status | Duration |
+   | --- | --- | --- |
+   | `tests/login.spec.ts`<br/>Sign-in happy path | ✅ PASSED | 1.23s |
+   | `tests/checkout.spec.ts`<br/>Add to cart and pay | ❌ FAILED | 4.57s |
+
+   > 1 of 2 failed
+   ```
+
+## Lifecycle on PR close
+
+`E2eTestPrCloseHandler` runs from `BotWebhookService.handlePrClosed(...)`.
+For every `e2e-test` run on the closed PR it:
+
+1. Broadcasts `DeploymentStrategy.teardown(...)` across every registered
+   strategy so the preview environment is released (the default
+   `teardown()` is a no-op, so strategies that don't recognise the handle
+   return silently).
+2. Removes the sandboxed workspace on disk.
+3. Deletes every `pr_test_suites` row for the PR whose `lifecycle_mode` is
+   `ephemeral` **or** `commit-to-pr` (the latter has already pushed its
+   content during the workflow run). Suites tagged `offer-as-pr` or
+   `promote-on-merge` are kept so the dashboard can correlate the parent
+   run with the follow-up PR; a future GC pass eventually removes them.
+4. For `promote-on-merge` suites only — and only when the parent PR was
+   actually **merged** — invokes
+   `SuitePromotionService.promote(...)` to open the follow-up PR against
+   the repository's default branch. See
+   [Suite lifecycle modes (M7)](#suite-lifecycle-modes-m7) below.
+
+Failures are logged but never abort the close handler.
+
+## Suite lifecycle modes (M7)
+
+`E2ETestWorkflow.paramsSchema()` exposes a `suiteLifecycle` param that
+controls what happens to the generated `PrTestSuite` once the run is
+done. The four modes are implemented by `SuitePromotionService`:
+
+| Mode | When promotion fires | Target branch | Target directory | Opens follow-up PR? |
+|---|---|---|---|---|
+| `ephemeral` (default) | — | — | — | no |
+| `offer-as-pr` | immediately after `outcome == PASSED` | parent feature branch | `tests/e2e/pr-{n}/` | yes — `ai-tests/pr-{n}` |
+| `promote-on-merge` | on PR close, only if `merged == true` and backing run was SUCCESS | repository default branch | `tests/e2e/` | yes — `ai-tests/promoted-pr-{n}` |
+| `commit-to-pr` | immediately after `outcome == PASSED` | parent feature branch | `tests/e2e/pr-{n}/` | no — commits directly |
+
+### Idempotency
+
+`PrWorkflowRun.followUpPrNumber` (column `follow_up_pr_number`, added
+by migration `V19`) is set on the first successful promotion. Subsequent
+triggers (re-runs, `@bot rerun-tests`, late merge events) see the column
+populated and short-circuit with an `ALREADY_PROMOTED` outcome — no
+duplicate branches, no duplicate PRs.
+
+### Conflict policy
+
+When the destination file already exists in the target branch (or
+collides with an earlier case in the same run), `SuitePromotionService`
+appends a numeric suffix before the first dot:
+`login.spec.ts` → `login_2.spec.ts` → `login_3.spec.ts`. The chosen
+final paths are listed in the follow-up PR description.
+
+### Failure semantics
+
+Workspace failures, `git push` failures, and `createPullRequest`
+failures all surface as an `Outcome.FAILED` and a `❌ Promotion failed
+— …` comment on the parent PR. The parent run's terminal status is
+never rolled back, and the deployment / workspace teardown still runs.
+
+### Security note
+
+Promoted tests run in the standard CI pipeline of the repository, which
+typically has access to a different / wider secret scope than the
+sandbox the bot generated them in. **Review every promoted PR for
+hidden credential references, hard-coded URLs pointing at the preview
+environment, and assumptions about the preview-only feature flags.**
+The follow-up PR body explicitly calls this out.
+
+### Operator recipe
+
+The runnable laptop walkthrough lives at
+[`systemtest/README-suite-promotion.md`](../systemtest/README-suite-promotion.md).
+
+## Persistence
+
+See `V17__pr_test_suites.sql` (H2 + PostgreSQL):
+
+```text
+pr_test_suites(id, run_id FK, pr_number, framework, source_tree_ref,
+               lifecycle_mode, created_at)
+pr_test_cases (id, suite_id FK, path, title, content,
+               last_status, last_run_at, last_duration_ms, last_log)
+```
+
+`run_id` cascades from `pr_workflow_runs(id)` so deleting a run cleans up
+its suite and cases. The `cases.content` column holds the full generated
+test source inline — the bot does not re-clone anything to re-run.
+
+## Where to look in the code
+
+| Concern                                                | Class                                                                 |
+|--------------------------------------------------------|-----------------------------------------------------------------------|
+| Workflow entry point                                   | `org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow`                   |
+| Persistence model                                      | `org.remus.giteabot.prworkflow.e2e.{PrTestSuite,PrTestCase}`          |
+| Sandbox + path-traversal guards                        | `org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager`  |
+| Pluggable runner SPI                                   | `org.remus.giteabot.prworkflow.e2e.runner.TestSuiteRunner`            |
+| Default no-op runner (kept for tests/docs only) | `org.remus.giteabot.prworkflow.e2e.runner.NoopTestSuiteRunner`        |
+| Playwright runner driving the three agents (M4 wave 2) | `org.remus.giteabot.prworkflow.e2e.runner.PlaywrightTestSuiteRunner`  |
+| Planner / Author / Runner agents (M4 wave 2)           | `org.remus.giteabot.prworkflow.e2e.agents.*`                          |
+| Sandboxed tool executor (M4 wave 2)                    | `org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolExecutor`      |
+| Slash-command dispatcher (M4 wave 2)                   | `org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler`        |
+| PR-close teardown                                      | `org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler`             |
+| Markdown rendering                                     | `org.remus.giteabot.prworkflow.e2e.E2eTestSummaryRenderer`            |
+
+## Slash commands
+
+The dispatcher `E2eTestSlashCommandHandler` intercepts comments on the
+PR before the regular code-review handler runs:
+
+| Command                                  | Effect                                                                       |
+|------------------------------------------|------------------------------------------------------------------------------|
+| `@bot rerun-tests`                       | Re-triggers the `e2e-test` workflow for the PR (creates a fresh `PrWorkflowRun`). |
+| `@bot regenerate-tests [feedback...]`    | Re-triggers the workflow. The trailing free-text is captured for the planner. |
+
+Both commands are no-ops if the bot's `WorkflowConfiguration` does not
+have `e2e-test` enabled — the comment falls through to the standard
+code-review handler so the bot keeps answering free-form mentions
+exactly as before.
+
+## Try it out — sample app under `systemtest/`
+
+A minimal Node app (no external deps, ~70 lines of `server.js`) lives
+under [`systemtest/sample-e2e-app/`](../systemtest/sample-e2e-app/) and is
+exposed via [`systemtest/docker-compose-e2e-sample.yml`](../systemtest/docker-compose-e2e-sample.yml).
+It boots a single login form with credentials `demo` / `demo` and exposes
+`/healthz` for the deployment-target probe.
+
+```bash
+docker compose -f systemtest/docker-compose-e2e-sample.yml up --build
+# In the bot UI:
+#   1. System settings → Deployment targets → New
+#        Strategy:               STATIC
+#        Preview URL template:   http://sample-e2e-app:3000   (or http://host.docker.internal:3030)
+#        Health-check path:      /healthz
+#   2. Bot → Workflow configuration: pick "Full-stack QA"
+#   3. Bot → Deployment target: pick the one created above
+# Open a PR → the bot generates Playwright specs, runs them against the sample
+# app and posts the run summary back on the PR.
+```
+
+## Coming next (post-wave 2)
+
+Already shipped in wave 2 / iterations 1 – 4:
+
+- ✅ `TestPlannerAgent`, `TestAuthorAgent`, `TestRunnerAgent` driving
+  the Playwright runner via the dedicated `E2eAgentRunner`.
+- ✅ Built-in tools under category `PR_WORKFLOW`: `pr-test-write`,
+  `pr-test-run`, `preview-url`, `preview-status`, `attach-artifact`.
+- ✅ Slash commands `@bot rerun-tests` and
+  `@bot regenerate-tests [feedback]` (`E2eTestSlashCommandHandler`)
+  wired through all four provider webhook handlers, with the trailing
+  free-text threaded into the planner's user message via
+  `PrWorkflowContext.hints`.
+- ✅ `Full-stack QA` seeded workflow configuration (Flyway `V18`,
+  H2 + PostgreSQL) — opt-in, never auto-attached.
+- ✅ `SuiteLifecycleMode.EPHEMERAL`-aware teardown in
+  `E2eTestPrCloseHandler` (broadcasts `DeploymentStrategy.teardown`
+  per registered strategy, cleans the sandbox, deletes ephemeral
+  suites).
+- ✅ Sample app under `systemtest/sample-e2e-app/` +
+  `systemtest/docker-compose-e2e-sample.yml`.
+- ✅ Per-provider native `attachPullRequestArtifact` overrides:
+   * **GitLab** — multipart POST to `/projects/:id/uploads`,
+     embeds the returned `markdown` link.
+   * **Gitea** — multipart POST to
+     `/repos/:o/:r/issues/:n/assets`, links to
+     `browser_download_url`.
+   * **Bitbucket Cloud** — multipart POST to
+     `/repositories/:ws/:r/downloads`, links to the resulting
+     `/downloads/<name>` URL.
+   * **GitHub** — keeps the inline default. GitHub has no
+     first-class PR-comment attachment API outside Releases assets,
+     and uploading every E2E artifact to a Release would create
+     noisy entries, so the default is the recommended path.
+  All three native overrides keep using
+  {@link org.remus.giteabot.repository.ArtifactCommentRenderer}
+  for inlineable images / text (better reviewer UX) and only switch
+  to the native upload for the renderer's `SUMMARY_ONLY` fallback
+  (large or binary non-image artifacts). Upload failures degrade
+  silently back to the summary comment.
+
+Deferred (post-wave 2):
+
+- Composite WireMock-based end-to-end integration test that exercises
+  the full planner → deploy → author → run → comment pipeline against
+  the sample app in one go. The current per-component tests
+  (`E2ETestWorkflowTest`, `PlaywrightTestSuiteRunnerTest`,
+  `TestPlannerAgentTest`, `TestAuthorAgentTest`, `TestRunnerAgentTest`,
+  the per-provider `ArtifactUploadTest`s, and
+  `PrWorkflowToolExecutorTest`) cover the building blocks; the
+  composite test would only add a smoke check.
+- Repo-file-access tools (`cat`, `rg`, `tree`, `get-issue`) for the
+  planner — requires plugging into `AgentToolRouter` and a
+  source-workspace mount.
+- Optional Playwright MCP server integration as an alternative to the
+  local Node-based runner.
+
+
+
+
+
+
+
+
+
+
+
+

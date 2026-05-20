@@ -4,6 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.github.model.GitHubReview;
 import org.remus.giteabot.github.model.GitHubReviewComment;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.WorkflowDispatchRequest;
+import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -297,16 +299,200 @@ public class GitHubApiClient implements RepositoryApiClient {
 
     // ---- Internal helpers ----
 
-    private String resolveRef(String owner, String repo, String ref) {
-        Map<String, Object> result = restClient.get()
-                .uri("/repos/{owner}/{repo}/git/ref/heads/{ref}", owner, repo, ref)
-                .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.get("object") instanceof Map<?, ?> obj) {
-            return (String) obj.get("sha");
+    // ---- CI workflow operations (M6) ----
+
+    @Override
+    public String dispatchWorkflow(WorkflowDispatchRequest request) {
+        log.info("Dispatching GitHub Actions workflow '{}' on ref {} for {}/{}",
+                request.workflowRef(), request.gitRef(), request.owner(), request.repo());
+        // Snapshot of all existing run ids matching our (workflow, event=workflow_dispatch
+        // [, branch]) filter -- so we can detect the *new* run we just triggered without
+        // mistaking a concurrent, unrelated dispatch for ours.
+        String branch = deriveBranchFilter(request.gitRef());
+        java.util.Set<Long> existing = listMatchingRunIds(
+                request.owner(), request.repo(), request.workflowRef(), branch);
+        var body = new java.util.LinkedHashMap<String, Object>();
+        body.put("ref", request.gitRef());
+        if (!request.inputs().isEmpty()) {
+            body.put("inputs", request.inputs());
         }
-        // Fallback: assume the ref is already a SHA
-        return ref;
+        restClient.post()
+                .uri("/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+                        request.owner(), request.repo(), request.workflowRef())
+                .body(body)
+                .retrieve()
+                .toBodilessEntity();
+        // GitHub's dispatch endpoint does not return a run id; poll briefly for
+        // the next run that appeared after our trigger and matches the same
+        // (workflow, event=workflow_dispatch [, branch]) filter. If we know the
+        // branch we pick the *oldest* new id (almost always our own dispatch);
+        // if we don't (e.g. pull-request head refs), correlation is best-effort
+        // and we log a WARN so the operator can spot cross-contamination in
+        // very high-concurrency repos.
+        long deadline = System.currentTimeMillis() + 15_000L;
+        while (System.currentTimeMillis() < deadline) {
+            Long candidate = resolveNewRunId(
+                    request.owner(), request.repo(), request.workflowRef(), branch, existing);
+            if (candidate != null) {
+                if (branch == null) {
+                    log.warn("Resolved GitHub Actions run id={} for workflow '{}' on ref {} without"
+                                    + " branch correlation (non-branch ref). In high-concurrency repos"
+                                    + " this may attach to a different dispatch.",
+                            candidate, request.workflowRef(), request.gitRef());
+                }
+                return String.valueOf(candidate);
+            }
+            try {
+                Thread.sleep(1_000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while resolving new GitHub run id", e);
+            }
+        }
+        throw new IllegalStateException(
+                "GitHub Actions accepted the dispatch but no new run for workflow '"
+                        + request.workflowRef() + "' appeared within 15s");
+    }
+
+    @Override
+    public WorkflowRunStatus getWorkflowRun(String owner, String repo, String runId) {
+        try {
+            Map<String, Object> run = restClient.get()
+                    .uri("/repos/{owner}/{repo}/actions/runs/{run_id}", owner, repo, runId)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (run == null) {
+                return WorkflowRunStatus.NOT_FOUND;
+            }
+            String status = run.get("status") == null ? null : String.valueOf(run.get("status"));
+            String conclusion = run.get("conclusion") == null ? null : String.valueOf(run.get("conclusion"));
+            return mapGitHubStatus(status, conclusion);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            return WorkflowRunStatus.NOT_FOUND;
+        }
+    }
+
+    @Override
+    public Map<String, String> getWorkflowRunOutputs(String owner, String repo, String runId) {
+        // GitHub Actions does not surface per-job `outputs` via REST. The
+        // CI_ACTION strategy falls back to the deployment-target preview-URL
+        // template; workflows that need to ship a dynamic URL should POST it
+        // to the bot's callbackUrl (see doc/PR_WORKFLOWS_CI_ACTIONS.md).
+        return Map.of();
+    }
+
+    /**
+     * Maps a Git ref to the {@code branch} query-parameter used by GitHub's
+     * "list workflow runs" endpoint. Returns {@code null} when the ref does
+     * not correspond to a single named branch (e.g. {@code refs/pull/N/head},
+     * a raw SHA, or a tag) — in that case run-id correlation has to fall back
+     * to "oldest new id matching event=workflow_dispatch".
+     */
+    public static String deriveBranchFilter(String gitRef) {
+        if (gitRef == null || gitRef.isBlank()) return null;
+        if (gitRef.startsWith("refs/heads/")) {
+            return gitRef.substring("refs/heads/".length());
+        }
+        if (gitRef.startsWith("refs/") || gitRef.matches("[0-9a-f]{7,40}")) {
+            // refs/tags/..., refs/pull/.../head, raw SHAs — not a branch
+            return null;
+        }
+        // bare branch name
+        return gitRef;
+    }
+
+    /**
+     * Returns the set of run ids currently matching our (workflow,
+     * {@code event=workflow_dispatch} [, branch]) filter. Used as a "before"
+     * snapshot so {@link #resolveNewRunId} can detect the run we just
+     * triggered without picking up an unrelated concurrent dispatch.
+     */
+    private java.util.Set<Long> listMatchingRunIds(
+            String owner, String repo, String workflow, String branch) {
+        java.util.Set<Long> ids = new java.util.HashSet<>();
+        for (Map<String, Object> run : listRecentRuns(owner, repo, workflow, branch)) {
+            Object id = run.get("id");
+            if (id instanceof Number n) ids.add(n.longValue());
+            else if (id != null) {
+                try { ids.add(Long.parseLong(id.toString())); } catch (NumberFormatException ignored) {}
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * After dispatch, pick the oldest run id that (a) was not in the
+     * pre-dispatch snapshot and (b) matches our branch filter if we have one.
+     * Choosing the *oldest* new id makes us prefer our own dispatch over any
+     * dispatch that piled up after ours within the same poll window.
+     */
+    private Long resolveNewRunId(
+            String owner, String repo, String workflow, String branch,
+            java.util.Set<Long> existing) {
+        Long bestId = null;
+        for (Map<String, Object> run : listRecentRuns(owner, repo, workflow, branch)) {
+            Object idObj = run.get("id");
+            Long id = (idObj instanceof Number n) ? n.longValue()
+                    : (idObj == null ? null : tryParseLong(idObj.toString()));
+            if (id == null || existing.contains(id)) continue;
+            if (branch != null) {
+                Object headBranch = run.get("head_branch");
+                if (headBranch != null && !branch.equals(String.valueOf(headBranch))) continue;
+            }
+            if (bestId == null || id < bestId) bestId = id;
+        }
+        return bestId;
+    }
+
+    private static Long tryParseLong(String s) {
+        try { return Long.parseLong(s); } catch (NumberFormatException e) { return null; }
+    }
+
+    private List<Map<String, Object>> listRecentRuns(
+            String owner, String repo, String workflow, String branch) {
+        try {
+            Map<String, Object> response = restClient.get()
+                    .uri(uriBuilder -> {
+                        var b = uriBuilder
+                                .path("/repos/{owner}/{repo}/actions/workflows/{workflow}/runs")
+                                .queryParam("per_page", 10)
+                                .queryParam("event", "workflow_dispatch");
+                        if (branch != null) b.queryParam("branch", branch);
+                        return b.build(owner, repo, workflow);
+                    })
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (response == null) return List.of();
+            Object runs = response.get("workflow_runs");
+            if (runs instanceof List<?> list) {
+                List<Map<String, Object>> out = new java.util.ArrayList<>(list.size());
+                for (Object item : list) {
+                    if (item instanceof Map<?, ?> m) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Object> typed = (Map<String, Object>) m;
+                        out.add(typed);
+                    }
+                }
+                return out;
+            }
+            return List.of();
+        } catch (Exception e) {
+            log.debug("Could not list GitHub Actions runs for {}/{} workflow={} branch={}: {}",
+                    owner, repo, workflow, branch, e.getMessage());
+            return List.of();
+        }
+    }
+
+    public static WorkflowRunStatus mapGitHubStatus(String status, String conclusion) {
+        if (status == null) return WorkflowRunStatus.NOT_FOUND;
+        return switch (status) {
+            case "queued", "requested", "waiting", "pending" -> WorkflowRunStatus.QUEUED;
+            case "in_progress" -> WorkflowRunStatus.IN_PROGRESS;
+            case "completed" -> "success".equals(conclusion)
+                    ? WorkflowRunStatus.COMPLETED_SUCCESS
+                    : WorkflowRunStatus.COMPLETED_FAILURE;
+            default -> WorkflowRunStatus.IN_PROGRESS;
+        };
     }
 
     // ---- Request DTOs ----

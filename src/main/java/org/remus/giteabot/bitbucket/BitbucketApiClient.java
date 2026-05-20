@@ -2,12 +2,22 @@ package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.bitbucket.model.BitbucketReviewComment;
+import org.remus.giteabot.repository.ArtifactCommentRenderer;
+import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.WorkflowDispatchRequest;
+import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
 import java.net.http.HttpClient;
@@ -122,6 +132,97 @@ public class BitbucketApiClient implements RepositoryApiClient {
                 .retrieve()
                 .toBodilessEntity();
         log.info("Comment posted successfully");
+    }
+
+    /**
+     * Uploads the artifact via Bitbucket Cloud's repository downloads bucket
+     * ({@code POST /repositories/{ws}/{repo}/downloads}) and posts a PR
+     * comment linking to the resulting file under
+     * {@code {cloneUrl}/{ws}/{repo}/downloads/{fileName}}.
+     *
+     * <p>Bitbucket has no per-PR attachment API; the {@code downloads}
+     * endpoint is the only place to host arbitrary files. For inlineable
+     * artifacts the shared {@link ArtifactCommentRenderer} is preferred
+     * (better reviewer UX); only the renderer's summary-only fallback
+     * (large or binary non-image artifacts) triggers a native upload.</p>
+     */
+    @Override
+    public void attachPullRequestArtifact(String owner, String repo, Long pullNumber,
+                                          String fileName, String contentType, byte[] payload) {
+        ArtifactCommentRenderer.RenderedComment rendered =
+                ArtifactCommentRenderer.render(fileName, contentType, payload);
+        if (rendered.mode() != ArtifactCommentRenderer.RenderMode.SUMMARY_ONLY) {
+            postPullRequestComment(owner, repo, pullNumber, rendered.markdown());
+            return;
+        }
+        try {
+            String linkMarkdown = uploadRepositoryDownload(owner, repo, fileName, contentType, payload);
+            int byteLen = payload == null ? 0 : payload.length;
+            postPullRequestComment(owner, repo, pullNumber,
+                    ArtifactUploadSupport.buildLinkComment(fileName, byteLen, linkMarkdown));
+        } catch (RuntimeException e) {
+            log.warn("Bitbucket native artifact upload for PR #{} in {}/{} failed: {} — falling back to summary comment",
+                    pullNumber, owner, repo, e.toString());
+            postPullRequestComment(owner, repo, pullNumber, rendered.markdown());
+        }
+    }
+
+    /**
+     * Calls the Bitbucket downloads endpoint and returns a Markdown link to
+     * the uploaded file. Visible for tests.
+     */
+    String uploadRepositoryDownload(String owner, String repo, String fileName,
+                                    String contentType, byte[] payload) {
+        String safeName = (fileName == null || fileName.isBlank()) ? "artifact.bin" : fileName.trim();
+        MediaType mediaType = parseMediaType(contentType);
+
+        ByteArrayResource fileResource = new ByteArrayResource(payload == null ? new byte[0] : payload) {
+            @Override
+            public String getFilename() {
+                return safeName;
+            }
+        };
+        HttpHeaders fileHeaders = new HttpHeaders();
+        fileHeaders.setContentType(mediaType);
+        HttpEntity<ByteArrayResource> filePart = new HttpEntity<>(fileResource, fileHeaders);
+
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("files", filePart);
+
+        restClient.post()
+                .uri("/repositories/{workspace}/{repo}/downloads", owner, repo)
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(form)
+                .retrieve()
+                .toBodilessEntity();
+
+        String downloadUrl = buildDownloadUrl(owner, repo, safeName);
+        return ArtifactUploadSupport.linkMarkdown(safeName, downloadUrl);
+    }
+
+    private String buildDownloadUrl(String workspace, String repo, String fileName) {
+        String base = credentials.cloneUrl();
+        if (base == null || base.isBlank()) {
+            base = "https://bitbucket.org";
+        }
+        String trimmed = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        return trimmed + "/" + workspace + "/" + repo + "/downloads/" + urlEncodePath(fileName);
+    }
+
+    private static String urlEncodePath(String s) {
+        // Encode but keep typical safe punctuation in download filenames.
+        return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
+    private static MediaType parseMediaType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        try {
+            return MediaType.parseMediaType(contentType);
+        } catch (RuntimeException e) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 
     @Override
@@ -318,6 +419,81 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     // ---- Internal helpers ----
+
+    // ---- CI workflow operations (M6) ----
+
+    @Override
+    public String dispatchWorkflow(WorkflowDispatchRequest request) {
+        log.info("Triggering Bitbucket Pipelines custom pipeline '{}' on branch {} for {}/{}",
+                request.workflowRef(), request.gitRef(), request.owner(), request.repo());
+
+        java.util.LinkedHashMap<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("target", Map.of(
+                "type", "pipeline_ref_target",
+                "ref_type", "branch",
+                "ref_name", request.gitRef(),
+                "selector", Map.of("type", "custom", "pattern", request.workflowRef())
+        ));
+        if (!request.inputs().isEmpty()) {
+            List<Map<String, Object>> variables = new java.util.ArrayList<>();
+            request.inputs().forEach((k, v) -> variables.add(Map.of(
+                    "key", k, "value", v, "secured", false
+            )));
+            body.put("variables", variables);
+        }
+        Map<String, Object> response = restClient.post()
+                .uri("/2.0/repositories/{owner}/{repo}/pipelines/", request.owner(), request.repo())
+                .body(body)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (response == null) {
+            throw new IllegalStateException(
+                    "Bitbucket Pipelines accepted the trigger but returned no body for " + request.owner() + "/" + request.repo());
+        }
+        Object uuid = response.get("uuid");
+        if (uuid == null) {
+            throw new IllegalStateException(
+                    "Bitbucket Pipelines accepted the trigger but returned no uuid for " + request.owner() + "/" + request.repo());
+        }
+        return uuid.toString();
+    }
+
+    @Override
+    public WorkflowRunStatus getWorkflowRun(String owner, String repo, String runId) {
+        try {
+            Map<String, Object> pipeline = restClient.get()
+                    .uri("/2.0/repositories/{owner}/{repo}/pipelines/{uuid}", owner, repo, runId)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (pipeline == null) return WorkflowRunStatus.NOT_FOUND;
+            Object stateObj = pipeline.get("state");
+            String name = null;
+            String resultName = null;
+            if (stateObj instanceof Map<?, ?> state) {
+                Object nameVal = state.get("name");
+                if (nameVal != null) name = nameVal.toString();
+                Object result = state.get("result");
+                if (result instanceof Map<?, ?> resultMap && resultMap.get("name") != null) {
+                    resultName = resultMap.get("name").toString();
+                }
+            }
+            return mapBitbucketStatus(name, resultName);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            return WorkflowRunStatus.NOT_FOUND;
+        }
+    }
+
+    public static WorkflowRunStatus mapBitbucketStatus(String state, String result) {
+        if (state == null) return WorkflowRunStatus.NOT_FOUND;
+        return switch (state) {
+            case "PENDING" -> WorkflowRunStatus.QUEUED;
+            case "IN_PROGRESS", "HALTED", "BUILDING" -> WorkflowRunStatus.IN_PROGRESS;
+            case "COMPLETED" -> "SUCCESSFUL".equalsIgnoreCase(result)
+                    ? WorkflowRunStatus.COMPLETED_SUCCESS
+                    : WorkflowRunStatus.COMPLETED_FAILURE;
+            default -> WorkflowRunStatus.IN_PROGRESS;
+        };
+    }
 
     private String urlEncode(String value) {
         return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);

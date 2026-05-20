@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
@@ -39,7 +40,16 @@ public record PrWorkflowContext(
         WebhookPayload payload,
         Long runId,
         BiConsumer<String, String> stepAppender,
-        BooleanSupplier cancellationCheck) {
+        BooleanSupplier cancellationCheck,
+        Map<String, String> hints) {
+
+    /**
+     * Conventional key under which {@link org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler}
+     * threads the free-text from {@code @bot regenerate-tests <feedback>} so
+     * {@link org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow} can hand it
+     * to the planner.
+     */
+    public static final String HINT_E2E_FEEDBACK = "e2e.feedback";
 
     public PrWorkflowContext {
         Objects.requireNonNull(bot, "bot");
@@ -47,6 +57,30 @@ public record PrWorkflowContext(
         Objects.requireNonNull(runId, "runId");
         Objects.requireNonNull(stepAppender, "stepAppender");
         Objects.requireNonNull(cancellationCheck, "cancellationCheck");
+        hints = hints == null ? Map.of() : Map.copyOf(hints);
+    }
+
+    /**
+     * Backwards-compatible constructor that omits the optional
+     * {@code hints} map. New call sites should prefer the canonical
+     * constructor and pass an explicit hints map (use {@link Map#of()}
+     * for "no hints").
+     */
+    public PrWorkflowContext(Bot bot,
+                             WebhookPayload payload,
+                             Long runId,
+                             BiConsumer<String, String> stepAppender,
+                             BooleanSupplier cancellationCheck) {
+        this(bot, payload, runId, stepAppender, cancellationCheck, Map.of());
+    }
+
+    /**
+     * Returns the value of {@code key} from the optional {@link #hints()}
+     * map, or {@code null} when absent. Convenience wrapper so workflows
+     * don't have to null-check the map twice.
+     */
+    public String hint(String key) {
+        return key == null ? null : hints.get(key);
     }
 
 

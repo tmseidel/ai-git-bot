@@ -76,6 +76,8 @@
                 <div class="form-text">
                     <strong>WEBHOOK</strong>: <code>{ "webhookUrl": "&lt;url&gt;", "sharedSecret": "&lt;hex&gt;", "headers": { ... } }</code>.<br/>
                     <strong>STATIC</strong>: <code>{ "healthcheckPath": "/healthz", "expectedStatus": 200, "intervalSeconds": 5, "extraHeaders": { ... } }</code>.<br/>
+                    <strong>MCP</strong>: <code>{ "mcpConfigurationId": &lt;id&gt;, "deployTool": "&lt;qualified-name&gt;", "statusTool": "&lt;qualified-name&gt;", "teardownTool": "&lt;qualified-name&gt;", "argsTemplate": { "branch": "{branch}", "sha": "{sha}" } }</code>. All tool names must be whitelisted on the referenced MCP configuration — the save is rejected otherwise.<br/>
+                    <strong>CI_ACTION</strong>: <code>{ "workflowRef": "preview.yml", "refTemplate": "refs/pull/{prNumber}/head", "previewUrlOutput": "preview_url", "pollIntervalSeconds": 15, "inputs": { "callbackUrl": "{callbackUrl}" } }</code>. <code>workflowRef</code> is the workflow file (GitHub / Gitea Actions), the pipeline trigger token (GitLab CI) or the custom pipeline pattern (Bitbucket Pipelines). See <a href="../../../doc/PR_WORKFLOWS_CI_ACTIONS.md" target="_blank">doc/PR_WORKFLOWS_CI_ACTIONS.md</a> for one recipe per provider.<br/>
                     See <a href="../../../doc/PR_WORKFLOWS.md" target="_blank">doc/PR_WORKFLOWS.md → Deployment targets</a> for the full schema.
                 </div>
             </div>

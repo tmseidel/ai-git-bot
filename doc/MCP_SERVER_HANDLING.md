@@ -115,3 +115,74 @@ This keeps issue threads readable while still allowing technical traceability in
 
 </details>
 
+
+## 6) Exposing Deployment-Style Tools (M5)
+
+Since the **M5** release the bot can use any MCP server as a *deployment
+target* — the `MCPDeploymentStrategy` lets a PR workflow trigger, observe
+and tear down per-PR preview environments by calling regular MCP tools on
+an already configured server.
+
+> **Why would I want this?** See
+> [`doc/refactoring/MCP_DEPLOYMENT_USER_STORY.md`](refactoring/MCP_DEPLOYMENT_USER_STORY.md)
+> for a concrete persona-driven story + benefits matrix, and
+> [`systemtest/README-mcp-deployment.md`](../systemtest/README-mcp-deployment.md)
+> for a 2-minute laptop reproduction (`docker compose -f
+> systemtest/docker-compose-mcp-deployment.yml up --build`).
+
+### Expected tool shape
+
+You expose **up to three** tools on the MCP server. Their qualified names
+are configured per deployment target (see
+[doc/PR_WORKFLOWS.md → Deployment targets](PR_WORKFLOWS.md#deployment-targets-m3)):
+
+| Role          | Required | Receives                                                                 | Returns (JSON)                                                                                          |
+|---------------|----------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| `deployTool`   | yes      | the rendered `argsTemplate` (see below)                                  | `{ "previewUrl": "..." }` → `READY`, or `{ "handle": {...} }` → `PENDING`, or `{ "status": "failed", "error": "..." }` |
+| `statusTool`   | optional | `{ runId, prNumber, repoOwner, repoName, handle }`                       | same shape as `deployTool` — used by the bot's poller to upgrade `PENDING` → `READY` / `FAILED`         |
+| `teardownTool` | optional | `{ runId, prNumber, repoOwner, repoName, handle }`                       | any (bot only inspects success)                                                                          |
+
+Argument payload available to `deployTool` (placeholders are substituted in
+the operator-defined `argsTemplate`; if `argsTemplate` is omitted, the bot
+sends a flat envelope with all of these keys):
+
+| Placeholder         | Example value                                                  |
+|---------------------|----------------------------------------------------------------|
+| `{prNumber}`        | `1234`                                                          |
+| `{sha}`             | `deadbeefcafe…`                                                 |
+| `{branch}`          | `feature/x`                                                     |
+| `{repoOwner}`       | `acme`                                                          |
+| `{repoName}`        | `web`                                                           |
+| `{runId}`           | `42` (persistent `PrWorkflowRun.id`)                            |
+| `{callbackUrl}`     | `https://bot.acme.io/api/workflow-callback/42/<callbackSecret>` |
+| `{callbackSecret}`  | per-run secret — useful if you eventually want to POST back     |
+
+### Whitelisting
+
+All three tool names **must** be ticked in **System settings → MCP
+configurations → Tools** before the deployment target can be saved:
+
+- the admin-UI save handler calls `McpToolSelectionService.selectedQualifiedToolNameSet(id)`
+  and rejects the form otherwise (`HTTP 400` with an actionable message);
+- the strategy enforces the same check a second time at runtime, so
+  removing a tool from the whitelist after the fact safely degrades to a
+  `REJECTED` deployment instead of a silent execution.
+
+### Polling, not callbacks
+
+`MCPDeploymentStrategy.awaitsCallback() == false` — MCP servers do not
+deliver HTTP callbacks into the bot. After `trigger()` returns `PENDING`,
+the bot's scheduled `DeploymentPoller` invokes `statusTool` at the target's
+configured interval (`timeoutSeconds` is the upper bound) until it
+observes `READY` / `FAILED`. The operator never has to wire up an inbound
+HMAC endpoint for an MCP-backed target.
+
+### When to choose MCP vs. WEBHOOK
+
+| Choose `MCP` when…                                                | Choose `WEBHOOK` when…                                       |
+|-------------------------------------------------------------------|--------------------------------------------------------------|
+| You already operate an internal platform MCP server.              | Your deploy lives in Jenkins / CI directly.                  |
+| You want everything (tool whitelist, audit) under one MCP roof.   | You need a callback channel because deploy is fire-and-forget. |
+| Your deploy/status flow is naturally request/response.            | The CI side cannot easily call out to an MCP server.         |
+
+

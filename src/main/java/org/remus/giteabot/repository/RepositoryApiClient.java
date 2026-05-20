@@ -67,6 +67,34 @@ public interface RepositoryApiClient {
     void postPullRequestComment(String owner, String repo, Long pullNumber, String body);
 
     /**
+     * Attaches an artifact (test screenshot, trace, log file, …) to a pull
+     * request as a Markdown-rendered comment.
+     *
+     * <p>The default implementation works for every provider via the existing
+     * {@link #postPullRequestComment(String, String, Long, String)} endpoint
+     * and is the fallback used by the {@code attach-artifact} PR-workflow
+     * tool: image artifacts are inlined as a {@code data:} URI, text
+     * artifacts are inlined inside a fenced code block (truncated at 64 KiB),
+     * binary non-image artifacts are summarised with size + SHA-256. Provider
+     * implementations may override this to push to a real attachment store
+     * (GitHub Releases assets, GitLab uploads, Bitbucket downloads, …) and
+     * link the resulting URL instead.</p>
+     *
+     * @param owner       repository owner
+     * @param repo        repository name
+     * @param pullNumber  target pull request number
+     * @param fileName    display file name (used in the comment header / link text)
+     * @param contentType MIME type, e.g. {@code image/png} or {@code text/plain}; may be {@code null}
+     * @param payload     raw artifact bytes; never {@code null}
+     */
+    default void attachPullRequestArtifact(String owner, String repo, Long pullNumber,
+                                           String fileName, String contentType, byte[] payload) {
+        org.remus.giteabot.repository.ArtifactCommentRenderer.RenderedComment rendered =
+                org.remus.giteabot.repository.ArtifactCommentRenderer.render(fileName, contentType, payload);
+        postPullRequestComment(owner, repo, pullNumber, rendered.markdown());
+    }
+
+    /**
      * Posts a regular top-level comment on an issue.
      */
     void postIssueComment(String owner, String repo, Long issueNumber, String body);
@@ -131,4 +159,61 @@ public interface RepositoryApiClient {
 
     Long createPullRequest(String owner, String repo, String title, String body,
                            String head, String base);
+
+    // ---- CI workflow operations (M6 — CI action deployment strategy) ----
+
+    /**
+     * Triggers a provider-native CI workflow / pipeline. Implementations
+     * return an opaque provider-assigned run id ({@code workflow run id} on
+     * GitHub / Gitea Actions, {@code pipeline id} on GitLab CI, {@code build
+     * uuid} on Bitbucket Pipelines) that the bot persists in
+     * {@code deployment_handle_json} and feeds back into
+     * {@link #getWorkflowRun(String, String, String)} and
+     * {@link #getWorkflowRunOutputs(String, String, String)}.
+     *
+     * <p>The default implementation throws
+     * {@link UnsupportedOperationException} so the bot fails fast when the
+     * operator picks a {@code CI_ACTION} deployment target on a provider that
+     * has not (yet) been ported.</p>
+     */
+    default String dispatchWorkflow(WorkflowDispatchRequest request) {
+        throw new UnsupportedOperationException(
+                "Workflow dispatch is not supported by this repository provider");
+    }
+
+    /**
+     * Returns the current status of a workflow run / pipeline previously
+     * dispatched via {@link #dispatchWorkflow(WorkflowDispatchRequest)}. Must
+     * be safe to poll on a tight schedule (polling cadence is operator
+     * configurable, default 15 s).
+     *
+     * <p>Default implementation throws
+     * {@link UnsupportedOperationException}; the {@code CiActionPoller}
+     * catches this and translates it into {@link WorkflowRunStatus#NOT_FOUND}
+     * so the run does not get stuck in {@code WAITING_DEPLOY} forever.</p>
+     */
+    default WorkflowRunStatus getWorkflowRun(String owner, String repo, String runId) {
+        throw new UnsupportedOperationException(
+                "Workflow run lookup is not supported by this repository provider");
+    }
+
+    /**
+     * Returns named outputs produced by the workflow run. Used by the
+     * {@code CI_ACTION} deployment strategy to extract a {@code preview_url}
+     * after the workflow has completed.
+     *
+     * <p>Per-provider semantics:</p>
+     * <ul>
+     *     <li><b>GitLab:</b> pipeline trigger variables ({@code GET
+     *         /projects/:id/pipelines/:id/variables}).</li>
+     *     <li><b>GitHub / Gitea / Bitbucket:</b> not exposed via REST API in a
+     *         generic way; the default implementation returns an empty map and
+     *         operators are expected to either echo the preview URL through
+     *         the bot's {@code callbackUrl} (preferred) or rely on the
+     *         {@code DeploymentTarget.previewUrlTemplate} fallback.</li>
+     * </ul>
+     */
+    default java.util.Map<String, String> getWorkflowRunOutputs(String owner, String repo, String runId) {
+        return java.util.Map.of();
+    }
 }

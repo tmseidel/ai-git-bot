@@ -1,0 +1,17 @@
+{
+  "name": "sample-mcp-deploy-server",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tiny MCP server demonstrating MCPDeploymentStrategy (deploy / status / teardown) for AI-Git-Bot M5.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "express": "^4.21.0",
+    "zod": "^3.23.8"
+  }
+}
+
+

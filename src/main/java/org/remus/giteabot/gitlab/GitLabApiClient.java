@@ -1,17 +1,29 @@
 package org.remus.giteabot.gitlab;
 
 import lombok.extern.slf4j.Slf4j;
-import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.gitlab.model.GitLabReview;
 import org.remus.giteabot.gitlab.model.GitLabReviewComment;
+import org.remus.giteabot.repository.ArtifactCommentRenderer;
+import org.remus.giteabot.repository.ArtifactUploadSupport;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.WorkflowDispatchRequest;
+import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
-import java.util.*;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -115,6 +127,96 @@ public class GitLabApiClient implements RepositoryApiClient {
                 .body(Map.of("body", body))
                 .retrieve()
                 .toBodilessEntity();
+    }
+
+    /**
+     * Uploads the artifact to the GitLab project's uploads bucket
+     * ({@code POST /api/v4/projects/:id/uploads}) and posts a comment that
+     * links to it, instead of inlining the raw bytes as a Markdown comment.
+     *
+     * <p>Small payloads that the shared {@link ArtifactCommentRenderer} can
+     * inline as an image data-URI or a fenced code block still use that
+     * representation (better reviewer UX than a download link). Only the
+     * {@link ArtifactCommentRenderer.RenderMode#SUMMARY_ONLY} fallback —
+     * i.e. large or binary non-image artifacts — is replaced with a native
+     * upload. Upload failures degrade silently back to the renderer
+     * summary comment so an outage in the uploads endpoint never breaks
+     * the {@code E2ETestWorkflow}.</p>
+     */
+    @Override
+    public void attachPullRequestArtifact(String owner, String repo, Long pullNumber,
+                                          String fileName, String contentType, byte[] payload) {
+        ArtifactCommentRenderer.RenderedComment rendered =
+                ArtifactCommentRenderer.render(fileName, contentType, payload);
+        if (rendered.mode() != ArtifactCommentRenderer.RenderMode.SUMMARY_ONLY) {
+            postPullRequestComment(owner, repo, pullNumber, rendered.markdown());
+            return;
+        }
+        try {
+            String uploadMarkdown = uploadProjectArtifact(owner, repo, fileName, contentType, payload);
+            int byteLen = payload == null ? 0 : payload.length;
+            postPullRequestComment(owner, repo, pullNumber,
+                    ArtifactUploadSupport.buildLinkComment(fileName, byteLen, uploadMarkdown));
+        } catch (RuntimeException e) {
+            log.warn("GitLab native artifact upload for MR !{} in {}/{} failed: {} — falling back to summary comment",
+                    pullNumber, owner, repo, e.toString());
+            postPullRequestComment(owner, repo, pullNumber, rendered.markdown());
+        }
+    }
+
+    /**
+     * Calls the GitLab project-uploads endpoint and returns the ready-to-embed
+     * Markdown link from the response. Visible for tests.
+     */
+    String uploadProjectArtifact(String owner, String repo, String fileName,
+                                 String contentType, byte[] payload) {
+        String projectPath = encodeProjectPath(owner, repo);
+        String safeName = (fileName == null || fileName.isBlank()) ? "artifact.bin" : fileName.trim();
+        MediaType mediaType = parseMediaType(contentType);
+
+        ByteArrayResource fileResource = new ByteArrayResource(payload == null ? new byte[0] : payload) {
+            @Override
+            public String getFilename() {
+                return safeName;
+            }
+        };
+        HttpHeaders fileHeaders = new HttpHeaders();
+        fileHeaders.setContentType(mediaType);
+        org.springframework.http.HttpEntity<ByteArrayResource> filePart =
+                new org.springframework.http.HttpEntity<>(fileResource, fileHeaders);
+
+        MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
+        form.add("file", filePart);
+
+        Map<String, Object> response = gitlabRestClient.post()
+                .uri("/api/v4/projects/{projectPath}/uploads", projectPath)
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(form)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (response == null) {
+            throw new IllegalStateException("GitLab uploads endpoint returned empty body");
+        }
+        Object markdown = response.get("markdown");
+        if (markdown instanceof String md && !md.isBlank()) {
+            return md;
+        }
+        Object url = response.get("url");
+        if (url instanceof String u && !u.isBlank()) {
+            return ArtifactUploadSupport.linkMarkdown(safeName, u);
+        }
+        throw new IllegalStateException("GitLab uploads response missing both 'markdown' and 'url' fields");
+    }
+
+    private static MediaType parseMediaType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        try {
+            return MediaType.parseMediaType(contentType);
+        } catch (RuntimeException e) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
     }
 
     @Override
@@ -458,6 +560,7 @@ public class GitLabApiClient implements RepositoryApiClient {
         return sb.toString();
     }
 
+
     /**
      * Converts a GitLab note to a ReviewComment.
      */
@@ -468,5 +571,92 @@ public class GitLabApiClient implements RepositoryApiClient {
         comment.setCreatedAt(note.getCreatedAt());
         comment.setAuthor(note.getAuthor());
         return comment;
+    }
+
+    // ---- CI workflow operations (M6) ----
+    //
+    // GitLab CI: the {workflowRef} field of {@link WorkflowDispatchRequest} is
+    // the pipeline trigger token. The {owner}/{repo} pair gets URL-encoded
+    // into a project path so the bot does not need to resolve numeric ids.
+
+    @Override
+    public String dispatchWorkflow(WorkflowDispatchRequest request) {
+        String projectPath = encodeProject(request.owner(), request.repo());
+        log.info("Triggering GitLab pipeline on ref {} for project {}", request.gitRef(), projectPath);
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("token", request.workflowRef());
+        form.add("ref", request.gitRef());
+        request.inputs().forEach((k, v) -> form.add("variables[" + k + "]", v));
+
+        Map<String, Object> response = gitlabRestClient.post()
+                .uri("/api/v4/projects/{path}/trigger/pipeline", projectPath)
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(form)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (response == null || response.get("id") == null) {
+            throw new IllegalStateException(
+                    "GitLab trigger pipeline returned no id for project " + projectPath);
+        }
+        Object id = response.get("id");
+        return id instanceof Number n ? String.valueOf(n.longValue()) : id.toString();
+    }
+
+    @Override
+    public WorkflowRunStatus getWorkflowRun(String owner, String repo, String runId) {
+        String projectPath = encodeProject(owner, repo);
+        try {
+            Map<String, Object> pipeline = gitlabRestClient.get()
+                    .uri("/api/v4/projects/{path}/pipelines/{id}", projectPath, runId)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (pipeline == null) return WorkflowRunStatus.NOT_FOUND;
+            String status = pipeline.get("status") == null ? null : String.valueOf(pipeline.get("status"));
+            return mapGitLabStatus(status);
+        } catch (org.springframework.web.client.HttpClientErrorException.NotFound e) {
+            return WorkflowRunStatus.NOT_FOUND;
+        }
+    }
+
+    @Override
+    public Map<String, String> getWorkflowRunOutputs(String owner, String repo, String runId) {
+        // GitLab exposes the trigger variables of a pipeline; the CI_ACTION
+        // strategy uses these as the {preview_url} carrier when configured.
+        String projectPath = encodeProject(owner, repo);
+        try {
+            List<Map<String, Object>> variables = gitlabRestClient.get()
+                    .uri("/api/v4/projects/{path}/pipelines/{id}/variables", projectPath, runId)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (variables == null || variables.isEmpty()) return Map.of();
+            Map<String, String> result = new java.util.LinkedHashMap<>();
+            for (Map<String, Object> variable : variables) {
+                Object key = variable.get("key");
+                Object value = variable.get("value");
+                if (key != null && value != null) {
+                    result.put(key.toString(), value.toString());
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            log.debug("Could not fetch GitLab pipeline variables for {}/{} id={}: {}",
+                    owner, repo, runId, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    private static String encodeProject(String owner, String repo) {
+        return java.net.URLEncoder.encode(owner + "/" + repo, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    public static WorkflowRunStatus mapGitLabStatus(String status) {
+        if (status == null) return WorkflowRunStatus.NOT_FOUND;
+        return switch (status) {
+            case "created", "waiting_for_resource", "preparing", "pending", "scheduled", "manual" -> WorkflowRunStatus.QUEUED;
+            case "running" -> WorkflowRunStatus.IN_PROGRESS;
+            case "success" -> WorkflowRunStatus.COMPLETED_SUCCESS;
+            case "failed", "canceled", "cancelled", "skipped" -> WorkflowRunStatus.COMPLETED_FAILURE;
+            default -> WorkflowRunStatus.IN_PROGRESS;
+        };
     }
 }

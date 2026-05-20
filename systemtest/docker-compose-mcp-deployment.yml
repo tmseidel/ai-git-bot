@@ -1,0 +1,62 @@
+# M5 (MCP deployment strategy) end-to-end recipe.
+#
+# Boots:
+#   - sample-e2e-app       — the M4 login app, plays the role of the
+#                            already-deployed PR preview build.
+#   - sample-mcp-deploy    — a tiny MCP server exposing the three tools
+#                            an AI-Git-Bot deployment target expects:
+#                              platform__deploy_preview   (deployTool)
+#                              platform__preview_status   (statusTool)
+#                              platform__teardown_preview (teardownTool)
+#
+# Usage:
+#   docker compose -f systemtest/docker-compose-mcp-deployment.yml up --build
+#
+# Then follow systemtest/README-mcp-deployment.md for the UI walkthrough.
+# Both containers join the shared `ai-git-bot-e2e` network so you can
+# attach an already-running AI-Git-Bot to the same network, or talk to
+# the MCP server from the host on port 8090.
+
+services:
+  sample-e2e-app:
+    build:
+      context: ./sample-e2e-app
+    image: ai-git-bot/sample-e2e-app:dev
+    container_name: ai-git-bot-sample-e2e-app
+    ports:
+      - "3030:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ai-git-bot-e2e
+
+  sample-mcp-deploy:
+    build:
+      context: ./sample-mcp-deploy-server
+    image: ai-git-bot/sample-mcp-deploy:dev
+    container_name: ai-git-bot-sample-mcp-deploy
+    environment:
+      PORT: "8090"
+      # Hand this URL back as the previewUrl once the simulated deploy
+      # transitions to READY. Points at the companion sample app on the
+      # shared docker network.
+      PREVIEW_URL: "http://sample-e2e-app:3000"
+      # How long a deploy stays PENDING before flipping to READY. Set to
+      # 0 for an instant READY response (handy for the smoke test).
+      DEPLOY_DELAY_MS: "3000"
+    ports:
+      - "8090:8090"
+    depends_on:
+      sample-e2e-app:
+        condition: service_healthy
+    networks:
+      - ai-git-bot-e2e
+
+networks:
+  ai-git-bot-e2e:
+    name: ai-git-bot-e2e
+    driver: bridge
+

@@ -1,0 +1,11 @@
+{
+  "name": "sample-e2e-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal login demo used by the AI-Git-Bot M4 E2E recipe.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
+

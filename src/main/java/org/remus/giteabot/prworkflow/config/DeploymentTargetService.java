@@ -1,16 +1,22 @@
 package org.remus.giteabot.prworkflow.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.prworkflow.deployment.DeploymentStrategyType;
+import org.remus.giteabot.prworkflow.deployment.mcp.McpDeploymentConfig;
+import org.remus.giteabot.systemsettings.McpConfiguration;
+import org.remus.giteabot.systemsettings.McpConfigurationRepository;
+import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * CRUD for {@link DeploymentTarget} rows. Encrypts the {@code configJson}
@@ -39,16 +45,23 @@ public class DeploymentTargetService {
     private final DeploymentTargetRepository repository;
     private final BotRepository botRepository;
     private final EncryptionService encryptionService;
+    private final McpConfigurationRepository mcpConfigurationRepository;
+    private final McpToolSelectionService mcpToolSelectionService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @PersistenceContext
     private EntityManager entityManager;
 
     public DeploymentTargetService(DeploymentTargetRepository repository,
                                    BotRepository botRepository,
-                                   EncryptionService encryptionService) {
+                                   EncryptionService encryptionService,
+                                   McpConfigurationRepository mcpConfigurationRepository,
+                                   McpToolSelectionService mcpToolSelectionService) {
         this.repository = repository;
         this.botRepository = botRepository;
         this.encryptionService = encryptionService;
+        this.mcpConfigurationRepository = mcpConfigurationRepository;
+        this.mcpToolSelectionService = mcpToolSelectionService;
     }
 
     /** Test seam: lets unit tests inject a mock EntityManager. */
@@ -92,6 +105,9 @@ public class DeploymentTargetService {
             throw new IllegalArgumentException(
                     "A deployment target named '" + target.getName() + "' already exists");
         }
+        if (target.getStrategyType() == DeploymentStrategyType.MCP) {
+            validateMcpConfig(target.getConfigJson());
+        }
         String plaintext = target.getConfigJson();
         target.setConfigJson(encryptionService.encrypt(plaintext));
         DeploymentTarget saved = repository.save(target);
@@ -121,13 +137,55 @@ public class DeploymentTargetService {
 
     /**
      * Returns the set of strategy types the operator can pick from in the
-     * admin UI. Currently filtered to the strategies that ship with M3
-     * ({@code WEBHOOK} and {@code STATIC}); the remaining values exist in the
-     * enum so the schema is forward-compatible.
+     * admin UI. M3 shipped {@code WEBHOOK} and {@code STATIC}; M5 added
+     * {@code MCP}; M6 adds {@code CI_ACTION}.
      */
     @Transactional(readOnly = true)
     public List<DeploymentStrategyType> availableStrategyTypes() {
-        return List.of(DeploymentStrategyType.WEBHOOK, DeploymentStrategyType.STATIC);
+        return List.of(
+                DeploymentStrategyType.WEBHOOK,
+                DeploymentStrategyType.STATIC,
+                DeploymentStrategyType.MCP,
+                DeploymentStrategyType.CI_ACTION);
+    }
+
+    /**
+     * Validates an {@code MCP} deployment-target {@code configJson}
+     * <em>before</em> encryption / persistence:
+     * <ol>
+     *     <li>parses the document via {@link McpDeploymentConfig#parse},</li>
+     *     <li>resolves the referenced {@link McpConfiguration} (must exist),</li>
+     *     <li>verifies that every referenced tool name
+     *         ({@code deployTool} and, when set, {@code statusTool} /
+     *         {@code teardownTool}) is part of the MCP configuration's
+     *         whitelist managed by {@link McpToolSelectionService}.</li>
+     * </ol>
+     * Any failure throws {@link IllegalArgumentException} so the admin UI
+     * surfaces an actionable error and the row is never saved.
+     */
+    private void validateMcpConfig(String configJson) {
+        McpDeploymentConfig parsed;
+        try {
+            parsed = McpDeploymentConfig.parse(configJson, objectMapper);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid MCP deployment target config: " + e.getMessage(), e);
+        }
+        McpConfiguration mcpConfiguration = mcpConfigurationRepository.findById(parsed.mcpConfigurationId())
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "MCP configuration id=" + parsed.mcpConfigurationId() + " not found"));
+        Set<String> allowed = mcpToolSelectionService.selectedQualifiedToolNameSet(mcpConfiguration.getId());
+        rejectIfNotWhitelisted(allowed, parsed.deployTool(), "deployTool");
+        parsed.optionalStatusTool()
+                .ifPresent(tool -> rejectIfNotWhitelisted(allowed, tool, "statusTool"));
+        parsed.optionalTeardownTool()
+                .ifPresent(tool -> rejectIfNotWhitelisted(allowed, tool, "teardownTool"));
+    }
+
+    private static void rejectIfNotWhitelisted(Set<String> allowed, String tool, String role) {
+        if (!allowed.contains(tool)) {
+            throw new IllegalArgumentException(
+                    "MCP tool '" + tool + "' (" + role + ") is not whitelisted on the configured MCP server");
+        }
     }
 
     /**

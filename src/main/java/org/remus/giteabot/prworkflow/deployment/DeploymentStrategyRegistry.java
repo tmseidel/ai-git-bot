@@ -46,4 +46,15 @@ public class DeploymentStrategyRegistry {
         return find(type).orElseThrow(() -> new IllegalArgumentException(
                 "No DeploymentStrategy registered for type " + type));
     }
+
+    /**
+     * All registered strategies in undefined order. Used by lifecycle hooks
+     * (e.g. {@code E2eTestPrCloseHandler}) that need to broadcast a teardown
+     * without knowing which strategy created the deployment handle — every
+     * strategy's {@link DeploymentStrategy#teardown(org.remus.giteabot.prworkflow.PrWorkflowRun)}
+     * is a no-op by default, so broadcasting is cheap and safe.
+     */
+    public List<DeploymentStrategy> all() {
+        return List.copyOf(byType.values());
+    }
 }

@@ -15,5 +15,12 @@ public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Lo
             Long prNumber,
             String workflowKey,
             List<PrWorkflowRunStatus> statuses);
+
+    /**
+     * Lists runs currently in the given status, ordered by oldest first.
+     * Used by {@link org.remus.giteabot.prworkflow.deployment.CiActionPoller}
+     * to fan-out polling across in-flight {@code CI_ACTION} deployments.
+     */
+    List<PrWorkflowRun> findByStatusOrderByStartedAtAsc(PrWorkflowRunStatus status);
 }
 

@@ -39,6 +39,17 @@ public enum ToolKind {
     REPOSITORY,
 
     /**
+     * Tools used by the {@code E2ETestWorkflow} agents (planner, author, runner):
+     * {@code pr-test-write}, {@code pr-test-run}, {@code preview-url},
+     * {@code preview-status}, {@code attach-artifact}. Operate exclusively inside
+     * the sandboxed {@link org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager}
+     * workspace or against the preview deployment — never the repository workspace.
+     * Test-runner output is surfaced as a public comment (mapped onto the
+     * VALIDATION display bucket); the others stay silent.
+     */
+    PR_WORKFLOW,
+
+    /**
      * Tool name is not configured for the current agent role.
      */
     UNKNOWN
