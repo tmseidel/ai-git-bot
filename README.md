@@ -12,6 +12,13 @@ Every team has a list of *"we know we should be doing this"* engineering chores.
 
 **AI-Git-Bot turns those chores into repeatable, automated workflows** that live natively inside **Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud** — triggered by the events your team is *already* producing (issue assigned, PR opened, reviewer re-requested, `@bot` mentioned in a comment).
 
+> ## 📣 New here? **Read the pitch first.**
+>
+> If you want to know **why this project exists, what it does for your team, and how it compares to Copilot Workspace / GitLab Duo / Qodo / Aider**, start with the pitch — it's the fastest way to decide whether AI-Git-Bot is for you.
+>
+> 👉 **[doc/pitch/PITCH.md](doc/pitch/PITCH.md)** — the long-form pitch (~10 min read)
+
+
 <p align="center">
   <img src="doc/images/ai-git-bot-diagram.svg" alt="AI-Git-Bot Architecture Schema" width="800"/>
 </p>
