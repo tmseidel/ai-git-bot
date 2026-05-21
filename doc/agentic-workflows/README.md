@@ -13,9 +13,7 @@ together. Operator-facing recipes (one per Git provider / one per
 deployment strategy) live next to it under [`../`](..), and laptop-runnable
 walkthroughs live under [`../../systemtest/`](../../systemtest/README.md).
 
-> 📸 *Screenshot placeholder — Workflow runs dashboard*
-> `doc/screenshots/prworkflow/dashboard-workflow-runs.png` (TODO)
-
+<img src="../screenshots/pr-workflow/ai-bot-workflow-settings.png" alt="Workflow runs dashboard" width="600"/>
 ---
 
 ## What the feature gives you
@@ -103,8 +101,7 @@ For the full state machine and per-component responsibilities see
 [`CONCEPT_AND_ARCHITECTURE.md` § 4](./CONCEPT_AND_ARCHITECTURE.md#4-high-level-architecture)
 and [`INTERNALS.md`](./INTERNALS.md).
 
-> 📸 *Screenshot placeholder — example PR with the E2E run comment*
-> `doc/screenshots/prworkflow/pr-comment-e2e-report.png` (TODO)
+<img src="../screenshots/pr-workflow/gitea-pr-with-e2e-test-run.png" alt="example PR with the E2E run comment" width="600"/>
 
 ---
 
@@ -123,9 +120,7 @@ and [`INTERNALS.md`](./INTERNALS.md).
    keep their pre-1.7 behaviour (only `review`) when both fields stay
    blank.
 
-> 📸 *Screenshot placeholder — Bots → Edit bot showing the two dropdowns*
-> `doc/screenshots/prworkflow/bot-form-workflow-deployment.png` (TODO)
-
+<img src="../screenshots/pr-workflow/ai-bot-bot-configuration.png" alt="Bots → Edit bot showing the two dropdowns" width="600"/>
 ---
 
 ## Common questions

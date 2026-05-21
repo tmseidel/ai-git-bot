@@ -33,7 +33,7 @@ ALTER TABLE ai_integrations ADD COLUMN IF NOT EXISTS use_legacy_tool_calling BOO
 -- 2) Persist the latest parsed implementation plan on the agent session.
 ------------------------------------------------------------------------
 ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS last_plan_summary VARCHAR(2048);
-ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS last_plan_json    VARCHAR;
+ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS last_plan_json    CLOB;
 ALTER TABLE agent_sessions ADD COLUMN IF NOT EXISTS last_plan_at      TIMESTAMP;
 
 ------------------------------------------------------------------------

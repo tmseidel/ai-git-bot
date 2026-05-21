@@ -24,6 +24,20 @@ CREATE TABLE IF NOT EXISTS workflow_selections (
 CREATE INDEX IF NOT EXISTS idx_workflow_selection_configuration
     ON workflow_selections (workflow_configuration_id);
 
+CREATE TABLE IF NOT EXISTS workflow_selection_params (
+    id BIGSERIAL PRIMARY KEY,
+    workflow_selection_id BIGINT NOT NULL,
+    name VARCHAR(128) NOT NULL,
+    param_value TEXT,
+    CONSTRAINT uk_workflow_selection_param UNIQUE (workflow_selection_id, name),
+    CONSTRAINT fk_workflow_selection_param_selection
+        FOREIGN KEY (workflow_selection_id) REFERENCES workflow_selections(id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_selection_param_selection
+    ON workflow_selection_params (workflow_selection_id);
+
 ALTER TABLE bots ADD COLUMN IF NOT EXISTS workflow_configuration_id BIGINT;
 
 DO $$

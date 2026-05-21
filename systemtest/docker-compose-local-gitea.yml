@@ -3,6 +3,37 @@
 #   (Settings → Resources → WSL Integration) to avoid conflicts with the
 #   native Docker Engine in WSL2. Docker Desktop routes host.docker.internal
 #   through a separate VM, breaking container-to-host connectivity.
+#
+# Gitea Actions (CI_ACTION deployment strategy):
+#   This compose file ships with Actions ENABLED at the instance level
+#   (`GITEA__actions__ENABLED=true`) and an `act_runner` sidecar so the
+#   `CI_ACTION` walkthrough in systemtest/README-ci-action.md works
+#   against this stack without extra setup. Per-repo you still have to:
+#     1. Settings → Units → tick "Actions"
+#     2. Register the runner once (one-time, instance-wide). Pick ONE
+#        of the two flows:
+#
+#        (A) Auto-register on first boot (recommended for laptops):
+#            a) UI: Site Administration → Actions → Runners → "Create
+#               new Runner" and copy the registration token.
+#            b) Put it into a `.env` file next to this compose file:
+#                 GITEA_RUNNER_REGISTRATION_TOKEN=<TOKEN>
+#               (or `export` it in the shell before `docker compose up`).
+#            c) `docker compose -f systemtest/docker-compose-local-gitea.yml up -d`
+#               — the runner self-registers on first start and persists
+#               its `.runner` file in the `gitea_runner_data` volume.
+#               On every subsequent boot the token env is ignored because
+#               the volume already contains a registered identity.
+#
+#        (B) Manual register after the fact:
+#            a) Start the stack without the token env, get the token from
+#               the same UI page, then:
+#                 docker compose -f systemtest/docker-compose-local-gitea.yml \
+#                   exec runner act_runner register --no-interactive \
+#                   --instance http://server:3000 --token <TOKEN> --name local
+#            b) `docker compose ... restart runner`.
+#
+# See doc/PR_WORKFLOWS_CI_ACTIONS.md § "Gitea Actions" for the full recipe.
 
 services:
   server:
@@ -12,6 +43,11 @@ services:
       - USER_UID=1000
       - USER_GID=1000
       - GITEA__webhook__ALLOWED_HOST_LIST=*
+      # Enable the Actions subsystem so `POST /api/v1/repos/.../actions/
+      # workflows/<file>/dispatches` returns 204 instead of 404. Without
+      # this the CI_ACTION strategy will only ever see "404 page not found"
+      # from GiteaApiClient.dispatchWorkflow / listRecentRuns.
+      - GITEA__actions__ENABLED=true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: always
@@ -24,6 +60,50 @@ services:
     ports:
       - "3000:3000"
       - "222:22"
+
+  # act_runner — Gitea's native CI runner. Without a registered runner,
+  # dispatched workflows stay forever queued and CiActionPoller times
+  # out. The runner has to be registered ONCE (see header comment); the
+  # registration (`.runner` file) survives in the named volume, so the
+  # token env is only read on the very first boot.
+  runner:
+    image: gitea/act_runner:0.2.13
+    container_name: gitea-act-runner
+    restart: always
+    depends_on:
+      - server
+    environment:
+      - GITEA_INSTANCE_URL=http://server:3000
+      # First-boot auto-registration. Get the token from
+      # Site Administration → Actions → Runners → "Create new Runner",
+      # then either inline it here or supply it via a .env file
+      # (GITEA_RUNNER_REGISTRATION_TOKEN=...). On subsequent boots this
+      # env is ignored because `.runner` already exists in the volume.
+      - GITEA_RUNNER_REGISTRATION_TOKEN=${GITEA_RUNNER_REGISTRATION_TOKEN:-IExQ2fu4RH4zQzxR2oJWxYByJp18zqFZvx7QA0og}
+      # Mounted custom config (see ./gitea-runner/config.yaml). Required
+      # because the default runner config spawns job containers on an
+      # isolated network where `http://server:3000` (the clone URL
+      # Gitea injects as GITEA_SERVER_URL) is not resolvable — that's
+      # the `Could not resolve host: server` symptom in actions/checkout.
+      # The file pins job containers to the `gitea-net` network below.
+      - CONFIG_FILE=/config/config.yaml
+    networks:
+      - gitea
+    volumes:
+      - gitea_runner_data:/data
+      - ./gitea-runner/config.yaml:/config/config.yaml:ro
+      # The runner spawns one container per job — give it the host
+      # Docker socket so those job containers run on the same engine.
+      - /var/run/docker.sock:/var/run/docker.sock
+
 networks:
   gitea:
+    # Pin a stable name so the runner's config.yaml can reference it
+    # regardless of the Compose project (= containing directory) name.
+    # Job containers spawned by act_runner attach to this network so
+    # they can resolve `server` to the Gitea service.
+    name: gitea-net
     driver: bridge
+
+volumes:
+  gitea_runner_data:

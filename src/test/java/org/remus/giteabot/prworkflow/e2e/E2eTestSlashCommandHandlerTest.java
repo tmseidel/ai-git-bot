@@ -4,11 +4,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
+import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.util.List;
 import java.util.Map;
@@ -39,6 +41,8 @@ class E2eTestSlashCommandHandlerTest {
 
     private PrWorkflowOrchestrator orchestrator;
     private WorkflowSelectionService selectionService;
+    private GiteaClientFactory giteaClientFactory;
+    private RepositoryApiClient repoClient;
     private E2eTestSlashCommandHandler handler;
 
     private Bot bot;
@@ -48,7 +52,10 @@ class E2eTestSlashCommandHandlerTest {
     void setUp() {
         orchestrator = mock(PrWorkflowOrchestrator.class);
         selectionService = mock(WorkflowSelectionService.class);
-        handler = new E2eTestSlashCommandHandler(orchestrator, selectionService);
+        giteaClientFactory = mock(GiteaClientFactory.class);
+        repoClient = mock(RepositoryApiClient.class);
+        when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
+        handler = new E2eTestSlashCommandHandler(orchestrator, selectionService, giteaClientFactory);
 
         workflowConfig = new WorkflowConfiguration();
         workflowConfig.setId(7L);
@@ -150,11 +157,74 @@ class E2eTestSlashCommandHandlerTest {
         verify(orchestrator, never()).run(any(), any(), any(), any());
     }
 
+    @Test
+    void addsEyesReactionWhenSlashCommandRecognised() {
+        WebhookPayload payload = payloadWithCommentAndIdentity(
+                "@ai-bot rerun-tests", 4242L, "acme", "web");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isTrue();
+        verify(repoClient).addReaction("acme", "web", 4242L, "eyes");
+    }
+
+    @Test
+    void doesNotReactWhenE2eDisabled() {
+        when(selectionService.enabledWorkflowKeys(7L)).thenReturn(List.of("review"));
+        WebhookPayload payload = payloadWithCommentAndIdentity(
+                "@ai-bot rerun-tests", 99L, "acme", "web");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isFalse();
+        verify(repoClient, never()).addReaction(any(), any(), any(), any());
+    }
+
+    @Test
+    void doesNotReactOnUnrelatedComment() {
+        WebhookPayload payload = payloadWithCommentAndIdentity(
+                "@ai-bot please review again", 100L, "acme", "web");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isFalse();
+        verify(repoClient, never()).addReaction(any(), any(), any(), any());
+    }
+
+    @Test
+    void reactionFailureDoesNotBlockDispatch() {
+        WebhookPayload payload = payloadWithCommentAndIdentity(
+                "@ai-bot rerun-tests", 7L, "acme", "web");
+        org.mockito.Mockito.doThrow(new RuntimeException("API down"))
+                .when(repoClient).addReaction(any(), any(), any(), any());
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isTrue();
+        verify(orchestrator).run(eq(bot), eq(payload), eq(E2ETestWorkflow.KEY), any());
+    }
+
     private WebhookPayload payloadWithComment(String body) {
         WebhookPayload payload = new WebhookPayload();
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
         comment.setBody(body);
         payload.setComment(comment);
+        return payload;
+    }
+
+    private WebhookPayload payloadWithCommentAndIdentity(String body, long commentId,
+                                                         String owner, String repo) {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setId(commentId);
+        comment.setBody(body);
+        payload.setComment(comment);
+        WebhookPayload.Repository repository = new WebhookPayload.Repository();
+        repository.setName(repo);
+        WebhookPayload.Owner ownerUser = new WebhookPayload.Owner();
+        ownerUser.setLogin(owner);
+        repository.setOwner(ownerUser);
+        payload.setRepository(repository);
         return payload;
     }
 }

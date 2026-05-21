@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -24,12 +25,24 @@ public class WorkspaceProcessRunner {
     /** Result of one process invocation. */
     public record ProcessResult(int exitCode, String combinedOutput, long durationMs, boolean timedOut) { }
 
+    /** Backwards-compatible overload — no extra environment overrides. */
+    public ProcessResult run(Path workspace, List<String> command,
+                             long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
+        return run(workspace, command, Map.of(), timeoutMs, maxOutputBytes);
+    }
+
     /**
      * Runs the given command in {@code workspace}, capturing combined
      * stdout/stderr (UTF-8) up to {@code maxOutputBytes} bytes and waiting
      * at most {@code timeout} ms before terminating the process.
+     *
+     * @param extraEnv environment overrides applied on top of the inherited
+     *                 JVM environment (later entries win). Use this to inject
+     *                 {@code BASE_URL} for browser tests or
+     *                 {@code PLAYWRIGHT_JSON_OUTPUT_NAME} to route the report.
      */
     public ProcessResult run(Path workspace, List<String> command,
+                             Map<String, String> extraEnv,
                              long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
         long start = System.nanoTime();
         ProcessBuilder pb = new ProcessBuilder(command)
@@ -37,6 +50,12 @@ public class WorkspaceProcessRunner {
                 .redirectErrorStream(true);
         // Make sure CI-style envs do not break the runner with interactive prompts.
         pb.environment().putIfAbsent("CI", "1");
+        if (extraEnv != null) {
+            for (Map.Entry<String, String> e : extraEnv.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) continue;
+                pb.environment().put(e.getKey(), e.getValue());
+            }
+        }
         Process process = pb.start();
         StringBuilder out = new StringBuilder();
         Thread reader = new Thread(() -> {

@@ -1,0 +1,55 @@
+# act_runner config used by systemtest/docker-compose-local-gitea.yml.
+#
+# Why this file exists at all:
+#   `act_runner` propagates GITEA_INSTANCE_URL as GITEA_SERVER_URL into the
+#   job containers it spawns. So `actions/checkout` runs
+#       git clone http://server:3000/<owner>/<repo>.git
+#   inside the job container. That hostname (`server`) only resolves on
+#   the same Docker network where the `gitea` service sits — by default
+#   `act_runner` would spin job containers up on an isolated bridge and
+#   the clone fails with `Could not resolve host: server`. We therefore
+#   pin `container.network` to the same Compose network.
+#
+# To regenerate the documented defaults run:
+#   docker run --rm gitea/act_runner:0.2.13 act_runner generate-config
+
+log:
+  level: info
+
+runner:
+  # Persist registration in the mounted /data volume. The token comes
+  # from GITEA_RUNNER_REGISTRATION_TOKEN on first boot.
+  file: /data/.runner
+  capacity: 1
+  timeout: 30m
+  fetch_timeout: 5s
+  fetch_interval: 2s
+
+cache:
+  enabled: false
+
+container:
+  # Attach every spawned job container to the same Compose network as
+  # the Gitea server so `http://server:3000` (the clone URL injected
+  # via GITEA_SERVER_URL) actually resolves. The matching `name:` is
+  # set in docker-compose-local-gitea.yml's networks section.
+  network: gitea-net
+  # Inject host.docker.internal into every job container so workflows
+  # can `curl http://host.docker.internal:8080/...` back to the bot
+  # process running on the host (the `{callbackUrl}` placeholder
+  # expands to that hostname when `app.public-url` is set accordingly).
+  # Without this you get `curl: (28) Failed to connect to
+  # host.docker.internal port 8080` — the `extra_hosts` entry on the
+  # Gitea *server* service only adds the mapping to that container,
+  # not to the per-job containers spawned by the runner.
+  options: "--add-host=host.docker.internal:host-gateway"
+  # Run jobs in privileged mode so docker-in-docker style actions work;
+  # safe on a developer laptop, do NOT copy this onto a shared host.
+  privileged: false
+  # Strip ANSI escapes from job logs for nicer Gitea UI rendering.
+  force_pull: false
+  valid_volumes: []
+
+host:
+  workdir_parent: ""
+

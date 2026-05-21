@@ -47,7 +47,10 @@
 
                     <div th:if="${row.prWorkflow != null and !row.prWorkflow.paramsSchema().empty}"
                          class="mt-3 ps-4">
-                        <div th:each="field : ${row.prWorkflow.paramsSchema().fields()}" class="mb-2">
+                        <div th:each="field : ${row.prWorkflow.paramsSchema().fields()}" class="mb-2"
+                             th:with="persisted=${row.persistedParams != null ? row.persistedParams.get(field.name) : null},
+                                      currentValue=${persisted != null ? persisted : field.defaultValue},
+                                      booleanChecked=${persisted != null ? (persisted == 'true') : (field.defaultValue != null and field.defaultValue == 'true')}">
                             <label class="form-label" th:for="'param-' + ${row.workflowKey} + '-' + ${field.name}">
                                 <span th:text="${field.label}"></span>
                                 <span th:if="${field.required}" class="text-danger">*</span>
@@ -56,33 +59,34 @@
                                       class="form-control"
                                       rows="3"
                                       th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
-                                      th:name="'params__' + ${row.workflowKey} + '__' + ${field.name}"
-                                      th:text="${field.defaultValue}"></textarea>
+                                      th:name="|params.${row.workflowKey}.${field.name}|"
+                                      th:text="${currentValue}"></textarea>
                             <input th:if="${field.type.name() == 'BOOLEAN'}"
                                    type="hidden"
-                                   th:name="'params__' + ${row.workflowKey} + '__' + ${field.name}"
+                                   th:name="|params.${row.workflowKey}.${field.name}|"
                                    value="false"/>
                             <div th:if="${field.type.name() == 'BOOLEAN'}" class="form-check">
                                 <input class="form-check-input" type="checkbox" value="true"
                                        th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
-                                       th:name="'params__' + ${row.workflowKey} + '__' + ${field.name}"
-                                       th:checked="${field.defaultValue != null and field.defaultValue == 'true'}"/>
+                                       th:name="|params.${row.workflowKey}.${field.name}|"
+                                       th:checked="${booleanChecked}"/>
                             </div>
                             <input th:if="${field.type.name() == 'INTEGER'}"
                                    type="number" class="form-control"
                                    th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
-                                   th:name="'params__' + ${row.workflowKey} + '__' + ${field.name}"
-                                   th:value="${field.defaultValue}"/>
+                                   th:name="|params.${row.workflowKey}.${field.name}|"
+                                   th:value="${currentValue}"/>
                             <input th:if="${field.type.name() == 'SECRET'}"
                                    type="password" class="form-control"
                                    th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
-                                   th:name="'params__' + ${row.workflowKey} + '__' + ${field.name}"
+                                   th:name="|params.${row.workflowKey}.${field.name}|"
+                                   th:placeholder="${persisted != null ? '(unchanged)' : ''}"
                                    autocomplete="off"/>
                             <input th:if="${field.type.name() == 'STRING'}"
                                    type="text" class="form-control"
                                    th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
-                                   th:name="'params__' + ${row.workflowKey} + '__' + ${field.name}"
-                                   th:value="${field.defaultValue}"/>
+                                   th:name="|params.${row.workflowKey}.${field.name}|"
+                                   th:value="${currentValue}"/>
                             <div class="form-text" th:if="${field.description}" th:text="${field.description}"></div>
                         </div>
                     </div>
@@ -101,4 +105,3 @@
 </div>
 </body>
 </html>
-

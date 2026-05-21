@@ -483,14 +483,24 @@ public class GiteaApiClient implements RepositoryApiClient {
     private List<Map<String, Object>> listRecentRuns(
             String owner, String repo, String workflow, String branch) {
         try {
+            // NB: Gitea exposes workflow runs under /actions/runs (with the
+            // workflow as a query parameter), NOT under the GitHub-shaped
+            // /actions/workflows/{workflow}/runs path. Calling the GitHub
+            // path returns Gitea's HTML 404 ("404 page not found") which
+            // surfaces in the bot log as a hard-to-diagnose error.
+            //
+            // See Gitea OpenAPI: GET /repos/{owner}/{repo}/actions/runs
+            // accepts workflow=, event=, branch=, status=, head_sha=,
+            // actor=, limit=, page= and returns {"workflow_runs":[...]}.
             Map<String, Object> response = giteaRestClient.get()
                     .uri(uriBuilder -> {
                         var b = uriBuilder
-                                .path("/api/v1/repos/{owner}/{repo}/actions/workflows/{workflow}/runs")
+                                .path("/api/v1/repos/{owner}/{repo}/actions/runs")
                                 .queryParam("limit", 10)
-                                .queryParam("event", "workflow_dispatch");
+                                .queryParam("event", "workflow_dispatch")
+                                .queryParam("workflow", workflow);
                         if (branch != null) b.queryParam("branch", branch);
-                        return b.build(owner, repo, workflow);
+                        return b.build(owner, repo);
                     })
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});

@@ -142,7 +142,7 @@ public class ToolCatalog {
                             + "results back into PrTestCase rows. Returns a textual summary plus the raw "
                             + "stdout/stderr (truncated).",
                     objectSchema(
-                            prop("framework", "string", "One of: playwright, pytest, k6, cypress."),
+                            prop("framework", "string", "playwright (well-tested, recommended); pytest, k6, cypress are experimental."),
                             arrayProp("args", "Additional CLI arguments forwarded verbatim to the runner."),
                             required("framework", "args"))),
             entry("preview-url", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
@@ -236,6 +236,16 @@ public class ToolCatalog {
 
     public List<String> validationToolNames(Set<String> allowed) {
         return filterNames(validationToolNames(), allowed);
+    }
+
+    /** Names of all PR-workflow tools (E2E role). Unfiltered. */
+    public List<String> prWorkflowToolNames() {
+        return namesOf(ToolKind.PR_WORKFLOW);
+    }
+
+    /** Names of PR-workflow tools the bot is allowed to invoke. See {@link #contextToolNames(Set)} for whitelist semantics. */
+    public List<String> prWorkflowToolNames(Set<String> allowed) {
+        return filterNames(prWorkflowToolNames(), allowed);
     }
 
     private List<String> namesOf(ToolKind kind) {

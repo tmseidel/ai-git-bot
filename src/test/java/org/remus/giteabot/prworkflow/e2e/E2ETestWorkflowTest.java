@@ -113,8 +113,11 @@ class E2ETestWorkflowTest {
 
         assertThat(result.status()).isEqualTo(WorkflowResultStatus.FAILED);
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(repoClient).postPullRequestComment(eq("acme"), eq("web"), eq(13L), body.capture());
-        assertThat(body.getValue())
+        verify(repoClient, org.mockito.Mockito.times(2))
+                .postPullRequestComment(eq("acme"), eq("web"), eq(13L), body.capture());
+        // First comment is the "starting" opener, second is the failure summary.
+        assertThat(body.getAllValues().get(0)).contains("Starting end-to-end test run");
+        assertThat(body.getAllValues().get(1))
                 .contains("❌")
                 .contains("preview did not respond");
     }
@@ -141,8 +144,10 @@ class E2ETestWorkflowTest {
         assertThat(saved.getLifecycleMode()).isEqualTo(SuiteLifecycleMode.EPHEMERAL);
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(repoClient).postPullRequestComment(eq("acme"), eq("web"), eq(14L), body.capture());
-        assertThat(body.getValue())
+        verify(repoClient, org.mockito.Mockito.times(2))
+                .postPullRequestComment(eq("acme"), eq("web"), eq(14L), body.capture());
+        assertThat(body.getAllValues().get(0)).contains("Starting end-to-end test run");
+        assertThat(body.getAllValues().get(1))
                 .contains("## E2E Test Run for PR #14")
                 .contains("https://preview-14.example.com")
                 .contains("⏭️ SKIPPED");
@@ -340,6 +345,11 @@ class E2ETestWorkflowTest {
         }
         @Override public java.util.Optional<PrTestSuite> findById(Long id) {
             return java.util.Optional.ofNullable(entities.get(id));
+        }
+        @Override public java.util.Optional<PrTestSuite> findByIdWithCases(Long id) {
+            // The in-memory test repo never detaches entities, so the lazy
+            // collection guard is irrelevant here — just delegate.
+            return findById(id);
         }
         // ---- everything else is unused by the workflow tests -----------
         @Override public java.util.List<PrTestSuite> findAll() { return List.copyOf(entities.values()); }

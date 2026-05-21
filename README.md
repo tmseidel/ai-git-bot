@@ -55,6 +55,60 @@ Each workflow is a **first-class, named PR workflow** you can enable per bot via
 
 > See the [PR Workflows guide](doc/PR_WORKFLOWS.md) and [Agent documentation](doc/AGENT.md) for the operator-facing details.
 
+> 🎥 **Watch the PR workflows in action:** [AI-Git-Bot — PR workflow walkthrough on YouTube](https://www.youtube.com/watch?v=MjFmZHGIO-w)
+>
+> [![Watch the PR workflow walkthrough](https://img.youtube.com/vi/MjFmZHGIO-w/hqdefault.jpg)](https://www.youtube.com/watch?v=MjFmZHGIO-w)
+
+> ## 🧪 Project maturity & tested provider matrix
+>
+> AI-Git-Bot is a single-maintainer side project. I cannot realistically run
+> the full feature set against every Git host × every AI provider combination,
+> so most provider-specific code is built **from the official API
+> documentation and reviewed by AI**, then validated end-to-end only on the
+> stack I actually run in production.
+>
+> | Provider | Maturity |
+> |---|---|
+> | **Gitea** | ✅ **Well-tested** — primary target, exercised end-to-end (incl. webhooks, PR review, coding agent, writer agent, E2E full-stack QA) on every release. |
+> | **GitHub / GitHub Enterprise** | ⚠️ Experimental — implemented from the REST/Webhook docs; basic flows have been smoke-tested but not exercised at scale. |
+> | **GitLab** | ⚠️ Experimental — same caveat as GitHub. |
+> | **Bitbucket Cloud** | ⚠️ Experimental — same caveat. |
+>
+> The **Full-stack QA / E2E PR review workflow** is the most complex
+> moving part (deployment targets, generated test suites, callbacks,
+> teardown lifecycle) and should be considered **experimental on every
+> provider including Gitea** — runtime semantics differ subtly between
+> hosts and not every combination has been exercised.
+>
+> 🐛 **Bug reports are very welcome** — please open a
+> [GitHub issue](https://github.com/tmseidel/ai-git-bot/issues) with the
+> provider, version, workflow, and the relevant log excerpt; that is the
+> fastest path to fixing the rough edges across the matrix.
+>
+> 🧰 **Reproducible system-test containers** — to keep the rough edges
+> findable, every non-trivial workflow ships with a self-contained
+> `docker-compose` stack under [`systemtest/`](systemtest/) plus a recipe
+> README. Bring up the bot + a real Git host + sample apps + (where
+> applicable) a local LLM and exercise the workflow end-to-end without
+> touching any production system:
+>
+> | Stack | Compose file | Recipe |
+> |---|---|---|
+> | Local **Gitea** + runner + bot | [`docker-compose-local-gitea.yml`](systemtest/docker-compose-local-gitea.yml) | [`systemtest/README.md`](systemtest/README.md) |
+> | Local **GitLab** + bot | [`docker-compose-local-gitlab.yml`](systemtest/docker-compose-local-gitlab.yml) | [`systemtest/README.md`](systemtest/README.md) |
+> | E2E sample app for Full-stack QA | [`docker-compose-e2e-sample.yml`](systemtest/docker-compose-e2e-sample.yml) | [`systemtest/README.md`](systemtest/README.md) |
+> | `CI_ACTION` deployment strategy | [`docker-compose-ci-action.yml`](systemtest/docker-compose-ci-action.yml) | [`systemtest/README-ci-action.md`](systemtest/README-ci-action.md) |
+> | `MCP` deployment strategy | [`docker-compose-mcp-deployment.yml`](systemtest/docker-compose-mcp-deployment.yml) | [`systemtest/README-mcp-deployment.md`](systemtest/README-mcp-deployment.md) |
+> | MCP tool-calling against GitHub | [`docker-compose-mcp-github.yml`](systemtest/docker-compose-mcp-github.yml) | [`systemtest/README-mcp-github.md`](systemtest/README-mcp-github.md) |
+> | Suite-promotion workflow | — | [`systemtest/README-suite-promotion.md`](systemtest/README-suite-promotion.md) |
+> | Local LLM via **Ollama** | [`docker-compose-ollama.yml`](systemtest/docker-compose-ollama.yml) | [`doc/OLLAMA.md`](doc/OLLAMA.md) |
+> | Local LLM via **llama.cpp** | [`docker-compose-llamacpp.yml`](systemtest/docker-compose-llamacpp.yml) | [`doc/LLAMACPP.md`](doc/LLAMACPP.md) |
+>
+> If you can reproduce a bug against one of these stacks, attach the
+> compose file you used + the bot log; that turns most reports into a
+> 1-commit fix.
+
+
 ## 🌍 Where the E2E workflow deploys its preview environment
 
 The **Full-stack QA** workflow needs a per-PR environment to test against. Different teams already have *very* different deploy pipelines — so the bot ships a small **`DeploymentStrategy` SPI** with four interchangeable implementations. Pick the one that matches the world your team already lives in:

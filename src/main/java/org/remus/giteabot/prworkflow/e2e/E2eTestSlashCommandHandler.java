@@ -2,10 +2,12 @@ package org.remus.giteabot.prworkflow.e2e;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
+import org.remus.giteabot.repository.RepositoryApiClient;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
@@ -50,11 +52,14 @@ public class E2eTestSlashCommandHandler {
 
     private final PrWorkflowOrchestrator orchestrator;
     private final WorkflowSelectionService selectionService;
+    private final GiteaClientFactory giteaClientFactory;
 
     public E2eTestSlashCommandHandler(PrWorkflowOrchestrator orchestrator,
-                                      WorkflowSelectionService selectionService) {
+                                      WorkflowSelectionService selectionService,
+                                      GiteaClientFactory giteaClientFactory) {
         this.orchestrator = orchestrator;
         this.selectionService = selectionService;
+        this.giteaClientFactory = giteaClientFactory;
     }
 
     /**
@@ -83,6 +88,11 @@ public class E2eTestSlashCommandHandler {
                     bot.getName(), verb);
             return false;
         }
+
+        // Acknowledge the slash command immediately with an 👀 reaction so
+        // the operator knows the bot picked it up — the actual workflow run
+        // can take several minutes to complete.
+        addEyesReaction(bot, payload);
 
         log.info("[Bot '{}'] E2E slash command '{}' detected (feedback='{}'), dispatching e2e-test workflow",
                 bot.getName(), verb, abbreviate(feedback, 80));
@@ -117,6 +127,32 @@ public class E2eTestSlashCommandHandler {
             return "";
         }
         return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    /**
+     * Best-effort 👀 reaction on the triggering comment. Mirrors the UX in
+     * {@code CodeReviewService.handleBotCommand} so {@code @bot rerun-tests}
+     * / {@code @bot regenerate-tests} get the same instant acknowledgement
+     * as the regular review slash commands. Failures are swallowed — a
+     * missing reaction must never block dispatch.
+     */
+    private void addEyesReaction(Bot bot, WebhookPayload payload) {
+        if (payload.getComment() == null
+                || payload.getComment().getId() == null
+                || payload.getRepository() == null
+                || payload.getRepository().getOwner() == null) {
+            return;
+        }
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long commentId = payload.getComment().getId();
+        try {
+            RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            client.addReaction(owner, repo, commentId, "eyes");
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",
+                    bot.getName(), commentId, e.getMessage());
+        }
     }
 }
 

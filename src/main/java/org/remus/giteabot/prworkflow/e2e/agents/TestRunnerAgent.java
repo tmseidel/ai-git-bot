@@ -1,6 +1,8 @@
 package org.remus.giteabot.prworkflow.e2e.agents;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.loop.ToolingMode;
+import org.remus.giteabot.agent.shared.SystemPromptAssembler;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.ToolDescriptor;
@@ -44,11 +46,13 @@ public class TestRunnerAgent {
 
     private final ToolCatalog toolCatalog;
     private final PrWorkflowToolExecutor toolExecutor;
+    private final SystemPromptAssembler promptAssembler;
 
     public TestRunnerAgent(ToolCatalog toolCatalog,
                            PrWorkflowToolExecutor toolExecutor) {
         this.toolCatalog = toolCatalog;
         this.toolExecutor = toolExecutor;
+        this.promptAssembler = new SystemPromptAssembler();
     }
 
     public Result execute(AiClient aiClient,
@@ -61,10 +65,21 @@ public class TestRunnerAgent {
         List<ToolDescriptor> descriptors = toolCatalog.nativeDescriptors(
                 ToolCatalog.Role.E2E, null, ALLOWED_TOOLS);
 
+        // System prompt = role description (E2ePromptLibrary) + tool protocol
+        // section rendered from ToolCatalog by SystemPromptAssembler — same
+        // pipeline as the issue / writer agents. Mode mirrors what
+        // E2eAgentRunner will resolve so prompt and dispatch stay aligned.
+        ToolingMode mode = ToolingMode.resolve(ToolingMode.NATIVE,
+                aiClient.supportsNativeTools(), !descriptors.isEmpty());
+        String systemPrompt = promptAssembler.assemble(
+                E2ePromptLibrary.runnerSystemPrompt(toolContext.framework()),
+                toolCatalog, ALLOWED_TOOLS, null, mode,
+                SystemPromptAssembler.PromptKind.E2E_AGENT);
+
         int maxRounds = Math.max(2, maxRetries) + OVERHEAD_ROUNDS;
         E2eAgentRunner runner = new E2eAgentRunner(
                 aiClient, toolExecutor, toolContext, descriptors,
-                E2ePromptLibrary.runnerSystemPrompt(toolContext.framework()),
+                systemPrompt,
                 maxRounds, DEFAULT_MAX_TOKENS, "test-runner");
 
         E2eAgentRunner.Result raw = runner.run(renderUserMessage(toolContext.framework(), plan, maxRetries));
@@ -76,11 +91,77 @@ public class TestRunnerAgent {
             if ("pr-test-run".equals(name)) runs++;
             else if ("attach-artifact".equals(name)) artifacts++;
         }
+
+        // Recovery for the "narrated tool call" failure mode — symmetrical to
+        // TestAuthorAgent. Some Claude releases (and any model when the
+        // context grows large) describe their tool invocations as plain text
+        // — either as ```json {"name":"pr-test-run","parameters":{...}}```
+        // blocks or as the leaked Claude XML form
+        // (<function_calls><invoke name="pr-test-run">…). In both cases the
+        // runner sees stopReason=END_TURN, toolCalls=0 and we would otherwise
+        // execute zero tests — every PrTestCase row stays PENDING and the
+        // suite is reported as ERROR even though the model "claimed" (in
+        // text) to have run the suite, often with fabricated results.
+        //
+        // We re-execute only `pr-test-run` calls — that tool is idempotent
+        // (it just shells out to the test framework and updates the PrTestCase
+        // rows from the real JSON reporter output) and it is the call that
+        // populates the database. `attach-artifact` is intentionally skipped
+        // because the artifact paths are almost always fabricated when the
+        // model is in the narrated-call failure mode, and `preview-url` /
+        // `preview-status` are informational only.
+        if (runs == 0) {
+            List<NarratedToolCallParser.Call> recovered =
+                    NarratedToolCallParser.parse(raw.lastAssistantText());
+            int recoveredRuns = 0;
+            for (NarratedToolCallParser.Call call : recovered) {
+                if (!"pr-test-run".equalsIgnoreCase(call.name())) continue;
+                String result = toolExecutor.execute(call.name(), call.args(), toolContext);
+                recoveredRuns++;
+                log.warn("TestRunnerAgent: re-executed narrated `pr-test-run` call args={} -> {}",
+                        call.args(), abbreviate(result));
+            }
+            if (recoveredRuns > 0) {
+                log.warn("TestRunnerAgent: recovered {} narrated `pr-test-run` call(s) from"
+                                + " assistant text after native tool_use produced 0 calls"
+                                + " (likely Claude regression to legacy tool-call syntax)",
+                        recoveredRuns);
+                runs = recoveredRuns;
+            } else if (looksLikeNarratedToolCall(raw.lastAssistantText())) {
+                log.warn("TestRunnerAgent: assistant text contains narrated tool-call markers"
+                        + " but no `pr-test-run` calls could be recovered — see DEBUG-level"
+                        + " AI response dump");
+            }
+        }
+
         if (raw.budgetExhausted()) {
             log.warn("TestRunnerAgent: budget exhausted after {} pr-test-run / {} attach-artifact calls",
                     runs, artifacts);
         }
         return new Result(runs, artifacts, raw.lastAssistantText(), raw.budgetExhausted());
+    }
+
+    /**
+     * Heuristic counterpart to {@link TestAuthorAgent#looksLikeNarratedToolCall(String)} —
+     * used purely for diagnostic logging when recovery yielded zero usable
+     * calls. The authoritative recovery is performed by {@link NarratedToolCallParser}.
+     */
+    static boolean looksLikeNarratedToolCall(String assistantText) {
+        if (assistantText == null || assistantText.isBlank()) return false;
+        String lower = assistantText.toLowerCase(java.util.Locale.ROOT);
+        if (!lower.contains("pr-test-run")) return false;
+        boolean jsonForm = (lower.contains("\"name\"") || lower.contains("'name'"))
+                && (lower.contains("\"parameters\"")
+                    || lower.contains("\"arguments\"")
+                    || lower.contains("\"input\""));
+        boolean xmlForm = lower.contains("<invoke") && lower.contains("<parameter");
+        boolean toolCallTag = lower.contains("<tool_call>");
+        return jsonForm || xmlForm || toolCallTag;
+    }
+
+    private static String abbreviate(String s) {
+        if (s == null) return "null";
+        return s.length() <= 160 ? s : s.substring(0, 160) + "…";
     }
 
     public record Result(int prTestRunInvocations,

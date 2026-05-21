@@ -111,9 +111,21 @@ public class DeploymentTargetService {
         String plaintext = target.getConfigJson();
         target.setConfigJson(encryptionService.encrypt(plaintext));
         DeploymentTarget saved = repository.save(target);
-        // Detach before exposing cleartext to the caller so callers cannot
-        // accidentally re-flush the plaintext value back to the database.
+        // Force the pending INSERT/UPDATE to be sent to the DB *before* we
+        // detach the entity below. Without this flush, an UPDATE issued via
+        // EntityManager#merge (the path Spring Data takes when the entity
+        // has a non-null id) is still only queued in the persistence
+        // context — detaching the entity would discard those pending
+        // changes and the row would never be updated, even though the
+        // transaction commits cleanly. INSERTs happen to work because
+        // GenerationType.IDENTITY forces an immediate INSERT at persist
+        // time to obtain the generated id, but UPDATEs need this explicit
+        // flush to survive the detach below.
         if (entityManager != null) {
+            entityManager.flush();
+            // Detach before exposing cleartext to the caller so callers
+            // cannot accidentally re-flush the plaintext value back to the
+            // database.
             entityManager.detach(saved);
         }
         saved.setConfigJson(plaintext);

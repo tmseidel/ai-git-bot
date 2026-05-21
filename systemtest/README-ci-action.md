@@ -54,7 +54,80 @@ exactly the lifecycle the orchestrator was built to demonstrate.
 
 ---
 
+## Running against a *real* Gitea / GitLab / Bitbucket
+
+The walkthrough below targets the **mock** (`sample-ci-action-server`) and
+therefore needs no provider-side CI runtime. The moment you point a
+`CI_ACTION` deployment target at a real provider — Gitea Actions, GitLab
+CI or Bitbucket Pipelines — the **CI subsystem must be enabled and a
+runner must be registered**, otherwise the dispatch either 404s or the
+pipeline stays queued forever and `CiActionPoller` eventually times out.
+
+| Provider             | What must be enabled                                                                                                         | Runner                                                                                              | Compose helper                                                                                       |
+|----------------------|------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| **Gitea Actions** (≥ 1.21) | Instance: `[actions] ENABLED=true` (env `GITEA__actions__ENABLED=true`). Repo: *Settings → Units → Actions*.                  | `act_runner` registered against the instance. Without it, dispatches 200/204 but never start.        | [`docker-compose-local-gitea.yml`](docker-compose-local-gitea.yml) ships both pre-wired — see the file header for the one-time runner-registration command. |
+| **GitLab CI**         | Enabled by default for new projects. Verify under *Settings → General → Visibility → CI/CD*.                                | At least one GitLab Runner registered as an *instance* / *group* / *project* runner.                 | [`docker-compose-local-gitlab.yml`](docker-compose-local-gitlab.yml) bundles `gitlab-runner` — see the file header for the one-time `gitlab-runner register` command. |
+| **Bitbucket Pipelines** | Per-repo: *Repository settings → Pipelines → Settings → Enable Pipelines*.                                                  | Atlassian-hosted by default. Self-hosted runners only needed for custom infra.                       | n/a (cloud).                                                                                          |
+| **GitHub Actions**    | Per-repo: *Settings → Actions → General → Allow all actions* (default for new repos).                                        | GitHub-hosted by default; self-hosted runners only if your workflow needs them.                      | n/a (cloud).                                                                                          |
+
+> 💡 If you see `404 page not found` from `GiteaApiClient.dispatchWorkflow`
+> or `… workflow runs … workflow=…`, the Actions subsystem isn't enabled
+> on the Gitea instance. If you see the dispatch accepted but
+> `CiActionPoller` only ever logs `IN_PROGRESS / QUEUED` until timeout,
+> there's no registered runner picking up the job. If the job *starts*
+> but `actions/checkout` dies with `Could not resolve host: server`,
+> your runner is spawning job containers on the wrong network — see the
+> header of `systemtest/gitea-runner/config.yaml`. If the job fails on
+> `./scripts/deploy-preview.sh: No such file or directory` or
+> `xxd: command not found`, you copy-pasted the production-grade
+> recipe; use the **minimal self-contained workflow** in
+> [`doc/PR_WORKFLOWS_CI_ACTIONS.md` § Gitea Actions](../doc/PR_WORKFLOWS_CI_ACTIONS.md)
+> instead. If the *Notify bot* step fails with
+> `curl: (7) Failed to connect to localhost port 8080`, the bot's
+> `app.public-url` property is still the default `http://localhost:8080`
+> — the workflow runs *inside* a job container where `localhost` means
+> the container itself, not your host. On Linux / WSL2 set
+> `app.public-url=http://172.17.0.1:8080` (the docker0 bridge gateway,
+> reachable from any container on any bridge); on macOS / Windows with
+> Docker Desktop use `http://host.docker.internal:8080` instead. Restart
+> the bot afterwards. If you've already set `app.public-url` to
+> `host.docker.internal` and the step hangs and finally dies with
+> `curl: (28) Failed to connect to host.docker.internal port 8080`,
+> the *job container* either lacks the `host.docker.internal` mapping
+> or has it pointing at an unreachable IP — the cleanest fix on Linux
+> is to switch to the docker0 IP (`172.17.0.1`) as above; alternatively
+> ensure `systemtest/gitea-runner/config.yaml` carries
+> `container.options: "--add-host=host.docker.internal:host-gateway"`
+> *and* `docker compose ... up -d --force-recreate runner` (a plain
+> `restart` is sometimes not enough to refresh the runner's task
+> template).
+
+See [`doc/PR_WORKFLOWS_CI_ACTIONS.md`](../doc/PR_WORKFLOWS_CI_ACTIONS.md)
+for the workflow-file recipes per provider; the rest of this document
+focuses on the mock-server scenario.
+
+---
+
 ## Step-by-step walkthrough
+
+> **Prerequisite — Git system: the bot must use a GitHub integration.**
+> The mock implements only the GitHub-Actions REST shape (no `/api/v1/`
+> prefix, no GitLab `/projects/:id/trigger/pipeline`, no Bitbucket
+> `/pipelines/`). The override in Step 2 (`github.api-base-url`) is a
+> **GitHub-only** property — it has no effect on `GiteaApiClient` /
+> `GitLabApiClient` / `BitbucketApiClient`, which talk to their own
+> base URLs. So:
+>
+> | Bot's Git integration | Works against this mock? | What to do instead                                                                  |
+> |-----------------------|--------------------------|-------------------------------------------------------------------------------------|
+> | **GitHub**            | ✅ — this walkthrough     | Follow the steps below.                                                              |
+> | **Gitea**             | ❌                        | Run against a real Gitea (see [`docker-compose-local-gitea.yml`](docker-compose-local-gitea.yml), header doc for runner registration). |
+> | **GitLab**            | ❌                        | Run against a real GitLab (see [`docker-compose-local-gitlab.yml`](docker-compose-local-gitlab.yml), header doc for runner registration). |
+> | **Bitbucket**         | ❌                        | Run against bitbucket.org with a custom pipeline (see [`doc/PR_WORKFLOWS_CI_ACTIONS.md`](../doc/PR_WORKFLOWS_CI_ACTIONS.md) § Bitbucket Pipelines). |
+>
+> The full per-provider matrix (Actions / Pipelines flag, runner
+> requirement) is in the *"Running against a real Gitea / GitLab /
+> Bitbucket"* section above.
 
 ### 1. Start the scenario
 
@@ -69,7 +142,14 @@ curl -s http://localhost:3030/healthz   # { ok: true } from the sample app
 curl -s http://localhost:8091/healthz   # { ok:true, runs:0, ... }
 ```
 
-### 2. Point AI-Git-Bot at the mock
+### 2. Point AI-Git-Bot at the mock *(GitHub bots only)*
+
+> ⚠️ This step assumes your bot's *Git integration* is of type
+> **GitHub**. The property below is a GitHub-client setting and has no
+> equivalent for `GiteaApiClient` / `GitLabApiClient` /
+> `BitbucketApiClient` — for those providers, follow the *"Running
+> against a real Gitea / GitLab / Bitbucket"* section above instead of
+> this mock walkthrough.
 
 In your local `application-dev.properties` (or however you run the bot):
 
@@ -85,29 +165,84 @@ If the bot itself is *not* in Docker, drop the override and use
 
 ### 3. Configure a `CI_ACTION` deployment target in the UI
 
-*System Settings → Deployment Targets → New*. Fields:
+*System Settings → Deployment Targets → New*. The form only exposes the
+target-level fields — **Provider** and **Owner / Repo** are *not* fields
+here: at dispatch time `CiActionTriggerStrategy` reads the provider from
+the bot's `GitIntegration` and the owner/repo from the PR run itself.
+All `CI_ACTION`-specific knobs live in the **Strategy config (JSON)**
+textarea.
 
-| Field                      | Value                                                                                  |
-|----------------------------|----------------------------------------------------------------------------------------|
-| Name                       | `Preview via mock CI Action`                                                            |
-| Strategy type              | **`CI_ACTION`**                                                                         |
-| Provider                   | `GITHUB`                                                                                |
-| Owner / Repo               | `acme` / `web`  *(any string is fine — the mock accepts anything)*                       |
-| `workflowRef`              | `preview.yml`                                                                           |
-| `gitRefTemplate`           | `refs/pull/{prNumber}/head`                                                              |
-| `inputs` (JSON)            | `{ "pr_number": "{prNumber}", "branch": "{branch}" }`                                   |
-| `previewUrlTemplate`       | `http://sample-e2e-app:3000`  *(the M4 sample app plays the role of the preview build)* |
-| `pollIntervalSeconds`      | `15`                                                                                    |
+Form fields:
+
+| Field                  | Value                                                                                                     |
+|------------------------|-----------------------------------------------------------------------------------------------------------|
+| Name                   | `Preview via mock CI Action`                                                                              |
+| Strategy               | **`CI_ACTION`**                                                                                            |
+| Preview URL template   | `http://sample-e2e-app:3000`  *(the M4 sample app plays the role of the preview build)*                   |
+| Timeout (seconds)      | `120`  *(any value ≥ `RUN_DURATION_MS` + a couple of poll intervals works)*                               |
+| Strategy config (JSON) | see below                                                                                                  |
+
+Strategy config (paste into the JSON textarea — this is the same shape
+the form's own help text shows next to the **CI_ACTION** label):
+
+```json
+{
+  "workflowRef": "preview.yml",
+  "refTemplate": "refs/heads/{branch}",
+  "previewUrlOutput": "preview_url",
+  "pollIntervalSeconds": 15,
+  "inputs": {
+    "callbackUrl": "{callbackUrl}"
+  }
+}
+```
+
+> Notes on the config keys (defined in `CiActionTriggerStrategy`):
+> - `workflowRef` — **required.** Workflow file (GitHub / Gitea Actions),
+>   pipeline trigger token (GitLab CI) or custom pipeline pattern
+>   (Bitbucket Pipelines). See
+>   [`doc/PR_WORKFLOWS_CI_ACTIONS.md`](../doc/PR_WORKFLOWS_CI_ACTIONS.md)
+>   for one recipe per provider.
+> - `refTemplate` — optional, defaults to `refs/heads/{branch}`. Placeholders
+>   `{prNumber}`, `{sha}`, `{branch}`, `{repoOwner}`, `{repoName}`, `{runId}`,
+>   `{callbackUrl}`, `{callbackSecret}` are expanded. The ref must resolve
+>   to a **branch or tag** that already exists on the remote — Gitea,
+>   GitLab and Bitbucket reject pull-request refs (`refs/pull/N/head`)
+>   at dispatch time. Only GitHub Actions also accepts
+>   `refs/pull/{prNumber}/head` (needed for fork PRs).
+> - `previewUrlOutput` — optional. Name of the workflow output that carries
+>   the preview URL (used by providers whose `getWorkflowRunOutputs(...)`
+>   returns a map, e.g. GitLab). For the GitHub mock the bot falls back to
+>   the top-level **Preview URL template**.
+> - `pollIntervalSeconds` — optional, default `15`, clamped to `5..120`.
+> - `inputs` — optional map forwarded as workflow inputs / pipeline
+>   variables; same placeholder set as `refTemplate`. The example above
+>   forwards `{callbackUrl}` so the workflow can POST back to the bot when
+>   it finishes (instead of waiting for the poll loop).
 
 Save. The `DeploymentTargetService` save-time validator confirms the
 config parses; no whitelist check applies to `CI_ACTION` (the bot can
-reach any workflow the provider credentials allow).
+reach any workflow the provider credentials allow). The mock accepts
+*any* `:owner/:repo` path, so whatever your bot's PR happens to live in
+(e.g. `acme/web`) will just work.
 
-### 4. Wire the target into a PR workflow configuration
+### 4. Wire the target into the bot
 
-*System Settings → Workflow Configurations → Full-stack QA* (or any
-configuration that runs `E2ETestWorkflow`) → set **Deployment Target =
-`Preview via mock CI Action`**.
+The deployment target is bound to a **Bot**, not to a workflow
+configuration. Open *Bots → &lt;your bot&gt; → Edit* and set:
+
+| Field             | Value                          |
+|-------------------|--------------------------------|
+| Deployment Target | `Preview via mock CI Action`   |
+
+Then make sure the workflow that should consume the preview is enabled
+for that bot. Open *System Settings → Workflow Configurations* — the page
+lists one row per workflow with a toggle and (if applicable) parameter
+fields. For this scenario tick **E2E Tests** (the row backed by
+`E2ETestWorkflow`); the **PR Review** row can stay on its current
+setting. There is intentionally no deployment-target dropdown on this
+page — every enabled workflow uses the deployment target configured on
+the bot.
 
 ### 5. Trigger a run
 

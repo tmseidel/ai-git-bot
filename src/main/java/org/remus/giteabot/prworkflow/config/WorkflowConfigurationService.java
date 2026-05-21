@@ -99,7 +99,7 @@ public class WorkflowConfigurationService {
             WorkflowSelection copy = new WorkflowSelection();
             copy.setConfiguration(clone);
             copy.setWorkflowKey(original.getWorkflowKey());
-            copy.setParamsJson(original.getParamsJson());
+            copy.replaceParams(original.getParamsMap());
             clonedSelections.add(copy);
         }
         clone.setSelectedWorkflows(clonedSelections);

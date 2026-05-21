@@ -52,7 +52,8 @@ public class SystemPromptAssembler {
     /** Identifies which template family to load. */
     public enum PromptKind {
         ISSUE_AGENT("issue-agent"),
-        WRITER_AGENT("writer-agent");
+        WRITER_AGENT("writer-agent"),
+        E2E_AGENT("e2e-agent");
 
         private final String fileBase;
         PromptKind(String fileBase) { this.fileBase = fileBase; }
@@ -130,6 +131,7 @@ public class SystemPromptAssembler {
         return switch (kind) {
             case ISSUE_AGENT  -> legacyRenderer.renderIssueAgent(toolCatalog, allowedBuiltinTools);
             case WRITER_AGENT -> legacyRenderer.renderWriterAgent(toolCatalog, allowedBuiltinTools);
+            case E2E_AGENT    -> legacyRenderer.renderE2eAgent(toolCatalog, allowedBuiltinTools);
         };
     }
 

@@ -1,9 +1,12 @@
 package org.remus.giteabot.prworkflow.e2e;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PrTestSuiteRepository extends JpaRepository<PrTestSuite, Long> {
@@ -19,4 +22,16 @@ public interface PrTestSuiteRepository extends JpaRepository<PrTestSuite, Long> 
      * that we no longer need the persisted source-of-truth.
      */
     List<PrTestSuite> findByRunId(Long runId);
+
+    /**
+     * Eager-loads the suite together with its {@link PrTestSuite#getCases()}
+     * collection. Required by {@code E2ETestWorkflow.run(...)} and any
+     * other caller that consumes the cases <em>after</em> the surrounding
+     * transaction has closed (typical for the async workflow orchestrator
+     * thread): a plain {@link #findById(Object)} returns a detached entity
+     * whose lazy {@code cases} bag throws {@link
+     * org.hibernate.LazyInitializationException} on first access.
+     */
+    @Query("SELECT s FROM PrTestSuite s LEFT JOIN FETCH s.cases WHERE s.id = :id")
+    Optional<PrTestSuite> findByIdWithCases(@Param("id") Long id);
 }

@@ -129,7 +129,7 @@ public class E2ETestWorkflow implements PrWorkflow {
                 new WorkflowParamField("framework", "Test framework",
                         WorkflowParamField.ParamType.STRING, false,
                         DEFAULT_FRAMEWORK.key(),
-                        "One of: playwright, pytest, k6, cypress (default: playwright)."),
+                        "playwright (default, well-tested) — pytest, k6, cypress are experimental and only smoke-tested."),
                 new WorkflowParamField("maxRetries", "Max retries per test",
                         WorkflowParamField.ParamType.INTEGER, false,
                         String.valueOf(DEFAULT_MAX_RETRIES),
@@ -176,6 +176,16 @@ public class E2ETestWorkflow implements PrWorkflow {
                     "Skipped — bot has no deployment target");
             return WorkflowResult.skipped("No deployment target on bot");
         }
+
+        // Tell the operator the run has started — generation, deployment and
+        // execution can take several minutes, so an immediate ack avoids the
+        // "is it stuck?" question and matches the 👀 reaction posted by
+        // E2eTestSlashCommandHandler for re-run / regenerate slash commands.
+        postPrComment(bot, payload, prNumber,
+                E2eTestSummaryRenderer.renderStarting(prNumber, framework, lifecycleMode));
+        context.appendStep("e2e-start",
+                "Starting E2E run (framework=" + framework.key()
+                        + ", lifecycle=" + lifecycleMode.key() + ")");
 
         context.requireActive("before persisting PrTestSuite");
         PrTestSuite suite = new PrTestSuite();
@@ -241,8 +251,13 @@ public class E2ETestWorkflow implements PrWorkflow {
                                 + ": " + e.getMessage());
             }
             // Re-fetch with the agent's persisted updates so the comment
-            // reflects the final per-case statuses.
-            suite = suiteRepository.findById(suite.getId()).orElse(suite);
+            // reflects the final per-case statuses. Must use the JOIN
+            // FETCH variant: we are on the async orchestrator thread,
+            // outside any active Hibernate session, and the renderer
+            // below touches the lazy `cases` collection — a plain
+            // findById would yield a detached entity and throw
+            // LazyInitializationException.
+            suite = suiteRepository.findByIdWithCases(suite.getId()).orElse(suite);
         }
 
         context.appendStep("e2e-runner", outcome.status() + " — " + outcome.summary());

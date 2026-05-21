@@ -150,7 +150,7 @@ class WorkflowConfigurationServiceTest {
         WorkflowSelection sel = new WorkflowSelection();
         sel.setConfiguration(source);
         sel.setWorkflowKey("review");
-        sel.setParamsJson("{\"foo\":\"bar\"}");
+        sel.replaceParams(java.util.Map.of("foo", "bar"));
         source.setSelectedWorkflows(List.of(sel));
 
         when(configurationRepository.findById(5L)).thenReturn(Optional.of(source));
@@ -163,7 +163,8 @@ class WorkflowConfigurationServiceTest {
         assertFalse(clone.isDefaultEntry());
         assertEquals(1, clone.getSelectedWorkflows().size());
         assertEquals("review", clone.getSelectedWorkflows().get(0).getWorkflowKey());
-        assertEquals("{\"foo\":\"bar\"}", clone.getSelectedWorkflows().get(0).getParamsJson());
+        assertEquals(java.util.Map.of("foo", "bar"),
+                clone.getSelectedWorkflows().get(0).getParamsMap());
         assertEquals(clone, clone.getSelectedWorkflows().get(0).getConfiguration());
     }
 

@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -127,8 +128,9 @@ class PrWorkflowToolExecutorTest {
                 Map.of("path", "../escape.spec.ts", "content", "x"),
                 ctx(null, "https://preview.example.com"));
 
-        assertThat(result).startsWith("ERROR:")
-                .contains("escapes the workspace");
+        // Either guard (allowed-prefix check or workspace-escape check) is
+        // acceptable as long as the write is rejected.
+        assertThat(result).startsWith("ERROR:");
         assertThat(stored).isEmpty();
     }
 
@@ -139,6 +141,31 @@ class PrWorkflowToolExecutorTest {
                 ctx(null, "https://preview.example.com"));
 
         assertThat(result).startsWith("ERROR:").contains("content");
+    }
+
+    @Test
+    void prTestWriteRejectsWritesOutsideTestsDirectory() throws IOException {
+        // The AI must not be able to overwrite the scaffolded
+        // playwright.config.ts / package.json — that has previously
+        // broken every subsequent pr-test-run with cryptic ReferenceError.
+        // Capture the scaffold content first so we can prove it stayed
+        // untouched after the rejected write.
+        Path config = workspace.resolve("playwright.config.ts");
+        String scaffoldedContent = Files.exists(config)
+                ? Files.readString(config) : "<absent>";
+
+        String result = executor.execute("pr-test-write",
+                Map.of("path", "playwright.config.ts",
+                       "content", "export default {};"),
+                ctx(null, "https://preview.example.com"));
+
+        assertThat(result).startsWith("ERROR:")
+                .contains("outside the allowed test directory")
+                .contains("tests/");
+        String afterContent = Files.exists(config)
+                ? Files.readString(config) : "<absent>";
+        assertThat(afterContent).isEqualTo(scaffoldedContent);
+        assertThat(stored).isEmpty();
     }
 
     // ---------------------------------------------------------------- pr-test-run
@@ -161,8 +188,14 @@ class PrWorkflowToolExecutorTest {
                   ]}
                 ]}
                 """;
-        when(processRunner.run(eq(workspace), anyList(), anyLong(), anyInt()))
-                .thenReturn(new WorkspaceProcessRunner.ProcessResult(1, json, 5_000L, false));
+        // Executor now reads playwright-report/report.json from the workspace
+        // (file reporter). Seed the file; stdout is only used as a fallback.
+        Path reportFile = workspace.resolve("playwright-report/report.json");
+        Files.createDirectories(reportFile.getParent());
+        Files.writeString(reportFile, json);
+
+        when(processRunner.run(eq(workspace), anyList(), any(), anyLong(), anyInt()))
+                .thenReturn(new WorkspaceProcessRunner.ProcessResult(1, "(list reporter output)", 5_000L, false));
 
         String result = executor.execute("pr-test-run",
                 Map.of("framework", "playwright", "args", List.of()),
@@ -191,6 +224,64 @@ class PrWorkflowToolExecutorTest {
                 ctx(null, "https://preview.example.com"));
 
         assertThat(result).startsWith("ERROR:").contains("Unknown framework");
+    }
+
+    @Test
+    void prTestRunMatchesTestDirRelativeReportPaths() throws Exception {
+        // Playwright reports `file` paths RELATIVE TO testDir (no `tests/`
+        // prefix), but pr-test-write stores them WITH the `tests/` prefix.
+        // The executor must resolve both forms.
+        seedCase("tests/login.spec.ts", "Login");
+        seedCase("tests/checkout.spec.ts", "Checkout");
+
+        String json = """
+                {"suites":[
+                  {"specs":[
+                    {"file":"login.spec.ts","tests":[{"results":[{"status":"passed","duration":42}]}]},
+                    {"file":"checkout.spec.ts","tests":[{"results":[{"status":"passed","duration":99}]}]}
+                  ]}
+                ]}
+                """;
+        Path reportFile = workspace.resolve("playwright-report/report.json");
+        Files.createDirectories(reportFile.getParent());
+        Files.writeString(reportFile, json);
+
+        when(processRunner.run(eq(workspace), anyList(), any(), anyLong(), anyInt()))
+                .thenReturn(new WorkspaceProcessRunner.ProcessResult(0, "", 100L, false));
+
+        String result = executor.execute("pr-test-run",
+                Map.of("framework", "playwright", "args", List.of()),
+                ctx(null, "https://preview.example.com"));
+
+        assertThat(result).contains("updatedCases=2");
+        assertThat(stored.get("tests/login.spec.ts").getLastStatus()).isEqualTo(PrTestCaseStatus.PASSED);
+        assertThat(stored.get("tests/checkout.spec.ts").getLastStatus()).isEqualTo(PrTestCaseStatus.PASSED);
+    }
+
+    @Test
+    void prTestRunPropagatesPreviewUrlAsBaseUrlEnv() throws Exception {
+        when(processRunner.run(eq(workspace), anyList(), any(), anyLong(), anyInt()))
+                .thenReturn(new WorkspaceProcessRunner.ProcessResult(0, "", 10L, false));
+
+        executor.execute("pr-test-run",
+                Map.of("framework", "playwright", "args", List.of()),
+                ctx(null, "http://localhost:8054/"));
+
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<Map<String, String>> envCap =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<List<String>> cmdCap =
+                org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(processRunner).run(eq(workspace), cmdCap.capture(), envCap.capture(), anyLong(), anyInt());
+
+        assertThat(envCap.getValue())
+                .containsEntry("BASE_URL", "http://localhost:8054")
+                .containsEntry("PLAYWRIGHT_BASE_URL", "http://localhost:8054");
+        // The CLI must NOT pass --reporter=json — that would override the
+        // scaffolded playwright.config.ts file reporter and dump JSON to stdout
+        // mixed with npx warnings, breaking JSON parsing.
+        assertThat(cmdCap.getValue()).doesNotContain("--reporter=json");
     }
 
     // ---------------------------------------------------------------- preview-url / preview-status

@@ -184,6 +184,7 @@ class E2eTestPrCloseHandlerTest {
             return out;
         }
         @Override public Optional<PrTestSuite> findById(Long id) { return Optional.ofNullable(entities.get(id)); }
+        @Override public Optional<PrTestSuite> findByIdWithCases(Long id) { return findById(id); }
         @Override public boolean existsById(Long id) { return entities.containsKey(id); }
         @Override public List<PrTestSuite> findAll() { return new ArrayList<>(entities.values()); }
         @Override public List<PrTestSuite> findAllById(Iterable<Long> ids) { throw new UnsupportedOperationException(); }

@@ -45,23 +45,24 @@ class WorkflowSelectionServiceTest {
     }
 
     @Test
-    void saveSelection_validatesParams_andPersistsCanonicalJson() {
+    void saveSelection_validatesParams_andPersistsAsChildRows() {
         WorkflowConfiguration cfg = configuration();
         when(configurationRepository.findById(1L)).thenReturn(Optional.of(cfg));
         when(selectionRepository.findByConfigurationId(1L)).thenReturn(List.of());
 
         service.saveSelection(1L,
                 List.of("tests-like"),
-                Map.of("tests-like", "{\"command\":\"mvn test\",\"timeoutSeconds\":\"42\"}"));
+                Map.of("tests-like", Map.of("command", "mvn test", "timeoutSeconds", "42")));
 
         ArgumentCaptor<Iterable<WorkflowSelection>> captor = ArgumentCaptor.forClass(Iterable.class);
         verify(selectionRepository).deleteByConfigurationId(1L);
         verify(selectionRepository).saveAll(captor.capture());
         WorkflowSelection persisted = captor.getValue().iterator().next();
         assertEquals("tests-like", persisted.getWorkflowKey());
-        // canonical form: keys serialized in field order, timeoutSeconds coerced to number
-        assertTrue(persisted.getParamsJson().contains("\"command\":\"mvn test\""));
-        assertTrue(persisted.getParamsJson().contains("\"timeoutSeconds\":42"));
+        // canonical form: typed coercion (timeoutSeconds parsed and re-serialised as "42")
+        Map<String, String> params = persisted.getParamsMap();
+        assertEquals("mvn test", params.get("command"));
+        assertEquals("42", params.get("timeoutSeconds"));
     }
 
     @Test
@@ -73,7 +74,7 @@ class WorkflowSelectionServiceTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                 () -> service.saveSelection(1L,
                         List.of("tests-like"),
-                        Map.of("tests-like", "{\"timeoutSeconds\":\"5\"}")));
+                        Map.of("tests-like", Map.of("timeoutSeconds", "5"))));
         assertTrue(e.getMessage().contains("Command"));
         verify(selectionRepository, never()).saveAll(any());
     }
@@ -90,7 +91,7 @@ class WorkflowSelectionServiceTest {
         ArgumentCaptor<WorkflowSelection> captor = ArgumentCaptor.forClass(WorkflowSelection.class);
         verify(selectionRepository).save(captor.capture());
         assertEquals("review-like", captor.getValue().getWorkflowKey());
-        assertEquals("{}", captor.getValue().getParamsJson());
+        assertTrue(captor.getValue().getParamsMap().isEmpty());
     }
 
     @Test
@@ -103,10 +104,10 @@ class WorkflowSelectionServiceTest {
     }
 
     @Test
-    void resolveParams_parsesPersistedJsonIntoTypedMap() {
+    void resolveParams_typedAccordingToSchema() {
         WorkflowSelection sel = new WorkflowSelection();
         sel.setWorkflowKey("tests-like");
-        sel.setParamsJson("{\"command\":\"mvn\",\"timeoutSeconds\":42}");
+        sel.replaceParams(Map.of("command", "mvn", "timeoutSeconds", "42"));
         when(selectionRepository.findByConfigurationIdAndWorkflowKey(1L, "tests-like"))
                 .thenReturn(Optional.of(sel));
 
@@ -121,7 +122,6 @@ class WorkflowSelectionServiceTest {
         when(configurationRepository.findById(1L)).thenReturn(Optional.of(cfg));
         WorkflowSelection orphan = new WorkflowSelection();
         orphan.setWorkflowKey("ghost");
-        orphan.setParamsJson("{}");
         when(selectionRepository.findByConfigurationId(1L)).thenReturn(List.of(orphan));
 
         List<WorkflowSelectionRow> rows = service.loadAvailableWorkflows(1L);
@@ -141,7 +141,6 @@ class WorkflowSelectionServiceTest {
     private WorkflowSelection selection(String key) {
         WorkflowSelection s = new WorkflowSelection();
         s.setWorkflowKey(key);
-        s.setParamsJson("{}");
         return s;
     }
 
@@ -168,5 +167,3 @@ class WorkflowSelectionServiceTest {
         }
     }
 }
-
-

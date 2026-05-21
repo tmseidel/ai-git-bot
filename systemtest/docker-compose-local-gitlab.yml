@@ -18,6 +18,27 @@
 #    http://host.docker.internal:8080/api/webhook/{your-bot-webhook-secret}
 #    (note: http:// with a single colon, and /webhook/ is singular)
 # 6. Create a merge request to trigger the bot
+#
+# GitLab CI (CI_ACTION deployment strategy):
+#   GitLab CE has CI/CD enabled out of the box, but pipelines stay queued
+#   forever unless at least one runner is registered. This compose file
+#   ships a `gitlab-runner` sidecar; register it ONCE after GitLab is
+#   reachable:
+#     1. In the UI: Admin Area → CI/CD → Runners → "New instance runner"
+#        (pick a tag like `docker`) and copy the registration token.
+#     2. Then run:
+#          docker compose -f systemtest/docker-compose-local-gitlab.yml \
+#            exec gitlab-runner gitlab-runner register \
+#              --non-interactive \
+#              --url http://gitlab.local:8929 \
+#              --token <TOKEN> \
+#              --executor docker \
+#              --docker-image alpine:3.20 \
+#              --docker-network-mode gitlab_gitlab
+#     3. The runner now picks up jobs; the bot's CI_ACTION dispatches
+#        (pipeline trigger tokens) actually execute.
+#
+#   See doc/PR_WORKFLOWS_CI_ACTIONS.md § "GitLab CI" for the full recipe.
 
 services:
   gitlab:
@@ -56,6 +77,27 @@ services:
       start_period: 300s
       retries: 10
 
+  # GitLab Runner — executes the pipelines triggered by the bot's
+  # CI_ACTION deployment strategy. Has to be registered ONCE after
+  # GitLab is up (see header comment); the registration is persisted
+  # in the `gitlab_runner_config` volume.
+  gitlab-runner:
+    image: gitlab/gitlab-runner:v17.5.2
+    container_name: gitlab-runner
+    restart: unless-stopped
+    depends_on:
+      - gitlab
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "gitlab.local:host-gateway"
+    networks:
+      - gitlab
+    volumes:
+      - gitlab_runner_config:/etc/gitlab-runner
+      # Runner spawns one container per job — share the host Docker
+      # socket so those job containers run on the same engine.
+      - /var/run/docker.sock:/var/run/docker.sock
+
 networks:
   gitlab:
     driver: bridge
@@ -64,3 +106,4 @@ volumes:
   gitlab_config:
   gitlab_logs:
   gitlab_data:
+  gitlab_runner_config:

@@ -120,6 +120,23 @@ public class PrWorkflowToolExecutor {
         String content = requireString(args, "content");
         String title = optString(args, "title");
 
+        // Only allow writes under the framework's tests directory. The
+        // scaffolded config files (playwright.config.ts, cypress.config.ts,
+        // package.json, …) must never be overwritten by the AI — corrupting
+        // them silently breaks every subsequent pr-test-run with cryptic
+        // errors (e.g. `ReferenceError: baseURL is not defined`).
+        String allowedPrefix = switch (ctx.framework()) {
+            case PLAYWRIGHT -> "tests/";
+            case CYPRESS    -> "cypress/e2e/";
+            case PYTEST     -> "tests/";
+            case K6         -> "scenarios/";
+        };
+        String normalized = path.replace('\\', '/');
+        if (!normalized.startsWith(allowedPrefix)) {
+            return "ERROR: path '" + path + "' is outside the allowed test directory '"
+                    + allowedPrefix + "' — the AI may only write test files, not configs";
+        }
+
         Path target = workspaceManager.resolveInsideWorkspace(ctx.workspace(), path);
         try {
             Files.createDirectories(target.getParent());
@@ -170,10 +187,48 @@ public class PrWorkflowToolExecutor {
         List<String> rawArgs = stringList(args.get("args"));
         List<String> command = buildCommand(framework, rawArgs);
 
+        // Propagate the deployment preview URL to the test process so browser
+        // tests can reach the right origin (Playwright config reads BASE_URL).
+        // We propagate via THREE channels — if any of them fails (env-var
+        // stripping by intermediate shells, sandboxing, …) the others still
+        // carry the value so tests never silently target the wrong origin.
+        Map<String, String> extraEnv = new LinkedHashMap<>();
+        if (ctx.previewUrl() != null && !ctx.previewUrl().isBlank()) {
+            // Strip trailing slash — many AI-authored tests do
+            // `await page.goto(`${BASE_URL}/`)` which would otherwise
+            // produce a double-slash path that some servers (Spring Boot
+            // static resources, nginx without merge_slashes) do not
+            // normalise and answer with a 404.
+            String url = ctx.previewUrl();
+            while (url.endsWith("/")) {
+                url = url.substring(0, url.length() - 1);
+            }
+            extraEnv.put("BASE_URL", url);
+            extraEnv.put("PLAYWRIGHT_BASE_URL", url);
+            // Belt-and-suspenders: some test setups load a workspace-local
+            // .env via dotenv; writing one guarantees the URL is reachable
+            // even if the JVM-to-Node env propagation breaks for any reason.
+            try {
+                Path envFile = ctx.workspace().resolve(".env");
+                Files.writeString(envFile,
+                        "BASE_URL=" + url + System.lineSeparator()
+                                + "PLAYWRIGHT_BASE_URL=" + url + System.lineSeparator(),
+                        StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                log.warn("Failed to write .env into {}: {}", ctx.workspace(), e.getMessage());
+            }
+            log.info("pr-test-run: framework={} BASE_URL={} workspace={}",
+                    framework.key(), url, ctx.workspace());
+        } else {
+            log.warn("pr-test-run: framework={} has no previewUrl on context — "
+                    + "tests will fail with a clear BASE_URL error", framework.key());
+        }
+
         WorkspaceProcessRunner.ProcessResult result;
         try {
-            result = processRunner.run(ctx.workspace(), command,
+            result = processRunner.run(ctx.workspace(), command, extraEnv,
                     DEFAULT_RUN_TIMEOUT_MS, DEFAULT_RUN_OUTPUT_BYTES);
+            log.debug("Result: ExitCode: {}, Combined output: {}",result.exitCode(),result.combinedOutput());
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to execute " + framework.key() + " runner: " + e.getMessage(), e);
@@ -205,7 +260,10 @@ public class PrWorkflowToolExecutor {
                 cmd.add("--yes");
                 cmd.add("playwright");
                 cmd.add("test");
-                cmd.add("--reporter=json");
+                // Reporters are configured in the scaffolded playwright.config.ts
+                // (file-based JSON report + list). Adding --reporter=json here
+                // would override the config and redirect the report to stdout,
+                // mixed with npx warnings + ANSI codes — breaking JSON parsing.
             }
             case CYPRESS -> {
                 cmd.add("npx");
@@ -227,22 +285,60 @@ public class PrWorkflowToolExecutor {
     }
 
     private int updatePlaywrightCases(PrWorkflowToolContext ctx, WorkspaceProcessRunner.ProcessResult result) {
-        // Playwright with the JSON reporter prints the report as a single JSON
-        // object to stdout. We extract the first balanced { ... } block.
-        String json = extractFirstJsonObject(result.combinedOutput());
+        // Playwright with the scaffolded config writes the JSON report to
+        // playwright-report/report.json (file reporter). We read that file
+        // instead of trying to extract JSON from stdout, which is contaminated
+        // by npx warnings, ANSI escape sequences and the list reporter.
+        String json = null;
+        Path reportFile = ctx.workspace().resolve("playwright-report").resolve("report.json");
+        if (Files.isRegularFile(reportFile)) {
+            try {
+                json = Files.readString(reportFile, StandardCharsets.UTF_8);
+                log.debug("Read Playwright JSON report from {} ({} chars)",
+                        reportFile, json.length());
+            } catch (IOException e) {
+                log.warn("Failed to read Playwright JSON report at {}: {}",
+                        reportFile, e.getMessage());
+            }
+        } else {
+            log.debug("Playwright JSON report not found at {} — falling back to stdout",
+                    reportFile);
+        }
         if (json == null) {
+            // Fallback for older scaffolds / custom configs that still emit
+            // the JSON report to stdout.
+            json = extractFirstJsonObject(result.combinedOutput());
+            if (json != null) {
+                log.debug("Extracted Playwright JSON report from stdout ({} chars)",
+                        json.length());
+            }
+        }
+        if (json == null) {
+            log.warn("No Playwright JSON report available — per-case PrTestCase rows "
+                    + "will stay PENDING. Check that the scaffolded playwright.config.ts "
+                    + "is unchanged in workspace {}", ctx.workspace());
             return 0;
         }
         try {
             JsonNode root = JSON.readTree(json);
             JsonNode suites = root.get("suites");
             if (suites == null || !suites.isArray()) {
+                log.warn("Playwright JSON report has no 'suites' array — cannot update cases");
                 return 0;
             }
             Instant now = Instant.now();
             int updated = 0;
+            List<String> seenSpecFiles = new ArrayList<>();
             for (JsonNode suite : suites) {
-                updated += walkPlaywrightSuite(ctx, suite, now);
+                updated += walkPlaywrightSuite(ctx, suite, now, seenSpecFiles);
+            }
+            if (updated == 0 && !seenSpecFiles.isEmpty()) {
+                log.warn("Playwright report referenced spec files {} but none matched a "
+                        + "PrTestCase for suite id={} — paths in DB likely differ "
+                        + "(check pr-test-write 'path' arg vs report 'file' field)",
+                        seenSpecFiles, ctx.suite().getId());
+            } else if (updated > 0) {
+                log.debug("Updated {} PrTestCase rows from Playwright report", updated);
             }
             return updated;
         } catch (Exception e) {
@@ -251,36 +347,89 @@ public class PrWorkflowToolExecutor {
         }
     }
 
-    private int walkPlaywrightSuite(PrWorkflowToolContext ctx, JsonNode suite, Instant now) {
+    private int walkPlaywrightSuite(PrWorkflowToolContext ctx, JsonNode suite, Instant now,
+                                    List<String> seenSpecFiles) {
         int updated = 0;
-        JsonNode file = suite.get("file");
+        JsonNode suiteFile = suite.get("file");
         JsonNode specs = suite.get("specs");
-        if (specs != null && specs.isArray() && file != null) {
-            String relativePath = file.asString();
-            Optional<PrTestCase> caseOpt = caseRepository.findBySuiteAndPath(ctx.suite(), relativePath);
-            if (caseOpt.isPresent()) {
-                PrTestCase pc = caseOpt.get();
-                PlaywrightSpecOutcome rollup = rollupSpecs(specs);
-                pc.setLastStatus(rollup.status());
-                pc.setLastRunAt(now);
-                pc.setLastDurationMs(rollup.durationMs());
-                pc.setLastLog(truncate(rollup.log(), 8 * 1024));
-                caseRepository.save(pc);
-                updated++;
+        if (specs != null && specs.isArray()) {
+            // Group specs by their reported file path. In modern Playwright
+            // reports the `file` field is set on every spec; for nested
+            // describe blocks specs may not share their suite's file.
+            Map<String, List<JsonNode>> specsByFile = new LinkedHashMap<>();
+            for (JsonNode spec : specs) {
+                JsonNode specFile = spec.get("file");
+                String file = specFile != null && !specFile.isNull()
+                        ? specFile.asString()
+                        : (suiteFile != null && !suiteFile.isNull() ? suiteFile.asString() : null);
+                if (file == null || file.isBlank()) continue;
+                specsByFile.computeIfAbsent(file, k -> new ArrayList<>()).add(spec);
+            }
+            for (Map.Entry<String, List<JsonNode>> e : specsByFile.entrySet()) {
+                String relativePath = normalizeReportPath(e.getKey());
+                if (!seenSpecFiles.contains(relativePath)) {
+                    seenSpecFiles.add(relativePath);
+                }
+                Optional<PrTestCase> caseOpt = findCaseByReportPath(ctx, relativePath);
+                if (caseOpt.isPresent()) {
+                    PrTestCase pc = caseOpt.get();
+                    PlaywrightSpecOutcome rollup = rollupSpecs(e.getValue());
+                    pc.setLastStatus(rollup.status());
+                    pc.setLastRunAt(now);
+                    pc.setLastDurationMs(rollup.durationMs());
+                    pc.setLastLog(truncate(rollup.log(), 8 * 1024));
+                    caseRepository.save(pc);
+                    updated++;
+                }
             }
         }
         JsonNode nested = suite.get("suites");
         if (nested != null && nested.isArray()) {
             for (JsonNode child : nested) {
-                updated += walkPlaywrightSuite(ctx, child, now);
+                updated += walkPlaywrightSuite(ctx, child, now, seenSpecFiles);
             }
         }
         return updated;
     }
 
+    /** Normalises Playwright report paths (Windows backslashes, leading "./" or "/") to match what pr-test-write stored. */
+    private static String normalizeReportPath(String reported) {
+        if (reported == null) return null;
+        String p = reported.replace('\\', '/');
+        while (p.startsWith("./")) p = p.substring(2);
+        while (p.startsWith("/")) p = p.substring(1);
+        return p;
+    }
+
+    /**
+     * Looks up a {@link PrTestCase} for a path Playwright reports. Playwright
+     * reports spec files relative to its {@code testDir} (e.g.
+     * {@code "dark-mode.spec.ts"}), but {@code pr-test-write} stores them
+     * with the framework's directory prefix (e.g. {@code "tests/dark-mode.spec.ts"}).
+     * We try the as-reported path first, then variants with the conventional
+     * prefixes prepended, so the executor matches regardless of whether the
+     * report uses rootDir-relative or testDir-relative paths.
+     */
+    private Optional<PrTestCase> findCaseByReportPath(PrWorkflowToolContext ctx, String reported) {
+        if (reported == null) return Optional.empty();
+        Optional<PrTestCase> direct = caseRepository.findBySuiteAndPath(ctx.suite(), reported);
+        if (direct.isPresent()) return direct;
+        String[] candidates = switch (ctx.framework()) {
+            case PLAYWRIGHT -> new String[] { "tests/" + reported, "e2e/" + reported };
+            case CYPRESS    -> new String[] { "cypress/e2e/" + reported, "cypress/" + reported };
+            case PYTEST     -> new String[] { "tests/" + reported };
+            case K6         -> new String[] { "scenarios/" + reported };
+        };
+        for (String candidate : candidates) {
+            Optional<PrTestCase> hit = caseRepository.findBySuiteAndPath(ctx.suite(), candidate);
+            if (hit.isPresent()) return hit;
+        }
+        return Optional.empty();
+    }
+
     private record PlaywrightSpecOutcome(PrTestCaseStatus status, long durationMs, String log) { }
 
-    private PlaywrightSpecOutcome rollupSpecs(JsonNode specs) {
+    private PlaywrightSpecOutcome rollupSpecs(Iterable<JsonNode> specs) {
         long totalDuration = 0;
         boolean anyFail = false;
         boolean anyFlaky = false;

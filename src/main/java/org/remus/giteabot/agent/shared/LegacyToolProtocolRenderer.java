@@ -152,6 +152,60 @@ public final class LegacyToolProtocolRenderer {
         return sb.toString();
     }
 
+    /**
+     * Renders the E2E-agent legacy protocol. Used by the PR-workflow agents
+     * (planner/author/runner) that operate on the sandboxed PR test
+     * workspace and dispatch {@link ToolCatalog.Role#E2E} tools only.
+     *
+     * <p>Unlike the coding/writer agents there is no validation/file/context
+     * split — every E2E tool is of kind {@code PR_WORKFLOW}. The whitelist
+     * passed in by the caller (the agent's per-role allowed tool set, e.g.
+     * just {@code pr-test-write} for the author, the four runner tools for
+     * the runner) determines which tools end up in the prompt, so a single
+     * renderer covers every E2E agent.</p>
+     */
+    public String renderE2eAgent(ToolCatalog catalog, Set<String> allowed) {
+        List<String> tools = catalog.prWorkflowToolNames(allowed);
+
+        StringBuilder sb = new StringBuilder(2048);
+
+        // ---- Output format -----------------------------------------------
+        sb.append("## Output Format\n")
+          .append("Respond with a JSON object:\n")
+          .append("```json\n{\n")
+          .append("  \"summary\": \"Brief description of what you are about to do\",\n")
+          .append("  \"runTools\": [\n");
+        if (!tools.isEmpty()) {
+            sb.append("    ").append(catalog.legacyUsageExample(tools.getFirst())).append("\n");
+        }
+        sb.append("  ]\n}\n```\n");
+        sb.append("Return `\"runTools\": []` together with a non-empty `summary` only when you are ")
+          .append("finished. The bot dispatches every entry in `runTools` and replies with the results ")
+          .append("so you can continue the dialogue.\n\n");
+
+        // ---- Tools enumeration -------------------------------------------
+        if (!tools.isEmpty()) {
+            sb.append("## Available Tools\n")
+              .append("Use these in `runTools`:\n");
+            appendBullets(sb, catalog, ToolCatalog.Role.E2E, tools);
+            sb.append("\n");
+        }
+
+        // ---- Tool IDs (same convention as coding/writer agents) ----------
+        sb.append("## Tool IDs\n")
+          .append("**Every entry in `runTools` must have a unique `id` field** ")
+          .append("(use UUID v4 format, e.g. `\"a3f1b2c4-1234-5678-abcd-ef0123456789\"`). ")
+          .append("Generate a fresh random UUID for each entry — do not reuse or sequentially increment IDs. ")
+          .append("The bot returns results keyed by this ID.\n\n");
+
+        sb.append("## Rules\n")
+          .append("- Call only tools listed above. Calling anything else is rejected.\n")
+          .append("- Do NOT narrate tool calls as plain text (no `<function_calls>`, no `<tool_call>{...}`, ")
+          .append("no `` ```json {\"name\": ...} `` ``` blocks). They dispatch zero tools.\n")
+          .append("- Never fabricate tool results in your text — wait for the bot's actual response.\n");
+        return sb.toString();
+    }
+
     /** Renders the writer-agent legacy protocol. */
     public String renderWriterAgent(ToolCatalog catalog, Set<String> allowed) {
         List<String> repoTools    = catalog.writerRepositoryToolNames(allowed);

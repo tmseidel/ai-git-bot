@@ -1,13 +1,8 @@
 package org.remus.giteabot.prworkflow.config;
 
-import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.prworkflow.WorkflowParamField;
 import org.remus.giteabot.prworkflow.WorkflowParamsSchema;
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.node.JsonNodeFactory;
-import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -15,21 +10,23 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Validates and normalises the {@code params_json} payload stored on a
- * {@link WorkflowSelection} against the
+ * Validates and normalises workflow parameter maps against the
  * {@link WorkflowParamsSchema} declared by the corresponding
  * {@link org.remus.giteabot.prworkflow.PrWorkflow}.
  *
  * <p>Behaviour:</p>
  * <ul>
- *     <li>Missing keys for non-required fields are filled in from
+ *     <li>Values are kept as plain {@link String}s — they are persisted as
+ *     plain strings in {@code workflow_selection_params.value} and only
+ *     coerced to typed Java objects on read via {@link #typed(Map, WorkflowParamsSchema)}.</li>
+ *     <li>Missing or blank values for non-required fields are filled in from
  *     {@link WorkflowParamField#defaultValue()} when present, otherwise
  *     dropped.</li>
  *     <li>Required fields must be present and non-blank; otherwise an
  *     {@link IllegalArgumentException} with a human-friendly message is
- *     thrown.</li>
- *     <li>Values are type-coerced (e.g. {@code "42"} → JSON number) so the
- *     persisted JSON is canonical and consumers can rely on typed access.</li>
+ *     thrown (errors for all fields are aggregated into a single exception).</li>
+ *     <li>Type-checked values are normalised (e.g. {@code "On"} → {@code "true"},
+ *     {@code "42 "} → {@code "42"}) so the persisted form is canonical.</li>
  *     <li>Unknown keys (not declared in the schema) are silently dropped — the
  *     UI never submits them, but old rows after a workflow downgrade should
  *     not break.</li>
@@ -38,136 +35,107 @@ import java.util.Map;
 @Component
 public class WorkflowParamsValidator {
 
-    private static final ObjectMapper MAPPER = AgentJackson.mapper();
-
     /**
-     * @param paramsJson raw JSON object (may be {@code null}, blank, or a
-     *                   non-object — treated as empty input)
-     * @param schema     descriptor of allowed/required fields
-     * @return canonical JSON representation suitable for persistence
-     * @throws IllegalArgumentException when validation fails
+     * Validates the given raw form values against the schema and returns a
+     * canonical, ordered map suitable for persistence on
+     * {@link WorkflowSelection}. Empty result when the schema declares no
+     * fields.
+     *
+     * @throws IllegalArgumentException when validation fails (aggregated message)
      */
-    public String validateAndCanonicalise(String paramsJson, WorkflowParamsSchema schema) {
-        JsonNode parsed = parse(paramsJson);
-        ObjectNode normalised = JsonNodeFactory.instance.objectNode();
+    public Map<String, String> validate(Map<String, String> raw, WorkflowParamsSchema schema) {
+        Map<String, String> normalised = new LinkedHashMap<>();
         List<String> errors = new ArrayList<>();
-
         for (WorkflowParamField field : schema.fields()) {
-            JsonNode value = parsed != null && parsed.isObject() ? parsed.get(field.name()) : null;
-            if (value == null || value.isNull() || (value.isString() && value.asString().isBlank())) {
+            String value = raw == null ? null : raw.get(field.name());
+            if (value == null || value.isBlank()) {
                 if (field.defaultValue() != null && !field.defaultValue().isBlank()) {
-                    value = coerce(field.defaultValue(), field, errors);
+                    value = field.defaultValue();
                 } else if (field.required()) {
                     errors.add("Parameter '" + field.label() + "' is required");
                     continue;
                 } else {
                     continue;
                 }
-            } else {
-                value = coerce(value, field, errors);
             }
-            if (value != null) {
-                normalised.set(field.name(), value);
+            String coerced = coerce(value.trim(), field, errors);
+            if (coerced != null) {
+                normalised.put(field.name(), coerced);
             }
         }
-
         if (!errors.isEmpty()) {
             throw new IllegalArgumentException(String.join("; ", errors));
         }
-        try {
-            return MAPPER.writeValueAsString(normalised);
-        } catch (RuntimeException e) {
-            throw new IllegalStateException("Failed to serialise workflow params", e);
-        }
+        return normalised;
     }
 
     /**
-     * Convenience for callers that already hold a typed map.
+     * Type-coerces a persisted {@code name -> String} parameter map into a
+     * runtime {@code name -> typed Object} map according to the schema. Unknown
+     * keys are passed through as-is so older payloads after a workflow
+     * downgrade do not break consumers.
      */
-    public String validateAndCanonicalise(Map<String, ?> params, WorkflowParamsSchema schema) {
-        ObjectNode input = JsonNodeFactory.instance.objectNode();
-        if (params != null) {
-            for (Map.Entry<String, ?> entry : params.entrySet()) {
-                Object value = entry.getValue();
-                if (value == null) {
-                    input.putNull(entry.getKey());
-                } else {
-                    input.put(entry.getKey(), value.toString());
+    public Map<String, Object> typed(Map<String, String> raw, WorkflowParamsSchema schema) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (raw == null || raw.isEmpty()) {
+            return out;
+        }
+        Map<String, WorkflowParamField> byName = new LinkedHashMap<>();
+        if (schema != null) {
+            for (WorkflowParamField f : schema.fields()) {
+                byName.put(f.name(), f);
+            }
+        }
+        for (Map.Entry<String, String> entry : raw.entrySet()) {
+            WorkflowParamField field = byName.get(entry.getKey());
+            String v = entry.getValue();
+            if (field == null) {
+                out.put(entry.getKey(), v);
+                continue;
+            }
+            out.put(entry.getKey(), toTyped(v, field));
+        }
+        return out;
+    }
+
+    /**
+     * Returns a copy of {@code raw} with any value mapped to a
+     * {@link WorkflowParamField.ParamType#SECRET} field replaced by a fixed
+     * mask. Used by the bot Details modal.
+     */
+    public Map<String, Object> maskSecrets(Map<String, String> raw, WorkflowParamsSchema schema) {
+        Map<String, Object> masked = new LinkedHashMap<>(typed(raw, schema));
+        if (schema == null) {
+            return masked;
+        }
+        for (WorkflowParamField field : schema.fields()) {
+            if (field.type() == WorkflowParamField.ParamType.SECRET && masked.containsKey(field.name())) {
+                Object current = masked.get(field.name());
+                if (current != null && !current.toString().isBlank()) {
+                    masked.put(field.name(), "********");
                 }
             }
         }
-        return validateAndCanonicalise(input.toString(), schema);
+        return masked;
     }
 
-    /**
-     * Parses a persisted params JSON back into a typed map suitable for
-     * passing to a workflow at runtime. Returns an empty map when the
-     * payload is null/blank.
-     */
-    public Map<String, Object> parseToMap(String paramsJson) {
-        JsonNode parsed = parse(paramsJson);
-        Map<String, Object> result = new LinkedHashMap<>();
-        if (parsed == null || !parsed.isObject()) {
-            return result;
-        }
-        for (Map.Entry<String, JsonNode> entry : parsed.properties()) {
-            JsonNode v = entry.getValue();
-            if (v == null || v.isNull()) {
-                result.put(entry.getKey(), null);
-            } else if (v.isBoolean()) {
-                result.put(entry.getKey(), v.asBoolean());
-            } else if (v.isInt() || v.isLong()) {
-                result.put(entry.getKey(), v.asLong());
-            } else if (v.isNumber()) {
-                result.put(entry.getKey(), v.asDouble());
-            } else {
-                result.put(entry.getKey(), v.asString());
-            }
-        }
-        return result;
-    }
-
-    private JsonNode parse(String paramsJson) {
-        if (paramsJson == null || paramsJson.isBlank()) {
-            return null;
-        }
-        try {
-            return MAPPER.readTree(paramsJson);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Invalid JSON for workflow params: " + e.getMessage());
-        }
-    }
-
-    private JsonNode coerce(Object raw, WorkflowParamField field, List<String> errors) {
-        String text = raw instanceof JsonNode node ? (node.isString() ? node.asString() : node.toString())
-                : raw == null ? null : raw.toString();
-        if (raw instanceof JsonNode node && !node.isString()) {
-            // Already typed (boolean / number) — convert via stringification then re-parse below.
-            text = node.asString();
-        }
-        if (text == null) {
-            if (field.required()) {
-                errors.add("Parameter '" + field.label() + "' is required");
-            }
-            return null;
-        }
-        String trimmed = text.trim();
+    private String coerce(String text, WorkflowParamField field, List<String> errors) {
         return switch (field.type()) {
-            case STRING, TEXT, SECRET -> JsonNodeFactory.instance.stringNode(trimmed);
+            case STRING, TEXT, SECRET -> text;
             case BOOLEAN -> {
-                if (trimmed.equalsIgnoreCase("true") || trimmed.equals("1") || trimmed.equalsIgnoreCase("on")) {
-                    yield JsonNodeFactory.instance.booleanNode(true);
+                if (text.equalsIgnoreCase("true") || text.equals("1") || text.equalsIgnoreCase("on")) {
+                    yield "true";
                 }
-                if (trimmed.equalsIgnoreCase("false") || trimmed.equals("0") || trimmed.equalsIgnoreCase("off")
-                        || trimmed.isEmpty()) {
-                    yield JsonNodeFactory.instance.booleanNode(false);
+                if (text.equalsIgnoreCase("false") || text.equals("0") || text.equalsIgnoreCase("off")
+                        || text.isEmpty()) {
+                    yield "false";
                 }
                 errors.add("Parameter '" + field.label() + "' must be a boolean (true/false)");
                 yield null;
             }
             case INTEGER -> {
                 try {
-                    yield JsonNodeFactory.instance.numberNode(Long.parseLong(trimmed));
+                    yield Long.toString(Long.parseLong(text));
                 } catch (NumberFormatException nfe) {
                     errors.add("Parameter '" + field.label() + "' must be an integer");
                     yield null;
@@ -175,6 +143,21 @@ public class WorkflowParamsValidator {
             }
         };
     }
+
+    private Object toTyped(String value, WorkflowParamField field) {
+        if (value == null) {
+            return null;
+        }
+        return switch (field.type()) {
+            case STRING, TEXT, SECRET -> value;
+            case BOOLEAN -> value.equalsIgnoreCase("true") || value.equals("1") || value.equalsIgnoreCase("on");
+            case INTEGER -> {
+                try {
+                    yield Long.parseLong(value.trim());
+                } catch (NumberFormatException nfe) {
+                    yield value;
+                }
+            }
+        };
+    }
 }
-
-

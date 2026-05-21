@@ -25,8 +25,8 @@ WHERE NOT EXISTS (
     SELECT 1 FROM workflow_configurations WHERE default_entry = TRUE
 );
 
-INSERT INTO workflow_selections (workflow_configuration_id, workflow_key, params_json)
-SELECT c.id, 'review', NULL
+INSERT INTO workflow_selections (workflow_configuration_id, workflow_key)
+SELECT c.id, 'review'
 FROM workflow_configurations c
 WHERE c.default_entry = TRUE
   AND NOT EXISTS (

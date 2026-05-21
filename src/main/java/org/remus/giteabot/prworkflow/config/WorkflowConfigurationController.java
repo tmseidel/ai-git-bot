@@ -110,7 +110,13 @@ public class WorkflowConfigurationController {
                                         @RequestParam Map<String, String> allParams,
                                         RedirectAttributes redirectAttributes) {
         try {
-            Map<String, String> workflowParams = extractWorkflowParams(allParams, selectedWorkflowKeys);
+            Map<String, Map<String, String>> workflowParams =
+                    extractWorkflowParams(allParams, selectedWorkflowKeys);
+            if (log.isDebugEnabled()) {
+                log.debug("saveWorkflowSelection id={} selectedKeys={} rawParamKeys={} workflowParams={}",
+                        id, selectedWorkflowKeys,
+                        allParams == null ? null : allParams.keySet(), workflowParams);
+            }
             selectionService.saveSelection(id, selectedWorkflowKeys, workflowParams);
             redirectAttributes.addFlashAttribute("success", "Workflow selection saved successfully");
             return "redirect:/system-settings";
@@ -149,7 +155,7 @@ public class WorkflowConfigurationController {
                     out.put("workflowKey", row.workflowKey());
                     out.put("displayName", row.displayName());
                     out.put("category", row.category());
-                    out.put("params", selectionService.maskSecrets(row.workflowKey(), row.paramsJson()));
+                    out.put("params", selectionService.maskSecrets(row.workflowKey(), row.persistedParams()));
                     return out;
                 })
                 .toList();
@@ -157,61 +163,48 @@ public class WorkflowConfigurationController {
     }
 
     /**
-     * Extracts the {@code params__<workflowKey>__<fieldName>} request
+     * Extracts the {@code params.<workflowKey>.<fieldName>} request
      * parameters submitted by the workflow-selection form into a
-     * {@code workflowKey -> {fieldName -> value}} map serialised as a per
-     * workflow JSON snippet ({@code "{\"field\":\"value\",...}"}) — the
-     * {@link WorkflowSelectionService} validates them against each
-     * workflow's {@link org.remus.giteabot.prworkflow.WorkflowParamsSchema}.
+     * {@code workflowKey -> {fieldName -> value}} map — the
+     * {@link WorkflowSelectionService} validates each per-workflow map
+     * against the workflow's
+     * {@link org.remus.giteabot.prworkflow.WorkflowParamsSchema} and
+     * persists the entries as {@code workflow_selection_params} rows.
+     *
+     * <p>The dot separator is used (rather than the historic
+     * {@code __} double-underscore) because Thymeleaf's expression
+     * preprocessing eats any {@code __...__} pair from attribute values,
+     * which silently mangled the field names so the controller never
+     * received them.</p>
      */
-    private Map<String, String> extractWorkflowParams(Map<String, String> allParams,
-                                                     List<String> selectedKeys) {
+    private Map<String, Map<String, String>> extractWorkflowParams(Map<String, String> allParams,
+                                                                   List<String> selectedKeys) {
         Map<String, Map<String, String>> grouped = new LinkedHashMap<>();
         if (allParams != null) {
             for (Map.Entry<String, String> entry : allParams.entrySet()) {
                 String key = entry.getKey();
-                if (!key.startsWith("params__")) {
+                if (!key.startsWith("params.")) {
                     continue;
                 }
-                String rest = key.substring("params__".length());
-                int sep = rest.indexOf("__");
+                String rest = key.substring("params.".length());
+                int sep = rest.indexOf('.');
                 if (sep < 0) {
                     continue;
                 }
                 String workflowKey = rest.substring(0, sep);
-                String fieldName = rest.substring(sep + 2);
+                String fieldName = rest.substring(sep + 1);
                 grouped.computeIfAbsent(workflowKey, k -> new LinkedHashMap<>())
                         .put(fieldName, entry.getValue());
             }
         }
-        Map<String, String> result = new LinkedHashMap<>();
+        Map<String, Map<String, String>> result = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, String>> entry : grouped.entrySet()) {
             if (selectedKeys != null && !selectedKeys.contains(entry.getKey())) {
                 continue;
             }
-            result.put(entry.getKey(), toJson(entry.getValue()));
+            result.put(entry.getKey(), entry.getValue());
         }
         return result;
-    }
-
-    private String toJson(Map<String, String> fields) {
-        StringBuilder sb = new StringBuilder("{");
-        boolean first = true;
-        for (Map.Entry<String, String> e : fields.entrySet()) {
-            if (!first) {
-                sb.append(',');
-            }
-            first = false;
-            sb.append('"').append(escape(e.getKey())).append('"').append(':')
-                    .append('"').append(escape(e.getValue() == null ? "" : e.getValue())).append('"');
-        }
-        sb.append('}');
-        return sb.toString();
-    }
-
-    private String escape(String s) {
-        return s.replace("\\", "\\\\").replace("\"", "\\\"")
-                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 }
 

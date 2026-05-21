@@ -1,6 +1,8 @@
 package org.remus.giteabot.prworkflow.e2e.agents;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.loop.ToolingMode;
+import org.remus.giteabot.agent.shared.SystemPromptAssembler;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.ToolDescriptor;
@@ -32,11 +34,13 @@ public class TestAuthorAgent {
 
     private final ToolCatalog toolCatalog;
     private final PrWorkflowToolExecutor toolExecutor;
+    private final SystemPromptAssembler promptAssembler;
 
     public TestAuthorAgent(ToolCatalog toolCatalog,
                            PrWorkflowToolExecutor toolExecutor) {
         this.toolCatalog = toolCatalog;
         this.toolExecutor = toolExecutor;
+        this.promptAssembler = new SystemPromptAssembler();
     }
 
     public Result write(AiClient aiClient,
@@ -52,14 +56,84 @@ public class TestAuthorAgent {
         List<ToolDescriptor> descriptors = toolCatalog.nativeDescriptors(
                 ToolCatalog.Role.E2E, null, allowed);
 
+        // Build the system prompt the same way the issue / writer agents do:
+        // role description (from E2ePromptLibrary) + tool protocol section
+        // rendered from the ToolCatalog by SystemPromptAssembler. The mode
+        // chosen here matches the one E2eAgentRunner will resolve so the
+        // prompt and the actual dispatch path stay aligned.
+        ToolingMode mode = ToolingMode.resolve(ToolingMode.NATIVE,
+                aiClient.supportsNativeTools(), !descriptors.isEmpty());
+        String systemPrompt = promptAssembler.assemble(
+                E2ePromptLibrary.authorSystemPrompt(toolContext.framework()),
+                toolCatalog, allowed, null, mode,
+                SystemPromptAssembler.PromptKind.E2E_AGENT);
+
         int maxRounds = Math.max(BASELINE_ROUNDS, plan.journeys().size() + 2);
         E2eAgentRunner runner = new E2eAgentRunner(
                 aiClient, toolExecutor, toolContext, descriptors,
-                E2ePromptLibrary.authorSystemPrompt(toolContext.framework()),
+                systemPrompt,
                 maxRounds, DEFAULT_MAX_TOKENS, "test-author");
 
-        E2eAgentRunner.Result raw = runner.run(renderUserMessage(toolContext.framework(), plan));
+        String userMessage = renderUserMessage(toolContext.framework(), plan);
+        E2eAgentRunner.Result raw = runner.run(userMessage);
+        int writes = countWrites(raw);
 
+        // Recovery for the "narrated tool call" failure mode:
+        //
+        //   Some Claude releases (and any model when the prompt grows large)
+        //   describe their tool invocations as plain text — either as
+        //   ```json {"name":"pr-test-write","parameters":{...}}``` blocks or
+        //   as the leaked Claude XML form:
+        //
+        //       <function_calls>
+        //         <invoke name="pr-test-write">
+        //           <parameter name="path">tests/foo.spec.ts</parameter>
+        //           <parameter name="content">…</parameter>
+        //         </invoke>
+        //       </function_calls>
+        //
+        //   In both cases the runner sees stopReason=END_TURN, toolCalls=0 and
+        //   we would otherwise write zero files. A second LLM round can fail
+        //   exactly the same way (and costs another ~4k output tokens), so we
+        //   parse the narrated calls and execute them directly through the
+        //   same PrWorkflowToolExecutor. This is content-preserving: the
+        //   path/content payloads are fully present in the assistant text.
+        if (writes == 0) {
+            List<NarratedToolCallParser.Call> recovered =
+                    NarratedToolCallParser.parse(raw.lastAssistantText());
+            int recoveredWrites = 0;
+            for (NarratedToolCallParser.Call call : recovered) {
+                if (!"pr-test-write".equalsIgnoreCase(call.name())) continue;
+                String result = toolExecutor.execute(call.name(), call.args(), toolContext);
+                if (result != null && result.startsWith("OK:")) {
+                    recoveredWrites++;
+                } else {
+                    log.warn("TestAuthorAgent: recovered narrated `pr-test-write` call for path={}"
+                                    + " failed: {}",
+                            call.args().get("path"), result);
+                }
+            }
+            if (recoveredWrites > 0) {
+                log.warn("TestAuthorAgent: recovered {} narrated `pr-test-write` call(s) from"
+                                + " assistant text after native tool_use produced 0 calls"
+                                + " (likely Claude regression to legacy tool-call syntax)",
+                        recoveredWrites);
+                writes = recoveredWrites;
+            } else if (looksLikeNarratedToolCall(raw.lastAssistantText())) {
+                log.warn("TestAuthorAgent: assistant text contains narrated tool-call markers"
+                        + " but no calls could be recovered — see DEBUG-level AI response dump");
+            }
+        }
+
+        boolean exhausted = raw.budgetExhausted() && writes < plan.journeys().size();
+        if (exhausted) {
+            log.warn("TestAuthorAgent: budget exhausted after writing {} / {} files",
+                    writes, plan.journeys().size());
+        }
+        return new Result(writes, raw.lastAssistantText(), exhausted);
+    }
+
+    private static int countWrites(E2eAgentRunner.Result raw) {
         int writes = 0;
         for (E2eAgentRunner.ToolInvocation inv : raw.toolInvocations()) {
             if ("pr-test-write".equalsIgnoreCase(inv.toolName())
@@ -68,12 +142,27 @@ public class TestAuthorAgent {
                 writes++;
             }
         }
-        boolean exhausted = raw.budgetExhausted() && writes < plan.journeys().size();
-        if (exhausted) {
-            log.warn("TestAuthorAgent: budget exhausted after writing {} / {} files",
-                    writes, plan.journeys().size());
-        }
-        return new Result(writes, raw.lastAssistantText(), exhausted);
+        return writes;
+    }
+
+    /**
+     * Best-effort heuristic to detect either of the two known "narrated tool
+     * call" failure modes — JSON-fenced blocks or leaked Claude XML
+     * ({@code <function_calls><invoke name="..."><parameter ...>}). Used only
+     * to decide whether a "no calls recovered" situation deserves a WARN log;
+     * the actual recovery is performed by {@link NarratedToolCallParser}.
+     */
+    static boolean looksLikeNarratedToolCall(String assistantText) {
+        if (assistantText == null || assistantText.isBlank()) return false;
+        String lower = assistantText.toLowerCase(java.util.Locale.ROOT);
+        if (!lower.contains("pr-test-write")) return false;
+        boolean jsonForm = (lower.contains("\"name\"") || lower.contains("'name'"))
+                && (lower.contains("\"parameters\"")
+                    || lower.contains("\"arguments\"")
+                    || lower.contains("\"input\""));
+        boolean xmlForm = lower.contains("<invoke") && lower.contains("<parameter");
+        boolean toolCallTag = lower.contains("<tool_call>");
+        return jsonForm || xmlForm || toolCallTag;
     }
 
     /**

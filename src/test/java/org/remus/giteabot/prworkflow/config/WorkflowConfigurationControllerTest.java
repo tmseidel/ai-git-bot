@@ -79,8 +79,8 @@ class WorkflowConfigurationControllerTest {
         WorkflowConfigurationController controller = newController(
                 mock(WorkflowConfigurationService.class), selectionService);
         Map<String, String> allParams = new LinkedHashMap<>();
-        allParams.put("params__tests__command", "mvn test");
-        allParams.put("params__tests__timeoutSeconds", "30");
+        allParams.put("params.tests.command", "mvn test");
+        allParams.put("params.tests.timeoutSeconds", "30");
         allParams.put("foo", "ignored");
 
         String view = controller.saveWorkflowSelection(3L,

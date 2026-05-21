@@ -3,12 +3,14 @@ package org.remus.giteabot.prworkflow.e2e.agents;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 
 /**
- * Central location for the three E2E agent system prompts. Kept compact and
- * framework-aware so unit tests can assert on stable fragments without
- * depending on full multi-paragraph copy. Refining the prompts (e.g. adding
- * few-shot exemplars, role-specific guard rails) is intentionally deferred —
- * Iteration 2's correctness gate is the round-trip glue (agent ↔ tool
- * executor ↔ persistence), not prose quality.
+ * Central location for the three E2E agent *role descriptions*. The
+ * tool-handling protocol (which tools exist, how to call them, what the
+ * output format is) is NOT in here — it is appended at runtime by
+ * {@link org.remus.giteabot.agent.shared.SystemPromptAssembler} from the
+ * shared {@link org.remus.giteabot.agent.tools.ToolCatalog}, just like the
+ * issue-implementation and writer agents. This keeps tool semantics
+ * single-sourced and prevents the "narrated tool call" failure mode that
+ * occurs when the prompt and the actual tool API drift apart.
  */
 public final class E2ePromptLibrary {
 
@@ -57,6 +59,10 @@ public final class E2ePromptLibrary {
 
     // ---------------------------------------------------------------- author
 
+    /**
+     * Author role description. The tool catalog (currently just
+     * {@code pr-test-write}) is appended by {@code SystemPromptAssembler}.
+     */
     public static String authorSystemPrompt(E2eTestFramework framework) {
         return """
                 You are TestAuthorAgent, the second stage of an automated E2E test
@@ -65,26 +71,44 @@ public final class E2ePromptLibrary {
                 %1$s test file by calling the `pr-test-write` tool exactly once
                 per journey.
 
-                Hard requirements:
-                  * Use the `fileName` value from the plan as the `path` argument
-                    of `pr-test-write`. Do not invent a different path.
+                Per-call requirements:
+                  * Use the `fileName` value from the plan as the `path`
+                    argument of `pr-test-write`. Do not invent a different path.
                   * The `content` argument must be the full UTF-8 source of the
                     test file — no placeholders, no TODOs.
                   * Use the journey `steps` and `assertions` verbatim as the
                     skeleton of the test body; you may add helper code but you
                     may not remove behaviour.
-                  * The test must target `process.env.BASE_URL` (Playwright,
-                    Cypress) or read the equivalent environment variable for
-                    other frameworks — never hard-code a preview URL.
 
-                When every journey has been written, respond with a short plain
-                text confirmation summarising the files you wrote. Do not call
-                any other tool.
+                URL handling — STRICT (Playwright/Cypress):
+                  * NEVER hard-code a preview URL.
+                  * NEVER reference `process.env.BASE_URL` in the test body.
+                  * NEVER write `const BASE_URL = process.env.BASE_URL ?? '…';`
+                    or any equivalent fallback constant.
+                  * NEVER call `page.goto(`${BASE_URL}/somepath`)` or any string
+                    concatenation that prefixes a URL.
+                  * DO use RELATIVE paths in `page.goto` / `cy.visit`:
+                        await page.goto('/');
+                        await page.goto('/login');
+                        cy.visit('/dashboard');
+                    Playwright resolves them against `use.baseURL` from
+                    `playwright.config.ts`; Cypress resolves them against
+                    `baseUrl` from `cypress.config.ts`. The runner injects the
+                    correct preview URL into both at execution time. This is
+                    the ONLY supported way to reach the preview.
+
+                After every journey has been written, reply with the single
+                line `DONE` and stop.
                 """.formatted(framework.key());
     }
 
     // ---------------------------------------------------------------- runner
 
+    /**
+     * Runner role description. The four runner tools (`preview-url`,
+     * `preview-status`, `pr-test-run`, `attach-artifact`) are appended by
+     * {@code SystemPromptAssembler}.
+     */
     public static String runnerSystemPrompt(E2eTestFramework framework) {
         return """
                 You are TestRunnerAgent, the third stage of an automated E2E test

@@ -122,7 +122,11 @@ public class BotToolSelectionService {
         }
 
         selectionRepository.deleteByConfigurationId(configurationId);
-        // Flush implicit; saveAll associates rows with the managed configuration.
+        // Force the DELETE to hit the DB before the inserts; otherwise
+        // Hibernate's action-queue ordering can run INSERTs first and trip
+        // the (configuration_id, tool_key) UNIQUE index when the new
+        // selection re-includes a previously-persisted tool key.
+        selectionRepository.flush();
         selectionRepository.saveAll(replacement);
     }
 

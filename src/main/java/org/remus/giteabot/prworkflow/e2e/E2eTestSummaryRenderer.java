@@ -65,6 +65,29 @@ public final class E2eTestSummaryRenderer {
                 + "⏭️ Skipped — " + reason + "\n";
     }
 
+    /**
+     * Posted as soon as the bot decides to actually run the E2E workflow
+     * (i.e. after the deployment-target precheck passes). The full pipeline
+     * — preview deployment, LLM-driven test generation, runner execution —
+     * routinely takes several minutes; this opener gives the operator
+     * immediate feedback so the PR thread does not feel stalled.
+     */
+    public static String renderStarting(long prNumber, E2eTestFramework framework,
+                                        SuiteLifecycleMode lifecycleMode) {
+        StringBuilder sb = new StringBuilder(256);
+        sb.append("## E2E Test Run for PR #").append(prNumber).append("\n\n");
+        sb.append("🤖 **Starting end-to-end test run** — this typically takes ")
+                .append("several minutes.\n\n");
+        sb.append("- **Framework:** `").append(framework.key()).append("`\n");
+        sb.append("- **Suite lifecycle:** `").append(lifecycleMode.key()).append("`\n");
+        sb.append('\n');
+        sb.append("I'll deploy a preview environment, generate the test suite ")
+                .append("and post the results here when the run finishes. ")
+                .append("Use `@bot rerun-tests` to re-execute or ")
+                .append("`@bot regenerate-tests <feedback>` to re-plan the suite.\n");
+        return sb.toString();
+    }
+
     public static String renderFailed(long prNumber, String reason) {
         return "## E2E Test Run for PR #" + prNumber + "\n\n"
                 + "❌ Failed — " + reason + "\n";

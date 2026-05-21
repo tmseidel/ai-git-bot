@@ -89,7 +89,12 @@ pure failure-detector.
 
   // Optional. Default "refs/heads/{branch}". Supports placeholders
   // {prNumber}, {sha}, {branch}, {repoOwner}, {repoName}.
-  "refTemplate": "refs/pull/{prNumber}/head",
+  // The ref MUST resolve to a branch or tag that already exists on the
+  // remote — Gitea, GitLab and Bitbucket reject pull-request refs
+  // (e.g. "refs/pull/N/head") at dispatch time with 404. Only GitHub
+  // Actions also accepts "refs/pull/{prNumber}/head", and even there
+  // only for same-repo PRs (forks silently no-op).
+  "refTemplate": "refs/heads/{branch}",
 
   // Optional. Default "preview_url". Key the poller looks for in
   // getWorkflowRunOutputs(...). GitLab returns pipeline variables here;
@@ -174,9 +179,120 @@ Deployment-target config:
 ### Gitea Actions (≥ 1.21)
 
 Identical workflow file structure to GitHub Actions. Place it under
-`.gitea/workflows/preview.yml`. The deployment-target config is the same as
-GitHub. Make sure Gitea Actions is **enabled per-repo** (`Settings → Repo
-units → Actions`) and that the bot's PAT has the `write:repository` scope.
+`.gitea/workflows/preview.yml`. Three things have to line up before any
+dispatch will succeed:
+
+1. **Instance level.** Actions must be enabled on the Gitea server —
+   `app.ini` needs `[actions] ENABLED=true` (or the equivalent env var
+   `GITEA__actions__ENABLED=true`). Without this every call to
+   `/api/v1/repos/.../actions/workflows/<file>/dispatches` returns
+   `404 page not found`.
+2. **Per repo.** *Settings → Units → Actions* must be ticked.
+3. **A registered runner.** Without an `act_runner` registered against
+   the instance, dispatches are accepted but the run stays `queued`
+   forever and `CiActionPoller` eventually times out. The bot's PAT
+   needs the `write:repository` scope to dispatch.
+
+For a turnkey local stack with all three pre-wired, use
+[`systemtest/docker-compose-local-gitea.yml`](../systemtest/docker-compose-local-gitea.yml)
+— the file header documents the one-time runner-registration command.
+
+> ⚠️ **Use a branch ref, not a pull-request ref.** Gitea's
+> `/actions/workflows/{file}/dispatches` endpoint rejects refs that are
+> not branches or tags with `404 ref "refs/pull/N/head" doesn't exist`.
+> Stick with the default `"refTemplate": "refs/heads/{branch}"` (or omit
+> it). The workflow file must already exist on that branch.
+
+#### Minimal self-contained workflow (copy-paste for laptops)
+
+The GitHub recipe above references `./scripts/deploy-preview.sh` and
+HMAC-signs the callback with `openssl` + `xxd`. Neither is present in
+the stock `node:20-bookworm` runner image, so on a fresh local Gitea
+the job dies with `No such file or directory` / `xxd: command not
+found`. Drop this into `.gitea/workflows/preview.yml` on the PR branch
+to get a working end-to-end run with **zero extra repo content** —
+swap the `echo` for your real deploy command when you're ready:
+
+```yaml
+name: preview
+on:
+  workflow_dispatch:
+    inputs:
+      callbackUrl: { description: "Bot callback URL", required: true }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pretend to deploy
+        id: deploy
+        run: echo "preview_url=http://host.docker.internal:3030" >> "$GITHUB_OUTPUT"
+      - name: Notify bot
+        if: always()
+        run: |
+          STATUS=READY
+          [ "${{ job.status }}" != "success" ] && STATUS=FAILED
+          curl -fsS -X POST "${{ inputs.callbackUrl }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"$STATUS\",\"previewUrl\":\"${{ steps.deploy.outputs.preview_url }}\"}"
+```
+
+The matching deployment-target config (the same shape the form's help
+text shows next to the **CI_ACTION** label) is:
+
+```json
+{
+  "workflowRef": "preview.yml",
+  "refTemplate": "refs/heads/{branch}",
+  "inputs": { "callbackUrl": "{callbackUrl}" }
+}
+```
+
+Notes:
+- `X-AI-Bot-Signature` is **optional** —
+  `WorkflowCallbackController` accepts unsigned callbacks. For
+  production you should add the HMAC header back in (recipe further
+  down) and make sure `xxd` / `openssl` are in your runner image.
+- `host.docker.internal` is reachable from job containers because the
+  runner config in `systemtest/gitea-runner/config.yaml` attaches them
+  to the `gitea-net` network (which already has the host-gateway
+  mapping). Swap it for your real preview URL when wiring up actual
+  deploys.
+- **The bot's own `app.public-url` must also point at a hostname the
+  job container can reach.** The default is `http://localhost:8080`,
+  which inside a job container resolves to the container itself —
+  `curl: (7) Failed to connect to localhost port 8080`. Pick the
+  variant that matches your dev host:
+  - **Linux / WSL2 (native Docker Engine):** use the docker0 bridge
+    gateway IP directly — it's stable per machine and reachable from
+    any container on any bridge network without `--add-host` gymnastics:
+    ```properties
+    app.public-url=http://172.17.0.1:8080
+    ```
+    Confirm the IP once with `ip -4 addr show docker0` if you have a
+    non-default daemon config.
+  - **macOS / Windows with Docker Desktop:** `host.docker.internal` is
+    auto-populated in every container by Docker Desktop, so:
+    ```properties
+    app.public-url=http://host.docker.internal:8080
+    ```
+    (On Linux the same name *can* work but only if every job container
+    actually receives `--add-host=host.docker.internal:host-gateway`,
+    which depends on the runner image / version honouring
+    `container.options` — the IP variant above sidesteps that and is
+    therefore the recommended Linux default.)
+- The PAT used by the bot needs the `write:repository` scope; the PAT
+  the job uses for `actions/checkout` is auto-injected by Gitea as
+  `GITHUB_TOKEN` and only needs `read:repository`.
+
+Deployment-target config:
+
+```json
+{ "workflowRef": "preview.yml", "refTemplate": "refs/heads/{branch}",
+  "inputs": { "callback_url": "{callbackUrl}", "callback_secret": "{callbackSecret}",
+              "preview_branch": "pr-{prNumber}" } }
+```
 
 ### GitLab CI
 
@@ -209,6 +325,15 @@ triggers` and use it as `workflowRef`. Deployment-target config:
 GitLab exposes the pipeline's trigger variables via
 `GET /pipelines/:id/variables`, so the bot can read the resolved
 `preview_url` even without an explicit callback POST.
+
+> ⚠️ **Runner required.** Self-hosted GitLab instances have CI/CD
+> enabled by default, but every pipeline stays `pending` until at least
+> one GitLab Runner is registered (instance / group / project scope).
+> If `CiActionPoller` only ever logs `QUEUED` it's almost always a
+> missing runner. The local stack
+> [`systemtest/docker-compose-local-gitlab.yml`](../systemtest/docker-compose-local-gitlab.yml)
+> ships a `gitlab-runner` sidecar — see the file header for the
+> one-time `gitlab-runner register` command.
 
 ### Bitbucket Pipelines
 

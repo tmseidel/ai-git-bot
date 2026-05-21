@@ -108,6 +108,28 @@ class DeploymentTargetServiceTest {
     }
 
     @Test
+    void saveFlushesBeforeDetachSoUpdatesActuallyHitTheDatabase() {
+        // Regression guard for the bug where editing a deployment target in
+        // the UI had no effect: Spring Data's save(...) translates to
+        // EntityManager#merge for an entity with a non-null id, which only
+        // *queues* the UPDATE in the persistence context. The service used
+        // to detach the merged entity immediately afterwards — which throws
+        // away the pending UPDATE, so the row was never modified. We now
+        // flush before detaching; this test verifies that ordering.
+        DeploymentTarget t = newTarget();
+        t.setId(42L);
+        when(repository.existsByNameAndIdNot("ci", 42L)).thenReturn(false);
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(repository, entityManager);
+
+        service.save(t);
+
+        order.verify(repository).save(any(DeploymentTarget.class));
+        order.verify(entityManager).flush();
+        order.verify(entityManager).detach(any(DeploymentTarget.class));
+    }
+
+    @Test
     void saveFillsDefaults() {
         DeploymentTarget t = newTarget();
         t.setConfigJson(null);

@@ -133,7 +133,139 @@ Bot target config (the bot's envelope is delivered verbatim as
 
 ---
 
-## 4. Argo CD ApplicationSet (PR generator)
+## 4. Gitea Actions (`workflow_dispatch`, Gitea ≥ 1.24)
+
+> ⚠️ **Use the `CI_ACTION` strategy for this**, not `WEBHOOK`.
+> Gitea's [`ActionsDispatchWorkflow`](https://docs.gitea.com/api/1.25/#tag/repository/operation/ActionsDispatchWorkflow)
+> endpoint requires a structured body `{ "ref": "...", "inputs": { ... } }`.
+> A `WEBHOOK` target would POST the bot's envelope verbatim and Gitea
+> rejects it with `HTTP 422 [Ref]: Required`. The `CI_ACTION` strategy
+> formats the body correctly, reuses the `GitIntegration` token the bot
+> already has on the repo (no second secret), and polls the dispatched run
+> until completion. Recipe verified against Gitea **1.25.5**; full
+> reference: [`doc/PR_WORKFLOWS_CI_ACTIONS.md`](PR_WORKFLOWS_CI_ACTIONS.md).
+
+### Where does the `callbackUrl` come from?
+
+The bot owns the per-run callback URL. In `CI_ACTION` mode you simply
+declare a `callbackUrl` *input* on the workflow and let the bot inject the
+fully-qualified value through the strategy's `inputs` map — the
+`{callbackUrl}` placeholder is substituted at dispatch time:
+
+```
+                          ┌───────────────────────────────────────────────┐
+  bot ── CI_ACTION dispatch│ POST /api/v1/repos/{o}/{r}/actions/workflows/ │
+                           │      preview.yml/dispatches                   │
+                           │ Body: {"ref":"refs/heads/feature/x",          │
+                           │        "inputs": {                            │
+                           │          "callbackUrl":                       │
+                           │            "https://bot.acme.io/api/          │
+                           │             workflow-callback/42/<secret>"    │
+                           │ } }                                           │
+                           └───────────────────────────────────────────────┘
+                                          │
+                                          ▼
+  workflow run ── ${{ inputs.callbackUrl }} ── curl -d '{"status":"READY",
+                                                       "previewUrl":"…"}'
+```
+
+### Deployment-target config
+
+In the bot UI: **Strategy = `CI_ACTION`**, then in *Strategy config (JSON)*:
+
+```json
+{
+  "workflowRef":       "preview.yml",
+  "refTemplate":       "refs/heads/{branch}",
+  "previewUrlOutput":  "preview_url",
+  "pollIntervalSeconds": 15,
+  "inputs": {
+    "callbackUrl": "{callbackUrl}"
+  }
+}
+```
+
+Notes:
+* `workflowRef` is the **filename** of the workflow under `.gitea/workflows/`.
+* `refTemplate` must resolve to a real branch — Gitea rejects PR refs
+  (`refs/pull/N/head`) at dispatch time. Default `refs/heads/{branch}`
+  is normally what you want.
+* `inputs.callbackUrl` uses the literal placeholder `{callbackUrl}`; the
+  bot replaces it with the per-run URL before dispatching. Other
+  available placeholders: `{prNumber}`, `{sha}`, `{branch}`,
+  `{callbackSecret}`, `{runId}`.
+* No `webhookUrl` / `sharedSecret` here — the bot reuses the
+  `GitIntegration` access token configured for the repo.
+
+### `.gitea/workflows/preview.yml`
+
+```yaml
+name: preview
+on:
+  workflow_dispatch:
+    inputs:
+      callbackUrl:
+        description: "ai-git-bot callback URL (auto-injected)"
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/deploy-preview.sh
+        id: deploy
+      - name: Notify ai-git-bot
+        if: always()
+        env:
+          CB:     ${{ inputs.callbackUrl }}
+          URL:    ${{ steps.deploy.outputs.preview_url }}
+          STATUS: ${{ job.status == 'success' && 'READY' || 'FAILED' }}
+        run: |
+          curl -fsS -X POST "$CB" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"$STATUS\",\"previewUrl\":\"$URL\"}"
+```
+
+> ℹ️ **Don't combine `on: pull_request` with the bot's `CI_ACTION` dispatch
+> on the same workflow** — the workflow would fire twice per PR (once
+> automatically from the push, once from the bot dispatch) and the second
+> run would race the first into the same preview slot. If you need a
+> manual fallback, keep `workflow_dispatch` (so you can trigger it from
+> the Gitea UI) but drop `pull_request` from this file or move the
+> automatic path into a separate workflow that *doesn't* call back to the
+> bot.
+
+### Pre-flight checklist
+
+* **Gitea Actions enabled** for the repo (`Settings → Actions → enabled`).
+* **At least one runner registered** (repo / owner / global). Without a
+  runner the dispatched workflow stays queued forever and the bot's
+  `timeoutSeconds` guard fails the run. See
+  [`systemtest/gitea-runner/config.yaml`](../systemtest/gitea-runner/config.yaml)
+  for a minimal local setup.
+* **Workflow file committed on the branch you target as `ref`** — Gitea
+  resolves the workflow definition from that ref, *not* from the default
+  branch. A common gotcha: the operator merges `preview.yml` to `main`
+  but the feature branch doesn't have it yet → dispatch returns
+  `HTTP 404 workflow not found`.
+* **`GitIntegration` access token scope** includes `write:repository` (a
+  read-only token returns `HTTP 403`).
+* **No `pull_request:` trigger on the same file** when the bot drives
+  it via `CI_ACTION` (see note above).
+
+### Common errors
+
+| Symptom | Cause |
+|---|---|
+| `Webhook returned HTTP 422 [Ref]: Required` | Strategy is `WEBHOOK` — switch to `CI_ACTION`. The bot envelope cannot be reshaped into the `{ref, inputs}` body Gitea wants. |
+| `HTTP 404 workflow not found` | Workflow file missing on the dispatched ref (see pre-flight bullet 3). |
+| Workflow dispatched, never callback | No runner registered, or the runner's labels don't match `runs-on`. Check `Actions → Runners` in Gitea. |
+| `inputs.callbackUrl` is empty in the workflow | The bot's `inputs` map is missing the `"callbackUrl": "{callbackUrl}"` line. |
+
+---
+
+## 5. Argo CD ApplicationSet (PR generator)
 
 Argo CD's PR generator auto-provisions a per-PR app — there is nothing for
 the bot to trigger, so the recommended setup is the `STATIC` strategy with

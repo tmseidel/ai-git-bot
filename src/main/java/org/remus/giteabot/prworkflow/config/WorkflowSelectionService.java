@@ -2,7 +2,7 @@ package org.remus.giteabot.prworkflow.config;
 
 import org.remus.giteabot.prworkflow.PrWorkflow;
 import org.remus.giteabot.prworkflow.PrWorkflowRegistry;
-import org.remus.giteabot.prworkflow.WorkflowParamField;
+import org.remus.giteabot.prworkflow.WorkflowParamsSchema;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,7 +60,7 @@ public class WorkflowSelectionService {
                     workflow.category().name(),
                     workflow,
                     persisted != null,
-                    persisted != null ? persisted.getParamsJson() : null));
+                    persisted != null ? persisted.getParamsMap() : Map.of()));
         }
         // Persisted-but-unknown workflows — keep them visible so admins can drop them.
         for (WorkflowSelection persisted : persistedByKey.values()) {
@@ -71,7 +71,7 @@ public class WorkflowSelectionService {
                         "UNKNOWN",
                         null,
                         true,
-                        persisted.getParamsJson()));
+                        persisted.getParamsMap()));
             }
         }
         return List.copyOf(rows.values());
@@ -86,16 +86,16 @@ public class WorkflowSelectionService {
 
     /**
      * Replaces all selections for the given configuration with the given
-     * subset. {@code workflowParams} maps {@code workflowKey -> raw JSON
-     * (or empty/blank for "no params")} and is validated against the
-     * registered workflow's {@link PrWorkflow#paramsSchema()}.
+     * subset. {@code workflowParams} maps {@code workflowKey -> (name -> value)}
+     * and is validated against the registered workflow's
+     * {@link PrWorkflow#paramsSchema()} before each child row is persisted.
      *
      * @throws IllegalArgumentException when params validation fails, with
      *         per-workflow error messages.
      */
     public void saveSelection(Long configurationId,
                               List<String> selectedWorkflowKeys,
-                              Map<String, String> workflowParams) {
+                              Map<String, Map<String, String>> workflowParams) {
         WorkflowConfiguration configuration = requireConfiguration(configurationId);
 
         Set<String> requested = new LinkedHashSet<>();
@@ -112,9 +112,9 @@ public class WorkflowSelectionService {
         }
 
         List<String> errors = new ArrayList<>();
-        Map<String, String> existingParams = new LinkedHashMap<>();
+        Map<String, Map<String, String>> existingParams = new LinkedHashMap<>();
         for (WorkflowSelection row : selectionRepository.findByConfigurationId(configurationId)) {
-            existingParams.put(row.getWorkflowKey(), row.getParamsJson());
+            existingParams.put(row.getWorkflowKey(), row.getParamsMap());
         }
 
         List<WorkflowSelection> replacement = new ArrayList<>();
@@ -124,21 +124,22 @@ public class WorkflowSelectionService {
             row.setConfiguration(configuration);
             row.setWorkflowKey(key);
 
-            String rawParams = workflowParams != null ? workflowParams.get(key) : null;
+            Map<String, String> rawParams = workflowParams != null ? workflowParams.get(key) : null;
             if (rawParams == null) {
                 rawParams = existingParams.get(key);
             }
             if (registered.isPresent()) {
                 try {
-                    row.setParamsJson(paramsValidator.validateAndCanonicalise(
-                            rawParams, registered.get().paramsSchema()));
+                    Map<String, String> canonical = paramsValidator.validate(
+                            rawParams, registered.get().paramsSchema());
+                    row.replaceParams(canonical);
                 } catch (IllegalArgumentException e) {
                     errors.add("Workflow '" + registered.get().displayName() + "': " + e.getMessage());
                     continue;
                 }
             } else {
-                // Unregistered workflow — keep the raw payload as-is so a re-install can re-validate.
-                row.setParamsJson(rawParams != null ? rawParams : "{}");
+                // Unregistered workflow — keep the raw values as-is so a re-install can re-validate.
+                row.replaceParams(rawParams);
             }
             replacement.add(row);
         }
@@ -148,31 +149,39 @@ public class WorkflowSelectionService {
         }
 
         selectionRepository.deleteByConfigurationId(configurationId);
+        // Force the DELETE to hit the DB before the inserts; otherwise
+        // Hibernate's action-queue ordering can run INSERTs first and trip
+        // the (configuration_id, workflow_key) UNIQUE index when the new
+        // selection re-includes a previously-persisted workflow key. The
+        // child params rows are removed by the DB-level ON DELETE CASCADE on
+        // workflow_selection_params.
+        selectionRepository.flush();
         selectionRepository.saveAll(replacement);
     }
 
     /**
      * Adds (or replaces) a single workflow selection on the configuration.
      * Used by the admin UI and by callers that want to programmatically
-     * enable an additional workflow on an existing configuration.
+     * enable an additional workflow on an existing configuration. {@code
+     * params} may be {@code null} for workflows without parameters.
      */
-    public void enableWorkflow(Long configurationId, String workflowKey, String paramsJson) {
+    public void enableWorkflow(Long configurationId, String workflowKey, Map<String, String> params) {
         WorkflowConfiguration configuration = requireConfiguration(configurationId);
         PrWorkflow workflow = workflowRegistry.require(workflowKey);
-        String canonical = paramsValidator.validateAndCanonicalise(paramsJson, workflow.paramsSchema());
+        Map<String, String> canonical = paramsValidator.validate(params, workflow.paramsSchema());
         Optional<WorkflowSelection> existing =
                 selectionRepository.findByConfigurationIdAndWorkflowKey(configurationId, workflowKey);
         WorkflowSelection row = existing.orElseGet(WorkflowSelection::new);
         row.setConfiguration(configuration);
         row.setWorkflowKey(workflowKey);
-        row.setParamsJson(canonical);
+        row.replaceParams(canonical);
         selectionRepository.save(row);
     }
 
     /**
      * Returns the persisted parameter map for the given workflow on the
-     * given configuration. Empty map when no selection exists or the params
-     * payload is blank.
+     * given configuration, type-coerced according to the workflow's schema.
+     * Empty map when no selection exists.
      */
     @Transactional(readOnly = true)
     public Map<String, Object> resolveParams(Long configurationId, String workflowKey) {
@@ -180,7 +189,7 @@ public class WorkflowSelectionService {
             return Map.of();
         }
         return selectionRepository.findByConfigurationIdAndWorkflowKey(configurationId, workflowKey)
-                .map(s -> paramsValidator.parseToMap(s.getParamsJson()))
+                .map(s -> paramsValidator.typed(s.getParamsMap(), schemaFor(workflowKey)))
                 .orElseGet(Map::of);
     }
 
@@ -200,7 +209,7 @@ public class WorkflowSelectionService {
 
     /**
      * Helper for the bot Details modal: returns one row per enabled workflow
-     * with its display name, category and persisted (masked) params.
+     * with its display name, category and persisted (raw) params.
      */
     @Transactional(readOnly = true)
     public List<WorkflowSelectionRow> describeSelections(Long configurationId) {
@@ -211,25 +220,17 @@ public class WorkflowSelectionService {
     }
 
     /**
-     * Mask {@link WorkflowParamField.ParamType#SECRET} values for display in
-     * the bot Details modal.
+     * Mask {@link org.remus.giteabot.prworkflow.WorkflowParamField.ParamType#SECRET}
+     * values for display in the bot Details modal.
      */
-    public Map<String, Object> maskSecrets(String workflowKey, String paramsJson) {
-        Map<String, Object> values = paramsValidator.parseToMap(paramsJson);
-        Optional<PrWorkflow> workflow = workflowRegistry.find(workflowKey);
-        if (workflow.isEmpty()) {
-            return values;
-        }
-        Map<String, Object> masked = new LinkedHashMap<>(values);
-        for (WorkflowParamField field : workflow.get().paramsSchema().fields()) {
-            if (field.type() == WorkflowParamField.ParamType.SECRET && masked.containsKey(field.name())) {
-                Object current = masked.get(field.name());
-                if (current != null && !current.toString().isBlank()) {
-                    masked.put(field.name(), "********");
-                }
-            }
-        }
-        return masked;
+    public Map<String, Object> maskSecrets(String workflowKey, Map<String, String> raw) {
+        return paramsValidator.maskSecrets(raw, schemaFor(workflowKey));
+    }
+
+    private WorkflowParamsSchema schemaFor(String workflowKey) {
+        return workflowRegistry.find(workflowKey)
+                .map(PrWorkflow::paramsSchema)
+                .orElse(null);
     }
 
     private WorkflowConfiguration requireConfiguration(Long id) {
@@ -237,4 +238,3 @@ public class WorkflowSelectionService {
                 .orElseThrow(() -> new IllegalArgumentException("Workflow configuration not found"));
     }
 }
-
