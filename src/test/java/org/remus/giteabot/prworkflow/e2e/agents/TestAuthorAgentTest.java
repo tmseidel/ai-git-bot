@@ -69,7 +69,7 @@ class TestAuthorAgentTest {
                                "title", "Cart")))
                 .withTextTurn("Wrote 2 tests.");
 
-        TestAuthorAgent.Result result = agent.write(ai, ctx, plan);
+        TestAuthorAgent.Result result = agent.write(ai, ctx, plan,null);
 
         assertThat(result.filesWritten()).isEqualTo(2);
         assertThat(result.budgetExhausted()).isFalse();
@@ -86,7 +86,7 @@ class TestAuthorAgentTest {
     void shortCircuitsOnEmptyPlan() {
         StubAiClient ai = new StubAiClient(true);
 
-        TestAuthorAgent.Result result = agent.write(ai, ctx, new TestPlan("playwright", List.of(), 1));
+        TestAuthorAgent.Result result = agent.write(ai, ctx, new TestPlan("playwright", List.of(), 1),null);
 
         assertThat(result.filesWritten()).isZero();
         assertThat(result.budgetExhausted()).isFalse();
@@ -108,7 +108,7 @@ class TestAuthorAgentTest {
                         Map.of("path", "../escape.spec.ts", "content", "x")))
                 .withTextTurn("Done");
 
-        TestAuthorAgent.Result result = agent.write(ai, ctx, plan);
+        TestAuthorAgent.Result result = agent.write(ai, ctx, plan,null);
 
         assertThat(result.filesWritten()).isZero();
     }
@@ -133,7 +133,7 @@ class TestAuthorAgentTest {
                 + " \"content\": \"// login\" }\n}\n```";
         StubAiClient ai = new StubAiClient(true).withTextTurn(narratedJson);
 
-        TestAuthorAgent.Result result = agent.write(ai, ctx, plan);
+        TestAuthorAgent.Result result = agent.write(ai, ctx, plan,null);
 
         assertThat(result.filesWritten()).isOne();
         assertThat(result.budgetExhausted()).isFalse();
@@ -180,7 +180,7 @@ class TestAuthorAgentTest {
                 """;
         StubAiClient ai = new StubAiClient(true).withTextTurn(narratedXml);
 
-        TestAuthorAgent.Result result = agent.write(ai, ctx, plan);
+        TestAuthorAgent.Result result = agent.write(ai, ctx, plan, null);
 
         assertThat(result.filesWritten()).isEqualTo(2);
         assertThat(ai.invocations()).hasSize(1);
@@ -246,7 +246,7 @@ class TestAuthorAgentTest {
                 .withTextTurn(envelope)
                 .withTextTurn("DONE");
 
-        TestAuthorAgent.Result result = agent.write(ai, ctx, plan);
+        TestAuthorAgent.Result result = agent.write(ai, ctx, plan, null);
 
         assertThat(result.filesWritten()).isEqualTo(2);
         assertThat(result.budgetExhausted()).isFalse();
