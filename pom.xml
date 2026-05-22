@@ -16,6 +16,36 @@
     <version>1.8.0-SNASPSHOT</version>
     <name>AI Git Bot</name>
     <description>AI-Git-Bot is a lightweight, self-hostable gateway application that connects your Git platforms with AI providers.</description>
+    <url>https://github.com/tmseidel/ai-git-bot</url>
+    <inceptionYear>2026</inceptionYear>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/license/mit</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>tmseidel</id>
+            <name>Tom Seidel</name>
+            <url>https://github.com/tmseidel</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/tmseidel/ai-git-bot.git</connection>
+        <developerConnection>scm:git:https://github.com/tmseidel/ai-git-bot.git</developerConnection>
+        <url>https://github.com/tmseidel/ai-git-bot</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/tmseidel/ai-git-bot/issues</url>
+    </issueManagement>
 
     <properties>
         <java.version>21</java.version>

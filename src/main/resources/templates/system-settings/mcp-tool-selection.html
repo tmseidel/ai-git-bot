@@ -14,7 +14,7 @@
                 <p class="mb-2">
                     Configuration: <strong th:text="${mcpConfiguration.name}"></strong>
                 </p>
-                <p class="text-muted mb-4">
+                <p class="text-secondary mb-4">
                     Select only the tools you want to expose to prompts. Unselected tools stay hidden.
                 </p>
 
@@ -41,13 +41,13 @@
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Selected</label>
-                        <div class="form-control bg-light" id="selectedCount">0</div>
+                        <div class="form-control bg-body-tertiary" id="selectedCount">0</div>
                     </div>
                 </div>
 
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-2">
-                        <thead class="table-light">
+                        <thead class="table-group-divider">
                         <tr>
                             <th style="width: 48px;">
                                 <input id="selectAllVisible" type="checkbox" class="form-check-input" title="Select all visible rows">
@@ -69,7 +69,7 @@
                 </div>
 
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <div class="text-muted" id="paginationInfo"></div>
+                    <div class="text-secondary" id="paginationInfo"></div>
                     <div class="btn-group">
                         <button type="button" id="prevPage" class="btn btn-outline-secondary btn-sm">Previous</button>
                         <button type="button" id="nextPage" class="btn btn-outline-secondary btn-sm">Next</button>
@@ -192,7 +192,7 @@
                         const tr = document.createElement('tr');
                         const td = document.createElement('td');
                         td.colSpan = 5;
-                        td.className = 'text-center text-muted py-4';
+                        td.className = 'text-center text-secondary py-4';
                         td.textContent = 'No tools found for current filter.';
                         tr.appendChild(td);
                         rowsBody.appendChild(tr);
@@ -201,7 +201,7 @@
                         page.rows.forEach(tool => {
                             if (tool.serverName !== previousServer) {
                                 const groupTr = document.createElement('tr');
-                                groupTr.className = 'table-light';
+                                groupTr.className = 'table-group-divider border-top-0';
                                 const groupTd = document.createElement('td');
                                 groupTd.colSpan = 5;
                                 const strong = document.createElement('strong');

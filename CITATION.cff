@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use AI-Git-Bot in your work, please cite it using this metadata."
+title: "AI-Git-Bot"
+abstract: "A lightweight, self-hostable AI gateway that connects Git platforms with AI providers for pull-request reviews, coding-agent workflows, and technical-writing issue refinement."
+type: software
+authors:
+  - family-names: "Seidel"
+    given-names: "Tom"
+repository-code: "https://github.com/tmseidel/ai-git-bot"
+url: "https://github.com/tmseidel/ai-git-bot"
+license: "MIT"
+version: "1.6.0"
+keywords:
+  - "ai-code-review"
+  - "code-review-bot"
+  - "coding-agent"
+  - "technical-writer-agent"
+  - "self-hosted-ai"
+  - "git-automation"
+  - "gitea"
+  - "github"
+  - "gitlab"
+  - "bitbucket"
+  - "ollama"
+  - "llama-cpp"
+  - "model-context-protocol"
+  - "spring-boot"
+  - "java"
+
+

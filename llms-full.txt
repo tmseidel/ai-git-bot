@@ -1,0 +1,188 @@
+# AI-Git-Bot LLM Reference
+
+This file provides a compact, LLM-friendly overview of AI-Git-Bot. It is intended for search engines, code assistants, RAG indexes, autonomous agents, and maintainers who need a single entry point into the repository.
+
+## Project identity
+
+- Name: AI-Git-Bot
+- Maven artifact: `org.remus:ai-git-bot`
+- Primary repository: https://github.com/tmseidel/ai-git-bot
+- Docker image: https://hub.docker.com/r/tmseidel/ai-git-bot
+- License: MIT
+- Runtime: Java 21, Spring Boot, PostgreSQL
+- Deployment model: self-hosted web application, commonly deployed via Docker Compose
+
+## One-sentence summary
+
+AI-Git-Bot is a self-hosted AI gateway that connects Git platforms with AI providers to perform reviewer-triggered pull-request reviews, interactive PR conversations, autonomous issue implementation, and technical-writing issue refinement.
+
+## What the project does
+
+AI-Git-Bot receives webhooks from Git hosting platforms, fetches repository context and diffs through provider APIs, sends prompts to configured AI providers, and writes results back to the Git platform. It centralizes configuration, credentials, prompts, bot personas, sessions, and optional MCP server tool access in a single application.
+
+Supported Git platforms include:
+
+- Gitea
+- GitHub
+- GitHub Enterprise
+- GitLab
+- Bitbucket Cloud
+
+Supported AI/provider styles include:
+
+- Anthropic Claude
+- OpenAI
+- Google AI / Gemini
+- Ollama for local LLMs
+- llama.cpp for local LLMs
+- Remote Model Context Protocol (MCP) servers, controlled through persisted tool whitelists
+
+## Main use cases
+
+1. Reviewer-triggered AI pull-request reviews
+   - The bot reviews a PR when assigned or re-requested as a reviewer.
+   - It splits large diffs into manageable chunks and retries when provider token limits are reached.
+   - It can post review comments back to the source Git platform.
+
+2. Interactive PR conversations
+   - Users can mention the bot in PR comments or inline review threads.
+   - The bot answers with PR/session context and remembers conversation history.
+
+3. Coding agent
+   - A coding bot can be assigned to an issue.
+   - It checks out the target repository, plans and implements changes, validates them, commits to a branch, pushes, and opens a pull request.
+   - Validation can use common build tools such as Maven, Gradle, npm, .NET, and similar project-local tooling.
+
+4. Technical writer agent
+   - A writer bot inspects vague or incomplete issues.
+   - It asks clarifying questions when necessary.
+   - It can create a linked implementation-ready issue with assumptions, acceptance criteria, and testable requirements.
+   - It uses a read-only issue drafting workflow and does not modify repository files.
+
+5. Self-hosted AI governance
+   - Teams can run the gateway in their own infrastructure.
+   - Credentials are centrally configured and encrypted at rest.
+   - Local LLM setups via Ollama or llama.cpp help with compliance and data residency requirements.
+
+## Important documentation map
+
+### Overview and operation
+
+- `README.md`: main project overview, feature list, diagrams, screenshots, quick start, and documentation index.
+- `doc/USER_GUIDE.md`: web UI guide for creating AI integrations, Git integrations, bots, prompts, and operating workflows.
+- `doc/DEPLOYMENT.md`: Docker Compose deployment, configuration, environment variables, and production notes.
+- `doc/LOCAL_DEVELOPMENT.md`: local build/test instructions and project structure.
+- `CHANGELOG.md`: release and unreleased change notes.
+- `SECURITY.md`: vulnerability reporting and security expectations.
+- `CITATION.cff`: citation metadata for GitHub and software catalog indexing.
+- `codemeta.json`: machine-readable software metadata for catalogs and crawlers.
+
+### Architecture and agents
+
+- `doc/ARCHITECTURE.md`: gateway architecture, request flow, persistence, and component diagrams.
+- `doc/AGENT.md`: coding agent and technical writer agent design, prompts, tools, and workflow details.
+- `doc/MCP_SERVER_HANDLING.md`: MCP server JSON configuration, selected-tool persistence, bot details UI, and transparency.
+
+### Git platform setup
+
+- `doc/GITEA_SETUP.md`: Gitea bot account, access token, permissions, webhook setup, and troubleshooting.
+- `doc/GITHUB_SETUP.md`: GitHub bot/PAT setup, permissions, webhook setup, and troubleshooting.
+- `doc/GITLAB_SETUP.md`: GitLab token and webhook setup.
+- `doc/BITBUCKET_SETUP.md`: Bitbucket Cloud app password and webhook setup.
+
+### Local LLM setup
+
+- `doc/OLLAMA.md`: using Ollama with AI-Git-Bot.
+- `doc/LLAMACPP.md`: using llama.cpp, including grammar support details.
+
+### Prompt templates
+
+- `prompts/default.md`: default review prompt.
+- `prompts/agent.md`: agent prompt for autonomous work.
+- `prompts/local-llm.md`: local-LLM-oriented prompt.
+
+## Source tree guide
+
+Typical source locations:
+
+- `src/main/java/org/remus/giteabot/admin/`: admin UI controllers/services/entities for bots, integrations, dashboard, and setup.
+- `src/main/java/org/remus/giteabot/ai/`: AI abstraction and provider implementations.
+- `src/main/java/org/remus/giteabot/agent/`: issue implementation agent, writer agent, prompt building, validation, and notification behavior.
+- `src/main/java/org/remus/giteabot/config/`: application configuration and prompt-related services.
+- `src/main/java/org/remus/giteabot/gitea/`: Gitea webhook/controller/API support.
+- `src/main/java/org/remus/giteabot/github/`: GitHub webhook/controller/API support.
+- `src/main/java/org/remus/giteabot/gitlab/`: GitLab integration support when present.
+- `src/main/java/org/remus/giteabot/bitbucket/`: Bitbucket integration support when present.
+- `src/main/java/org/remus/giteabot/repository/`: repository provider abstraction and metadata.
+- `src/main/java/org/remus/giteabot/review/`: pull-request review orchestration.
+- `src/main/java/org/remus/giteabot/session/`: conversation/session persistence.
+- `src/main/resources/db/`: database migrations.
+- `src/main/resources/templates/`: Thymeleaf admin UI templates.
+- `src/test/java/`: unit and integration tests.
+- `systemtest/`: local integration/system-test compose files.
+
+Prefer current source files under `src/` over generated files under `target/`.
+
+## Build, test, and run
+
+Run tests:
+
+```bash
+mvn clean test
+```
+
+Run the application locally:
+
+```bash
+mvn spring-boot:run
+```
+
+Run with Docker Compose:
+
+```bash
+docker compose up -d
+```
+
+After startup, open `http://localhost:8080`, create the initial admin account, configure AI and Git integrations, create a bot, and register the bot webhook URL in the chosen Git platform.
+
+## Configuration concepts
+
+- AI integrations: provider type, API endpoint/key/model, and provider-specific options.
+- Git integrations: provider type, base URL, token, and repository access configuration.
+- Bots: connect an AI integration, a Git integration, bot type, prompts, and webhook behavior.
+- System prompts: reusable persona/instruction templates for review, coding-agent, and writer-agent workflows.
+- MCP server configurations: JSON-based remote tool definitions plus a persisted per-configuration whitelist.
+- Sessions: PR and conversation history used for follow-up replies.
+
+## Security and privacy model
+
+- AI-Git-Bot is designed for self-hosting.
+- Secrets such as API keys and tokens are encrypted at rest.
+- Local LLM providers can be used to keep code and prompts inside controlled infrastructure.
+- Webhook endpoints should be protected according to provider-specific setup guides.
+- Report vulnerabilities according to `SECURITY.md`.
+
+## Search and classification keywords
+
+AI-Git-Bot, AI Git Bot, ai-git-bot, self-hosted AI code review, AI pull request review, code review bot, Git bot, Gitea bot, GitHub bot, GitLab bot, Bitbucket bot, GitHub Enterprise AI review, coding agent, issue implementation agent, autonomous software agent, technical writer agent, AI issue triage, issue refinement, acceptance criteria generator, repository automation, webhook gateway, AI gateway, LLM gateway, Anthropic Claude, OpenAI, Gemini, Google AI, Ollama, llama.cpp, local LLM, Model Context Protocol, MCP server, MCP tool whitelist, Java, Spring Boot, PostgreSQL, Docker Compose, encrypted secrets, on-premise AI, compliance-friendly AI automation.
+
+## Guidance for LLMs and code agents
+
+- Start with `README.md` for product context and user-facing behavior.
+- Use `doc/ARCHITECTURE.md` before changing request flows, persistence, webhook handling, or provider abstractions.
+- Use `doc/AGENT.md` before modifying coding-agent or writer-agent behavior.
+- Use the platform-specific setup guides before changing webhook payload or token permission logic.
+- Use `pom.xml` for Java/Spring Boot dependency and build metadata.
+- Use `src/test/java/` to understand intended behavior and to add regression coverage.
+- Avoid indexing generated build output in `target/`, local databases in `data/`, IDE metadata in `.idea/`, or compiled `.class` files when building semantic summaries.
+
+## Related distribution metadata
+
+- Docker Hub README: `doc/DOCKERHUB_README.md`
+- Docker Hub short description: `doc/DOCKERHUB_SHORT_DESCRIPTION.txt`
+- Docker publishing workflow: `.github/workflows/docker-publish.yml`
+- CI workflow: `.github/workflows/ci.yml`
+
+
+
+

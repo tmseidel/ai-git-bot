@@ -1,0 +1,79 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "name": "AI-Git-Bot",
+  "codeRepository": "https://github.com/tmseidel/ai-git-bot",
+  "url": "https://github.com/tmseidel/ai-git-bot",
+  "issueTracker": "https://github.com/tmseidel/ai-git-bot/issues",
+  "license": "https://spdx.org/licenses/MIT.html",
+  "version": "1.6.0",
+  "programmingLanguage": [
+    "Java",
+    "HTML",
+    "Shell",
+    "Dockerfile"
+  ],
+  "runtimePlatform": [
+    "Java 21",
+    "Spring Boot",
+    "Docker",
+    "PostgreSQL"
+  ],
+  "applicationCategory": [
+    "DeveloperApplication",
+    "CodeReviewTool",
+    "AutomationTool"
+  ],
+  "keywords": [
+    "AI code review",
+    "code review bot",
+    "coding agent",
+    "technical writer agent",
+    "issue implementation agent",
+    "self-hosted AI",
+    "Git automation",
+    "Gitea",
+    "GitHub",
+    "GitHub Enterprise",
+    "GitLab",
+    "Bitbucket",
+    "Anthropic Claude",
+    "OpenAI",
+    "Google Gemini",
+    "Ollama",
+    "llama.cpp",
+    "local LLM",
+    "Model Context Protocol",
+    "MCP",
+    "Spring Boot",
+    "Docker",
+    "PostgreSQL"
+  ],
+  "description": "AI-Git-Bot is a lightweight, self-hostable gateway application that connects Git platforms with AI providers for pull-request code reviews, interactive PR conversations, autonomous issue implementation, and technical-writing issue refinement.",
+  "author": [
+    {
+      "@type": "Person",
+      "givenName": "Tom",
+      "familyName": "Seidel",
+      "url": "https://github.com/tmseidel"
+    }
+  ],
+  "maintainer": [
+    {
+      "@type": "Person",
+      "givenName": "Tom",
+      "familyName": "Seidel",
+      "url": "https://github.com/tmseidel"
+    }
+  ],
+  "softwareRequirements": [
+    "Java 21 or later",
+    "Maven 3.9+",
+    "PostgreSQL for production deployments",
+    "Docker Compose for containerized deployments"
+  ],
+  "isAccessibleForFree": true,
+  "developmentStatus": "active"
+}
+
+

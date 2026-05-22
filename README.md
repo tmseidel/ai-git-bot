@@ -354,6 +354,12 @@ The bot receives webhooks from your Git provider, fetches PR diffs, sends them t
 | **Community** | |
 | [Contributing](CONTRIBUTING.md) | Contribution guidelines, coding conventions |
 | [Code of Conduct](CODE_OF_CONDUCT.md) | Community standards |
+| [Security Policy](SECURITY.md) | Vulnerability reporting and operator security guidance |
+| [Changelog](CHANGELOG.md) | Release notes and notable changes |
+| [Citation Metadata](CITATION.cff) | Citation and software catalog metadata |
+| [CodeMeta](codemeta.json) | Machine-readable software metadata for catalogs and crawlers |
+| [LLM Index](llms.txt) | Compact LLM and search-engine entry point |
+| [Full LLM Reference](llms-full.txt) | Expanded single-file context for LLMs and RAG systems |
 
 ## License
 

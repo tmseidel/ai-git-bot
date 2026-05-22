@@ -16,7 +16,7 @@
 
         <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
 
-        <p class="text-muted">
+        <p class="text-secondary">
             Tick the PR workflows that should run on every pull-request webhook for bots
             using this configuration. Workflows are executed sequentially in stable order
             (lexicographic by workflow key).
@@ -39,8 +39,8 @@
                                th:id="'wf-' + ${row.workflowKey}"/>
                         <label class="form-check-label" th:for="'wf-' + ${row.workflowKey}">
                             <strong th:text="${row.displayName}"></strong>
-                            <code class="ms-2 text-muted" th:text="${row.workflowKey}"></code>
-                            <span class="badge bg-light text-dark ms-2" th:text="${row.category}"></span>
+                            <code class="ms-2 text-secondary" th:text="${row.workflowKey}"></code>
+                            <span class="badge bg-body-tertiary text-body ms-2" th:text="${row.category}"></span>
                             <span th:if="${row.prWorkflow == null}" class="badge bg-warning ms-2">Not registered</span>
                         </label>
                     </div>

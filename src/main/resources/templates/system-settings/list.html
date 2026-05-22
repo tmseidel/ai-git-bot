@@ -15,7 +15,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-0">System prompts</h5>
-                            <small class="text-muted">Prompt sets available to bot configurations.</small>
+                            <small class="text-secondary">Prompt sets available to bot configurations.</small>
                         </div>
                         <a th:href="@{/system-settings/system-prompts/new}" class="btn btn-primary btn-sm">
                             <i class="bi bi-plus-circle"></i> Add
@@ -23,12 +23,12 @@
                     </div>
                     <div class="card-body">
                         <div th:if="${#lists.isEmpty(systemPrompts)}" class="text-center py-4">
-                            <i class="bi bi-inbox fs-1 text-muted"></i>
-                            <p class="text-muted mt-2">No system prompts configured yet.</p>
+                            <i class="bi bi-inbox fs-1 text-secondary"></i>
+                            <p class="text-secondary mt-2">No system prompts configured yet.</p>
                         </div>
                         <div th:if="${!#lists.isEmpty(systemPrompts)}" class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                                <thead class="table-group-divider">
                                 <tr>
                                     <th>Name</th>
                                     <th>Default</th>
@@ -79,7 +79,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-0">MCP configurations</h5>
-                            <small class="text-muted">Remote MCP server configurations assignable to bots.</small>
+                            <small class="text-secondary">Remote MCP server configurations assignable to bots.</small>
                         </div>
                         <a th:href="@{/system-settings/mcp-configurations/new}" class="btn btn-primary btn-sm">
                             <i class="bi bi-plus-circle"></i> Add
@@ -87,12 +87,12 @@
                     </div>
                     <div class="card-body">
                         <div th:if="${#lists.isEmpty(mcpConfigurations)}" class="text-center py-4">
-                            <i class="bi bi-inbox fs-1 text-muted"></i>
-                            <p class="text-muted mt-2">No MCP configurations configured yet.</p>
+                            <i class="bi bi-inbox fs-1 text-secondary"></i>
+                            <p class="text-secondary mt-2">No MCP configurations configured yet.</p>
                         </div>
                         <div th:if="${!#lists.isEmpty(mcpConfigurations)}" class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                                <thead class="table-group-divider">
                                 <tr>
                                     <th>Name</th>
                                     <th>Updated</th>
@@ -138,7 +138,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-0">Tool configurations</h5>
-                            <small class="text-muted">Whitelists of built-in agent tools (file, context, validation, repository) assignable to bots.</small>
+                            <small class="text-secondary">Whitelists of built-in agent tools (file, context, validation, repository) assignable to bots.</small>
                         </div>
                         <a th:href="@{/system-settings/bot-tools/new}" class="btn btn-primary btn-sm">
                             <i class="bi bi-plus-circle"></i> Add
@@ -146,12 +146,12 @@
                     </div>
                     <div class="card-body">
                         <div th:if="${#lists.isEmpty(botToolConfigurations)}" class="text-center py-4">
-                            <i class="bi bi-inbox fs-1 text-muted"></i>
-                            <p class="text-muted mt-2">No tool configurations yet.</p>
+                            <i class="bi bi-inbox fs-1 text-secondary"></i>
+                            <p class="text-secondary mt-2">No tool configurations yet.</p>
                         </div>
                         <div th:if="${!#lists.isEmpty(botToolConfigurations)}" class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                                <thead class="table-group-divider">
                                 <tr>
                                     <th>Name</th>
                                     <th>Default</th>
@@ -206,7 +206,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-0">Workflow configurations</h5>
-                            <small class="text-muted">Named whitelists of PR workflows (review, tests, …) assignable to bots.</small>
+                            <small class="text-secondary">Named whitelists of PR workflows (review, tests, …) assignable to bots.</small>
                         </div>
                         <a th:href="@{/system-settings/workflow-configurations/new}" class="btn btn-primary btn-sm">
                             <i class="bi bi-plus-circle"></i> Add
@@ -214,12 +214,12 @@
                     </div>
                     <div class="card-body">
                         <div th:if="${#lists.isEmpty(workflowConfigurations)}" class="text-center py-4">
-                            <i class="bi bi-inbox fs-1 text-muted"></i>
-                            <p class="text-muted mt-2">No workflow configurations yet.</p>
+                            <i class="bi bi-inbox fs-1 text-secondary"></i>
+                            <p class="text-secondary mt-2">No workflow configurations yet.</p>
                         </div>
                         <div th:if="${!#lists.isEmpty(workflowConfigurations)}" class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                                <thead class="table-group-divider">
                                 <tr>
                                     <th>Name</th>
                                     <th>Default</th>
@@ -274,7 +274,7 @@
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <div>
                             <h5 class="mb-0">Deployment targets</h5>
-                            <small class="text-muted">Per-PR preview environments used by workflows that need a live deployment (E2E tests, smoke checks).</small>
+                            <small class="text-secondary">Per-PR preview environments used by workflows that need a live deployment (E2E tests, smoke checks).</small>
                         </div>
                         <a th:href="@{/system-settings/deployment-targets/new}" class="btn btn-primary btn-sm">
                             <i class="bi bi-plus-circle"></i> Add
@@ -282,12 +282,12 @@
                     </div>
                     <div class="card-body">
                         <div th:if="${#lists.isEmpty(deploymentTargets)}" class="text-center py-4">
-                            <i class="bi bi-cloud-slash fs-1 text-muted"></i>
-                            <p class="text-muted mt-2">No deployment targets configured. Workflows needing a preview environment will be skipped on bots without a target.</p>
+                            <i class="bi bi-cloud-slash fs-1 text-secondary"></i>
+                            <p class="text-secondary mt-2">No deployment targets configured. Workflows needing a preview environment will be skipped on bots without a target.</p>
                         </div>
                         <div th:if="${!#lists.isEmpty(deploymentTargets)}" class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                                <thead class="table-group-divider">
                                 <tr>
                                     <th>Name</th>
                                     <th>Strategy</th>
@@ -305,7 +305,7 @@
                                     <td>
                                         <code th:if="${deploymentTarget.previewUrlTemplate != null}"
                                               th:text="${deploymentTarget.previewUrlTemplate}"></code>
-                                        <span th:if="${deploymentTarget.previewUrlTemplate == null}" class="text-muted">—</span>
+                                        <span th:if="${deploymentTarget.previewUrlTemplate == null}" class="text-secondary">—</span>
                                     </td>
                                     <td th:text="${deploymentTarget.timeoutSeconds}"></td>
                                     <td>

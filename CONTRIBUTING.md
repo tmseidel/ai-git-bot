@@ -16,8 +16,8 @@ We welcome contributions to AI-Git-Bot! This document provides guidelines and in
 1. Fork and clone the repository:
 
    ```bash
-   git clone https://github.com/<your-fork>/anthropic-gitea-bot.git
-   cd anthropic-gitea-bot
+   git clone https://github.com/<your-fork>/ai-git-bot.git
+   cd ai-git-bot
    ```
 
 2. Build the project:
