@@ -1,0 +1,224 @@
+name: preview
+on:
+  workflow_dispatch:
+    inputs:
+      callbackUrl:
+        description: "ai-git-bot callback URL (auto-injected)"
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: maven:3.9.11-eclipse-temurin-21
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      FALLBACK_CALLBACK_URL: ${{ vars.CALLBACK_URL }}
+    steps:
+      - name: Install workflow tools
+        run: |
+          if command -v git >/dev/null 2>&1 && command -v curl >/dev/null 2>&1 && command -v ssh >/dev/null 2>&1 && command -v scp >/dev/null 2>&1; then
+            echo "Workflow tools already installed"
+            exit 0
+          fi
+
+          APT_GET="apt-get"
+          if command -v sudo >/dev/null 2>&1; then
+            APT_GET="sudo apt-get"
+          fi
+
+          $APT_GET update
+          $APT_GET install -y curl git openssh-client
+      - name: Checkout repository
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          TOKEN: ${{ github.token }}
+          DEFAULT_SHA: ${{ github.sha }}
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          if [ -f pom.xml ] && [ -d .git ]; then
+            echo "Repository already present in workspace"
+            git status --short || true
+            exit 0
+          fi
+
+          if [ ! -d .git ]; then
+            git init
+          fi
+
+          git remote remove origin 2>/dev/null || true
+          git remote add origin "$REPO_URL"
+
+          REF_SHA="$DEFAULT_SHA"
+
+          if [ -n "$TOKEN" ]; then
+            AUTH_HEADER="$(printf 'x-access-token:%s' "$TOKEN" | base64 -w 0)"
+            git -c http.extraheader="AUTHORIZATION: basic $AUTH_HEADER" fetch --depth 1 origin "$REF_SHA"
+          else
+            git fetch --depth 1 origin "$REF_SHA"
+          fi
+
+          git checkout --force --detach FETCH_HEAD
+          git reset --hard FETCH_HEAD
+      - name: Resolve deployment metadata
+        id: meta
+        env:
+          INPUT_CALLBACK_URL: ${{ inputs.callbackUrl }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          mask_url() {
+            local value="$1"
+            local length=${#value}
+        
+            if (( length == 0 )); then
+              printf '[empty]'
+              return
+            fi
+        
+            # short strings
+            if (( length <= 2 )); then
+              printf '...'
+              return
+            fi
+        
+            # dynamic
+            local prefix_len suffix_len
+            if   (( length <= 6 ));  then prefix_len=1; suffix_len=1
+            elif (( length <= 12 )); then prefix_len=2; suffix_len=2
+            elif (( length <= 17 )); then prefix_len=4; suffix_len=3
+            else                       prefix_len=11; suffix_len=3
+            fi
+        
+            printf '%s...%s' "${value:0:prefix_len}" "${value: -suffix_len}"
+          }
+
+          CALLBACK_URL="$INPUT_CALLBACK_URL"
+          if [ -z "$CALLBACK_URL" ]; then
+            CALLBACK_URL="$FALLBACK_CALLBACK_URL"
+          fi
+
+          SLOT="$RUN_NUMBER"
+          NUMERIC_SOURCE="$RUN_NUMBER"
+          PORT=$((20000 + (NUMERIC_SOURCE % 1000)))
+          REMOTE_DIR="preview/tasklist-${SLOT}"
+          PREVIEW_URL="http://${DEPLOY_HOST}:${PORT}"
+          MASKED_PREVIEW_URL="$(mask_url "$PREVIEW_URL")"
+          MASKED_CALLBACK_URL="$(mask_url "$CALLBACK_URL")"
+
+          echo "Resolved deployment metadata:"
+          echo "  slot=$SLOT"
+          echo "  port=$PORT"
+          echo "  remote_dir=$REMOTE_DIR"
+          echo "  preview_url=$MASKED_PREVIEW_URL"
+          echo "  callback_url=$MASKED_CALLBACK_URL"
+
+          {
+            echo "callback_url=$CALLBACK_URL"
+            echo "masked_callback_url=$MASKED_CALLBACK_URL"
+            echo "slot=$SLOT"
+            echo "port=$PORT"
+            echo "remote_dir=$REMOTE_DIR"
+            echo "preview_url=$PREVIEW_URL"
+            echo "masked_preview_url=$MASKED_PREVIEW_URL"
+          } | tee -a "$GITHUB_OUTPUT" >/dev/null
+      - name: Build application
+        run: mvn -B clean verify
+      - name: Locate artifact
+        id: artifact
+        run: |
+          ARTIFACT_PATH="$(find target -maxdepth 1 -type f -name '*.jar' ! -name '*original.jar' | head -n 1)"
+          if [ -z "$ARTIFACT_PATH" ]; then
+            echo "No deployable JAR artifact found in target/." >&2
+            exit 1
+          fi
+
+          ARTIFACT_NAME="$(basename "$ARTIFACT_PATH")"
+          echo "Deployable artifact found: $ARTIFACT_PATH"
+
+          {
+            echo "path=$ARTIFACT_PATH"
+            echo "name=$ARTIFACT_NAME"
+          } | tee -a "$GITHUB_OUTPUT" >/dev/null
+      - name: Deploy artifact
+        id: deploy
+        env:
+          REMOTE_DIR: ${{ steps.meta.outputs.remote_dir }}
+          REMOTE_PORT: ${{ steps.meta.outputs.port }}
+          PREVIEW_URL: ${{ steps.meta.outputs.preview_url }}
+          MASKED_PREVIEW_URL: ${{ steps.meta.outputs.masked_preview_url }}
+          ARTIFACT_PATH: ${{ steps.artifact.outputs.path }}
+          ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
+        run: |
+          if [ -z "$DEPLOY_USER" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "Set repository variable DEPLOY_USER and secret SSH_PRIVATE_KEY before running this workflow." >&2
+            exit 1
+          fi
+
+          SSH_DIR="$HOME/.ssh"
+          mkdir -p "$SSH_DIR"
+          chmod 700 "$SSH_DIR"
+          SSH_KEY_FILE="$SSH_DIR/deploy_key"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$SSH_KEY_FILE"
+          chmod 600 "$SSH_KEY_FILE"
+          # Ensure key ends with newline (OpenSSH requirement)
+          if [ -n "$(tail -c1 "$SSH_KEY_FILE")" ]; then
+            printf '\n' >> "$SSH_KEY_FILE"
+          fi
+
+          SSH_OPTS="-i $SSH_KEY_FILE -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
+
+          echo "Starting deploy to $DEPLOY_HOST"
+          echo "  remote_dir=$REMOTE_DIR"
+          echo "  artifact=$ARTIFACT_NAME"
+          echo "  port=$REMOTE_PORT"
+
+          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$REMOTE_DIR'"
+          scp $SSH_OPTS "$ARTIFACT_PATH" "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/$ARTIFACT_NAME"
+          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -eu
+            command -v java >/dev/null 2>&1 || {
+              echo 'Java is not installed on the target server.' >&2
+              exit 1
+            }
+            cd '$REMOTE_DIR'
+            if [ -f app.pid ] && kill -0 \$(cat app.pid) 2>/dev/null; then
+              kill \$(cat app.pid) || true
+              sleep 5
+            fi
+            nohup java -jar '$ARTIFACT_NAME' --server.port='$REMOTE_PORT' > app.log 2>&1 &
+            echo \$! > app.pid
+            sleep 10
+            if ! kill -0 \$(cat app.pid) 2>/dev/null; then
+              echo 'Remote application failed to start.' >&2
+              cat app.log >&2 || true
+              exit 1
+            fi
+          "
+
+          echo "Deploy finished successfully: $MASKED_PREVIEW_URL"
+          echo "preview_url=$PREVIEW_URL" | tee -a "$GITHUB_OUTPUT" >/dev/null
+      - name: Notify bot
+        if: always()
+        env:
+          CALLBACK_URL:  ${{ inputs.callbackUrl }}
+          PREVIEW_URL: ${{ steps.meta.outputs.preview_url }}
+          MASKED_PREVIEW_URL: ${{ steps.meta.outputs.masked_preview_url }}
+          MASKED_CALLBACK_URL: ${{ steps.meta.outputs.masked_callback_url }}
+          STATUS: ${{ job.status == 'success' && 'READY' || 'FAILED' }}
+        run: |
+          if [ -z "$CALLBACK_URL" ]; then
+            echo "Skipping callback because no callback URL was provided."
+            exit 0
+          fi
+
+          STATUS=READY
+          [ "${{ job.status }}" != "success" ] && STATUS=FAILED
+          echo "Sending callback to $MASKED_CALLBACK_URL with status=$STATUS and preview_url=$MASKED_PREVIEW_URL"
+          curl -fsS -X POST "$CALLBACK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"status\":\"$STATUS\",\"previewUrl\":\"$PREVIEW_URL\"}"

@@ -13,7 +13,7 @@
 
     <groupId>org.remus</groupId>
     <artifactId>ai-git-bot</artifactId>
-    <version>1.7.0</version>
+    <version>1.7.1</version>
     <name>AI Git Bot</name>
     <description>AI-Git-Bot is a lightweight, self-hostable gateway application that connects your Git platforms with AI providers.</description>
     <url>https://github.com/tmseidel/ai-git-bot</url>
