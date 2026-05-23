@@ -71,30 +71,37 @@ jobs:
           INPUT_CALLBACK_URL: ${{ inputs.callbackUrl }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
+          # POSIX-sh compatible (no bashisms): runs under `sh -e {0}` as well as bash.
           mask_url() {
-            local value="$1"
-            local length=${#value}
-        
-            if (( length == 0 )); then
+            value="$1"
+            length=${#value}
+
+            if [ "$length" -eq 0 ]; then
               printf '[empty]'
               return
             fi
-        
+
             # short strings
-            if (( length <= 2 )); then
+            if [ "$length" -le 2 ]; then
               printf '...'
               return
             fi
-        
-            # dynamic
-            local prefix_len suffix_len
-            if   (( length <= 6 ));  then prefix_len=1; suffix_len=1
-            elif (( length <= 12 )); then prefix_len=2; suffix_len=2
-            elif (( length <= 17 )); then prefix_len=4; suffix_len=3
-            else                       prefix_len=11; suffix_len=3
+
+            # dynamic prefix/suffix lengths
+            if [ "$length" -le 6 ]; then
+              prefix_len=1; suffix_len=1
+            elif [ "$length" -le 12 ]; then
+              prefix_len=2; suffix_len=2
+            elif [ "$length" -le 17 ]; then
+              prefix_len=4; suffix_len=3
+            else
+              prefix_len=11; suffix_len=3
             fi
-        
-            printf '%s...%s' "${value:0:prefix_len}" "${value: -suffix_len}"
+
+            prefix=$(printf '%s' "$value" | cut -c1-"$prefix_len")
+            suffix_start=$((length - suffix_len + 1))
+            suffix=$(printf '%s' "$value" | cut -c"$suffix_start"-)
+            printf '%s...%s' "$prefix" "$suffix"
           }
 
           CALLBACK_URL="$INPUT_CALLBACK_URL"
