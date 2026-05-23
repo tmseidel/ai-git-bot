@@ -316,12 +316,43 @@ public class GitHubApiClient implements RepositoryApiClient {
         if (!request.inputs().isEmpty()) {
             body.put("inputs", request.inputs());
         }
-        restClient.post()
-                .uri("/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
-                        request.owner(), request.repo(), request.workflowRef())
-                .body(body)
-                .retrieve()
-                .toBodilessEntity();
+        try {
+            restClient.post()
+                    .uri("/repos/{owner}/{repo}/actions/workflows/{workflow}/dispatches",
+                            request.owner(), request.repo(), request.workflowRef())
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (org.springframework.web.client.HttpClientErrorException e) {
+            int status = e.getStatusCode().value();
+            if (status == 404) {
+                // GitHub resolves the workflow file via the repository's DEFAULT branch.
+                // If the file is missing there (e.g. only present on the feature branch
+                // being PR'd), the dispatch endpoint returns 404 even though the file
+                // exists on the requested `ref`. Surface an actionable hint so the
+                // operator does not have to guess.
+                throw new IllegalStateException(
+                        "GitHub returned 404 when dispatching workflow '" + request.workflowRef()
+                                + "' for " + request.owner() + "/" + request.repo()
+                                + " on ref " + request.gitRef() + ". GitHub resolves the workflow"
+                                + " file via the repository's DEFAULT branch — make sure '"
+                                + request.workflowRef() + "' exists at .github/workflows/"
+                                + request.workflowRef() + " on the default branch AND declares"
+                                + " 'on: workflow_dispatch:'. Original response: " + e.getMessage(),
+                        e);
+            }
+            if (status == 422) {
+                // 422 typically means the workflow file exists but does not declare
+                // workflow_dispatch, or required inputs are missing.
+                throw new IllegalStateException(
+                        "GitHub returned 422 when dispatching workflow '" + request.workflowRef()
+                                + "'. The workflow file likely does not declare"
+                                + " 'on: workflow_dispatch:' or is missing a required input."
+                                + " Original response: " + e.getMessage(),
+                        e);
+            }
+            throw e;
+        }
         // GitHub's dispatch endpoint does not return a run id; poll briefly for
         // the next run that appeared after our trigger and matches the same
         // (workflow, event=workflow_dispatch [, branch]) filter. If we know the
