@@ -42,6 +42,48 @@ planner's user message via `PrWorkflowContext.hints`.
 
 3. Save. The next PR-open / PR-synchronise webhook triggers the workflow.
 
+## Customising the agent prompts
+
+The three E2E agents (**planner**, **author**, **runner**) ship with
+sensible built-in role descriptions, but you can override each one per
+**System Prompt entry** under *System settings → System prompts*. The
+form exposes three additional editors below the existing
+review / issue-agent / writer-agent slots:
+
+- **E2E Planner System-Prompt** — persona and policy for the agent that
+  reads the PR diff and produces the test plan.
+- **E2E Author System-Prompt** — persona and policy for the agent that
+  materialises each planned journey as a runnable test file.
+- **E2E Runner System-Prompt** — persona and policy for the agent that
+  executes the suite against the preview deployment and reports the
+  outcome.
+
+The bot's *Preview* button renders all three texts alongside the
+existing review / coding / writer prompts so you can sanity-check them
+before saving.
+
+> 🛡️ **What you can and cannot edit.** These three editors hold the
+> agent's **role description only** — persona, intent, tone, policy.
+> The *technical protocol* is appended automatically by the software at
+> runtime and is **not** editable from the UI:
+>
+> - the active test framework key (`playwright`, `cypress`, …)
+> - the planner's JSON output schema (`framework`, `journeys[]`,
+>   `maxRetries`, …)
+> - the author's required tool call (`pr-test-write`) and the strict
+>   URL handling rules (`page.goto('/…')` / `cy.visit('/…')`,
+>   never `process.env.BASE_URL`)
+> - the runner's tool sequence (`preview-url` → `preview-status` →
+>   `pr-test-run` → optional `attach-artifact`) and the retry / FLAKY
+>   semantics
+>
+> That split means an operator can freely tune *how* the agents speak
+> and *what they prioritise*, but cannot accidentally break the JSON
+> contract, the tool dispatch, or the URL conventions the runner relies
+> on. The fallback used when a slot is left blank is the corresponding
+> `DEFAULT_*_EDITABLE` constant in
+> `org.remus.giteabot.prworkflow.e2e.agents.E2ePromptLibrary`.
+
 ## What it does (per run)
 
 1. Resolves the workflow parameters from the bot's configuration.
