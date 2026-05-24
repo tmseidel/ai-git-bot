@@ -538,6 +538,15 @@ Sensitive data (API keys, Git tokens) is encrypted at rest using AES-256-GCM enc
 
 The web UI is protected by Spring Security with form-based authentication. The API webhook endpoints (`/api/webhook/**`) remain unauthenticated to allow Git providers to send webhooks. Each bot has a unique, random webhook secret in its URL path that serves as authentication.
 
+### Per-Bot User Whitelist (token-spend guard)
+
+Each bot has an optional **User Whitelist** (see [Creating a Bot](#creating-a-bot)) that limits which Git usernames may trigger AI-spending interactions: PR opens/synchronisations, `@`-mentions in PR or issue comments, inline review comments, review submissions, agent issue assignments and follow-up comments.
+
+* **Blank whitelist ⇒ everyone is allowed.** This is the historical default and remains safe for private/internal repositories where the set of repository collaborators is already trusted.
+* **Non-blank whitelist ⇒ strict allow-list.** Only the listed usernames (case-insensitive, whitespace-trimmed, newline- *or* comma-separated) may spend tokens. Every other caller is silently ignored — no PR comment is posted, but the rejection is logged at `INFO` so operators can audit blocked traffic.
+
+The whitelist is the recommended defence for bots installed on **public repositories**, where any drive-by visitor could otherwise open a PR or post an `@bot` comment and burn through your AI quota. The bot's own username does not need to be listed: events authored by the bot itself are filtered out separately by `BotWebhookService#isBotUser`.
+
 ## Configuration Reference
 
 ### Environment Variables

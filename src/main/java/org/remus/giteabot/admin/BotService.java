@@ -6,8 +6,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -81,5 +84,55 @@ public class BotService {
         bot.setLastErrorMessage(errorMessage);
         bot.setLastErrorAt(Instant.now());
         botRepository.save(bot);
+    }
+
+    /**
+     * Parses the bot's {@link Bot#getUserWhitelist() user-whitelist} blob
+     * into a case-insensitive lookup set of trimmed, lower-cased
+     * usernames. Accepts both newline and comma separators (mixed
+     * allowed) so operators can enter the list in whichever style they
+     * prefer in the admin UI.
+     *
+     * <p>Returns an empty set when the whitelist is {@code null} or
+     * blank — callers that treat an empty set as "everyone allowed"
+     * preserve the unrestricted historical behaviour. The bot entity
+     * intentionally holds no logic for this (JPA entities stay anaemic);
+     * all whitelist semantics live here in the service layer.</p>
+     */
+    @Transactional(readOnly = true)
+    public Set<String> getAllowedUsernames(Bot bot) {
+        if (bot == null) {
+            return Collections.emptySet();
+        }
+        String raw = bot.getUserWhitelist();
+        if (raw == null || raw.isBlank()) {
+            return Collections.emptySet();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        for (String token : raw.split("[,\\r\\n]+")) {
+            String trimmed = token.trim();
+            if (!trimmed.isEmpty()) {
+                out.add(trimmed.toLowerCase());
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Returns {@code true} when {@code username} is permitted to trigger
+     * AI-spending interactions with {@code bot}. A blank / unset
+     * whitelist ⇒ everyone is allowed (historical default). A blank
+     * {@code username} is never allowed when a whitelist is configured.
+     */
+    @Transactional(readOnly = true)
+    public boolean isUserAllowed(Bot bot, String username) {
+        Set<String> allowed = getAllowedUsernames(bot);
+        if (allowed.isEmpty()) {
+            return true;
+        }
+        if (username == null || username.isBlank()) {
+            return false;
+        }
+        return allowed.contains(username.trim().toLowerCase());
     }
 }

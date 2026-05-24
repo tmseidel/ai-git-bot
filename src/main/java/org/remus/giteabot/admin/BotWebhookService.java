@@ -28,6 +28,8 @@ import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.Set;
+
 /**
  * Handles webhook events for persisted {@link Bot} entities using their
  * specific {@link AiIntegration} and {@link GitIntegration} configurations.
@@ -340,6 +342,9 @@ public class BotWebhookService {
      */
     @Async
     public void handleIssueComment(Bot bot, WebhookPayload payload) {
+        if (!isCallerAllowed(bot, payload)) {
+            return;
+        }
         if (bot.getBotType() == BotType.WRITER) {
             try {
                 createWriterAgentService(bot).handleIssueComment(payload);
@@ -447,6 +452,58 @@ public class BotWebhookService {
             return payload.getIssue().getNumber();
         }
         return payload.getNumber();
+    }
+
+    /**
+     * Token-spend guard for public-repo deployments: returns {@code true}
+     * when the bot's configured {@link Bot#getUserWhitelist() user
+     * whitelist} permits the webhook caller, or when no whitelist is
+     * configured (historical "everyone allowed" behaviour). All
+     * whitelist parsing / matching is delegated to
+     * {@link BotService#isUserAllowed(Bot, String)} so the JPA entity
+     * stays free of business logic.
+     */
+    boolean isCallerAllowed(Bot bot, WebhookPayload payload) {
+        if (bot == null) {
+            return true;
+        }
+        Set<String> allowed = botService.getAllowedUsernames(bot);
+        if (allowed.isEmpty()) {
+            return true;
+        }
+        String caller = resolveCallerUsername(payload);
+        if (botService.isUserAllowed(bot, caller)) {
+            return true;
+        }
+        log.info("[Bot '{}'] Ignoring webhook from user '{}' — not in whitelist ({} entries)",
+                bot.getName(),
+                caller == null ? "<unknown>" : caller,
+                allowed.size());
+        return false;
+    }
+
+    /**
+     * Resolves the most specific username that the webhook payload
+     * exposes for the triggering actor. Mirrors the lookup order
+     * documented on {@link #isCallerAllowed(Bot, WebhookPayload)}.
+     */
+    private String resolveCallerUsername(WebhookPayload payload) {
+        if (payload == null) {
+            return null;
+        }
+        if (payload.getComment() != null && payload.getComment().getUser() != null) {
+            return payload.getComment().getUser().getLogin();
+        }
+        if (payload.getSender() != null && payload.getSender().getLogin() != null) {
+            return payload.getSender().getLogin();
+        }
+        if (payload.getPullRequest() != null && payload.getPullRequest().getUser() != null) {
+            return payload.getPullRequest().getUser().getLogin();
+        }
+        if (payload.getIssue() != null && payload.getIssue().getUser() != null) {
+            return payload.getIssue().getUser().getLogin();
+        }
+        return null;
     }
 
     /**
