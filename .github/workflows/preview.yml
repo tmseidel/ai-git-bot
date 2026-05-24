@@ -184,7 +184,44 @@ jobs:
           echo "  artifact=$ARTIFACT_NAME"
           echo "  port=$REMOTE_PORT"
 
-          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$REMOTE_DIR'"
+          # --- Idempotency / state reset ----------------------------------
+          ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "
+            set -eu
+
+            # 1. Stop any previous instance on this slot and free the port.
+            if [ -f '$REMOTE_DIR/app.pid' ]; then
+              OLD_PID=\$(cat '$REMOTE_DIR/app.pid' 2>/dev/null || echo '')
+              if [ -n \"\$OLD_PID\" ] && kill -0 \"\$OLD_PID\" 2>/dev/null; then
+                echo \"Stopping previous instance PID=\$OLD_PID on slot $SLOT\"
+                kill \"\$OLD_PID\" 2>/dev/null || true
+                for i in 1 2 3 4 5 6 7 8 9 10; do
+                  kill -0 \"\$OLD_PID\" 2>/dev/null || break
+                  sleep 1
+                done
+                kill -9 \"\$OLD_PID\" 2>/dev/null || true
+              fi
+            fi
+
+            # 2. Wipe the slot directory entirely — no stale jars, no stale
+            #    H2 *.mv.db, no stale app.log, no stale anything.
+            rm -rf '$REMOTE_DIR'
+            mkdir -p '$REMOTE_DIR'
+
+            # 3. Best-effort garbage collection of preview slots older than
+            #    24h to reclaim disk + ports. Errors are swallowed because
+            #    this must never break a deploy.
+            (
+              find preview -mindepth 1 -maxdepth 1 -type d -name 'tasklist-*' -mtime +1 2>/dev/null |
+                while IFS= read -r d; do
+                  if [ -f \"\$d/app.pid\" ]; then
+                    OLD=\$(cat \"\$d/app.pid\" 2>/dev/null || echo '')
+                    [ -n \"\$OLD\" ] && kill \"\$OLD\" 2>/dev/null || true
+                  fi
+                  rm -rf \"\$d\"
+                done
+            ) || true
+          "
+
           scp $SSH_OPTS "$ARTIFACT_PATH" "$DEPLOY_USER@$DEPLOY_HOST:$REMOTE_DIR/$ARTIFACT_NAME"
           ssh $SSH_OPTS "$DEPLOY_USER@$DEPLOY_HOST" "
             set -eu
@@ -193,23 +230,53 @@ jobs:
               exit 1
             }
             cd '$REMOTE_DIR'
-            if [ -f app.pid ] && kill -0 \$(cat app.pid) 2>/dev/null; then
-              kill \$(cat app.pid) || true
-              sleep 5
-            fi
+            # The JVM is started with a deterministic, ephemeral configuration:
+            #   * H2 in-memory database — no on-disk *.mv.db, fresh schema on every
+            #     boot (Flyway re-runs all migrations from scratch).
+            #   * Auto-login enabled with a fixed admin/admin pair — every browser
+            #     context is auto-authenticated on its first request, regardless
+            #     of cookies (or absence thereof).
+            #   * Deterministic encryption key — bot integrations created mid-test
+            #     can be decrypted reproducibly across JVM restarts within the
+            #     same slot.
             nohup java -jar '$ARTIFACT_NAME' \
               --server.port='$REMOTE_PORT' \
+              --spring.datasource.url='jdbc:h2:mem:preview-$SLOT;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE;MODE=LEGACY' \
+              --spring.datasource.username=sa \
+              --spring.datasource.password= \
+              --spring.jpa.hibernate.ddl-auto=validate \
+              --spring.flyway.enabled=true \
+              --spring.flyway.clean-disabled=false \
+              --app.encryption-key='preview-deterministic-key-do-not-use-in-prod' \
               --giteabot.security.auto-login.enabled=true \
               --giteabot.security.auto-login.username=admin \
               --giteabot.security.auto-login.password=admin \
               > app.log 2>&1 &
             echo \$! > app.pid
-            sleep 10
-            if ! kill -0 \$(cat app.pid) 2>/dev/null; then
-              echo 'Remote application failed to start.' >&2
-              cat app.log >&2 || true
+
+            # Readiness probe: wait up to 60s for actuator/health to return 200,
+            # rather than a fixed 10s sleep. This catches slow JVM warmups on
+            # cold hosts and surfaces startup failures with the real log tail.
+            READY=0
+            for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 \
+                     16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+              if ! kill -0 \$(cat app.pid) 2>/dev/null; then
+                echo 'Remote application died during startup.' >&2
+                tail -n 200 app.log >&2 || true
+                exit 1
+              fi
+              if curl -fsS \"http://127.0.0.1:$REMOTE_PORT/actuator/health\" >/dev/null 2>&1; then
+                READY=1
+                break
+              fi
+              sleep 2
+            done
+            if [ \"\$READY\" != \"1\" ]; then
+              echo 'Remote application failed readiness probe within 60s.' >&2
+              tail -n 200 app.log >&2 || true
               exit 1
             fi
+            echo 'Application is ready and healthy.'
           "
 
           echo "Deploy finished successfully: $MASKED_PREVIEW_URL"
