@@ -116,6 +116,36 @@ class E2eTestSlashCommandHandlerTest {
     }
 
     @Test
+    void dispatchesOnRerunTestSingular() {
+        // Common typo: user writes the verb without the trailing 's'.
+        WebhookPayload payload = payloadWithComment("@ai-bot rerun-test");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isTrue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(orchestrator).run(eq(bot), eq(payload), eq(E2ETestWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue()).containsEntry(PrWorkflowContext.HINT_RERUN_ONLY, "true");
+    }
+
+    @Test
+    void dispatchesOnRegenerateTestSingularWithFeedback() {
+        // Common typo: user writes the verb without the trailing 's'.
+        WebhookPayload payload = payloadWithComment(
+                "@ai-bot regenerate-test focus on the checkout flow");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isTrue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(orchestrator).run(eq(bot), eq(payload), eq(E2ETestWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue())
+                .containsEntry(PrWorkflowContext.HINT_E2E_FEEDBACK, "focus on the checkout flow");
+    }
+
+    @Test
     void ignoresUnrelatedComment() {
         WebhookPayload payload = payloadWithComment("@ai-bot please review the diff again");
 

@@ -46,11 +46,13 @@ public class E2eTestSlashCommandHandler {
      * {@code @bot} marker OR any actual bot alias (configured per bot via
      * {@link Bot#getName()}), followed by either {@code rerun-tests} or
      * {@code regenerate-tests} as the first whitespace-delimited token.
-     * Any trailing text after {@code regenerate-tests} is captured as
+     * The trailing {@code s} is optional so that common typos like
+     * {@code rerun-test} / {@code regenerate-test} (singular) are also
+     * accepted. Any trailing text after the verb is captured as
      * feedback (group 2).
      */
     private static final Pattern COMMAND_PATTERN = Pattern.compile(
-            "(?im)(?:^|\\s)@\\S+\\s+(rerun-tests|regenerate-tests)\\b\\s*(.*)$");
+            "(?im)(?:^|\\s)@\\S+\\s+(rerun-tests?|regenerate-tests?)\\b\\s*(.*)$");
 
     private final PrWorkflowOrchestrator orchestrator;
     private final WorkflowSelectionService selectionService;
@@ -127,11 +129,13 @@ public class E2eTestSlashCommandHandler {
 
     private static @NonNull Map<String, String> getHints(String verb, String feedback) {
         Map<String, String> hints;
-        if ("rerun-tests".equals(verb)) {
+        // verb is already lower-cased; accept both singular ("rerun-test") and
+        // plural ("rerun-tests") forms — same for regenerate-test(s).
+        if (verb.startsWith("rerun-test")) {
             // Skip Planner+Author; re-run the existing test files from the last suite.
             hints = Map.of(PrWorkflowContext.HINT_RERUN_ONLY, "true");
         } else {
-            // regenerate-tests: full flow. Optionally pass operator feedback to the planner.
+            // regenerate-test(s): full flow. Optionally pass operator feedback to the planner.
             hints = feedback.isBlank()
                     ? Map.of()
                     : Map.of(PrWorkflowContext.HINT_E2E_FEEDBACK, feedback);

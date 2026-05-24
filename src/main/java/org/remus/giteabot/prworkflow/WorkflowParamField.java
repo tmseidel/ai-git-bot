@@ -42,6 +42,26 @@ public record WorkflowParamField(
         }
     }
 
+    /**
+     * Convenience constructor that takes a {@link WorkflowParamName} enum
+     * value instead of a raw string. Use this from new code so the key
+     * is checked at compile time:
+     *
+     * <pre>{@code
+     * new WorkflowParamField(E2eTestParam.MAX_RETRIES, "Max retries per test",
+     *         ParamType.INTEGER, false, "1", "...");
+     * }</pre>
+     */
+    public WorkflowParamField(WorkflowParamName name,
+                              String label,
+                              ParamType type,
+                              boolean required,
+                              String defaultValue,
+                              String description) {
+        this(Objects.requireNonNull(name, "name").key(),
+                label, type, required, defaultValue, description);
+    }
+
     public enum ParamType {
         /** Single-line text. */
         STRING,

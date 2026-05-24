@@ -64,6 +64,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.review.CodeReviewServiceFactory codeReviewServiceFactory;
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler e2eTestPrCloseHandler;
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
+    @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
 
     private BotWebhookService botWebhookService;
 
@@ -77,7 +78,7 @@ class BotWebhookServiceTest {
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService, botService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
                 prWorkflowOrchestrator, codeReviewServiceFactory, e2eTestPrCloseHandler,
-                e2eTestSlashCommandHandler);
+                e2eTestSlashCommandHandler, workflowSelectionService);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
@@ -819,6 +820,47 @@ class BotWebhookServiceTest {
             verify(sessionService, never()).getOrCreateSession(any(), any(), any(), any());
             verify(agentSessionService, never()).setStatus(any(), any());
         }
+
+        @Test
+        void noAgentSession_botWithoutReviewWorkflow_doesNotFallIntoCodeReview() {
+            // Bot only has e2e-test configured (no review). An unrecognised comment must
+            // NOT trigger the code-review path — instead the bot replies that it does
+            // not understand the command.
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot", true,
+                    java.util.List.of("e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            // Code-review path MUST NOT be entered
+            verify(sessionService, never()).getOrCreateSession(any(), any(), any(), any());
+            // Unrecognised-command reply MUST be posted
+            verify(repositoryApiClient).postIssueComment(eq(OWNER), eq(REPO), eq(PR_NUMBER),
+                    org.mockito.ArgumentMatchers.contains("did not understand"));
+        }
+
+        @Test
+        void noAgentSession_botWithReviewWorkflow_stillRoutesToCodeReview() {
+            // Sanity: an explicit configuration that DOES include review keeps the
+            // existing code-review behaviour.
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+
+            Bot bot = createBotWithWorkflows("review-bot", "claude_bot", true,
+                    java.util.List.of("review", "e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            verify(sessionService).getOrCreateSession(OWNER, REPO, PR_NUMBER, "system-prompt:1");
+            verify(repositoryApiClient, never()).postIssueComment(any(), any(), any(),
+                    org.mockito.ArgumentMatchers.contains("did not understand"));
+        }
     }
 
     // ---- helpers ----
@@ -834,6 +876,25 @@ class BotWebhookServiceTest {
         systemPrompt.setIssueAgentSystemPrompt("Agent prompt");
         systemPrompt.setWriterAgentSystemPrompt("Writer prompt");
         bot.setSystemPrompt(systemPrompt);
+        return bot;
+    }
+
+    /**
+     * Builds a Bot with an explicit {@link org.remus.giteabot.prworkflow.config.WorkflowConfiguration}
+     * whose enabled keys are stubbed on {@link #workflowSelectionService}. Used to verify
+     * the workflow-guard logic in {@code BotWebhookService} which must refuse to fall
+     * into the code-review path when the {@code review} workflow is not enabled.
+     */
+    private Bot createBotWithWorkflows(String name, String username, boolean agentEnabled,
+                                       java.util.List<String> enabledWorkflowKeys) {
+        Bot bot = createBot(name, username, agentEnabled);
+        org.remus.giteabot.prworkflow.config.WorkflowConfiguration cfg =
+                new org.remus.giteabot.prworkflow.config.WorkflowConfiguration();
+        cfg.setId(42L);
+        cfg.setName(name + "-cfg");
+        bot.setWorkflowConfiguration(cfg);
+        lenient().when(workflowSelectionService.enabledWorkflowKeys(42L))
+                .thenReturn(enabledWorkflowKeys);
         return bot;
     }
 

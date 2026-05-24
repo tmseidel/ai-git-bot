@@ -58,6 +58,7 @@ via `PrWorkflowContext.hints`.
    | `maxRetries`     | integer | `1`          | Per-test retry budget. A test that passes after retry is tagged `FLAKY`. Capped at 5. |
    | `maxTestCases`   | integer | `20`         | Hard cost guard. Capped at 100 server-side. |
    | `suiteLifecycle` | string  | `ephemeral`  | See [Suite lifecycle modes](#suite-lifecycle-modes) below. |
+   | `promotionThresholdPercent` | integer | `100` | Minimum percentage of executed cases that must pass for the suite to be **promoted** (offer-as-pr / commit-to-pr / promote-on-merge). `100` keeps the original "only fully green suites are promoted" behaviour; lower it (e.g. `80`) when you want partial successes to still trigger the configured promotion action. `ERROR` / `SKIPPED` suites are never promoted regardless of this value. See [Treating generated tests as a regression baseline](#treating-generated-tests-as-a-regression-baseline). |
 
 3. Save. The next PR-open / PR-synchronise webhook triggers the workflow.
 
@@ -181,6 +182,54 @@ scanners all apply unchanged.
 
 **Recipe.** A laptop-runnable walkthrough lives at
 [`systemtest/README-suite-promotion.md`](../systemtest/README-suite-promotion.md).
+
+## Treating generated tests as a regression baseline
+
+Even with a well-tuned planner / author / runner pipeline, **LLM-generated
+end-to-end tests are rarely 100% runnable on the first try**. Selectors
+drift, assumptions about routing or seed data turn out to be slightly
+wrong, async timing is mis-calibrated, and edge cases that the planner
+considered "covered" still flake. Treating a green suite as ground truth
+out of the gate sets the bar too high and ends up suppressing useful
+output.
+
+**Use the generated suite as a regression-test baseline instead.** The
+recommended workflow is:
+
+1. **Let the bot generate a first version.** Review the suite — both the
+   structure (does it cover the journeys you care about?) and the
+   individual specs (do the selectors match your app's actual DOM, are
+   the URLs and credentials right?).
+2. **Iterate with `@bot regenerate-tests <feedback>`.** Each comment is
+   passed verbatim to the planner. Typical feedback: "use `data-testid`
+   instead of CSS classes", "the login URL is `/auth/sign-in`, not
+   `/login`", "add an empty-state test for the dashboard". Cheap, scoped,
+   fast.
+3. **Promote partial successes when the trend is healthy.** Set
+   `promotionThresholdPercent` below `100` (e.g. `80`) so suites with a
+   small number of flaky / wrong cases still land on the feature branch
+   or in the follow-up PR. You then keep the *value* of the working
+   tests and can either fix or delete the bad ones during normal code
+   review — the same workflow you'd apply to any human-authored test.
+4. **Re-run with `@bot rerun-tests` after fixing.** No LLM call, no
+   regeneration; just executes the same files against a fresh preview
+   deploy. Use this to confirm a fix or to retry transient infra
+   flakiness without paying the planning bill again.
+
+**Why a threshold below 100% is usually right.** A pure 100% gate means
+that *one* genuinely buggy generated case prevents *all* of the
+other valid cases from being adopted. Lowering the threshold trades a
+small amount of cleanup work (delete or fix the bad ones in the
+follow-up PR) for a much larger amount of reusable scaffolding (login
+flow, navigation helpers, fixtures, asserted user journeys). The
+threshold is enforced both by the immediate promotion path
+(`offer-as-pr` / `commit-to-pr`) and by the `promote-on-merge` close
+handler, so the same value applies regardless of when promotion fires.
+
+**What is never promoted.** Suites that ended with status `ERROR` (e.g.
+the framework itself blew up, missing dependency, sandbox failure) or
+`SKIPPED` (no runner, deployment was never ready) are skipped
+unconditionally — there is nothing meaningful in those rows to graduate.
 
 ## Lifecycle on PR close
 

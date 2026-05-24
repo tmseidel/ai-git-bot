@@ -168,6 +168,21 @@
                             </div>
                         </div>
 
+                        <div class="col-12">
+                            <label for="userWhitelist" class="form-label">User Whitelist <span class="text-secondary">(optional)</span></label>
+                            <textarea class="form-control font-monospace" id="userWhitelist" rows="4"
+                                      th:field="*{userWhitelist}"
+                                      placeholder="alice&#10;bob&#10;charlie"></textarea>
+                            <div class="form-text">
+                                Git usernames allowed to trigger AI-spending interactions with this bot
+                                (PR opens/syncs, <code>@</code>-mentions, inline comments, agent issue work).
+                                One username per line or comma-separated; matching is case-insensitive.
+                                <strong>Leave blank to allow everyone</strong> (historical default).
+                                Recommended for <strong>public repositories</strong> so unknown users
+                                cannot burn the bot's AI tokens.
+                            </div>
+                        </div>
+
                         <div class="col-md-6">
                             <div class="form-check form-switch mt-3">
                                 <input class="form-check-input" type="checkbox" id="enabled"
