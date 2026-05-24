@@ -145,6 +145,16 @@ public interface RepositoryApiClient {
         throw new UnsupportedOperationException("Creating issues is not supported by this repository provider");
     }
 
+    /**
+     * Fetches the full pull-request payload (head / base refs, SHAs, title, …)
+     * from the provider. Used to "hydrate" webhook payloads that lack the
+     * pull-request object — most notably GitHub {@code issue_comment} events
+     * which carry only the issue, not the PR.
+     */
+    default Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        return Map.of();
+    }
+
     // ---- Repository operations ----
 
     String getDefaultBranch(String owner, String repo);

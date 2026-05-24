@@ -154,21 +154,36 @@ public class PrTestWorkspaceManager {
                 """);
         writeAlways(workspace.resolve("playwright.config.ts"), """
                 import { defineConfig } from '@playwright/test';
-                // baseURL is populated at runtime from the deployment preview URL.
-                // We fail loudly if BASE_URL is missing — silently falling back
-                // to localhost:3000 hides a misconfigured preview deployment
-                // and produces a flood of unrelated test failures.
                 const baseURL = process.env.BASE_URL;
                 if (!baseURL) {
                   throw new Error(
                       'BASE_URL environment variable is required — the PR-workflow '
                       + 'executor must set it from the deployment preview URL.');
                 }
+                // Idempotency contract:
+                //   * `workers: 1` + `fullyParallel: false` — every test sees the
+                //     same server-side state in deterministic order; parallel
+                //     workers against a single preview deployment would race on
+                //     the shared database and produce flaky failures.
+                //   * `storageState: undefined` — start each browser context with
+                //     no cookies / localStorage so a previous test's auth or
+                //     wizard progress cannot leak into the next one. (Default in
+                //     Playwright, set explicitly to document the intent.)
+                //   * `retries: 0` — masking flakiness with retries is the
+                //     opposite of what we want here; a flaky run must surface as
+                //     a real failure so we can fix the underlying state leak.
                 export default defineConfig({
                   testDir: './tests',
                   reporter: [['json', { outputFile: 'playwright-report/report.json' }],
                              ['list']],
-                  use: { baseURL }
+                  fullyParallel: false,
+                  workers: 1,
+                  retries: 0,
+                  use: {
+                    baseURL,
+                    storageState: undefined,
+                    ignoreHTTPSErrors: true,
+                  },
                 });
                 """);
         Files.createDirectories(workspace.resolve("tests"));

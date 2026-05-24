@@ -10,7 +10,9 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
 public class SecurityConfig {
@@ -49,7 +51,8 @@ public class SecurityConfig {
      */
     @Bean
     @Order(2)
-    public SecurityFilterChain webSecurityFilterChain(HttpSecurity http) {
+    public SecurityFilterChain webSecurityFilterChain(HttpSecurity http,
+                                                      ObjectProvider<AutoLoginConfig.AutoLoginFilter> autoLoginFilter) {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/setup", "/setup/**", "/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
@@ -64,6 +67,13 @@ public class SecurityConfig {
                         .logoutSuccessUrl("/login?logout")
                         .permitAll()
                 );
+        // When the auto-login profile is active (giteabot.security.auto-login.enabled=true)
+        // an AutoLoginFilter bean is published — insert it before the form-login filter
+        // so every request is pre-authenticated and the form is never shown.
+        AutoLoginConfig.AutoLoginFilter filter = autoLoginFilter.getIfAvailable();
+        if (filter != null) {
+            http.addFilterBefore(filter, UsernamePasswordAuthenticationFilter.class);
+        }
         return http.build();
     }
 }

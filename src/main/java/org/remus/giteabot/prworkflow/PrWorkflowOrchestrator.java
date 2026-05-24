@@ -240,8 +240,23 @@ public class PrWorkflowOrchestrator {
     }
 
     private Long resolvePrNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null) {
+        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
             return payload.getPullRequest().getNumber();
+        }
+        // GitHub `issue_comment` events do not carry a top-level `pull_request`
+        // object — the PR number lives on `issue.number`, and `issue.pull_request`
+        // is non-null iff the issue is actually a pull request (vs. a plain issue).
+        // This is what unblocks `@bot rerun-tests` / `regenerate-tests` slash commands
+        // on GitHub (see E2eTestSlashCommandHandler).
+        if (payload.getIssue() != null
+                && payload.getIssue().getNumber() != null
+                && payload.getIssue().getPullRequest() != null) {
+            return payload.getIssue().getNumber();
+        }
+        // Final fallback: some translators set the top-level `number` field
+        // directly (e.g. pull_request events).
+        if (payload.getNumber() != null) {
+            return payload.getNumber();
         }
         return null;
     }

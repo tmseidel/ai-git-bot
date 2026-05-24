@@ -74,18 +74,34 @@ public final class E2eTestSummaryRenderer {
      */
     public static String renderStarting(long prNumber, E2eTestFramework framework,
                                         SuiteLifecycleMode lifecycleMode) {
-        StringBuilder sb = new StringBuilder(256);
-        sb.append("## E2E Test Run for PR #").append(prNumber).append("\n\n");
-        sb.append("🤖 **Starting end-to-end test run** — this typically takes ")
-                .append("several minutes.\n\n");
-        sb.append("- **Framework:** `").append(framework.key()).append("`\n");
-        sb.append("- **Suite lifecycle:** `").append(lifecycleMode.key()).append("`\n");
-        sb.append('\n');
-        sb.append("I'll deploy a preview environment, generate the test suite ")
-                .append("and post the results here when the run finishes. ")
-                .append("Use `@bot rerun-tests` to re-execute or ")
-                .append("`@bot regenerate-tests <feedback>` to re-plan the suite.\n");
-        return sb.toString();
+        return "## E2E Test Run for PR #" + prNumber + "\n\n" +
+                "🤖 **Starting end-to-end test run** — this typically takes " +
+                "several minutes.\n\n" +
+                "- **Framework:** `" + framework.key() + "`\n" +
+                "- **Suite lifecycle:** `" + lifecycleMode.key() + "`\n" +
+                '\n' +
+                "I'll deploy a preview environment, generate the test suite " +
+                "and post the results here when the run finishes. " +
+                "Use `@bot rerun-tests` to re-execute or " +
+                "`@bot regenerate-tests <feedback>` to re-plan the suite.\n";
+    }
+
+    /**
+     * Short "ack" comment posted at the very beginning of a <em>rerun-only</em>
+     * run ({@code @bot rerun-tests}). Unlike {@link #renderStarting} it makes
+     * clear that no new tests are generated — only the existing ones are
+     * re-executed against a fresh deployment.
+     */
+    public static String renderRerunStarting(long prNumber, E2eTestFramework framework,
+                                             SuiteLifecycleMode lifecycleMode) {
+        return "## E2E Test Re-run for PR #" + prNumber + "\n\n" +
+                "🔄 **Re-running existing test suite** — skipping test generation, " +
+                "re-executing the previously generated tests against a fresh deployment.\n\n" +
+                "- **Framework:** `" + framework.key() + "`\n" +
+                "- **Suite lifecycle:** `" + lifecycleMode.key() + "`\n" +
+                '\n' +
+                "Results will be posted here once the run finishes. " +
+                "Use `@bot regenerate-tests <feedback>` to re-plan and regenerate the suite.\n";
     }
 
     public static String renderFailed(long prNumber, String reason) {

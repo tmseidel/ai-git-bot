@@ -11,17 +11,23 @@ import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestCaseRepository;
 import org.remus.giteabot.prworkflow.e2e.PrTestCaseStatus;
+import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.agents.TestAuthorAgent;
 import org.remus.giteabot.prworkflow.e2e.agents.TestPlan;
 import org.remus.giteabot.prworkflow.e2e.agents.TestPlanParser;
 import org.remus.giteabot.prworkflow.e2e.agents.TestPlannerAgent;
 import org.remus.giteabot.prworkflow.e2e.agents.TestRunnerAgent;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolContext;
+import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolExecutor;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /**
  * M4 wave 2 LLM-driven {@link TestSuiteRunner} for
@@ -51,19 +57,22 @@ public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
     private final TestAuthorAgent authorAgent;
     private final TestRunnerAgent runnerAgent;
     private final PrTestCaseRepository caseRepository;
+    private final PrWorkflowToolExecutor toolExecutor;
 
     public PlaywrightTestSuiteRunner(AiClientFactory aiClientFactory,
                                      GiteaClientFactory giteaClientFactory,
                                      TestPlannerAgent plannerAgent,
                                      TestAuthorAgent authorAgent,
                                      TestRunnerAgent runnerAgent,
-                                     PrTestCaseRepository caseRepository) {
+                                     PrTestCaseRepository caseRepository,
+                                     PrWorkflowToolExecutor toolExecutor) {
         this.aiClientFactory = aiClientFactory;
         this.giteaClientFactory = giteaClientFactory;
         this.plannerAgent = plannerAgent;
         this.authorAgent = authorAgent;
         this.runnerAgent = runnerAgent;
         this.caseRepository = caseRepository;
+        this.toolExecutor = toolExecutor;
     }
 
     @Override
@@ -92,6 +101,13 @@ public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
         }
 
         OwnerRepoPr addr = OwnerRepoPr.from(request.payload());
+
+        // ── rerun-only path: restore previously generated test files, skip Planner+Author ──
+        if (request.isRerunOnly()) {
+            return runExistingTests(request, aiClient, apiClient, addr);
+        }
+
+        // ── full regenerate path ──
         String diff = "";
         try {
             if (addr.owner() != null && addr.repo() != null && addr.prNumber() != null) {
@@ -172,8 +188,104 @@ public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
                 failed + "/" + attempted + " failed", attempted, failed);
     }
 
-    private static int effectiveRetries(TestPlan plan, int workflowDefault) {
-        Integer fromPlan = plan.maxRetries();
+    /**
+     * Rerun-only path: restores all test files from the {@link PrTestSuite#getCases()
+     * cases} of {@code request.previousSuite()} into the new workspace, clones the
+     * {@link PrTestCase} rows into the freshly-created suite so the tool-executor's
+     * post-run status matcher can find them, then invokes {@code pr-test-run}
+     * directly via {@link PrWorkflowToolExecutor} — no LLM round-trip, no
+     * planner / author / runner agent. The operator asked for a deterministic
+     * rerun, so we run the exact same files and only refresh statuses.
+     */
+    private TestSuiteOutcome runExistingTests(TestSuiteRequest request,
+                                              AiClient aiClient,
+                                              RepositoryApiClient apiClient,
+                                              OwnerRepoPr addr) {
+        PrTestSuite previousSuite = request.previousSuite();
+        List<PrTestCase> previousCases = caseRepository.findBySuiteOrderByIdAsc(previousSuite);
+        if (previousCases.isEmpty()) {
+            return TestSuiteOutcome.skipped(
+                    "rerun-only: previous suite #" + previousSuite.getId()
+                            + " has no persisted test cases — cannot rerun");
+        }
+
+        // 1) Restore each test file from the DB into the new workspace directory.
+        // 2) Clone the PrTestCase row into the NEW suite (status=PENDING) so the
+        //    pr-test-run tool's per-case status matcher (looks up by suite+path)
+        //    can update them after the playwright run — otherwise the new suite
+        //    has zero cases and the run is reported as "no tests executed".
+        int restored = 0;
+        for (PrTestCase pc : previousCases) {
+            if (pc.getContent() == null || pc.getPath() == null) continue;
+            try {
+                Path dest = request.workspace().resolve(pc.getPath());
+                Files.createDirectories(dest.getParent());
+                Files.writeString(dest, pc.getContent());
+                restored++;
+            } catch (IOException e) {
+                log.warn("PlaywrightTestSuiteRunner rerun: could not restore '{}': {}",
+                        pc.getPath(), e.getMessage());
+                continue;
+            }
+            PrTestCase clone = new PrTestCase();
+            clone.setSuite(request.suite());
+            clone.setPath(pc.getPath());
+            clone.setTitle(pc.getTitle());
+            clone.setContent(pc.getContent());
+            clone.setLastStatus(PrTestCaseStatus.PENDING);
+            caseRepository.save(clone);
+        }
+        if (restored == 0) {
+            return TestSuiteOutcome.error(
+                    "rerun-only: failed to restore any test files from suite #"
+                            + previousSuite.getId() + " into workspace");
+        }
+        log.info("PlaywrightTestSuiteRunner rerun: restored {}/{} test files from suite #{} into new suite #{} (no LLM)",
+                restored, previousCases.size(), previousSuite.getId(), request.suite().getId());
+
+        PrWorkflowToolContext toolContext = new PrWorkflowToolContext(
+                request.suite(), request.workspace(), request.framework(),
+                request.previewUrl(),
+                addr.owner(), addr.repo(), addr.prNumber(),
+                apiClient);
+
+        // Directly invoke pr-test-run — the LLM-driven TestRunnerAgent is
+        // intentionally skipped for rerun-only: nothing to discover, nothing to
+        // author, nothing to "discuss". Just execute and aggregate.
+        String toolResult = toolExecutor.execute(
+                "pr-test-run", Map.of("framework", request.framework().key()), toolContext);
+        log.debug("PlaywrightTestSuiteRunner rerun: pr-test-run result: {}", toolResult);
+
+        List<PrTestCase> cases = caseRepository.findBySuiteOrderByIdAsc(request.suite());
+        int attempted = 0;
+        int failed = 0;
+        for (PrTestCase pc : cases) {
+            if (pc.getLastStatus() == null || pc.getLastStatus() == PrTestCaseStatus.PENDING) {
+                continue;
+            }
+            attempted++;
+            if (pc.getLastStatus() == PrTestCaseStatus.FAILED
+                    || pc.getLastStatus() == PrTestCaseStatus.ERROR) {
+                failed++;
+            }
+        }
+        if (attempted == 0) {
+            return TestSuiteOutcome.error(
+                    "rerun: pr-test-run finished but no PrTestCase status was updated — "
+                            + "tool output: " + abbreviate(toolResult, 400));
+        }
+        if (failed == 0) {
+            return TestSuiteOutcome.passed(attempted + "/" + cases.size() + " passed (rerun)", attempted);
+        }
+        return TestSuiteOutcome.failed(failed + "/" + attempted + " failed (rerun)", attempted, failed);
+    }
+
+    private static String abbreviate(String s, int max) {
+        if (s == null) return "";
+        return s.length() <= max ? s : s.substring(0, max) + "…";
+    }
+
+    private static int effectiveRetries(TestPlan plan, int workflowDefault) {        Integer fromPlan = plan.maxRetries();
         if (fromPlan == null) return workflowDefault;
         return Math.max(0, Math.min(workflowDefault, fromPlan));
     }
