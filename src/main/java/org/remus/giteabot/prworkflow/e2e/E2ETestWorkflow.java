@@ -154,8 +154,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     public WorkflowResult run(PrWorkflowContext context) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
-        long prNumber = payload.getPullRequest() == null
-                ? 0L : (payload.getPullRequest().getNumber() == null ? 0L : payload.getPullRequest().getNumber());
+        long prNumber = resolvePrNumber(payload);
 
         Map<String, Object> params = bot.getWorkflowConfiguration() == null
                 ? Map.of()
@@ -177,14 +176,44 @@ public class E2ETestWorkflow implements PrWorkflow {
             return WorkflowResult.skipped("No deployment target on bot");
         }
 
+        boolean rerunOnly = "true".equalsIgnoreCase(context.hint(PrWorkflowContext.HINT_RERUN_ONLY));
+
+        // Locate the most-recent previous suite that actually has test cases attached
+        // when we are in rerun-only mode. If none exists we fall back to a full run.
+        PrTestSuite previousSuite = null;
+        if (rerunOnly) {
+            // NB: findByPrNumberOrderByIdDesc returns detached entities with a lazy
+            // `cases` bag - accessing it here would throw LazyInitializationException
+            // because the async workflow runs outside the repository's transaction.
+            // Re-fetch each candidate via the fetch-join query until we find one with
+            // actual test cases attached.
+            previousSuite = suiteRepository.findByPrNumberOrderByIdDesc(prNumber).stream()
+                    .map(s -> suiteRepository.findByIdWithCases(s.getId()).orElse(null))
+                    .filter(s -> s != null && s.getCases() != null && !s.getCases().isEmpty())
+                    .findFirst()
+                    .orElse(null);
+            if (previousSuite == null) {
+                log.info("[Workflow '{}'] rerun-only requested for PR #{} but no previous suite with "
+                        + "cases found — falling back to full regenerate run", KEY, prNumber);
+                rerunOnly = false;
+            } else {
+                log.info("[Workflow '{}'] rerun-only for PR #{}: reusing suite #{} ({} cases)",
+                        KEY, prNumber, previousSuite.getId(),
+                        previousSuite.getCases().size());
+            }
+        }
+
         // Tell the operator the run has started — generation, deployment and
         // execution can take several minutes, so an immediate ack avoids the
         // "is it stuck?" question and matches the 👀 reaction posted by
         // E2eTestSlashCommandHandler for re-run / regenerate slash commands.
         postPrComment(bot, payload, prNumber,
-                E2eTestSummaryRenderer.renderStarting(prNumber, framework, lifecycleMode));
+                rerunOnly
+                        ? E2eTestSummaryRenderer.renderRerunStarting(prNumber, framework, lifecycleMode)
+                        : E2eTestSummaryRenderer.renderStarting(prNumber, framework, lifecycleMode));
         context.appendStep("e2e-start",
-                "Starting E2E run (framework=" + framework.key()
+                (rerunOnly ? "Re-running existing tests" : "Starting E2E run")
+                        + " (framework=" + framework.key()
                         + ", lifecycle=" + lifecycleMode.key() + ")");
 
         context.requireActive("before persisting PrTestSuite");
@@ -239,7 +268,8 @@ public class E2ETestWorkflow implements PrWorkflow {
         } else {
             TestSuiteRequest request = new TestSuiteRequest(
                     context, bot, payload, suite, workspace,
-                    framework, deployment.previewUrl(), maxRetries, maxTestCases);
+                    framework, deployment.previewUrl(), maxRetries, maxTestCases,
+                    previousSuite);
             try {
                 outcome = runner.run(request);
             } catch (RuntimeException e) {
@@ -383,6 +413,25 @@ public class E2ETestWorkflow implements PrWorkflow {
             return null;
         }
         return payload.getPullRequest().getHead().getSha();
+    }
+
+    /**
+     * Resolves the pull-request number using the same fallback chain as
+     * {@code PrWorkflowOrchestrator.resolvePrNumber}: PR object first,
+     * then issue (for GitHub {@code issue_comment} events that lack the
+     * pull-request block), then the top-level {@code number} field.
+     */
+    private long resolvePrNumber(WebhookPayload payload) {
+        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
+            return payload.getPullRequest().getNumber();
+        }
+        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
+            return payload.getIssue().getNumber();
+        }
+        if (payload.getNumber() != null) {
+            return payload.getNumber();
+        }
+        return 0L;
     }
 }
 

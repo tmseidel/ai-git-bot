@@ -173,6 +173,16 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
+    public Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        log.info("Fetching pull-request #{} details in {}/{}", pullNumber, owner, repo);
+        Map<String, Object> pr = restClient.get()
+                .uri("/repos/{owner}/{repo}/pulls/{pull_number}", owner, repo, pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return pr != null ? pr : Map.of();
+    }
+
+    @Override
     public List<Map<String, Object>> searchIssues(String owner, String repo, String query) {
         log.info("Searching issues in {}/{} for '{}'", owner, repo, query);
         Map<String, Object> result = restClient.get()
@@ -463,7 +473,7 @@ public class GitHubApiClient implements RepositoryApiClient {
         Long bestId = null;
         for (Map<String, Object> run : listRecentRuns(owner, repo, workflow, branch)) {
             Object idObj = run.get("id");
-            Long id = (idObj instanceof Number n) ? n.longValue()
+            Long id = (idObj instanceof Number n) ? Long.valueOf(n.longValue())
                     : (idObj == null ? null : tryParseLong(idObj.toString()));
             if (id == null || existing.contains(id)) continue;
             if (branch != null) {

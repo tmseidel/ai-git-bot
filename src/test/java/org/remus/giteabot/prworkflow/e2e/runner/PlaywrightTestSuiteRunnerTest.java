@@ -70,7 +70,7 @@ class PlaywrightTestSuiteRunnerTest {
 
         suiteRunner = new PlaywrightTestSuiteRunner(
                 aiClientFactory, giteaClientFactory,
-                plannerAgent, authorAgent, runnerAgent, caseRepository);
+                plannerAgent, authorAgent, runnerAgent, caseRepository, toolExecutor);
 
         bot = new Bot();
         bot.setName("acme-bot");
