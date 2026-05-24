@@ -137,6 +137,29 @@ public interface RepositoryApiClient {
         return Map.of();
     }
 
+    /**
+     * Returns pull-request details as a provider-native map. Callers must
+     * extract the fields they need defensively. Recommended keys (subset
+     * supported by all providers):
+     * <ul>
+     *   <li>{@code number} — the PR number (Long)</li>
+     *   <li>{@code title}, {@code body} — display strings</li>
+     *   <li>{@code state} — e.g. {@code open}, {@code closed}, {@code merged}</li>
+     *   <li>{@code merged} — Boolean</li>
+     *   <li>{@code head} — Map with {@code ref} (branch name) and {@code sha}</li>
+     *   <li>{@code base} — Map with {@code ref} and {@code sha}</li>
+     * </ul>
+     *
+     * <p>Primary use case: hydrate {@code WebhookPayload.PullRequest} when
+     * the bot receives an {@code issue_comment} event (GitHub) which only
+     * carries the issue object — the slash-command handlers need the head
+     * branch to dispatch a CI-based deployment. Default implementation
+     * returns an empty map.</p>
+     */
+    default Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        return Map.of();
+    }
+
     default List<Map<String, Object>> searchIssues(String owner, String repo, String query) {
         return List.of();
     }

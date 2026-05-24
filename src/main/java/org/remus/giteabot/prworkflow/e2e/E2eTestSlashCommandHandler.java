@@ -101,6 +101,12 @@ public class E2eTestSlashCommandHandler {
         // can take several minutes to complete.
         addEyesReaction(bot, payload);
 
+        // GitHub `issue_comment` events arrive without a `pull_request` object —
+        // only the issue is set. The downstream workflow + CI dispatch strategy
+        // need the head branch (for `refs/heads/{branch}`) and PR number, so
+        // hydrate the payload from the provider API before dispatching.
+        hydratePullRequest(bot, payload);
+
         log.info("[Bot '{}'] E2E slash command '{}' detected (feedback='{}'), dispatching e2e-test workflow",
                 bot.getName(), verb, abbreviate(feedback, 80));
         try {
@@ -159,6 +165,79 @@ public class E2eTestSlashCommandHandler {
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",
                     bot.getName(), commentId, e.getMessage());
+        }
+    }
+
+    /**
+     * Hydrates {@code payload.pullRequest} from the provider's PR API when
+     * the incoming webhook was an {@code issue_comment} (GitHub) event —
+     * those payloads carry only {@code issue.number}, but the downstream
+     * workflow + {@code CiActionTriggerStrategy} need the PR's head branch
+     * ({@code refs/heads/{branch}}) and SHA to dispatch a build. No-op when
+     * the payload already contains the PR object or no repository/PR can
+     * be resolved. Failures are logged but never propagate — the workflow
+     * will then fail with a clearer downstream error if the missing data
+     * is actually required.
+     */
+    @SuppressWarnings("unchecked")
+    private void hydratePullRequest(Bot bot, WebhookPayload payload) {
+        if (payload.getPullRequest() != null
+                && payload.getPullRequest().getHead() != null
+                && payload.getPullRequest().getHead().getRef() != null) {
+            return; // Already complete
+        }
+        if (payload.getRepository() == null
+                || payload.getRepository().getOwner() == null
+                || payload.getIssue() == null
+                || payload.getIssue().getNumber() == null
+                || payload.getIssue().getPullRequest() == null) {
+            return; // Not a PR issue_comment we can hydrate
+        }
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long prNumber = payload.getIssue().getNumber();
+        try {
+            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            Map<String, Object> details = client.getPullRequestDetails(owner, repo, prNumber);
+            if (details == null || details.isEmpty()) {
+                log.warn("[Bot '{}'] Could not hydrate PR #{} — provider returned no details",
+                        bot.getName(), prNumber);
+                return;
+            }
+            WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+            pr.setNumber(prNumber);
+            Object title = details.get("title");
+            if (title instanceof String s) pr.setTitle(s);
+            Object body = details.get("body");
+            if (body instanceof String s) pr.setBody(s);
+            Object state = details.get("state");
+            if (state instanceof String s) pr.setState(s);
+            Object merged = details.get("merged");
+            if (merged instanceof Boolean b) pr.setMerged(b);
+            Object headObj = details.get("head");
+            if (headObj instanceof Map) {
+                Map<String, Object> head = (Map<String, Object>) headObj;
+                WebhookPayload.Head h = new WebhookPayload.Head();
+                if (head.get("ref") instanceof String s) h.setRef(s);
+                if (head.get("sha") instanceof String s) h.setSha(s);
+                pr.setHead(h);
+            }
+            Object baseObj = details.get("base");
+            if (baseObj instanceof Map) {
+                Map<String, Object> base = (Map<String, Object>) baseObj;
+                WebhookPayload.Head b = new WebhookPayload.Head();
+                if (base.get("ref") instanceof String s) b.setRef(s);
+                if (base.get("sha") instanceof String s) b.setSha(s);
+                pr.setBase(b);
+            }
+            payload.setPullRequest(pr);
+            payload.setNumber(prNumber);
+            log.debug("[Bot '{}'] Hydrated PR #{} (head={}) from provider for slash-command dispatch",
+                    bot.getName(), prNumber,
+                    pr.getHead() == null ? "?" : pr.getHead().getRef());
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Failed to hydrate PR #{} for slash-command dispatch: {}",
+                    bot.getName(), prNumber, e.getMessage());
         }
     }
 }

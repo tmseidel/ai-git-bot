@@ -79,6 +79,21 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
+    public Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        log.debug("Fetching PR details for #{} in {}/{}", pullNumber, owner, repo);
+        try {
+            Map<String, Object> body = restClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{pull_number}", owner, repo, pullNumber)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {});
+            return body == null ? Map.of() : body;
+        } catch (RuntimeException e) {
+            log.warn("Could not fetch PR details for {}/{}#{}: {}", owner, repo, pullNumber, e.getMessage());
+            return Map.of();
+        }
+    }
+
+    @Override
     public void postIssueComment(String owner, String repo, Long issueNumber, String body) {
         log.info("Posting comment on issue #{} in {}/{}", issueNumber, owner, repo);
         restClient.post()
