@@ -41,8 +41,6 @@ import static org.mockito.Mockito.when;
 class SuitePromotionServiceTest {
 
     private WorkspaceService workspaceService;
-    private GiteaClientFactory giteaClientFactory;
-    private PrWorkflowRunRepository runRepository;
     private RepositoryApiClient repoClient;
     private SuitePromotionService service;
 
@@ -52,8 +50,8 @@ class SuitePromotionServiceTest {
     void setUp(@TempDir Path tmp) throws IOException {
         workspace = Files.createDirectories(tmp.resolve("ws"));
         workspaceService = mock(WorkspaceService.class);
-        giteaClientFactory = mock(GiteaClientFactory.class);
-        runRepository = mock(PrWorkflowRunRepository.class);
+        GiteaClientFactory giteaClientFactory = mock(GiteaClientFactory.class);
+        PrWorkflowRunRepository runRepository = mock(PrWorkflowRunRepository.class);
         repoClient = mock(RepositoryApiClient.class);
 
         when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
@@ -89,20 +87,21 @@ class SuitePromotionServiceTest {
         PrTestSuite suite = suite(SuiteLifecycleMode.OFFER_AS_PR, 7L,
                 caseAt("login.spec.ts", "// generated login test"));
         PrWorkflowRun run = run(99L);
+        String expectedBranch = "ai-tests/pr-7-r99";
         when(repoClient.createPullRequest(eq("acme"), eq("web"), anyString(), anyString(),
-                eq("ai-tests/pr-7"), eq("feature/login"))).thenReturn(4242L);
+                eq(expectedBranch), eq("feature/login"))).thenReturn(4242L);
 
         SuitePromotionService.Outcome out = service.promote(bot(), run, suite,
                 "acme", "web", "feature/login");
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.PROMOTED);
         assertThat(out.followUpPrNumber()).isEqualTo(4242L);
-        assertThat(out.branch()).isEqualTo("ai-tests/pr-7");
+        assertThat(out.branch()).isEqualTo(expectedBranch);
         assertThat(out.writtenPaths()).containsExactly("tests/e2e/pr-7/login.spec.ts");
         assertThat(run.getFollowUpPrNumber()).isEqualTo(4242L);
         // File actually written.
         assertThat(workspace.resolve("tests/e2e/pr-7/login.spec.ts")).exists();
-        verify(workspaceService).commitAndPush(eq(workspace), eq("ai-tests/pr-7"),
+        verify(workspaceService).commitAndPush(eq(workspace), eq(expectedBranch),
                 anyString(), anyString(), anyString(), eq(true));
     }
 
@@ -112,7 +111,7 @@ class SuitePromotionServiceTest {
                 caseAt("checkout.spec.ts", "// promoted"));
         PrWorkflowRun run = run(7L);
         when(repoClient.createPullRequest(eq("acme"), eq("web"), anyString(), anyString(),
-                eq("ai-tests/promoted-pr-11"), eq("main"))).thenReturn(5050L);
+                eq("ai-tests/promoted-pr-11-r7"), eq("main"))).thenReturn(5050L);
 
         SuitePromotionService.Outcome out = service.promote(bot(), run, suite,
                 "acme", "web", "ignored");
@@ -121,6 +120,33 @@ class SuitePromotionServiceTest {
         assertThat(out.writtenPaths()).containsExactly("tests/e2e/checkout.spec.ts");
         assertThat(workspace.resolve("tests/e2e/checkout.spec.ts")).exists();
         assertThat(run.getFollowUpPrNumber()).isEqualTo(5050L);
+    }
+
+    @Test
+    void rerun_usesUniqueBranchPerRun() {
+        // First attempt with run id 100.
+        PrTestSuite suite1 = suite(SuiteLifecycleMode.PROMOTE_ON_MERGE, 11L,
+                caseAt("a.spec.ts", "// v1"));
+        PrWorkflowRun run1 = run(100L);
+        when(repoClient.createPullRequest(eq("acme"), eq("web"), anyString(), anyString(),
+                eq("ai-tests/promoted-pr-11-r100"), eq("main"))).thenReturn(900L);
+
+        SuitePromotionService.Outcome out1 = service.promote(bot(), run1, suite1,
+                "acme", "web", "ignored");
+        assertThat(out1.branch()).isEqualTo("ai-tests/promoted-pr-11-r100");
+
+        // Re-run for the same parent PR uses a different run id and therefore
+        // a different branch, so the second createPullRequest does not collide.
+        PrTestSuite suite2 = suite(SuiteLifecycleMode.PROMOTE_ON_MERGE, 11L,
+                caseAt("a.spec.ts", "// v2"));
+        PrWorkflowRun run2 = run(101L);
+        when(repoClient.createPullRequest(eq("acme"), eq("web"), anyString(), anyString(),
+                eq("ai-tests/promoted-pr-11-r101"), eq("main"))).thenReturn(901L);
+
+        SuitePromotionService.Outcome out2 = service.promote(bot(), run2, suite2,
+                "acme", "web", "ignored");
+        assertThat(out2.branch()).isEqualTo("ai-tests/promoted-pr-11-r101");
+        assertThat(out2.branch()).isNotEqualTo(out1.branch());
     }
 
     @Test
