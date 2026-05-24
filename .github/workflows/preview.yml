@@ -197,7 +197,12 @@ jobs:
               kill \$(cat app.pid) || true
               sleep 5
             fi
-            nohup java -jar '$ARTIFACT_NAME' --server.port='$REMOTE_PORT' > app.log 2>&1 &
+            nohup java -jar '$ARTIFACT_NAME' \
+              --server.port='$REMOTE_PORT' \
+              --giteabot.security.auto-login.enabled=true \
+              --giteabot.security.auto-login.username=admin \
+              --giteabot.security.auto-login.password=admin \
+              > app.log 2>&1 &
             echo \$! > app.pid
             sleep 10
             if ! kill -0 \$(cat app.pid) 2>/dev/null; then
