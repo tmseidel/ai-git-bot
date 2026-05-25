@@ -243,7 +243,7 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **Name**: A unique name for the bot (e.g., "Code Reviewer")
    - **Username**: The Git username the bot uses (e.g., "ai_bot"). This is used to detect and ignore the bot's own actions, and as the mention alias (e.g., `@ai_bot`)
    - **Bot Type**: Choose **Coding bot** for pull-request reviews and issue implementation, or **Writer bot** for technical-writing assistance on issues.
-   - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, and writer-agent instructions before saving.
+   - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, writer-agent, and the three E2E (planner / author / runner) instructions before saving. The preview opens as an expandable panel view so long prompts can be inspected section by section.
    - **MCP Configuration** *(optional)*: Select a saved MCP configuration. Use **Details** next to the dropdown to open a read-only list of the currently selected MCP tools.
    - **Tool Configuration** *(required)*: Select a saved built-in tool configuration. New bots default to **Default** (all built-in tools enabled). Use **Details** next to the dropdown to open a read-only list of the built-in tools enabled for the selected configuration. See [Tool Configurations](#tool-configurations) below and [Bot Tool Configurations](BOT_TOOL_CONFIGURATIONS.md) for the full reference.
    - **AI Integration**: Select an AI integration from the dropdown
@@ -427,8 +427,18 @@ System prompts are managed in **System settings → System prompts**. A prompt e
 - **Review System-Prompt**: Used for pull-request reviews and bot conversations on PRs
 - **Issue-Agent System-Prompt**: Used when the agent implements assigned issues
 - **Writer-Agent System-Prompt**: Used when a writer bot improves assigned issues
+- **E2E Planner System-Prompt**: Role description for the planner stage of the *Full-stack QA* (E2E) PR workflow
+- **E2E Author System-Prompt**: Role description for the author stage that materialises the planned test files
+- **E2E Runner System-Prompt**: Role description for the runner stage that executes the suite against the preview deployment
+
+> The three E2E slots only hold the agent's **role description** (persona, intent, policy). The technical protocol — active test framework, JSON output schema, tool names (`pr-test-write`, `preview-url`, `preview-status`, `pr-test-run`, `attach-artifact`), tool call sequence, and the strict URL handling rules — is appended automatically by the software and is **not** editable from the UI. That keeps the pipeline robust against accidental edits while still letting you tune persona, tone and policy.
 
 You can add, clone, edit, and delete prompt entries. The built-in **Default** entry is always present and cannot be deleted. It is initialized from `prompts/default.md` for reviews and `prompts/agent.md` for issue-agent work. A prompt entry cannot be deleted while one or more bots still use it; reassign those bots first.
+
+The edit form groups the six prompt bodies into **collapsible sections**
+with page-level **Expand all / Collapse all** actions. The browser also
+remembers which sections you left open, which is helpful when you
+iterate on just one or two prompt slots repeatedly.
 
 ### Creating a Writer Prompt for Better Issue Drafts
 
@@ -456,7 +466,7 @@ After saving the prompt entry:
 
 1. Create or edit a bot and choose **Bot Type = Writer bot**.
 2. Select the prompt entry in the **System Prompt** dropdown.
-3. Use **Preview** in the bot form to inspect the review, coding-agent, and writer-agent prompt texts before saving.
+3. Use **Preview** in the bot form to inspect the review, coding-agent, writer-agent, and E2E (planner / author / runner) prompt texts before saving.
 4. Save the bot and configure its webhook URL in your Git provider.
 5. Assign the bot to issues that need rewriting or clarification.
 
@@ -532,6 +542,15 @@ Sensitive data (API keys, Git tokens) is encrypted at rest using AES-256-GCM enc
 ### Authentication
 
 The web UI is protected by Spring Security with form-based authentication. The API webhook endpoints (`/api/webhook/**`) remain unauthenticated to allow Git providers to send webhooks. Each bot has a unique, random webhook secret in its URL path that serves as authentication.
+
+### Per-Bot User Whitelist (token-spend guard)
+
+Each bot has an optional **User Whitelist** (see [Creating a Bot](#creating-a-bot)) that limits which Git usernames may trigger AI-spending interactions: PR opens/synchronisations, `@`-mentions in PR or issue comments, inline review comments, review submissions, agent issue assignments and follow-up comments.
+
+* **Blank whitelist ⇒ everyone is allowed.** This is the historical default and remains safe for private/internal repositories where the set of repository collaborators is already trusted.
+* **Non-blank whitelist ⇒ strict allow-list.** Only the listed usernames (case-insensitive, whitespace-trimmed, newline- *or* comma-separated) may spend tokens. Every other caller is silently ignored — no PR comment is posted, but the rejection is logged at `INFO` so operators can audit blocked traffic.
+
+The whitelist is the recommended defence for bots installed on **public repositories**, where any drive-by visitor could otherwise open a PR or post an `@bot` comment and burn through your AI quota. The bot's own username does not need to be listed: events authored by the bot itself are filtered out separately by `BotWebhookService#isBotUser`.
 
 ## Configuration Reference
 

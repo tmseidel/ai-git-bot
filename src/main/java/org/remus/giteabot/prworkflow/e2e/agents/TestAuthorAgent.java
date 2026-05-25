@@ -9,6 +9,7 @@ import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolContext;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolExecutor;
+import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -45,7 +46,8 @@ public class TestAuthorAgent {
 
     public Result write(AiClient aiClient,
                         PrWorkflowToolContext toolContext,
-                        TestPlan plan) {
+                        TestPlan plan,
+                        SystemPrompt systemPrompt) {
         if (aiClient == null) {
             return new Result(0, "AI client unavailable", true);
         }
@@ -57,21 +59,22 @@ public class TestAuthorAgent {
                 ToolCatalog.Role.E2E, null, allowed);
 
         // Build the system prompt the same way the issue / writer agents do:
-        // role description (from E2ePromptLibrary) + tool protocol section
-        // rendered from the ToolCatalog by SystemPromptAssembler. The mode
-        // chosen here matches the one E2eAgentRunner will resolve so the
-        // prompt and the actual dispatch path stay aligned.
+        // role description (from E2ePromptLibrary or the operator-edited
+        // SystemPrompt) + tool protocol section rendered from the ToolCatalog
+        // by SystemPromptAssembler. The mode chosen here matches the one
+        // E2eAgentRunner will resolve so the prompt and the actual dispatch
+        // path stay aligned.
         ToolingMode mode = ToolingMode.resolve(ToolingMode.NATIVE,
                 aiClient.supportsNativeTools(), !descriptors.isEmpty());
-        String systemPrompt = promptAssembler.assemble(
-                E2ePromptLibrary.authorSystemPrompt(toolContext.framework()),
+        String systemPromptText = promptAssembler.assemble(
+                E2ePromptLibrary.authorSystemPromptOrDefault(systemPrompt, toolContext.framework()),
                 toolCatalog, allowed, null, mode,
                 SystemPromptAssembler.PromptKind.E2E_AGENT);
 
         int maxRounds = Math.max(BASELINE_ROUNDS, plan.journeys().size() + 2);
         E2eAgentRunner runner = new E2eAgentRunner(
                 aiClient, toolExecutor, toolContext, descriptors,
-                systemPrompt,
+                systemPromptText,
                 maxRounds, DEFAULT_MAX_TOKENS, "test-author");
 
         String userMessage = renderUserMessage(toolContext.framework(), plan);

@@ -31,6 +31,7 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -73,6 +74,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     static final int DEFAULT_MAX_RETRIES = 1;
     static final int DEFAULT_MAX_TEST_CASES = 20;
     static final E2eTestFramework DEFAULT_FRAMEWORK = E2eTestFramework.PLAYWRIGHT;
+    static final int DEFAULT_PROMOTION_THRESHOLD_PERCENT = 100;
 
     private final DeploymentOrchestrator deploymentOrchestrator;
     private final PrTestSuiteRepository suiteRepository;
@@ -126,27 +128,53 @@ public class E2ETestWorkflow implements PrWorkflow {
     @Override
     public WorkflowParamsSchema paramsSchema() {
         return WorkflowParamsSchema.of(
-                new WorkflowParamField("framework", "Test framework",
-                        WorkflowParamField.ParamType.STRING, false,
+                new WorkflowParamField(E2eTestParam.FRAMEWORK, "Test framework",
+                        false,
                         DEFAULT_FRAMEWORK.key(),
-                        "playwright (default, well-tested) — pytest, k6, cypress are experimental and only smoke-tested."),
-                new WorkflowParamField("maxRetries", "Max retries per test",
+                        "playwright (default, well-tested) — pytest, k6, cypress are experimental and only smoke-tested.",
+                        List.of(
+                                new WorkflowParamField.EnumOption(E2eTestFramework.PLAYWRIGHT.key(), "Playwright",
+                                        "Node.js — default, well-tested."),
+                                new WorkflowParamField.EnumOption(E2eTestFramework.PYTEST.key(), "pytest",
+                                        "Python — experimental."),
+                                new WorkflowParamField.EnumOption(E2eTestFramework.K6.key(), "k6",
+                                        "Grafana k6 load testing — experimental."),
+                                new WorkflowParamField.EnumOption(E2eTestFramework.CYPRESS.key(), "Cypress",
+                                        "Node.js — experimental.")
+                        )),
+                new WorkflowParamField(E2eTestParam.MAX_RETRIES, "Max retries per test",
                         WorkflowParamField.ParamType.INTEGER, false,
                         String.valueOf(DEFAULT_MAX_RETRIES),
                         "Per-test retry budget. A test that passes after retries is tagged FLAKY."),
-                new WorkflowParamField("maxTestCases", "Max test cases per suite",
+                new WorkflowParamField(E2eTestParam.MAX_TEST_CASES, "Max test cases per suite",
                         WorkflowParamField.ParamType.INTEGER, false,
                         String.valueOf(DEFAULT_MAX_TEST_CASES),
                         "Cost guard. Capped at " + ABSOLUTE_MAX_TEST_CASES
                                 + " regardless of the configured value."),
-                new WorkflowParamField("suiteLifecycle", "Suite lifecycle",
-                        WorkflowParamField.ParamType.STRING, false,
+                new WorkflowParamField(E2eTestParam.SUITE_LIFECYCLE, "Suite lifecycle",
+                        false,
                         SuiteLifecycleMode.EPHEMERAL.key(),
-                        "What happens to the generated suite. One of: "
-                                + "ephemeral (delete on PR close, default), "
-                                + "offer-as-pr (open a follow-up PR with the tests), "
-                                + "promote-on-merge (open follow-up PR against the default branch once the parent PR merges), "
-                                + "commit-to-pr (commit the tests directly onto the feature branch).")
+                        "What happens to the generated suite after the PR closes.",
+                        List.of(
+                                new WorkflowParamField.EnumOption(SuiteLifecycleMode.EPHEMERAL.key(), "Ephemeral",
+                                        "Delete suite and test cases when the PR closes (default)."),
+                                new WorkflowParamField.EnumOption(SuiteLifecycleMode.OFFER_AS_PR.key(), "Offer as PR",
+                                        "Open a follow-up PR with the generated tests against the feature branch."),
+                                new WorkflowParamField.EnumOption(SuiteLifecycleMode.PROMOTE_ON_MERGE.key(), "Promote on merge",
+                                        "Once the parent PR merges, open a follow-up PR against the default branch."),
+                                new WorkflowParamField.EnumOption(SuiteLifecycleMode.COMMIT_TO_PR.key(), "Commit to PR",
+                                        "Commit the generated tests directly onto the feature branch.")
+                        )),
+                new WorkflowParamField(E2eTestParam.PROMOTION_THRESHOLD_PERCENT, "Promotion pass-rate threshold (%)",
+                        WorkflowParamField.ParamType.INTEGER, false,
+                        String.valueOf(DEFAULT_PROMOTION_THRESHOLD_PERCENT),
+                        "Minimum percentage of executed test cases that must pass for the suite to be "
+                                + "promoted (applies to offer-as-pr / commit-to-pr / promote-on-merge). "
+                                + "100 (default) means only fully green suites are promoted; lower it to "
+                                + "e.g. 80 to also promote when at least 80% of the tests pass. "
+                                + "Suites that ERROR or are SKIPPED are never promoted regardless of this value. "
+                                + "Tip: LLM-generated tests are rarely 100% runnable on the first try — "
+                                + "treat them as a regression-test baseline, not as ground truth.")
         );
     }
 
@@ -154,15 +182,14 @@ public class E2ETestWorkflow implements PrWorkflow {
     public WorkflowResult run(PrWorkflowContext context) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
-        long prNumber = payload.getPullRequest() == null
-                ? 0L : (payload.getPullRequest().getNumber() == null ? 0L : payload.getPullRequest().getNumber());
+        long prNumber = resolvePrNumber(payload);
 
         Map<String, Object> params = bot.getWorkflowConfiguration() == null
                 ? Map.of()
                 : selectionService.resolveParams(bot.getWorkflowConfiguration().getId(), KEY);
         E2eTestFramework framework = resolveFramework(params);
-        int maxRetries = clamp(intParam(params, "maxRetries", DEFAULT_MAX_RETRIES), 0, 5);
-        int maxTestCases = clamp(intParam(params, "maxTestCases", DEFAULT_MAX_TEST_CASES),
+        int maxRetries = clamp(intParam(params, E2eTestParam.MAX_RETRIES, DEFAULT_MAX_RETRIES), 0, 5);
+        int maxTestCases = clamp(intParam(params, E2eTestParam.MAX_TEST_CASES, DEFAULT_MAX_TEST_CASES),
                 1, ABSOLUTE_MAX_TEST_CASES);
         SuiteLifecycleMode lifecycleMode = resolveLifecycle(params);
 
@@ -177,14 +204,44 @@ public class E2ETestWorkflow implements PrWorkflow {
             return WorkflowResult.skipped("No deployment target on bot");
         }
 
+        boolean rerunOnly = "true".equalsIgnoreCase(context.hint(PrWorkflowContext.HINT_RERUN_ONLY));
+
+        // Locate the most-recent previous suite that actually has test cases attached
+        // when we are in rerun-only mode. If none exists we fall back to a full run.
+        PrTestSuite previousSuite = null;
+        if (rerunOnly) {
+            // NB: findByPrNumberOrderByIdDesc returns detached entities with a lazy
+            // `cases` bag - accessing it here would throw LazyInitializationException
+            // because the async workflow runs outside the repository's transaction.
+            // Re-fetch each candidate via the fetch-join query until we find one with
+            // actual test cases attached.
+            previousSuite = suiteRepository.findByPrNumberOrderByIdDesc(prNumber).stream()
+                    .map(s -> suiteRepository.findByIdWithCases(s.getId()).orElse(null))
+                    .filter(s -> s != null && s.getCases() != null && !s.getCases().isEmpty())
+                    .findFirst()
+                    .orElse(null);
+            if (previousSuite == null) {
+                log.info("[Workflow '{}'] rerun-only requested for PR #{} but no previous suite with "
+                        + "cases found — falling back to full regenerate run", KEY, prNumber);
+                rerunOnly = false;
+            } else {
+                log.info("[Workflow '{}'] rerun-only for PR #{}: reusing suite #{} ({} cases)",
+                        KEY, prNumber, previousSuite.getId(),
+                        previousSuite.getCases().size());
+            }
+        }
+
         // Tell the operator the run has started — generation, deployment and
         // execution can take several minutes, so an immediate ack avoids the
         // "is it stuck?" question and matches the 👀 reaction posted by
         // E2eTestSlashCommandHandler for re-run / regenerate slash commands.
         postPrComment(bot, payload, prNumber,
-                E2eTestSummaryRenderer.renderStarting(prNumber, framework, lifecycleMode));
+                rerunOnly
+                        ? E2eTestSummaryRenderer.renderRerunStarting(prNumber, framework, lifecycleMode)
+                        : E2eTestSummaryRenderer.renderStarting(prNumber, framework, lifecycleMode));
         context.appendStep("e2e-start",
-                "Starting E2E run (framework=" + framework.key()
+                (rerunOnly ? "Re-running existing tests" : "Starting E2E run")
+                        + " (framework=" + framework.key()
                         + ", lifecycle=" + lifecycleMode.key() + ")");
 
         context.requireActive("before persisting PrTestSuite");
@@ -239,7 +296,8 @@ public class E2ETestWorkflow implements PrWorkflow {
         } else {
             TestSuiteRequest request = new TestSuiteRequest(
                     context, bot, payload, suite, workspace,
-                    framework, deployment.previewUrl(), maxRetries, maxTestCases);
+                    framework, deployment.previewUrl(), maxRetries, maxTestCases,
+                    previousSuite);
             try {
                 outcome = runner.run(request);
             } catch (RuntimeException e) {
@@ -264,16 +322,67 @@ public class E2ETestWorkflow implements PrWorkflow {
         String comment = E2eTestSummaryRenderer.render(suite, outcome, deployment.previewUrl());
         postPrComment(bot, payload, prNumber, comment);
 
-        // M7 — offer/commit modes promote immediately after a successful run.
-        // PROMOTE_ON_MERGE waits for the parent PR to merge (handled by
-        // E2eTestPrCloseHandler).
-        if (outcome.status() == TestSuiteOutcomeStatus.PASSED
+        // M7 — offer/commit modes promote immediately when the configured
+        // pass-rate threshold is met. PROMOTE_ON_MERGE waits for the parent
+        // PR to merge (handled by E2eTestPrCloseHandler), which also honours
+        // the same threshold.
+        int promotionThreshold = clamp(
+                intParam(params, E2eTestParam.PROMOTION_THRESHOLD_PERCENT, DEFAULT_PROMOTION_THRESHOLD_PERCENT),
+                0, 100);
+        if (meetsPromotionThreshold(outcome, promotionThreshold)
                 && (lifecycleMode == SuiteLifecycleMode.OFFER_AS_PR
                     || lifecycleMode == SuiteLifecycleMode.COMMIT_TO_PR)) {
-            promoteIfRequested(bot, payload, suite, context, lifecycleMode);
+            promoteIfRequested(bot, payload, suite, context, lifecycleMode, outcome, promotionThreshold);
+        } else if (outcome.status() == TestSuiteOutcomeStatus.FAILED
+                && (lifecycleMode == SuiteLifecycleMode.OFFER_AS_PR
+                    || lifecycleMode == SuiteLifecycleMode.COMMIT_TO_PR)) {
+            int passRate = passRatePercent(outcome.attempted(), outcome.failed());
+            context.appendStep("e2e-promotion",
+                    lifecycleMode.key() + " — skipped: pass-rate " + passRate
+                            + "% below threshold " + promotionThreshold + "%");
         }
 
         return mapOutcome(outcome);
+    }
+
+    /**
+     * Returns {@code true} when the suite is allowed to be promoted given
+     * the configured {@code promotionThresholdPercent}. {@link
+     * TestSuiteOutcomeStatus#PASSED PASSED} always qualifies; {@link
+     * TestSuiteOutcomeStatus#FAILED FAILED} only qualifies when the
+     * pass-rate (excluding skipped / pending cases) meets the threshold.
+     * {@link TestSuiteOutcomeStatus#ERROR ERROR} and {@link
+     * TestSuiteOutcomeStatus#SKIPPED SKIPPED} never qualify — these signal
+     * infra problems, not test results, so there is nothing meaningful to
+     * promote.
+     */
+    static boolean meetsPromotionThreshold(TestSuiteOutcome outcome, int thresholdPercent) {
+        if (outcome == null) {
+            return false;
+        }
+        if (outcome.status() == TestSuiteOutcomeStatus.PASSED) {
+            return true;
+        }
+        if (outcome.status() != TestSuiteOutcomeStatus.FAILED) {
+            return false;
+        }
+        if (outcome.attempted() <= 0) {
+            return false;
+        }
+        return passRatePercent(outcome.attempted(), outcome.failed()) >= thresholdPercent;
+    }
+
+    /**
+     * Integer percentage of cases that did <em>not</em> fail among those
+     * actually executed. Returns {@code 0} when {@code attempted} is zero
+     * so callers can safely compare against any threshold.
+     */
+    static int passRatePercent(int attempted, int failed) {
+        if (attempted <= 0) {
+            return 0;
+        }
+        int passed = Math.max(0, attempted - failed);
+        return (int) Math.floor((passed * 100.0) / attempted);
     }
 
     /**
@@ -283,7 +392,8 @@ public class E2ETestWorkflow implements PrWorkflow {
      * status.
      */
     private void promoteIfRequested(Bot bot, WebhookPayload payload, PrTestSuite suite,
-                                    PrWorkflowContext context, SuiteLifecycleMode mode) {
+                                    PrWorkflowContext context, SuiteLifecycleMode mode,
+                                    TestSuiteOutcome outcome, int thresholdPercent) {
         if (payload.getRepository() == null
                 || payload.getRepository().getOwner() == null
                 || payload.getPullRequest() == null
@@ -299,6 +409,9 @@ public class E2ETestWorkflow implements PrWorkflow {
             log.warn("[Workflow '{}'] Cannot promote — run id {} not found", KEY, context.runId());
             return;
         }
+        int passRate = passRatePercent(outcome.attempted(), outcome.failed());
+        log.info("[Workflow '{}'] Promoting suite id={} mode={} status={} passRate={}% threshold={}%",
+                KEY, suite.getId(), mode.key(), outcome.status(), passRate, thresholdPercent);
         SuitePromotionService.Outcome out = suitePromotionService.promote(
                 bot, run, suite, owner, repoName, featureBranch);
         context.appendStep("e2e-promotion", mode.key() + " — " + out.kind() + (
@@ -332,7 +445,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     }
 
     private E2eTestFramework resolveFramework(Map<String, Object> params) {
-        Object raw = params.get("framework");
+        Object raw = params.get(E2eTestParam.FRAMEWORK.key());
         if (raw == null || raw.toString().isBlank()) {
             return DEFAULT_FRAMEWORK;
         }
@@ -346,7 +459,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     }
 
     private SuiteLifecycleMode resolveLifecycle(Map<String, Object> params) {
-        Object raw = params.get("suiteLifecycle");
+        Object raw = params.get(E2eTestParam.SUITE_LIFECYCLE.key());
         if (raw == null || raw.toString().isBlank()) {
             return SuiteLifecycleMode.EPHEMERAL;
         }
@@ -357,6 +470,17 @@ public class E2ETestWorkflow implements PrWorkflow {
                     KEY, raw);
             return SuiteLifecycleMode.EPHEMERAL;
         }
+    }
+
+    /**
+     * Compile-time-safe overload of {@link #intParam(Map, String, int)} that
+     * accepts a {@link org.remus.giteabot.prworkflow.WorkflowParamName} enum
+     * value so callers cannot mistype the key.
+     */
+    private int intParam(Map<String, Object> params,
+                         org.remus.giteabot.prworkflow.WorkflowParamName name,
+                         int fallback) {
+        return intParam(params, name.key(), fallback);
     }
 
     private int intParam(Map<String, Object> params, String key, int fallback) {
@@ -383,6 +507,25 @@ public class E2ETestWorkflow implements PrWorkflow {
             return null;
         }
         return payload.getPullRequest().getHead().getSha();
+    }
+
+    /**
+     * Resolves the pull-request number using the same fallback chain as
+     * {@code PrWorkflowOrchestrator.resolvePrNumber}: PR object first,
+     * then issue (for GitHub {@code issue_comment} events that lack the
+     * pull-request block), then the top-level {@code number} field.
+     */
+    private long resolvePrNumber(WebhookPayload payload) {
+        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
+            return payload.getPullRequest().getNumber();
+        }
+        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
+            return payload.getIssue().getNumber();
+        }
+        if (payload.getNumber() != null) {
+            return payload.getNumber();
+        }
+        return 0L;
     }
 }
 

@@ -9,10 +9,24 @@
                 <i class="bi bi-diagram-3"></i>
                 Workflows for &laquo;<span th:text="${workflowConfiguration.name}"></span>&raquo;
             </h2>
-            <a th:href="@{/system-settings}" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left"></i> Back to System settings
-            </a>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="expandAllWorkflows">
+                    <i class="bi bi-arrows-expand"></i> Expand all
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="collapseAllWorkflows">
+                    <i class="bi bi-arrows-collapse"></i> Collapse all
+                </button>
+                <a th:href="@{/system-settings}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-arrow-left"></i> Back to System settings
+                </a>
+            </div>
         </div>
+
+        <style>
+            .workflow-toggle { cursor: pointer; }
+            .workflow-toggle .section-chevron { transition: transform 0.2s ease-in-out; }
+            .workflow-toggle.collapsed .section-chevron { transform: rotate(-90deg); }
+        </style>
 
         <div th:if="${error}" class="alert alert-danger" th:text="${error}"></div>
 
@@ -30,8 +44,22 @@
             </div>
 
             <div th:each="row : ${workflows}" class="card mb-3">
-                <div class="card-body">
-                    <div class="form-check">
+                <div class="card-header d-flex align-items-center gap-2 py-2">
+                    <!-- Collapse toggle (only rendered when the workflow has params) -->
+                    <button th:if="${row.prWorkflow != null and !row.prWorkflow.paramsSchema().empty}"
+                            type="button"
+                            class="btn btn-link p-0 text-body text-decoration-none workflow-toggle"
+                            data-bs-toggle="collapse"
+                            th:data-bs-target="'#wf-collapse-' + ${row.workflowKey}"
+                            aria-expanded="true"
+                            th:aria-controls="'wf-collapse-' + ${row.workflowKey}">
+                        <i class="bi bi-chevron-down section-chevron"></i>
+                    </button>
+                    <!-- Spacer so rows without a toggle button still align -->
+                    <span th:if="${row.prWorkflow == null or row.prWorkflow.paramsSchema().empty}"
+                          style="width:1.5rem; display:inline-block;"></span>
+
+                    <div class="form-check mb-0 flex-grow-1">
                         <input class="form-check-input" type="checkbox"
                                name="selectedWorkflowKeys"
                                th:value="${row.workflowKey}"
@@ -44,23 +72,34 @@
                             <span th:if="${row.prWorkflow == null}" class="badge bg-warning ms-2">Not registered</span>
                         </label>
                     </div>
+                </div>
 
-                    <div th:if="${row.prWorkflow != null and !row.prWorkflow.paramsSchema().empty}"
-                         class="mt-3 ps-4">
-                        <div th:each="field : ${row.prWorkflow.paramsSchema().fields()}" class="mb-2"
+                <div th:if="${row.prWorkflow != null and !row.prWorkflow.paramsSchema().empty}"
+                     th:id="'wf-collapse-' + ${row.workflowKey}"
+                     class="collapse show">
+                    <div class="card-body pt-2">
+                        <div th:each="field : ${row.prWorkflow.paramsSchema().fields()}" class="mb-3"
                              th:with="persisted=${row.persistedParams != null ? row.persistedParams.get(field.name) : null},
                                       currentValue=${persisted != null ? persisted : field.defaultValue},
                                       booleanChecked=${persisted != null ? (persisted == 'true') : (field.defaultValue != null and field.defaultValue == 'true')}">
-                            <label class="form-label" th:for="'param-' + ${row.workflowKey} + '-' + ${field.name}">
+
+                            <!-- Label (skip for BOOLEAN which has its own inline label) -->
+                            <label th:if="${field.type.name() != 'BOOLEAN'}"
+                                   class="form-label fw-semibold"
+                                   th:for="'param-' + ${row.workflowKey} + '-' + ${field.name}">
                                 <span th:text="${field.label}"></span>
                                 <span th:if="${field.required}" class="text-danger">*</span>
                             </label>
+
+                            <!-- TEXT -->
                             <textarea th:if="${field.type.name() == 'TEXT'}"
                                       class="form-control"
                                       rows="3"
                                       th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
                                       th:name="|params.${row.workflowKey}.${field.name}|"
                                       th:text="${currentValue}"></textarea>
+
+                            <!-- BOOLEAN -->
                             <input th:if="${field.type.name() == 'BOOLEAN'}"
                                    type="hidden"
                                    th:name="|params.${row.workflowKey}.${field.name}|"
@@ -70,24 +109,54 @@
                                        th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
                                        th:name="|params.${row.workflowKey}.${field.name}|"
                                        th:checked="${booleanChecked}"/>
+                                <label class="form-check-label fw-semibold"
+                                       th:for="'param-' + ${row.workflowKey} + '-' + ${field.name}">
+                                    <span th:text="${field.label}"></span>
+                                    <span th:if="${field.required}" class="text-danger">*</span>
+                                </label>
                             </div>
+
+                            <!-- INTEGER -->
                             <input th:if="${field.type.name() == 'INTEGER'}"
                                    type="number" class="form-control"
                                    th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
                                    th:name="|params.${row.workflowKey}.${field.name}|"
                                    th:value="${currentValue}"/>
+
+                            <!-- SECRET -->
                             <input th:if="${field.type.name() == 'SECRET'}"
                                    type="password" class="form-control"
                                    th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
                                    th:name="|params.${row.workflowKey}.${field.name}|"
                                    th:placeholder="${persisted != null ? '(unchanged)' : ''}"
                                    autocomplete="off"/>
+
+                            <!-- STRING -->
                             <input th:if="${field.type.name() == 'STRING'}"
                                    type="text" class="form-control"
                                    th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
                                    th:name="|params.${row.workflowKey}.${field.name}|"
                                    th:value="${currentValue}"/>
-                            <div class="form-text" th:if="${field.description}" th:text="${field.description}"></div>
+
+                            <!-- ENUM — radio-button group -->
+                            <div th:if="${field.type.name() == 'ENUM'}"
+                                 th:each="opt : ${field.allowedValues}"
+                                 class="form-check">
+                                <input class="form-check-input" type="radio"
+                                       th:id="'param-' + ${row.workflowKey} + '-' + ${field.name} + '-' + ${opt.key}"
+                                       th:name="|params.${row.workflowKey}.${field.name}|"
+                                       th:value="${opt.key}"
+                                       th:checked="${currentValue == opt.key}"/>
+                                <label class="form-check-label"
+                                       th:for="'param-' + ${row.workflowKey} + '-' + ${field.name} + '-' + ${opt.key}">
+                                    <strong th:text="${opt.label}"></strong>
+                                    <span th:if="${opt.description}" class="text-secondary small ms-1"
+                                          th:text="'— ' + ${opt.description}"></span>
+                                </label>
+                            </div>
+
+                            <div class="form-text" th:if="${field.description != null and field.type.name() != 'ENUM'}"
+                                 th:text="${field.description}"></div>
                         </div>
                     </div>
                 </div>
@@ -100,6 +169,18 @@
                 <a th:href="@{/system-settings}" class="btn btn-outline-secondary">Cancel</a>
             </div>
         </form>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                initCollapsibleSections({
+                    storageKey: 'workflowsEdit.collapsedSections',
+                    collapses: document.querySelectorAll('[id^="wf-collapse-"].collapse'),
+                    expandButton: document.getElementById('expandAllWorkflows'),
+                    collapseButton: document.getElementById('collapseAllWorkflows'),
+                    allowMultipleOpen: true
+                });
+            });
+        </script>
 
     </div>
 </div>

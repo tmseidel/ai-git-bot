@@ -12,6 +12,7 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-giteabot}
       # Encryption key for API keys stored in database (optional, but recommended for production)
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
       # Optional agent prompt context limits; reduce these for small local LLM context windows
       AGENT_CONTEXT_MAX_TREE_FILES: ${AGENT_CONTEXT_MAX_TREE_FILES:-500}
       AGENT_CONTEXT_MAX_ISSUE_COMMENTS: ${AGENT_CONTEXT_MAX_ISSUE_COMMENTS:-50}

@@ -51,7 +51,7 @@ class TestRunnerAgentTest {
         TestPlan plan = new TestPlan("playwright", List.of(
                 new TestPlan.Journey("a", "A", List.of("s"), List.of("x"), "tests/a.spec.ts")), 0);
 
-        agent.execute(ai, ctx, plan, 0);
+        agent.execute(ai, ctx, plan, 0, null);
 
         assertThat(ai.invocations()).hasSize(1);
         assertThat(ai.invocations().get(0).tools())
@@ -80,7 +80,7 @@ class TestRunnerAgentTest {
         TestPlan plan = new TestPlan("playwright", List.of(
                 new TestPlan.Journey("a", "A", List.of("s"), List.of("x"), "tests/a.spec.ts")), 1);
 
-        TestRunnerAgent.Result result = agent.execute(ai, ctx, plan, 1);
+        TestRunnerAgent.Result result = agent.execute(ai, ctx, plan, 1, null);
 
         assertThat(result.prTestRunInvocations()).isEqualTo(1);
         assertThat(result.attachedArtifacts()).isEqualTo(1);
@@ -91,7 +91,7 @@ class TestRunnerAgentTest {
     @Test
     void handlesNullAiClientGracefully() {
         TestRunnerAgent.Result result = agent.execute(null, ctx,
-                new TestPlan("playwright", List.of(), 0), 0);
+                new TestPlan("playwright", List.of(), 0), 0, null);
 
         assertThat(result.budgetExhausted()).isTrue();
         assertThat(result.prTestRunInvocations()).isZero();
@@ -132,7 +132,7 @@ class TestRunnerAgentTest {
         TestPlan plan = new TestPlan("playwright", List.of(
                 new TestPlan.Journey("a", "A", List.of("s"), List.of("x"), "tests/a.spec.ts")), 0);
 
-        TestRunnerAgent.Result result = agent.execute(ai, ctx, plan, 0);
+        TestRunnerAgent.Result result = agent.execute(ai, ctx, plan, 0, null);
 
         // The recovered call counts as a real pr-test-run invocation so the
         // PlaywrightTestSuiteRunner aggregation will pick up the rows the
@@ -191,7 +191,7 @@ class TestRunnerAgentTest {
         TestPlan plan = new TestPlan("playwright", List.of(
                 new TestPlan.Journey("a", "A", List.of("s"), List.of("x"), "tests/a.spec.ts")), 0);
 
-        TestRunnerAgent.Result result = agent.execute(ai, ctx, plan, 1);
+        TestRunnerAgent.Result result = agent.execute(ai, ctx, plan, 1, null);
 
         assertThat(result.prTestRunInvocations()).isEqualTo(2);
         // The second call carries an array of strings — assert it is passed

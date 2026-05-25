@@ -58,10 +58,10 @@ With only `ephemeral` lifecycle:
 - [x] A new **`suiteLifecycle`** workflow param on `e2e-test` accepts
       `ephemeral` / `offer-as-pr` / `promote-on-merge` / `commit-to-pr`.
 - [x] `offer-as-pr`: after a successful run the bot opens a follow-up
-      PR `ai-tests/pr-{n} → feature-branch` carrying every generated
+      PR `ai-tests/pr-{n}-r{runId} → feature-branch` carrying every generated
       `PrTestCase` under `tests/e2e/pr-{n}/`.
 - [x] `promote-on-merge`: triggered by the PR-merged lifecycle hook;
-      opens a follow-up PR `ai-tests/promoted-pr-{n} → default-branch`
+      opens a follow-up PR `ai-tests/promoted-pr-{n}-r{runId} → default-branch`
       carrying the tests under `tests/e2e/`.
 - [x] `commit-to-pr`: the tests are committed directly onto the feature
       branch — no follow-up PR.
@@ -97,7 +97,7 @@ With only `ephemeral` lifecycle:
 | **No more throwaway tests** | The good tests survive PR close and start protecting `main`. |
 | **Lin reviews tests like normal code** | The follow-up PR is a regular PR — code review, comment threads, branch-protection rules all apply. |
 | **Auditable promotion trail** | `PrWorkflowRun.followUpPrNumber` links every promoted suite back to the run that generated it; the dashboard surfaces both PRs. |
-| **No double-promotion** | Idempotency guard means re-runs / late merges never open duplicate PRs. |
+| **No double-promotion** | Idempotency guard means re-runs / late merges never open duplicate PRs, and the per-run branch suffix avoids collisions with older promotion branches for the same parent PR. |
 | **No silent overwrites** | Conflict suffixes (`login_2.spec.ts`) make sure existing tests are never clobbered. |
 | **Mode per team, not per repo** | A team owning a stable area can pick `promote-on-merge`. A scratch-pad service can stay on `commit-to-pr`. A risk-averse team keeps `offer-as-pr` and reviews everything. |
 | **No new infrastructure** | Reuses the existing `WorkspaceService` (same `git clone` / `git push` path the coding agent already uses) and the existing `RepositoryApiClient.createPullRequest` — works on Gitea, GitHub, GitLab, Bitbucket out of the box. |
@@ -112,7 +112,7 @@ With only `ephemeral` lifecycle:
 │  Bot generates 4 specs on PR #7.                  │    │  Bot generates 4 specs on PR #7.        │
 │  Suite report posted to PR comment.               │    │  Suite report posted to PR comment.     │
 │  PR closes → suite deleted.                       │    │  Follow-up PR #4242 opens on            │
-│  Tests never run on main.                         │    │  `ai-tests/pr-7 → feature/login`        │
+│  Tests never run on main.                         │    │  `ai-tests/pr-7-r101 → feature/login`   │
 │  Next quarter Lin still has no coverage.          │    │  with the 4 specs.                       │
 │                                                   │    │  Lin reviews + merges → tests live      │
 │                                                   │    │  on main → CI runs them on every PR.    │
@@ -134,9 +134,9 @@ PR opened ──▶ E2ETestWorkflow ──▶ Planner / Author / Runner
                                        ▼
               WorkspaceService.prepareWorkspace(repo, featureBranch)
               Files.write tests/e2e/pr-{n}/*.spec.ts
-              WorkspaceService.commitAndPush(branch=ai-tests/pr-{n})
+              WorkspaceService.commitAndPush(branch=ai-tests/pr-{n}-r{runId})
               RepositoryApiClient.createPullRequest(title, body,
-                                                   head=ai-tests/pr-{n},
+                                                   head=ai-tests/pr-{n}-r{runId},
                                                    base=featureBranch)
                                        │
                                        ▼

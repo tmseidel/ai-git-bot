@@ -129,6 +129,7 @@ class WorkflowSelectionServiceIntegrationTest {
                     ? field.defaultValue() : "alpha";
             case BOOLEAN -> "true";
             case INTEGER -> "1";
+            case ENUM -> field.allowedValues().isEmpty() ? "alpha" : field.allowedValues().get(0).key();
         };
     }
 
@@ -137,6 +138,8 @@ class WorkflowSelectionServiceIntegrationTest {
             case STRING, TEXT, SECRET -> "BRAVO-" + field.name();
             case BOOLEAN -> "false";
             case INTEGER -> "99";
+            case ENUM -> field.allowedValues().isEmpty() ? "bravo"
+                    : field.allowedValues().get(field.allowedValues().size() - 1).key();
         };
     }
 }

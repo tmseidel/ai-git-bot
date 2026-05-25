@@ -30,16 +30,16 @@ import java.util.Set;
  *     <li>{@link SuiteLifecycleMode#OFFER_AS_PR OFFER_AS_PR} — clones the
  *         feature branch into a sandbox, writes every generated
  *         {@link PrTestCase} under {@code tests/e2e/pr-{n}/}, commits onto
- *         a fresh branch {@code ai-tests/pr-{n}}, pushes it and opens a
- *         follow-up PR <em>against the feature branch</em>. The original
- *         PR author reviews the proposed tests in isolation.</li>
+ *         a fresh branch {@code ai-tests/pr-{n}-r{runId}}, pushes it and
+ *         opens a follow-up PR <em>against the feature branch</em>. The
+ *         original PR author reviews the proposed tests in isolation.</li>
  *     <li>{@link SuiteLifecycleMode#PROMOTE_ON_MERGE PROMOTE_ON_MERGE} —
  *         only triggered after the parent PR merges. Clones the
  *         repository's default branch, writes the tests under
  *         {@code tests/e2e/}, commits onto
- *         {@code ai-tests/promoted-pr-{n}}, pushes and opens a follow-up
- *         PR against the default branch. The tests become part of the
- *         standard CI matrix.</li>
+ *         {@code ai-tests/promoted-pr-{n}-r{runId}}, pushes and opens a
+ *         follow-up PR against the default branch. The tests become part
+ *         of the standard CI matrix.</li>
  *     <li>{@link SuiteLifecycleMode#COMMIT_TO_PR COMMIT_TO_PR} — clones
  *         the feature branch, writes the tests under
  *         {@code tests/e2e/pr-{n}/} and commits directly back to the
@@ -115,9 +115,14 @@ public class SuitePromotionService {
                 ? "tests/e2e"
                 : "tests/e2e/pr-" + prNumber;
 
+
+        String uniqueSuffix = (run.getId() != null)
+                ? ("r" + run.getId())
+                : ("t" + System.currentTimeMillis());
+
         String workBranch = switch (mode) {
-            case PROMOTE_ON_MERGE -> "ai-tests/promoted-pr-" + prNumber;
-            case OFFER_AS_PR      -> "ai-tests/pr-" + prNumber;
+            case PROMOTE_ON_MERGE -> "ai-tests/promoted-pr-" + prNumber + "-" + uniqueSuffix;
+            case OFFER_AS_PR      -> "ai-tests/pr-" + prNumber + "-" + uniqueSuffix;
             case COMMIT_TO_PR     -> baseBranch;
             case EPHEMERAL        -> throw new IllegalStateException("EPHEMERAL rejected above");
         };

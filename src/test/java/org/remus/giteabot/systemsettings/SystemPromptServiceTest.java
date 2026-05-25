@@ -75,6 +75,9 @@ class SystemPromptServiceTest {
         systemPrompt.setReviewSystemPrompt("review");
         systemPrompt.setIssueAgentSystemPrompt("agent");
         systemPrompt.setWriterAgentSystemPrompt("writer");
+        systemPrompt.setE2ePlannerSystemPrompt("planner");
+        systemPrompt.setE2eAuthorSystemPrompt("author");
+        systemPrompt.setE2eRunnerSystemPrompt("runner");
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
                 () -> systemPromptService.save(systemPrompt));
@@ -90,6 +93,9 @@ class SystemPromptServiceTest {
         systemPrompt.setReviewSystemPrompt("review");
         systemPrompt.setIssueAgentSystemPrompt("agent");
         systemPrompt.setWriterAgentSystemPrompt("writer");
+        systemPrompt.setE2ePlannerSystemPrompt("planner");
+        systemPrompt.setE2eAuthorSystemPrompt("author");
+        systemPrompt.setE2eRunnerSystemPrompt("runner");
         when(systemPromptRepository.existsByName("Custom")).thenReturn(true);
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
@@ -109,6 +115,9 @@ class SystemPromptServiceTest {
         systemPrompt.setReviewSystemPrompt("review");
         systemPrompt.setIssueAgentSystemPrompt("agent");
         systemPrompt.setWriterAgentSystemPrompt("writer");
+        systemPrompt.setE2ePlannerSystemPrompt("planner");
+        systemPrompt.setE2eAuthorSystemPrompt("author");
+        systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setDefaultEntry(true);
         when(systemPromptRepository.existsByNameAndIdNot("Custom", 2L)).thenReturn(false);
         when(systemPromptRepository.findByDefaultEntryTrue()).thenReturn(Optional.of(existingDefault));
@@ -118,5 +127,53 @@ class SystemPromptServiceTest {
 
         assertEquals("Only one default system prompt is allowed", exception.getMessage());
         verify(systemPromptRepository, never()).save(any());
+    }
+
+    @Test
+    void save_requiresE2ePlannerPrompt() {
+        SystemPrompt systemPrompt = baseValidSystemPrompt();
+        systemPrompt.setE2ePlannerSystemPrompt(null);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("E2E Planner System-Prompt is required", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
+    @Test
+    void save_requiresE2eAuthorPrompt() {
+        SystemPrompt systemPrompt = baseValidSystemPrompt();
+        systemPrompt.setE2eAuthorSystemPrompt("");
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("E2E Author System-Prompt is required", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
+    @Test
+    void save_requiresE2eRunnerPrompt() {
+        SystemPrompt systemPrompt = baseValidSystemPrompt();
+        systemPrompt.setE2eRunnerSystemPrompt("   ");
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("E2E Runner System-Prompt is required", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
+    private static SystemPrompt baseValidSystemPrompt() {
+        SystemPrompt systemPrompt = new SystemPrompt();
+        systemPrompt.setName("Custom");
+        systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setIssueAgentSystemPrompt("agent");
+        systemPrompt.setWriterAgentSystemPrompt("writer");
+        systemPrompt.setE2ePlannerSystemPrompt("planner");
+        systemPrompt.setE2eAuthorSystemPrompt("author");
+        systemPrompt.setE2eRunnerSystemPrompt("runner");
+        return systemPrompt;
     }
 }

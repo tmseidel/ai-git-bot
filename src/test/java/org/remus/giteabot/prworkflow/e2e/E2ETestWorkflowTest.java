@@ -338,6 +338,12 @@ class E2ETestWorkflowTest {
                     .filter(s -> runId != null && runId.equals(s.getRunId()))
                     .toList();
         }
+        @Override public java.util.List<PrTestSuite> findByPrNumberOrderByIdDesc(Long prNumber) {
+            return entities.values().stream()
+                    .filter(s -> prNumber.equals(s.getPrNumber()))
+                    .sorted(java.util.Comparator.comparingLong(PrTestSuite::getId).reversed())
+                    .toList();
+        }
         @Override public <S extends PrTestSuite> S save(S entity) {
             if (entity.getId() == null) entity.setId(sequence++);
             entities.put(entity.getId(), entity);

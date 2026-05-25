@@ -82,8 +82,8 @@ class E2eTestSlashCommandHandlerTest {
         ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
         verify(orchestrator).run(eq(bot), eq(payload), key.capture(), hints.capture());
         assertThat(key.getValue()).isEqualTo(E2ETestWorkflow.KEY);
-        // "please" trails `rerun-tests` and is captured as feedback — it is a hint, not a no-op.
-        assertThat(hints.getValue()).containsEntry(PrWorkflowContext.HINT_E2E_FEEDBACK, "please");
+        // rerun-tests always sets HINT_RERUN_ONLY and ignores any trailing text
+        assertThat(hints.getValue()).containsEntry(PrWorkflowContext.HINT_RERUN_ONLY, "true");
     }
 
     @Test
@@ -104,7 +104,7 @@ class E2eTestSlashCommandHandlerTest {
 
     @Test
     void dispatchesEmptyHintsWhenNoTrailingFeedback() {
-        WebhookPayload payload = payloadWithComment("@ai-bot rerun-tests");
+        WebhookPayload payload = payloadWithComment("@ai-bot regenerate-tests");
 
         boolean handled = handler.tryHandle(bot, payload);
 
@@ -113,6 +113,36 @@ class E2eTestSlashCommandHandlerTest {
         ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
         verify(orchestrator).run(eq(bot), eq(payload), eq(E2ETestWorkflow.KEY), hints.capture());
         assertThat(hints.getValue()).isEmpty();
+    }
+
+    @Test
+    void dispatchesOnRerunTestSingular() {
+        // Common typo: user writes the verb without the trailing 's'.
+        WebhookPayload payload = payloadWithComment("@ai-bot rerun-test");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isTrue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(orchestrator).run(eq(bot), eq(payload), eq(E2ETestWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue()).containsEntry(PrWorkflowContext.HINT_RERUN_ONLY, "true");
+    }
+
+    @Test
+    void dispatchesOnRegenerateTestSingularWithFeedback() {
+        // Common typo: user writes the verb without the trailing 's'.
+        WebhookPayload payload = payloadWithComment(
+                "@ai-bot regenerate-test focus on the checkout flow");
+
+        boolean handled = handler.tryHandle(bot, payload);
+
+        assertThat(handled).isTrue();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(orchestrator).run(eq(bot), eq(payload), eq(E2ETestWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue())
+                .containsEntry(PrWorkflowContext.HINT_E2E_FEEDBACK, "focus on the checkout flow");
     }
 
     @Test

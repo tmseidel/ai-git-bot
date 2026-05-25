@@ -46,39 +46,22 @@ public class Bot {
     @JoinColumn(name = "mcp_configuration_id")
     private McpConfiguration mcpConfiguration;
 
-    /**
-     * Whitelist of built-in agent tools (file, context, validation,
-     * writer-repository) that may be exposed to the AI for this bot. Mandatory
-     * — every bot is associated with at least the auto-generated default
-     * configuration, which contains all currently registered built-in tools.
-     */
     @ManyToOne(optional = false)
     @JoinColumn(name = "bot_tool_configuration_id", nullable = false)
     private BotToolConfiguration toolConfiguration;
 
-    /**
-     * Reusable workflow whitelist (M2). Nullable for backwards compatibility:
-     * a bot without an explicit {@link WorkflowConfiguration} behaves as if
-     * it referenced the auto-bootstrapped {@code Default} configuration
-     * (which always has at least the legacy {@code review} workflow enabled).
-     * Existing rows are backfilled to the default by Flyway migration
-     * {@code V15__workflow_configurations_default.sql}.
-     */
     @ManyToOne
     @JoinColumn(name = "workflow_configuration_id")
     private WorkflowConfiguration workflowConfiguration;
 
-    /**
-     * Optional deployment target (M3). Workflows that need a per-PR preview
-     * environment (e.g. {@code E2ETestWorkflow} from M4) consult this FK;
-     * when it is {@code null} those workflows abort cleanly with an
-     * explanatory PR comment instead of running blind.
-     */
     @ManyToOne
     @JoinColumn(name = "deployment_target_id")
     private DeploymentTarget deploymentTarget;
 
     private String webhookSecret;
+
+    @Column(name = "user_whitelist", columnDefinition = "TEXT")
+    private String userWhitelist;
 
     @Column(nullable = false)
     private boolean enabled = true;

@@ -7,6 +7,7 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
 import org.remus.giteabot.prworkflow.PrWorkflowRunStatus;
+import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.deployment.DeploymentStrategy;
 import org.remus.giteabot.prworkflow.deployment.DeploymentStrategyRegistry;
 import org.remus.giteabot.prworkflow.e2e.promotion.SuitePromotionService;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -66,19 +68,22 @@ public class E2eTestPrCloseHandler {
     private final DeploymentStrategyRegistry strategyRegistry;
     private final SuitePromotionService suitePromotionService;
     private final BotRepository botRepository;
+    private final WorkflowSelectionService workflowSelectionService;
 
     public E2eTestPrCloseHandler(PrWorkflowRunRepository runRepository,
                                  PrTestSuiteRepository suiteRepository,
                                  PrTestWorkspaceManager workspaceManager,
                                  DeploymentStrategyRegistry strategyRegistry,
                                  SuitePromotionService suitePromotionService,
-                                 BotRepository botRepository) {
+                                 BotRepository botRepository,
+                                 WorkflowSelectionService workflowSelectionService) {
         this.runRepository = runRepository;
         this.suiteRepository = suiteRepository;
         this.workspaceManager = workspaceManager;
         this.strategyRegistry = strategyRegistry;
         this.suitePromotionService = suitePromotionService;
         this.botRepository = botRepository;
+        this.workflowSelectionService = workflowSelectionService;
     }
 
     @Transactional
@@ -139,14 +144,18 @@ public class E2eTestPrCloseHandler {
                     botId, promotable.size());
             return;
         }
+        int thresholdPercent = resolvePromotionThreshold(bot);
         for (PrTestSuite suite : promotable) {
             PrWorkflowRun run = runs.stream()
                     .filter(r -> r.getId().equals(suite.getRunId()))
                     .findFirst()
                     .orElseGet(() -> runRepository.findById(suite.getRunId()).orElse(null));
-            if (run == null || run.getStatus() != PrWorkflowRunStatus.SUCCESS) {
-                log.info("PROMOTE_ON_MERGE: skipping suite id={} — backing run missing or not SUCCESS",
+            if (run == null) {
+                log.info("PROMOTE_ON_MERGE: skipping suite id={} — backing run not found",
                         suite.getId());
+                continue;
+            }
+            if (!isEligibleForPromotion(suite, run, thresholdPercent)) {
                 continue;
             }
             try {
@@ -159,6 +168,86 @@ public class E2eTestPrCloseHandler {
                         suite.getId(), e.toString());
             }
         }
+    }
+
+    /**
+     * Loads the bot's {@code promotionThresholdPercent} param for the
+     * {@code e2e-test} workflow, clamped to {@code [0,100]}. Bots without
+     * a {@code WorkflowConfiguration} fall back to {@code 100} (only fully
+     * green suites are promoted — the historical default).
+     */
+    private int resolvePromotionThreshold(Bot bot) {
+        if (bot.getWorkflowConfiguration() == null) {
+            return E2ETestWorkflow.DEFAULT_PROMOTION_THRESHOLD_PERCENT;
+        }
+        try {
+            Map<String, Object> params = workflowSelectionService.resolveParams(
+                    bot.getWorkflowConfiguration().getId(), E2ETestWorkflow.KEY);
+            Object raw = params.get(E2eTestParam.PROMOTION_THRESHOLD_PERCENT.key());
+            int value;
+            if (raw instanceof Number n) {
+                value = n.intValue();
+            } else if (raw != null) {
+                value = Integer.parseInt(raw.toString().trim());
+            } else {
+                value = E2ETestWorkflow.DEFAULT_PROMOTION_THRESHOLD_PERCENT;
+            }
+            return Math.max(0, Math.min(100, value));
+        } catch (RuntimeException e) {
+            log.debug("PROMOTE_ON_MERGE: failed to resolve promotionThresholdPercent for bot id={} ({}) — defaulting to {}",
+                    bot.getId(), e.getMessage(), E2ETestWorkflow.DEFAULT_PROMOTION_THRESHOLD_PERCENT);
+            return E2ETestWorkflow.DEFAULT_PROMOTION_THRESHOLD_PERCENT;
+        }
+    }
+
+    /**
+     * A suite qualifies for {@code PROMOTE_ON_MERGE} when the backing run
+     * succeeded outright, or when the run technically failed but the
+     * suite's pass-rate (computed from its {@link PrTestCase} rows) still
+     * meets the configured {@code promotionThresholdPercent}. Runs that
+     * ended in any non-terminal status (RUNNING / WAITING_DEPLOY /
+     * CANCELLED) are never promoted.
+     */
+    private boolean isEligibleForPromotion(PrTestSuite suite, PrWorkflowRun run, int thresholdPercent) {
+        PrWorkflowRunStatus status = run.getStatus();
+        if (status == PrWorkflowRunStatus.SUCCESS) {
+            return true;
+        }
+        if (status != PrWorkflowRunStatus.FAILED) {
+            log.info("PROMOTE_ON_MERGE: skipping suite id={} — backing run status {} is not terminal",
+                    suite.getId(), status);
+            return false;
+        }
+        // FAILED run — only promote when the per-case pass-rate clears the threshold.
+        int attempted = 0;
+        int passed = 0;
+        List<PrTestCase> cases = suite.getCases();
+        if (cases != null) {
+            for (PrTestCase c : cases) {
+                PrTestCaseStatus s = c.getLastStatus();
+                if (s == PrTestCaseStatus.PENDING || s == PrTestCaseStatus.SKIPPED) {
+                    continue;
+                }
+                attempted++;
+                if (s == PrTestCaseStatus.PASSED || s == PrTestCaseStatus.FLAKY) {
+                    passed++;
+                }
+            }
+        }
+        if (attempted == 0) {
+            log.info("PROMOTE_ON_MERGE: skipping suite id={} — no executed test cases on a FAILED run",
+                    suite.getId());
+            return false;
+        }
+        int passRate = (int) Math.floor((passed * 100.0) / attempted);
+        if (passRate < thresholdPercent) {
+            log.info("PROMOTE_ON_MERGE: skipping suite id={} — pass-rate {}% below threshold {}%",
+                    suite.getId(), passRate, thresholdPercent);
+            return false;
+        }
+        log.info("PROMOTE_ON_MERGE: suite id={} — backing run FAILED but pass-rate {}% meets threshold {}%, promoting anyway",
+                suite.getId(), passRate, thresholdPercent);
+        return true;
     }
 
     private void teardownDeployment(PrWorkflowRun run) {

@@ -136,8 +136,9 @@ class WorkflowConfigurationControllerMvcTest {
     private static String sample(org.remus.giteabot.prworkflow.WorkflowParamField field, String tag) {
         return switch (field.type()) {
             case STRING, TEXT, SECRET -> tag + "-" + field.name();
-            case BOOLEAN -> tag.equals("alpha") ? "true" : "false";
+            case BOOLEAN -> Boolean.toString(tag.equals("alpha"));
             case INTEGER -> tag.equals("alpha") ? "1" : "99";
+            case ENUM -> field.allowedValues().isEmpty() ? tag : field.allowedValues().get(0).key();
         };
     }
 

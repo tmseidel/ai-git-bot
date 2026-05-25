@@ -82,25 +82,41 @@ pipeline stays queued forever and `CiActionPoller` eventually times out.
 > `xxd: command not found`, you copy-pasted the production-grade
 > recipe; use the **minimal self-contained workflow** in
 > [`doc/PR_WORKFLOWS_CI_ACTIONS.md` § Gitea Actions](../doc/PR_WORKFLOWS_CI_ACTIONS.md)
-> instead. If the *Notify bot* step fails with
-> `curl: (7) Failed to connect to localhost port 8080`, the bot's
-> `app.public-url` property is still the default `http://localhost:8080`
-> — the workflow runs *inside* a job container where `localhost` means
-> the container itself, not your host. On Linux / WSL2 set
-> `app.public-url=http://172.17.0.1:8080` (the docker0 bridge gateway,
-> reachable from any container on any bridge); on macOS / Windows with
-> Docker Desktop use `http://host.docker.internal:8080` instead. Restart
-> the bot afterwards. If you've already set `app.public-url` to
-> `host.docker.internal` and the step hangs and finally dies with
-> `curl: (28) Failed to connect to host.docker.internal port 8080`,
-> the *job container* either lacks the `host.docker.internal` mapping
-> or has it pointing at an unreachable IP — the cleanest fix on Linux
-> is to switch to the docker0 IP (`172.17.0.1`) as above; alternatively
-> ensure `systemtest/gitea-runner/config.yaml` carries
-> `container.options: "--add-host=host.docker.internal:host-gateway"`
-> *and* `docker compose ... up -d --force-recreate runner` (a plain
-> `restart` is sometimes not enough to refresh the runner's task
-> template).
+> instead.
+>
+> If the *Notify bot* step fails with
+> `curl: (7) Failed to connect to localhost port 8080`, the bot is still
+> advertising the default callback URL `http://localhost:8080`. Inside a
+> job container, `localhost` means the container itself — **not** your bot
+> host.
+>
+> If you run the bot via Docker / `docker compose`, set `APP_PUBLIC_URL`
+> (maps to Spring property `app.public-url`) to a host that the job
+> container can actually reach:
+>
+> - **Linux / WSL2:**
+>   `APP_PUBLIC_URL=http://172.17.0.1:8080`
+>   (`docker0` bridge gateway; usually reachable from any bridge network)
+> - **macOS / Windows with Docker Desktop:**
+>   `APP_PUBLIC_URL=http://host.docker.internal:8080`
+>
+> Restart the bot afterwards.
+>
+> If you've already set `APP_PUBLIC_URL=http://host.docker.internal:8080`
+> and the step hangs, then fails with
+> `curl: (28) Failed to connect to host.docker.internal port 8080`, the
+> *job container* either has no `host.docker.internal` mapping or it
+> points at an unreachable IP.
+>
+> In that case:
+>
+> - on **Linux**, prefer the `docker0` IP (`172.17.0.1`) above
+> - otherwise ensure `systemtest/gitea-runner/config.yaml` contains
+>   `container.options: "--add-host=host.docker.internal:host-gateway"`
+> - then recreate the runner with
+>   `docker compose ... up -d --force-recreate runner`
+>   (`restart` alone is sometimes not enough to refresh the runner task
+>   template)
 
 See [`doc/PR_WORKFLOWS_CI_ACTIONS.md`](../doc/PR_WORKFLOWS_CI_ACTIONS.md)
 for the workflow-file recipes per provider; the rest of this document

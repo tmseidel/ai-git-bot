@@ -1,0 +1,80 @@
+name: Guard main branch
+
+# Ensures that only release branches with a non-SNAPSHOT version in the
+# Maven POM can be merged into `main`. Runs on every pull request that
+# targets `main` and fails fast if either guard is violated.
+#
+# Required check: configure this workflow as a required status check on
+# the `main` branch in the repository's branch protection rules so a PR
+# cannot be merged while the job is red.
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: Only release/* with non-SNAPSHOT version may target main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check source branch name
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          echo "Source branch: '${HEAD_REF}'"
+          if [[ ! "${HEAD_REF}" =~ ^release/ ]]; then
+            echo "::error::Only branches starting with 'release/' may be merged into 'main'."
+            echo "::error::Got '${HEAD_REF}'. Rename your branch or target a different base."
+            exit 1
+          fi
+          echo "OK: branch name starts with 'release/'."
+
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+
+      - name: Verify pom.xml version is not a SNAPSHOT
+        run: |
+          set -euo pipefail
+          if [[ ! -f pom.xml ]]; then
+            echo "::error::pom.xml not found at repository root."
+            exit 1
+          fi
+          # Extract the FIRST <version> child of <project> — the project's own
+          # version, not a dependency or parent version. Uses awk to walk the
+          # XML linearly so we don't pull in an XML parser dependency.
+          VERSION=$(awk '
+            /<project[ >]/      { inproj=1; depth=0; next }
+            inproj && /<parent>/        { inparent=1 }
+            inproj && /<\/parent>/      { inparent=0; next }
+            inproj && /<dependencies>/  { indep++ }
+            inproj && /<\/dependencies>/ { indep-- }
+            inproj && !inparent && (indep+0)==0 && /<version>/ {
+              match($0, /<version>([^<]+)<\/version>/, m)
+              if (m[1] != "") { print m[1]; exit }
+            }
+          ' pom.xml)
+
+          if [[ -z "${VERSION}" ]]; then
+            echo "::error::Could not extract project <version> from pom.xml."
+            exit 1
+          fi
+          echo "Detected pom.xml project version: '${VERSION}'"
+
+          shopt -s nocasematch
+          if [[ "${VERSION}" == *-SNAPSHOT ]]; then
+            echo "::error::Release branches must not carry a SNAPSHOT version."
+            echo "::error::pom.xml version '${VERSION}' ends with '-SNAPSHOT'."
+            echo "::error::Bump to a released version (e.g. '${VERSION%-SNAPSHOT}') before merging into main."
+            exit 1
+          fi
+          echo "OK: version '${VERSION}' is not a SNAPSHOT."
+

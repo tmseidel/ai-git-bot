@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolExecutor;
+import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -36,13 +37,17 @@ public class TestPlannerAgent {
         this.toolExecutor = toolExecutor;
     }
 
+
     /**
-     * Runs the planner. Returns the parsed plan if the model produced one,
-     * empty otherwise (parser rejection, AI failure, or empty journeys).
+     * Runs the planner using an operator-editable system prompt resolved
+     * from {@code systemPrompt} (with fallback to the built-in default in
+     * {@link E2ePromptLibrary} when {@code systemPrompt} is {@code null} or
+     * its E2E planner slot is blank).
      */
     public Optional<TestPlan> plan(AiClient aiClient,
                                    E2eTestFramework framework,
-                                   PlannerInput input) {
+                                   PlannerInput input,
+                                   SystemPrompt systemPrompt) {
         if (aiClient == null) {
             log.warn("TestPlannerAgent.plan called with null AiClient — skipping");
             return Optional.empty();
@@ -52,7 +57,7 @@ public class TestPlannerAgent {
                 toolExecutor,
                 /* toolContext = */ null,
                 /* toolDescriptors = */ List.of(),
-                E2ePromptLibrary.plannerSystemPrompt(framework),
+                E2ePromptLibrary.plannerSystemPromptOrDefault(systemPrompt, framework),
                 DEFAULT_MAX_ROUNDS,
                 DEFAULT_MAX_TOKENS,
                 "test-planner");

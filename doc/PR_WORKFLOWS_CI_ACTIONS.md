@@ -259,7 +259,8 @@ Notes:
   to the `gitea-net` network (which already has the host-gateway
   mapping). Swap it for your real preview URL when wiring up actual
   deploys.
-- **The bot's own `app.public-url` must also point at a hostname the
+- **The bot's own public callback URL (`APP_PUBLIC_URL` in Docker,
+  Spring property `app.public-url`) must also point at a hostname the
   job container can reach.** The default is `http://localhost:8080`,
   which inside a job container resolves to the container itself —
   `curl: (7) Failed to connect to localhost port 8080`. Pick the
@@ -267,21 +268,22 @@ Notes:
   - **Linux / WSL2 (native Docker Engine):** use the docker0 bridge
     gateway IP directly — it's stable per machine and reachable from
     any container on any bridge network without `--add-host` gymnastics:
-    ```properties
-    app.public-url=http://172.17.0.1:8080
+    ```yaml
+    APP_PUBLIC_URL: http://172.17.0.1:8080
     ```
     Confirm the IP once with `ip -4 addr show docker0` if you have a
     non-default daemon config.
   - **macOS / Windows with Docker Desktop:** `host.docker.internal` is
     auto-populated in every container by Docker Desktop, so:
-    ```properties
-    app.public-url=http://host.docker.internal:8080
+    ```yaml
+    APP_PUBLIC_URL: http://host.docker.internal:8080
     ```
     (On Linux the same name *can* work but only if every job container
     actually receives `--add-host=host.docker.internal:host-gateway`,
     which depends on the runner image / version honouring
     `container.options` — the IP variant above sidesteps that and is
-    therefore the recommended Linux default.)
+    therefore the recommended Linux default.) If you do not run the bot via
+    Docker, set the equivalent Spring property `app.public-url` instead.
 - The PAT used by the bot needs the `write:repository` scope; the PAT
   the job uses for `actions/checkout` is auto-injected by Gitea as
   `GITHUB_TOKEN` and only needs `read:repository`.

@@ -8,6 +8,7 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ### Added
 
+- Added per-bot **User Whitelist** (optional textarea on the bot edit form, backed by the new `bots.user_whitelist` column) that restricts which Git usernames may trigger AI-spending interactions — PR opens/syncs, `@`-mentions, inline review comments, review submissions, agent issue assignments and follow-up comments. Blank ⇒ everyone allowed (historical default); non-blank ⇒ strict allow-list enforced in `BotWebhookService#isCallerAllowed`. Recommended for bots installed on public repositories so unknown users cannot burn the bot's AI tokens.
 - Added Dark Theme support with a toggle switch in the navbar.
 - Added repository discovery metadata for search engines, LLMs, autonomous agents, and RAG systems.
 - Added `llms.txt` as a concise LLM entry point.

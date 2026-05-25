@@ -355,8 +355,10 @@ mechanism as today.
 
 ### 7.4 Test-suite lifecycle
 
-A separate **isolated test-suite branch/folder** (`ai-tests/pr-{n}/…`) exists
-per PR. Options for what happens to it at the end:
+A separate **isolated test-suite branch / folder pair** exists per
+promotion attempt: the generated files live under `tests/e2e/pr-{n}/`,
+while follow-up PR modes use a dedicated branch such as
+`ai-tests/pr-{n}-r{runId}`. Options for what happens to it at the end:
 
 1. **`ephemeral` (default):** suite lives only as a DB record, deleted on
    `pullRequest closed`.

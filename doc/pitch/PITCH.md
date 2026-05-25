@@ -139,8 +139,8 @@ re-generates them from scratch*. AI-Git-Bot's
 |---|---|
 | **`ephemeral`** (safe default) | Suite is deleted on PR close. Use while you trial the bot. |
 | **`commit-to-pr`** | Tests are committed directly onto the feature branch — single PR review. |
-| **`offer-as-pr`** | A follow-up PR `ai-tests/pr-{n} → feature` is opened with the generated tests under `tests/e2e/pr-{n}/`. |
-| **`promote-on-merge`** | On parent-PR merge a follow-up PR `ai-tests/promoted-pr-{n} → default-branch` is opened so the tests join the CI matrix. |
+| **`offer-as-pr`** | A follow-up PR `ai-tests/pr-{n}-r{runId} → feature` is opened with the generated tests under `tests/e2e/pr-{n}/`. |
+| **`promote-on-merge`** | On parent-PR merge a follow-up PR `ai-tests/promoted-pr-{n}-r{runId} → default-branch` is opened so the tests join the CI matrix. |
 
 Plus: idempotency via `PrWorkflowRun.followUpPrNumber`,
 conflict-resolving file naming (`login.spec.ts` → `login_2.spec.ts`),

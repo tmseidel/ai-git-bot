@@ -15,6 +15,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -127,6 +128,34 @@ class BotToolConfigurationServiceTest {
     }
 
     @Test
+    void save_existingConfiguration_preservesSelectedTools() {
+        BotToolConfiguration persisted = new BotToolConfiguration();
+        persisted.setId(2L);
+        persisted.setName("Java");
+        persisted.setDefaultEntry(false);
+        BotToolSelection selectedTool = new BotToolSelection();
+        selectedTool.setConfiguration(persisted);
+        selectedTool.setToolName("mvn");
+        selectedTool.setToolKind("VALIDATION");
+        persisted.setSelectedTools(List.of(selectedTool));
+
+        BotToolConfiguration update = new BotToolConfiguration();
+        update.setId(2L);
+        update.setName("  Java Renamed  ");
+
+        when(configurationRepository.findById(2L)).thenReturn(Optional.of(persisted));
+        when(configurationRepository.existsByNameAndIdNot("Java Renamed", 2L)).thenReturn(false);
+        when(configurationRepository.save(any(BotToolConfiguration.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        BotToolConfiguration saved = service.save(update);
+
+        assertSame(persisted, saved);
+        assertEquals("Java Renamed", saved.getName());
+        assertEquals(List.of(selectedTool), saved.getSelectedTools());
+    }
+
+    @Test
     void deleteById_defaultConfiguration_throws() {
         BotToolConfiguration persisted = new BotToolConfiguration();
         persisted.setId(1L);
@@ -234,6 +263,5 @@ class BotToolConfigurationServiceTest {
         assertEquals("Custom", captor.getValue().getName());
     }
 }
-
 
 

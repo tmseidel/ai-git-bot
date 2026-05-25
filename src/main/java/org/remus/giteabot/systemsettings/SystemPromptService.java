@@ -50,6 +50,15 @@ public class SystemPromptService {
         if (systemPrompt.getWriterAgentSystemPrompt() == null || systemPrompt.getWriterAgentSystemPrompt().isBlank()) {
             throw new IllegalArgumentException("Writer-Agent System-Prompt is required");
         }
+        if (systemPrompt.getE2ePlannerSystemPrompt() == null || systemPrompt.getE2ePlannerSystemPrompt().isBlank()) {
+            throw new IllegalArgumentException("E2E Planner System-Prompt is required");
+        }
+        if (systemPrompt.getE2eAuthorSystemPrompt() == null || systemPrompt.getE2eAuthorSystemPrompt().isBlank()) {
+            throw new IllegalArgumentException("E2E Author System-Prompt is required");
+        }
+        if (systemPrompt.getE2eRunnerSystemPrompt() == null || systemPrompt.getE2eRunnerSystemPrompt().isBlank()) {
+            throw new IllegalArgumentException("E2E Runner System-Prompt is required");
+        }
         boolean duplicateName = systemPrompt.getId() == null
                 ? systemPromptRepository.existsByName(systemPrompt.getName())
                 : systemPromptRepository.existsByNameAndIdNot(systemPrompt.getName(), systemPrompt.getId());
@@ -79,8 +88,4 @@ public class SystemPromptService {
         systemPromptRepository.delete(systemPrompt);
     }
 
-    @Transactional(readOnly = true)
-    public long countBotsUsing(Long id) {
-        return botRepository.countBySystemPromptId(id);
-    }
 }

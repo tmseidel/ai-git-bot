@@ -55,6 +55,7 @@ public class BotToolConfigurationService {
         }
         configuration.setName(configuration.getName().trim());
 
+        BotToolConfiguration target = configuration;
         if (configuration.getId() != null) {
             BotToolConfiguration existing = configurationRepository.findById(configuration.getId())
                     .orElseThrow(() -> new IllegalArgumentException("Tool configuration not found"));
@@ -62,9 +63,10 @@ public class BotToolConfigurationService {
                 if (!existing.getName().equals(configuration.getName())) {
                     throw new IllegalArgumentException("The default tool configuration cannot be renamed");
                 }
-                // Cannot revoke the default flag through normal updates.
-                configuration.setDefaultEntry(true);
             }
+            existing.setName(configuration.getName());
+            // Preserve the managed entity and its selectedTools collection.
+            target = existing;
         } else {
             // New configurations are never default; the default is bootstrapped once.
             configuration.setDefaultEntry(false);
@@ -76,7 +78,7 @@ public class BotToolConfigurationService {
         if (duplicateName) {
             throw new IllegalArgumentException("A tool configuration with this name already exists");
         }
-        return configurationRepository.save(configuration);
+        return configurationRepository.save(target);
     }
 
     /**
@@ -128,6 +130,5 @@ public class BotToolConfigurationService {
         return candidate;
     }
 }
-
 
 

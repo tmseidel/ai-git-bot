@@ -34,12 +34,11 @@ class WorkflowSelectionServiceTest {
     @Mock private WorkflowSelectionRepository selectionRepository;
 
     private final WorkflowParamsValidator paramsValidator = new WorkflowParamsValidator();
-    private PrWorkflowRegistry registry;
     private WorkflowSelectionService service;
 
     @BeforeEach
     void setUp() {
-        registry = new PrWorkflowRegistry(List.of(new ReviewLike(), new TestsLike()));
+        PrWorkflowRegistry registry = new PrWorkflowRegistry(List.of(new ReviewLike(), new TestsLike()));
         service = new WorkflowSelectionService(configurationRepository, selectionRepository,
                 registry, paramsValidator);
     }
@@ -161,9 +160,9 @@ class WorkflowSelectionServiceTest {
         @Override public WorkflowParamsSchema paramsSchema() {
             return WorkflowParamsSchema.of(
                     new WorkflowParamField("command", "Command",
-                            WorkflowParamField.ParamType.STRING, true, null, "Test command"),
+                            WorkflowParamField.ParamType.STRING, true, null, "Test command", List.of()),
                     new WorkflowParamField("timeoutSeconds", "Timeout",
-                            WorkflowParamField.ParamType.INTEGER, false, "300", "Timeout in seconds"));
+                            WorkflowParamField.ParamType.INTEGER, false, "300", "Timeout in seconds", List.of()));
         }
     }
 }

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Validates and normalises workflow parameter maps against the
@@ -122,6 +123,23 @@ public class WorkflowParamsValidator {
     private String coerce(String text, WorkflowParamField field, List<String> errors) {
         return switch (field.type()) {
             case STRING, TEXT, SECRET -> text;
+            case ENUM -> {
+                List<WorkflowParamField.EnumOption> opts = field.allowedValues();
+                if (!opts.isEmpty()) {
+                    java.util.Optional<String> canonical = opts.stream()
+                            .map(WorkflowParamField.EnumOption::key)
+                            .filter(k -> k.equalsIgnoreCase(text))
+                            .findFirst();
+                    if (canonical.isPresent()) {
+                        yield canonical.get();   // persist the canonical casing
+                    }
+                    errors.add("Parameter '" + field.label() + "' must be one of: "
+                            + opts.stream().map(WorkflowParamField.EnumOption::key)
+                                    .collect(Collectors.joining(", ")));
+                    yield null;
+                }
+                yield text;
+            }
             case BOOLEAN -> {
                 if (text.equalsIgnoreCase("true") || text.equals("1") || text.equalsIgnoreCase("on")) {
                     yield "true";
@@ -149,7 +167,7 @@ public class WorkflowParamsValidator {
             return null;
         }
         return switch (field.type()) {
-            case STRING, TEXT, SECRET -> value;
+            case STRING, TEXT, SECRET, ENUM -> value;
             case BOOLEAN -> value.equalsIgnoreCase("true") || value.equals("1") || value.equalsIgnoreCase("on");
             case INTEGER -> {
                 try {

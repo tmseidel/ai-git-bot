@@ -29,21 +29,134 @@
                         </div>
 
                         <div class="col-12">
-                            <label for="reviewSystemPrompt" class="form-label">Review System-Prompt</label>
-                            <textarea class="form-control" id="reviewSystemPrompt" th:field="*{reviewSystemPrompt}"
-                                      rows="10" required></textarea>
-                        </div>
+                            <div class="d-flex justify-content-end gap-2 mb-2">
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        id="expandAllPromptsBtn">
+                                    <i class="bi bi-arrows-expand"></i> Expand all
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        id="collapseAllPromptsBtn">
+                                    <i class="bi bi-arrows-collapse"></i> Collapse all
+                                </button>
+                            </div>
+                            <div class="accordion" id="systemPromptsAccordion">
 
-                        <div class="col-12">
-                            <label for="issueAgentSystemPrompt" class="form-label">Issue-Agent System-Prompt</label>
-                            <textarea class="form-control" id="issueAgentSystemPrompt" th:field="*{issueAgentSystemPrompt}"
-                                       rows="14" required></textarea>
-                        </div>
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseReviewPrompt"
+                                                aria-expanded="true" aria-controls="collapseReviewPrompt">
+                                            Review System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseReviewPrompt" class="accordion-collapse collapse show"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <label for="reviewSystemPrompt" class="form-label visually-hidden">Review System-Prompt</label>
+                                            <textarea class="form-control" id="reviewSystemPrompt" th:field="*{reviewSystemPrompt}"
+                                                      rows="10" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
 
-                        <div class="col-12">
-                            <label for="writerAgentSystemPrompt" class="form-label">Writer-Agent System-Prompt</label>
-                            <textarea class="form-control" id="writerAgentSystemPrompt" th:field="*{writerAgentSystemPrompt}"
-                                      rows="14" required></textarea>
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseIssueAgentPrompt"
+                                                aria-expanded="false" aria-controls="collapseIssueAgentPrompt">
+                                            Issue-Agent System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseIssueAgentPrompt" class="accordion-collapse collapse"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <label for="issueAgentSystemPrompt" class="form-label visually-hidden">Issue-Agent System-Prompt</label>
+                                            <textarea class="form-control" id="issueAgentSystemPrompt" th:field="*{issueAgentSystemPrompt}"
+                                                      rows="14" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseWriterAgentPrompt"
+                                                aria-expanded="false" aria-controls="collapseWriterAgentPrompt">
+                                            Writer-Agent System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseWriterAgentPrompt" class="accordion-collapse collapse"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <label for="writerAgentSystemPrompt" class="form-label visually-hidden">Writer-Agent System-Prompt</label>
+                                            <textarea class="form-control" id="writerAgentSystemPrompt" th:field="*{writerAgentSystemPrompt}"
+                                                      rows="14" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseE2EPlannerPrompt"
+                                                aria-expanded="false" aria-controls="collapseE2EPlannerPrompt">
+                                            E2E Planner System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseE2EPlannerPrompt" class="accordion-collapse collapse"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <div class="alert alert-info py-2 small mb-3">
+                                                Used by the Full-stack QA workflow. Edit the agent's
+                                                <strong>role description</strong> only — the technical protocol
+                                                (active framework, JSON output schema, tool names and call sequence,
+                                                URL conventions) is always appended by the software and is
+                                                <strong>not</strong> editable here, so an edit cannot break the pipeline.
+                                            </div>
+                                            <label for="e2ePlannerSystemPrompt" class="form-label visually-hidden">E2E Planner System-Prompt</label>
+                                            <textarea class="form-control" id="e2ePlannerSystemPrompt" th:field="*{e2ePlannerSystemPrompt}"
+                                                      rows="14" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseE2EAuthorPrompt"
+                                                aria-expanded="false" aria-controls="collapseE2EAuthorPrompt">
+                                            E2E Author System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseE2EAuthorPrompt" class="accordion-collapse collapse"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <label for="e2eAuthorSystemPrompt" class="form-label visually-hidden">E2E Author System-Prompt</label>
+                                            <textarea class="form-control" id="e2eAuthorSystemPrompt" th:field="*{e2eAuthorSystemPrompt}"
+                                                      rows="14" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseE2ERunnerPrompt"
+                                                aria-expanded="false" aria-controls="collapseE2ERunnerPrompt">
+                                            E2E Runner System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseE2ERunnerPrompt" class="accordion-collapse collapse"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <label for="e2eRunnerSystemPrompt" class="form-label visually-hidden">E2E Runner System-Prompt</label>
+                                            <textarea class="form-control" id="e2eRunnerSystemPrompt" th:field="*{e2eRunnerSystemPrompt}"
+                                                      rows="14" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
                         </div>
                     </div>
 
@@ -61,5 +174,30 @@
 
     </div>
 </div>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const accordion = document.getElementById('systemPromptsAccordion');
+        if (!accordion) {
+            return;
+        }
+
+        initCollapsibleSections({
+            storageKey: 'systemPromptsEdit.collapsedSections',
+            collapses: accordion.querySelectorAll('.accordion-collapse'),
+            expandButton: document.getElementById('expandAllPromptsBtn'),
+            collapseButton: document.getElementById('collapseAllPromptsBtn'),
+            allowMultipleOpen: true
+        });
+
+        // If the form has validation errors, expand the first textarea that is invalid
+        const invalid = accordion.querySelector('textarea:invalid');
+        if (invalid) {
+            const collapseEl = invalid.closest('.accordion-collapse');
+            if (collapseEl) {
+                bootstrap.Collapse.getOrCreateInstance(collapseEl, { toggle: false }).show();
+            }
+        }
+    });
+</script>
 </body>
 </html>

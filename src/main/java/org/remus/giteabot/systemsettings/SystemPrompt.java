@@ -28,6 +28,15 @@ public class SystemPrompt {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String writerAgentSystemPrompt;
 
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String e2ePlannerSystemPrompt;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String e2eAuthorSystemPrompt;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String e2eRunnerSystemPrompt;
+
     @Column(nullable = false)
     private boolean defaultEntry = false;
 

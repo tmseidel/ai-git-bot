@@ -51,6 +51,16 @@ public record PrWorkflowContext(
      */
     public static final String HINT_E2E_FEEDBACK = "e2e.feedback";
 
+    /**
+     * When {@code "true"}, instructs {@link org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow}
+     * and the {@link org.remus.giteabot.prworkflow.e2e.runner.PlaywrightTestSuiteRunner} to
+     * skip the Planner + Author phases and re-run only the existing test files
+     * from the most recent {@link org.remus.giteabot.prworkflow.e2e.PrTestSuite} for
+     * this PR. Set by {@code E2eTestSlashCommandHandler} for the {@code @bot rerun-tests}
+     * slash command (as opposed to {@code regenerate-tests} which re-runs the full flow).
+     */
+    public static final String HINT_RERUN_ONLY = "e2e.rerun-only";
+
     public PrWorkflowContext {
         Objects.requireNonNull(bot, "bot");
         Objects.requireNonNull(payload, "payload");
