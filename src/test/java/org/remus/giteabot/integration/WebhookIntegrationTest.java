@@ -309,6 +309,7 @@ class WebhookIntegrationTest {
             systemPrompt.setE2ePlannerSystemPrompt("Planner test prompt");
             systemPrompt.setE2eAuthorSystemPrompt("Author test prompt");
             systemPrompt.setE2eRunnerSystemPrompt("Runner test prompt");
+            systemPrompt.setUnitTestAuthorSystemPrompt("Unit-test-author test prompt");
             systemPrompt.setDefaultEntry(true);
             return systemPromptService.save(systemPrompt);
         });

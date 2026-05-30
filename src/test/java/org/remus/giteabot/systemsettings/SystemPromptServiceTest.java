@@ -98,6 +98,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2ePlannerSystemPrompt("planner");
         systemPrompt.setE2eAuthorSystemPrompt("author");
         systemPrompt.setE2eRunnerSystemPrompt("runner");
+        systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
         when(systemPromptRepository.existsByName("Custom")).thenReturn(true);
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
@@ -121,6 +122,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2ePlannerSystemPrompt("planner");
         systemPrompt.setE2eAuthorSystemPrompt("author");
         systemPrompt.setE2eRunnerSystemPrompt("runner");
+        systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
         systemPrompt.setDefaultEntry(true);
         when(systemPromptRepository.existsByNameAndIdNot("Custom", 2L)).thenReturn(false);
         when(systemPromptRepository.findByDefaultEntryTrue()).thenReturn(Optional.of(existingDefault));
@@ -178,6 +180,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2ePlannerSystemPrompt("planner");
         systemPrompt.setE2eAuthorSystemPrompt("author");
         systemPrompt.setE2eRunnerSystemPrompt("runner");
+        systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
         return systemPrompt;
     }
 }
