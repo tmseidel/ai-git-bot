@@ -873,6 +873,7 @@ class BotWebhookServiceTest {
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);
         systemPrompt.setReviewSystemPrompt("Review prompt");
+        systemPrompt.setReviewAgentSystemPrompt("Review-Agent prompt");
         systemPrompt.setIssueAgentSystemPrompt("Agent prompt");
         systemPrompt.setWriterAgentSystemPrompt("Writer prompt");
         bot.setSystemPrompt(systemPrompt);

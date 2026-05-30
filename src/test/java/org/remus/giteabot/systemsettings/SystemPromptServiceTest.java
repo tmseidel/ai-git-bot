@@ -61,6 +61,7 @@ class SystemPromptServiceTest {
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setName("Custom");
         systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setReviewAgentSystemPrompt("review-agent");
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
                 () -> systemPromptService.save(systemPrompt));
@@ -91,6 +92,7 @@ class SystemPromptServiceTest {
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setName("Custom");
         systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setReviewAgentSystemPrompt("review-agent");
         systemPrompt.setIssueAgentSystemPrompt("agent");
         systemPrompt.setWriterAgentSystemPrompt("writer");
         systemPrompt.setE2ePlannerSystemPrompt("planner");
@@ -113,6 +115,7 @@ class SystemPromptServiceTest {
         systemPrompt.setId(2L);
         systemPrompt.setName("Custom");
         systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setReviewAgentSystemPrompt("review-agent");
         systemPrompt.setIssueAgentSystemPrompt("agent");
         systemPrompt.setWriterAgentSystemPrompt("writer");
         systemPrompt.setE2ePlannerSystemPrompt("planner");
@@ -169,6 +172,7 @@ class SystemPromptServiceTest {
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setName("Custom");
         systemPrompt.setReviewSystemPrompt("review");
+        systemPrompt.setReviewAgentSystemPrompt("review-agent");
         systemPrompt.setIssueAgentSystemPrompt("agent");
         systemPrompt.setWriterAgentSystemPrompt("writer");
         systemPrompt.setE2ePlannerSystemPrompt("planner");
