@@ -23,6 +23,9 @@ public class SystemPrompt {
     private String reviewSystemPrompt;
 
     @Column(nullable = false, columnDefinition = "TEXT")
+    private String reviewAgentSystemPrompt;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String issueAgentSystemPrompt;
 
     @Column(nullable = false, columnDefinition = "TEXT")

@@ -303,6 +303,7 @@ class WebhookIntegrationTest {
             SystemPrompt systemPrompt = new SystemPrompt();
             systemPrompt.setName("Default Test");
             systemPrompt.setReviewSystemPrompt("Review test prompt");
+            systemPrompt.setReviewAgentSystemPrompt("Review-Agent test prompt");
             systemPrompt.setIssueAgentSystemPrompt("Agent test prompt");
             systemPrompt.setWriterAgentSystemPrompt("Writer test prompt");
             systemPrompt.setE2ePlannerSystemPrompt("Planner test prompt");

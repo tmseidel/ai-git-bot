@@ -14,7 +14,13 @@ first workflow — `ReviewWorkflow`, key `review` — and continues to run by
 default for every bot. Future milestones add additional workflows
 (`e2e-test`, `security-scan`, …) and a per-bot configuration UI.
 
+> **Agentic PR Review.** An opt-in, read-only agentic alternative to the
+> one-shot `review` workflow — the LLM can iteratively call repository and MCP
+> tools before writing its review. See
+> [`PR_WORKFLOWS_AGENTIC_REVIEW.md`](PR_WORKFLOWS_AGENTIC_REVIEW.md).
+
 ## Components
+
 
 ```mermaid
 flowchart LR
@@ -41,6 +47,7 @@ flowchart LR
 | `PrWorkflowMetrics` | `prworkflow.run_total{workflow,status}` counter and `prworkflow.run_duration_seconds{workflow}` timer. |
 | `ReviewWorkflow` | First implementation; wraps the legacy `CodeReviewService.reviewPullRequest(...)` + `postReviewAction(...)` flow. |
 | `CodeReviewServiceFactory` | Per-bot construction of `CodeReviewService`, shared between `ReviewWorkflow` and the remaining `BotWebhookService` handlers. |
+| `AgentReviewWorkflow` | Read-only **agentic** review (key `agentic-review`). Runs an `AgentLoop` with the read-only `ReviewAgentStrategy` so the LLM can explore the repo via context/MCP tools before commenting. See [`PR_WORKFLOWS_AGENTIC_REVIEW.md`](PR_WORKFLOWS_AGENTIC_REVIEW.md). |
 
 ## Lifecycle
 

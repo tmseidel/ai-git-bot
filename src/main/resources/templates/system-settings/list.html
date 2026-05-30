@@ -18,26 +18,26 @@
         </div>
 
         <style>
-            .collapsible-card-header { cursor: pointer; }
-            .collapsible-card-header .section-chevron { transition: transform 0.2s ease-in-out; }
-            .collapsible-card-header.collapsed .section-chevron { transform: rotate(-90deg); }
+            .collapsible-card-header { cursor: default; }
+            .section-collapse-toggle { cursor: pointer; flex: 1; min-width: 0; }
+            .section-collapse-toggle .section-chevron { transition: transform 0.2s ease-in-out; }
+            .section-collapse-toggle.collapsed .section-chevron { transform: rotate(-90deg); }
         </style>
 
         <div class="row g-4">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center"
-                         data-bs-toggle="collapse" data-bs-target="#section-system-prompts"
-                         role="button" aria-expanded="true" aria-controls="section-system-prompts">
-                        <div class="d-flex align-items-center">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-system-prompts"
+                             role="button" aria-expanded="true" aria-controls="section-system-prompts">
                             <i class="bi bi-chevron-down section-chevron me-2"></i>
                             <div>
                                 <h5 class="mb-0">System prompts</h5>
                                 <small class="text-secondary">Prompt sets available to bot configurations.</small>
                             </div>
                         </div>
-                        <a th:href="@{/system-settings/system-prompts/new}" class="btn btn-primary btn-sm"
-                           onclick="event.stopPropagation();">
+                        <a th:href="@{/system-settings/system-prompts/new}" class="btn btn-primary btn-sm flex-shrink-0">
                             <i class="bi bi-plus-circle"></i> Add
                         </a>
                     </div>
@@ -98,18 +98,17 @@
 
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center"
-                         data-bs-toggle="collapse" data-bs-target="#section-mcp-configurations"
-                         role="button" aria-expanded="true" aria-controls="section-mcp-configurations">
-                        <div class="d-flex align-items-center">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-mcp-configurations"
+                             role="button" aria-expanded="true" aria-controls="section-mcp-configurations">
                             <i class="bi bi-chevron-down section-chevron me-2"></i>
                             <div>
                                 <h5 class="mb-0">MCP configurations</h5>
                                 <small class="text-secondary">Remote MCP server configurations assignable to bots.</small>
                             </div>
                         </div>
-                        <a th:href="@{/system-settings/mcp-configurations/new}" class="btn btn-primary btn-sm"
-                           onclick="event.stopPropagation();">
+                        <a th:href="@{/system-settings/mcp-configurations/new}" class="btn btn-primary btn-sm flex-shrink-0">
                             <i class="bi bi-plus-circle"></i> Add
                         </a>
                     </div>
@@ -165,18 +164,17 @@
 
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center"
-                         data-bs-toggle="collapse" data-bs-target="#section-bot-tools"
-                         role="button" aria-expanded="true" aria-controls="section-bot-tools">
-                        <div class="d-flex align-items-center">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-bot-tools"
+                             role="button" aria-expanded="true" aria-controls="section-bot-tools">
                             <i class="bi bi-chevron-down section-chevron me-2"></i>
                             <div>
                                 <h5 class="mb-0">Tool configurations</h5>
                                 <small class="text-secondary">Whitelists of built-in agent tools (file, context, validation, repository) assignable to bots.</small>
                             </div>
                         </div>
-                        <a th:href="@{/system-settings/bot-tools/new}" class="btn btn-primary btn-sm"
-                           onclick="event.stopPropagation();">
+                        <a th:href="@{/system-settings/bot-tools/new}" class="btn btn-primary btn-sm flex-shrink-0">
                             <i class="bi bi-plus-circle"></i> Add
                         </a>
                     </div>
@@ -241,18 +239,17 @@
 
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center"
-                         data-bs-toggle="collapse" data-bs-target="#section-workflow-configurations"
-                         role="button" aria-expanded="true" aria-controls="section-workflow-configurations">
-                        <div class="d-flex align-items-center">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-workflow-configurations"
+                             role="button" aria-expanded="true" aria-controls="section-workflow-configurations">
                             <i class="bi bi-chevron-down section-chevron me-2"></i>
                             <div>
                                 <h5 class="mb-0">Workflow configurations</h5>
                                 <small class="text-secondary">Named whitelists of PR workflows (review, tests, …) assignable to bots.</small>
                             </div>
                         </div>
-                        <a th:href="@{/system-settings/workflow-configurations/new}" class="btn btn-primary btn-sm"
-                           onclick="event.stopPropagation();">
+                        <a th:href="@{/system-settings/workflow-configurations/new}" class="btn btn-primary btn-sm flex-shrink-0">
                             <i class="bi bi-plus-circle"></i> Add
                         </a>
                     </div>
@@ -317,18 +314,17 @@
 
             <div class="col-12">
                 <div class="card">
-                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center"
-                         data-bs-toggle="collapse" data-bs-target="#section-deployment-targets"
-                         role="button" aria-expanded="true" aria-controls="section-deployment-targets">
-                        <div class="d-flex align-items-center">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-deployment-targets"
+                             role="button" aria-expanded="true" aria-controls="section-deployment-targets">
                             <i class="bi bi-chevron-down section-chevron me-2"></i>
                             <div>
                                 <h5 class="mb-0">Deployment targets</h5>
                                 <small class="text-secondary">Per-PR preview environments used by workflows that need a live deployment (E2E tests, smoke checks).</small>
                             </div>
                         </div>
-                        <a th:href="@{/system-settings/deployment-targets/new}" class="btn btn-primary btn-sm"
-                           onclick="event.stopPropagation();">
+                        <a th:href="@{/system-settings/deployment-targets/new}" class="btn btn-primary btn-sm flex-shrink-0">
                             <i class="bi bi-plus-circle"></i> Add
                         </a>
                     </div>

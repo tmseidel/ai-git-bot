@@ -320,7 +320,7 @@ public class E2ETestWorkflow implements PrWorkflow {
 
         context.appendStep("e2e-runner", outcome.status() + " — " + outcome.summary());
         String comment = E2eTestSummaryRenderer.render(suite, outcome, deployment.previewUrl());
-        postPrComment(bot, payload, prNumber, comment);
+        postPrReviewComment(bot, payload, prNumber, comment);
 
         // M7 — offer/commit modes promote immediately when the configured
         // pass-rate threshold is met. PROMOTE_ON_MERGE waits for the parent
@@ -441,6 +441,22 @@ public class E2ETestWorkflow implements PrWorkflow {
             client.postPullRequestComment(owner, repoName, prNumber, body);
         } catch (RuntimeException e) {
             log.warn("[Workflow '{}'] Failed to post PR comment: {}", KEY, e.getMessage(), e);
+        }
+    }
+
+    private void postPrReviewComment(Bot bot, WebhookPayload payload, long prNumber, String body) {
+        if (payload.getRepository() == null || prNumber <= 0) {
+            log.warn("[Workflow '{}'] Cannot post review comment — payload lacks repository or pr number", KEY);
+            return;
+        }
+        try {
+            RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            String owner = payload.getRepository().getOwner() == null
+                    ? null : payload.getRepository().getOwner().getLogin();
+            String repoName = payload.getRepository().getName();
+            client.postReviewComment(owner, repoName, prNumber, body);
+        } catch (RuntimeException e) {
+            log.warn("[Workflow '{}'] Failed to post PR review comment: {}", KEY, e.getMessage(), e);
         }
     }
 

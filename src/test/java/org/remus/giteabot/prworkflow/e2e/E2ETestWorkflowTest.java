@@ -144,8 +144,10 @@ class E2ETestWorkflowTest {
         assertThat(saved.getLifecycleMode()).isEqualTo(SuiteLifecycleMode.EPHEMERAL);
 
         ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
-        verify(repoClient, org.mockito.Mockito.times(2))
+        verify(repoClient, org.mockito.Mockito.times(1))
                 .postPullRequestComment(eq("acme"), eq("web"), eq(14L), body.capture());
+        verify(repoClient, org.mockito.Mockito.times(1))
+                .postReviewComment(eq("acme"), eq("web"), eq(14L), body.capture());
         assertThat(body.getAllValues().get(0)).contains("Starting end-to-end test run");
         assertThat(body.getAllValues().get(1))
                 .contains("## E2E Test Run for PR #14")
