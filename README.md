@@ -6,6 +6,8 @@
 [![GitHub stars](https://img.shields.io/github/stars/tmseidel/ai-git-bot)](https://github.com/tmseidel/ai-git-bot/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/tmseidel/ai-git-bot)](https://github.com/tmseidel/ai-git-bot/issues)
 
+🌐 Languages: **English** · [中文](README.zh.md) · [한국어](README.ko.md) · [日本語](README.ja.md)
+
 > **Automate the necessary-but-uncomfortable parts of software development — directly inside the Git tools your team already uses.**
 
 Every team has a list of *"we know we should be doing this"* engineering chores. Writing a properly scoped issue *before* coding starts. Adding a regression E2E test for that login bug. Re-reviewing a PR after the third force-push. Tearing down a stale preview environment. These chores are **necessary** (skipping them rots the codebase) but **uncomfortable** (they aren't the fun part, and they get cut first under deadline pressure).
@@ -72,9 +74,9 @@ Each workflow is a **first-class, named PR workflow** you can enable per bot via
 > | Provider | Maturity |
 > |---|---|
 > | **Gitea** | ✅ **Well-tested** — primary target, exercised end-to-end (incl. webhooks, PR review, coding agent, writer agent, E2E full-stack QA) on every release. |
-> | **GitHub / GitHub Enterprise** | ⚠️ Experimental — implemented from the REST/Webhook docs; basic flows have been smoke-tested but not exercised at scale. |
-> | **GitLab** | ⚠️ Experimental — same caveat as GitHub. |
-> | **Bitbucket Cloud** | ⚠️ Experimental — same caveat. |
+> | **GitHub / GitHub Enterprise** | ✅ **Well-tested** — the project itself uses these integrations and workflows extensively in day-to-day development, so the GitHub feature set is exercised regularly in real usage in addition to targeted testing. |
+> | **GitLab** | ⚠️ Experimental — implemented from the REST/Webhook docs; basic flows have been smoke-tested but not exercised at scale. |
+> | **Bitbucket Cloud** | ⚠️ Experimental — implemented from the REST/Webhook docs; basic flows have been smoke-tested but not exercised at scale. |
 >
 > The **Full-stack QA / E2E PR review workflow** is the most complex
 > moving part (deployment targets, generated test suites, callbacks,
