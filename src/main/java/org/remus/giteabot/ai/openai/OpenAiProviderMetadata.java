@@ -1,8 +1,10 @@
 package org.remus.giteabot.ai.openai;
 
+import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -48,8 +50,12 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
         if (decryptedApiKey == null || decryptedApiKey.isBlank()) {
             throw new IllegalStateException("OpenAI integration requires an API key");
         }
+        var httpClient = HttpClients.createDefault();
+        HttpComponentsClientHttpRequestFactory factory =
+                new HttpComponentsClientHttpRequestFactory(httpClient);
         return RestClient.builder()
                 .baseUrl(integration.getApiUrl())
+                .requestFactory(factory)
                 .defaultHeader("Authorization", "Bearer " + decryptedApiKey)
                 .defaultHeader("Content-Type", "application/json")
                 .build();
