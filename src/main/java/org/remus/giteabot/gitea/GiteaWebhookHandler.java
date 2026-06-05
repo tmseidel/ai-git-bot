@@ -264,7 +264,7 @@ public class GiteaWebhookHandler {
             return ResponseEntity.ok("session closed");
         }
 
-        if (("opened".equals(action) && hasBotReviewer(bot, payload))
+        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
                 || ("assigned".equals(action) && isBotAssignee(bot, payload))
                 || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
             botWebhookService.reviewPullRequest(bot, payload);

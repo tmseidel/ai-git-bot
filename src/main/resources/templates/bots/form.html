@@ -153,6 +153,17 @@
                         </div>
 
                         <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="runOnPrCreation"
+                                       th:field="*{runOnPrCreation}"/>
+                                <label class="form-check-label" for="runOnPrCreation">Run workflow when PR is opened</label>
+                            </div>
+                            <div class="form-text">
+                                When enabled, the bot executes its configured PR workflow when a pull request is created or opened, even if the bot is not assigned as reviewer.
+                            </div>
+                        </div>
+
+                        <div class="col-12">
                             <label for="deploymentTargetId" class="form-label">Deployment Target <span class="text-secondary">(optional)</span></label>
                             <select class="form-select" id="deploymentTargetId" name="deploymentTargetId">
                                 <option value="">(none — preview-aware workflows will be skipped)</option>

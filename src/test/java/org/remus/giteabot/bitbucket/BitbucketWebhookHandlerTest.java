@@ -52,6 +52,35 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
+    void pullRequestCreatedWithoutBotReviewer_isIgnored() {
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:created",
+                pullRequestPayload(List.of(user("human")), null));
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void pullRequestCreatedWithRunOnPrCreation_triggersReviewWithoutBotReviewer() {
+        bot.setRunOnPrCreation(true);
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:created",
+                pullRequestPayload(List.of(user("human")), null));
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void pullRequestUpdatedWithRunOnPrCreation_isStillIgnored() {
+        bot.setRunOnPrCreation(true);
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:updated",
+                pullRequestPayload(List.of(user("human")), null));
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
     void pullRequestUpdatedWithoutReviewerChange_isIgnored() {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:updated",
                 pullRequestPayload(List.of(user("ai_bot")), null));

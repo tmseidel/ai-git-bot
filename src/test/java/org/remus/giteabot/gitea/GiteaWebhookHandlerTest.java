@@ -176,6 +176,29 @@ class GiteaWebhookHandlerTest {
     }
 
     @Test
+    void prOpenedEvent_withRunOnPrCreation_triggersReviewWithoutBotReviewer() {
+        bot.setRunOnPrCreation(true);
+        Map<String, Object> payload = buildPrEventPayload("opened");
+        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void prSynchronizedEvent_withRunOnPrCreation_isStillIgnored() {
+        bot.setRunOnPrCreation(true);
+        Map<String, Object> payload = buildPrEventPayload("synchronized");
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
     void prReviewRequestedForBot_routesToReviewPullRequest() {
         Map<String, Object> payload = buildPrEventPayload("review_requested");
         payload.put("requested_reviewer", ownerMap(BOT_USERNAME));

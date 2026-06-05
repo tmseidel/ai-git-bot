@@ -76,7 +76,7 @@ public class GitHubWebhookHandler {
 
     private ResponseEntity<String> handlePullRequestEvent(Bot bot, WebhookPayload payload) {
         String action = payload.getAction();
-        if (("opened".equals(action) && hasBotReviewer(bot, payload))
+        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
                 || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
@@ -145,7 +145,6 @@ public class GitHubWebhookHandler {
 
     // ---- GitHub → WebhookPayload translation ----
 
-    @SuppressWarnings("unchecked")
     WebhookPayload translatePayload(String eventType, Map<String, Object> raw) {
         return switch (eventType) {
             case "pull_request" -> translatePullRequestEvent(raw);
@@ -299,7 +298,6 @@ public class GitHubWebhookHandler {
         return c;
     }
 
-    @SuppressWarnings("unchecked")
     private WebhookPayload.Comment extractReviewComment(Map<String, Object> comment) {
         WebhookPayload.Comment c = extractComment(comment);
         if (c == null) return null;
@@ -351,13 +349,11 @@ public class GitHubWebhookHandler {
         return o;
     }
 
-    @SuppressWarnings("unchecked")
     private List<WebhookPayload.Owner> extractOwners(List<Map<String, Object>> owners) {
         if (owners == null) return null;
         return owners.stream().map(this::extractOwner).toList();
     }
 
-    @SuppressWarnings("unchecked")
     private WebhookPayload.Review extractReview(Map<String, Object> review) {
         if (review == null) return null;
         WebhookPayload.Review r = new WebhookPayload.Review();

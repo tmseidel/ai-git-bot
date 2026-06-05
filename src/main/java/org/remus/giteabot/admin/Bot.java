@@ -77,6 +77,9 @@ public class Bot {
     @Column(nullable = false)
     private boolean agentEnabled = false;
 
+    @Column(nullable = false)
+    private boolean runOnPrCreation = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private BotType botType = BotType.CODING;

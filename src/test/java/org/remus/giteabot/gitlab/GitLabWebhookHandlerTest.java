@@ -54,6 +54,35 @@ class GitLabWebhookHandlerTest {
     }
 
     @Test
+    void mergeRequestOpenedWithoutBotReviewer_isIgnored() {
+        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+                mergeRequestPayload("open", List.of(user("human")), null));
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void mergeRequestOpenedWithRunOnPrCreation_triggersReviewWithoutBotReviewer() {
+        bot.setRunOnPrCreation(true);
+        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+                mergeRequestPayload("open", List.of(user("human")), null));
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void mergeRequestUpdateWithRunOnPrCreation_isStillIgnored() {
+        bot.setRunOnPrCreation(true);
+        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+                mergeRequestPayload("update", List.of(user("human")), null));
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
     void mergeRequestUpdateWithoutReviewerChange_isIgnored() {
         ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
                 mergeRequestPayload("update", List.of(user("ai_bot")), null));

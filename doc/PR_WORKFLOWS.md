@@ -211,6 +211,51 @@ in `pr_workflow_runs`.
 Unregistered workflow keys (e.g. an entry persisted before a workflow bean was
 removed) are logged with `WARN` and skipped.
 
+## Trigger conditions
+
+PR workflows are invoked only when the webhook handler decides that the event
+is relevant for the bot. Two mutually reinforcing conditions gate every
+create/open event across all four Git providers (GitHub, Gitea, Bitbucket,
+GitLab):
+
+| Condition | Default | Effect |
+|---|---|---|
+| Bot is listed as a **requested reviewer** on the PR | always checked | Triggers the workflow when the bot is explicitly asked to review. |
+| Bot has **Run on PR creation** enabled | `false` | Triggers the workflow on every new PR, regardless of reviewer assignment. |
+
+The effective predicate is:
+
+```java
+bot.isRunOnPrCreation() || hasBotReviewer(payload)
+```
+
+> **Scope.** The flag applies exclusively to PR/MR **create** and **open**
+> events. It does *not* affect `synchronize` (push), `updated`, `closed`,
+> `review_requested`, comment or approval events — those follow their own
+> rules unchanged.
+
+### Configuration
+
+On the **Bots → New / Edit bot** form, the toggle lives in the **Workflow
+Configuration** section:
+
+> ☐ **Run workflow when PR is opened**
+> When enabled, the bot executes its configured PR workflow when a pull request is created or opened, even if the bot is not assigned as reviewer.
+
+The field is persisted as `bots.run_on_pr_creation BOOLEAN NOT NULL DEFAULT
+FALSE` (Flyway migration `V25__bots_run_on_pr_creation.sql`, mirrored for
+H2 and PostgreSQL). Existing bots keep their previous behaviour (flag off);
+no manual migration step is required.
+
+### Use cases
+
+- **Mandatory review policy.** Enable the flag on a compliance bot that must
+  review every PR in a repository, even when developers forget to add it as
+  a reviewer.
+- **Selective review.** Leave the flag off (default) so the bot only runs
+  when explicitly requested — useful for expensive agentic reviews or bots
+  shared across many repositories.
+
 ### Admin UI
 
 Three touchpoints, all reusing the existing table-plus-modal pattern:

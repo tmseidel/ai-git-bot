@@ -87,7 +87,7 @@ public class GitLabWebhookHandler {
         return switch (gitlabAction != null ? gitlabAction : "") {
             case "open" -> {
                 webhookPayload.setAction("opened");
-                if (hasBotReviewer(bot, payload, null)) {
+                if (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload, null)) {
                     botWebhookService.reviewPullRequest(bot, webhookPayload);
                     yield ResponseEntity.ok("review triggered");
                 }

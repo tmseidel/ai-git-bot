@@ -82,7 +82,7 @@ public class BitbucketWebhookHandler {
     private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, String eventKey, WebhookPayload payload,
                                                                      Map<String, Object> raw) {
         if (("pullrequest:created".equals(eventKey) || "pullrequest:open".equals(eventKey))
-                ? hasBotReviewer(bot, payload)
+                ? (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload))
                 : botReviewerWasAdded(bot, raw)) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
