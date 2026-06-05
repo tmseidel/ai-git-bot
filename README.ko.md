@@ -21,7 +21,7 @@
 > 👉 **[doc/pitch/PITCH.md](doc/pitch/PITCH.md)** — 긴 형식의 pitch (~10분)
 
 <p align="center">
-  <img src="doc/images/ai-git-bot-diagram.svg" alt="AI-Git-Bot 아키텍처 다이어그램" width="800"/>
+  <img src="doc/images/schema.png" alt="AI-Git-Bot Architecture Schema" width="800"/>
 </p>
 
 ## 🩹 해결해 주는 고통 포인트

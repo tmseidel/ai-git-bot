@@ -21,7 +21,7 @@
 > 👉 **[doc/pitch/PITCH.md](doc/pitch/PITCH.md)** — ロングフォーム pitch（約 10 分）
 
 <p align="center">
-  <img src="doc/images/ai-git-bot-diagram.svg" alt="AI-Git-Bot アーキテクチャ図" width="800"/>
+  <img src="doc/images/schema.png" alt="AI-Git-Bot Architecture Schema" width="800"/>
 </p>
 
 ## 🩹 解消する痛み

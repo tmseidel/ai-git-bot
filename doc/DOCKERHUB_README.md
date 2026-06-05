@@ -154,6 +154,7 @@ All AI configuration (API URLs, keys, models) is managed through the web UI — 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APP_ENCRYPTION_KEY` | *(random)* | Encryption key for API keys/tokens. Set for persistence across restarts. |
+| `APP_PUBLIC_URL` | `http://localhost:8080` | Public base URL of the bot instance. Used as callback URL for CI deployment workflows and preview environments. |
 | `DATABASE_URL` | `jdbc:postgresql://db:5432/giteabot` | JDBC connection URL |
 | `DATABASE_USERNAME` | `giteabot` | Database username |
 | `DATABASE_PASSWORD` | | Database password |

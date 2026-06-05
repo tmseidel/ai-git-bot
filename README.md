@@ -22,7 +22,7 @@ Every team has a list of *"we know we should be doing this"* engineering chores.
 
 
 <p align="center">
-  <img src="doc/images/ai-git-bot-diagram.svg" alt="AI-Git-Bot Architecture Schema" width="800"/>
+  <img src="doc/images/schema.png" alt="AI-Git-Bot Architecture Schema" width="800"/>
 </p>
 
 ## 🩹 The pain points it removes

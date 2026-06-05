@@ -251,6 +251,7 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **Tool Configuration** *(required)*: Select a saved built-in tool configuration. New bots default to **Default** (all built-in tools enabled). Use **Details** next to the dropdown to open a read-only list of the built-in tools enabled for the selected configuration. See [Tool Configurations](#tool-configurations) below and [Bot Tool Configurations](BOT_TOOL_CONFIGURATIONS.md) for the full reference.
    - **Workflow Configuration** *(optional)*: Select which PR workflows should run for this bot. Leave empty to inherit the auto-bootstrapped default configuration, which is **review-only**. Use **Details** next to the dropdown to inspect the selected workflows and any persisted parameters.
    - **Deployment Target** *(optional)*: Select the per-PR preview environment used by workflows that need a live deployment, such as **Full-stack QA** / E2E tests.
+   - **Run workflow when PR is opened** *(optional)*: When enabled, the bot executes its configured PR workflows whenever a pull request is created or opened — even if the bot is not assigned as a reviewer. Disabled by default. Useful for mandatory-review bots that must run on every PR. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for details.
    - **AI Integration**: Select an AI integration from the dropdown
    - **Git Integration**: Select a Git integration from the dropdown
    - **User Whitelist** *(optional)*: Restrict AI-spending interactions to a set of Git usernames. This is recommended for public repositories.
@@ -283,6 +284,8 @@ The workflow-selection screen provides:
 
 - one row per registered workflow with display name, stable workflow key, category, and description
 - expand/collapse controls for workflows that expose configurable parameters
+- **ENUM parameters** rendered as radio-button groups (e.g. suite lifecycle mode, promotion strategy) so operators pick from a fixed set of labelled options with helper text
+- free-text parameters rendered as standard input fields
 - persisted workflow parameters per configuration
 - sequential execution in stable order (lexicographic by workflow key)
 
@@ -303,6 +306,18 @@ See [PR Workflows](PR_WORKFLOWS.md), [E2E Workflow](PR_WORKFLOWS_E2E.md), [Unit-
 - It cannot be renamed or deleted.
 - New or unassigned bots inherit it automatically.
 - It starts as **review-only**; clone it when you want a customised workflow set.
+
+### Slash commands and unrecognised-command handling
+
+When a user `@`-mentions the bot in a PR comment, the bot checks the mention against its registered slash commands in order:
+
+1. **E2E test commands** — `@bot rerun-tests`, `@bot regenerate-tests [feedback]`
+2. **Unit-test commands** — `@bot generate-tests`, `@bot rerun-unit-tests`
+3. **Code review** — triggered as a fallback when no slash command matched and the **review** workflow is enabled for the bot
+
+If none of the above match (e.g. a typo like `@bot regenrate-tests`), the bot posts a helpful reply listing the available slash commands based on which workflows are enabled for that bot. This prevents silent failures and guides users toward the correct syntax.
+
+> **Note:** The user whitelist (if configured) is enforced *before* command routing — blocked users never reach the command handler.
 
 ## MCP Configurations and Tool Selection
 
@@ -611,9 +626,18 @@ The whitelist is the recommended defence for bots installed on **public reposito
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APP_ENCRYPTION_KEY` | *(random)* | Encryption key for sensitive data. Set to a fixed value for persistence across restarts. |
+| `APP_PUBLIC_URL` | `http://localhost:8080` | Public base URL of the bot instance. Used as callback URL for CI deployment workflows and preview environments. Set to the externally reachable URL when running behind a reverse proxy or in CI. |
 | `DATABASE_URL` | H2 in-memory | Database JDBC URL |
 | `DATABASE_USERNAME` | `sa` | Database username |
 | `DATABASE_PASSWORD` | *(empty)* | Database password |
+
+#### Auto-login mode (preview / e2e environments only)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GITEABOT_SECURITY_AUTO_LOGIN_ENABLED` | `false` | Bypass authentication entirely — every request is auto-authenticated as the configured admin user. **Never enable in production.** Intended for ephemeral preview environments (e.g. PR preview deployments). |
+| `GITEABOT_SECURITY_AUTO_LOGIN_USERNAME` | `admin` | Username for the auto-login admin account (created on startup if missing). |
+| `GITEABOT_SECURITY_AUTO_LOGIN_PASSWORD` | `admin` | Password for the auto-login admin account. |
 
 ### Agent Configuration
 

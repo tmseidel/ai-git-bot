@@ -21,7 +21,7 @@
 > 👉 **[doc/pitch/PITCH.md](doc/pitch/PITCH.md)** — 长版 pitch（约 10 分钟）
 
 <p align="center">
-  <img src="doc/images/ai-git-bot-diagram.svg" alt="AI-Git-Bot 架构示意图" width="800"/>
+  <img src="doc/images/schema.png" alt="AI-Git-Bot Architecture Schema" width="800"/>
 </p>
 
 ## 🩹 它消除的痛点
