@@ -86,20 +86,18 @@ public class IssueImplementationService {
     private final CriticAgent criticAgent;
 
     public IssueImplementationService(IssueImplementationContext context,
-                                      PromptService promptService,
-                                      AgentConfigProperties agentConfig,
-                                      AgentSessionService sessionService,
-                                      ToolExecutionService toolExecutionService,
-                                      ToolCatalog toolCatalog,
-                                      WorkspaceService workspaceService) {
+                                      AgentCollaborators collaborators) {
+        AgentConfigProperties agentConfig = collaborators.agentConfig();
+        ToolExecutionService toolExecutionService = collaborators.toolExecutionService();
+        ToolCatalog toolCatalog = collaborators.toolCatalog();
         this.repositoryClient = context.repositoryClient();
         this.aiClient = context.aiClient();
-        this.promptService = promptService;
+        this.promptService = collaborators.promptService();
         this.agentConfig = agentConfig;
-        this.sessionService = sessionService;
+        this.sessionService = collaborators.sessionService();
         this.toolExecutionService = toolExecutionService;
         this.toolCatalog = toolCatalog;
-        this.workspaceService = workspaceService;
+        this.workspaceService = collaborators.workspaceService();
         this.issueAgentSystemPrompt = context.issueAgentSystemPrompt();
         this.botUsername = context.botUsername();
         this.mcpOrchestrationService = context.mcpOrchestrationService();

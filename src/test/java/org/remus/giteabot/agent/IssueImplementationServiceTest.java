@@ -72,8 +72,7 @@ class IssueImplementationServiceTest {
         toolCatalog = new org.remus.giteabot.agent.tools.ToolCatalog(agentConfig);
         IssueImplementationContext context = new IssueImplementationContext(
                 repositoryClient, aiClient, null, null, null, null, McpToolCatalog.empty(), null);
-        service = new IssueImplementationService(context, promptService, agentConfig,
-                sessionService, toolExecutionService, toolCatalog, workspaceService);
+        service = new IssueImplementationService(context, collaborators(agentConfig));
 
         lenient().when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
     }
@@ -865,8 +864,7 @@ class IssueImplementationServiceTest {
         )));
         IssueImplementationContext context = new IssueImplementationContext(
                 repositoryClient, aiClient, null, null, mcpOrchestrationService, null, catalog, null);
-        return new IssueImplementationService(context, promptService, agentConfig,
-                sessionService, toolExecutionService, toolCatalog, workspaceService);
+        return new IssueImplementationService(context, collaborators(agentConfig));
     }
 
     private IssueImplementationService createServiceWithBotUsername(String botUsername) {
@@ -876,7 +874,11 @@ class IssueImplementationServiceTest {
         agentConfig.setBranchPrefix("ai-agent/");
         IssueImplementationContext context = new IssueImplementationContext(
                 repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty(), null);
-        return new IssueImplementationService(context, promptService, agentConfig,
-                sessionService, toolExecutionService, toolCatalog, workspaceService);
+        return new IssueImplementationService(context, collaborators(agentConfig));
+    }
+
+    private AgentCollaborators collaborators(AgentConfigProperties agentConfig) {
+        return new AgentCollaborators(promptService, agentConfig, sessionService,
+                toolExecutionService, toolCatalog, workspaceService);
     }
 }

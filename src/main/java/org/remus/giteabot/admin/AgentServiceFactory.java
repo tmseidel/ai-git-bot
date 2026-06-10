@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import lombok.RequiredArgsConstructor;
+import org.remus.giteabot.agent.AgentCollaborators;
 import org.remus.giteabot.agent.IssueImplementationContext;
 import org.remus.giteabot.agent.IssueImplementationService;
 import org.remus.giteabot.agent.session.AgentSessionService;
@@ -56,8 +57,12 @@ class AgentServiceFactory {
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
-        return new IssueImplementationService(context, promptService, agentConfig,
-                agentSessionService, toolExecutionService, toolCatalog, workspaceService);
+        return new IssueImplementationService(context, collaborators());
+    }
+
+    private AgentCollaborators collaborators() {
+        return new AgentCollaborators(promptService, agentConfig, agentSessionService,
+                toolExecutionService, toolCatalog, workspaceService);
     }
 
     /**
