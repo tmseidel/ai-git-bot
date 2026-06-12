@@ -43,7 +43,7 @@
                             <select class="form-select" id="botType" th:field="*{botType}" required>
                                 <option th:each="type : ${botTypes}"
                                         th:value="${type}"
-                                        th:text="${type == T(org.remus.giteabot.admin.BotType).WRITER ? 'Writer bot' : 'Coding bot'}">
+                                        th:text="${type.name() == 'WRITER' ? 'Writer bot' : 'Coding bot'}">
                                 </option>
                              </select>
                              <div class="form-text">

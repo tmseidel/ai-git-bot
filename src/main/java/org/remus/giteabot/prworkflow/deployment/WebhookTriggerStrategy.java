@@ -1,8 +1,8 @@
 package org.remus.giteabot.prworkflow.deployment;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -130,7 +130,7 @@ public class WebhookTriggerStrategy implements DeploymentStrategy {
         JsonNode headers = config.get(CONFIG_HEADERS);
         if (headers != null && headers.isObject()) {
             headers.properties().iterator().forEachRemaining(entry ->
-                    builder.header(entry.getKey(), entry.getValue().asText()));
+                    builder.header(entry.getKey(), entry.getValue().asString()));
         }
 
         try {
@@ -168,7 +168,7 @@ public class WebhookTriggerStrategy implements DeploymentStrategy {
             return null;
         }
         JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+        return (v == null || v.isNull()) ? null : v.asString();
     }
 
     private static String truncate(String body) {

@@ -1,7 +1,7 @@
 package org.remus.giteabot.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
@@ -62,8 +62,8 @@ public class McpConfigurationParser {
         JsonNode headersNode = node.get("headers");
         if (headersNode != null && headersNode.isObject()) {
             headersNode.properties().forEach(field -> {
-                if (field.getValue().isTextual()) {
-                    headers.put(field.getKey(), field.getValue().asText());
+                if (field.getValue().isString()) {
+                    headers.put(field.getKey(), field.getValue().asString());
                 }
             });
         }
@@ -72,10 +72,9 @@ public class McpConfigurationParser {
 
     private String text(JsonNode node, String field, String defaultValue) {
         JsonNode value = node.get(field);
-        if (value != null && value.isTextual() && !value.asText().isBlank()) {
-            return value.asText().strip();
+        if (value != null && value.isString() && !value.asString().isBlank()) {
+            return value.asString().strip();
         }
         return defaultValue;
     }
 }
-

@@ -1,7 +1,7 @@
 package org.remus.giteabot.prworkflow.deployment;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -161,7 +161,7 @@ public class WorkflowCallbackController {
 
     private static String textOrNull(JsonNode node, String field) {
         JsonNode v = node == null ? null : node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+        return (v == null || v.isNull()) ? null : v.asString();
     }
 
     private static boolean constantTimeEquals(String expected, String provided) {

@@ -82,4 +82,3 @@ public class LlamaCppResponse {
         private Double predictedMs;
     }
 }
-

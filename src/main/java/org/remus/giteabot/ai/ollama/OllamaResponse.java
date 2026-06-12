@@ -57,4 +57,3 @@ public class OllamaResponse {
         private Map<String, Object> arguments;
     }
 }
-

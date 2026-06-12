@@ -1,7 +1,7 @@
 package org.remus.giteabot.prworkflow.deployment;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -127,7 +127,7 @@ class WebhookTriggerStrategyTest {
     }
 
     @Test
-    void payloadShapeMatchesContract() throws Exception {
+    void payloadShapeMatchesContract() {
         RecordingClient client = new RecordingClient();
         WebhookTriggerStrategy strategy = new WebhookTriggerStrategy(client);
         DeploymentResult result = strategy.trigger(request(
@@ -136,12 +136,12 @@ class WebhookTriggerStrategyTest {
         JsonNode body = MAPPER.readTree(client.lastBody);
         assertThat(body.get("runId").asLong()).isEqualTo(42L);
         assertThat(body.get("prNumber").asLong()).isEqualTo(1234L);
-        assertThat(body.get("sha").asText()).isEqualTo("abc123");
-        assertThat(body.get("branch").asText()).isEqualTo("feature/x");
-        assertThat(body.get("repoOwner").asText()).isEqualTo("acme");
-        assertThat(body.get("repoName").asText()).isEqualTo("web");
-        assertThat(body.get("callbackUrl").asText()).contains("/api/workflow-callback/42/");
-        assertThat(body.get("callbackSecret").asText()).isEqualTo("cbsecret");
+        assertThat(body.get("sha").asString()).isEqualTo("abc123");
+        assertThat(body.get("branch").asString()).isEqualTo("feature/x");
+        assertThat(body.get("repoOwner").asString()).isEqualTo("acme");
+        assertThat(body.get("repoName").asString()).isEqualTo("web");
+        assertThat(body.get("callbackUrl").asString()).contains("/api/workflow-callback/42/");
+        assertThat(body.get("callbackSecret").asString()).isEqualTo("cbsecret");
     }
 
     /** Minimal HttpClient that records the request body sent — avoids deep Mockito stubbing. */
