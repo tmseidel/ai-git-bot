@@ -298,6 +298,8 @@ public class GoogleAiClient extends AbstractAiClient {
                     response.getUsageMetadata().getPromptTokenCount(),
                     response.getUsageMetadata().getCandidatesTokenCount(),
                     calls.size());
+            reportUsage(response.getUsageMetadata().getPromptTokenCount(),
+                    response.getUsageMetadata().getCandidatesTokenCount());
         }
         return new ChatTurn(text.toString(), calls, reason);
     }
@@ -373,6 +375,8 @@ public class GoogleAiClient extends AbstractAiClient {
             log.info("Google AI {} response: {} prompt tokens, {} candidate tokens",
                     context,
                     response.getUsageMetadata().getPromptTokenCount(),
+                    response.getUsageMetadata().getCandidatesTokenCount());
+            reportUsage(response.getUsageMetadata().getPromptTokenCount(),
                     response.getUsageMetadata().getCandidatesTokenCount());
         }
 

@@ -11,7 +11,7 @@
 
         <!-- Summary Cards -->
         <div class="row g-3 mb-4">
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-primary">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
@@ -24,7 +24,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-success">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
@@ -37,7 +37,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-info">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
@@ -50,7 +50,7 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md">
                 <div class="card text-white bg-warning">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
@@ -66,6 +66,22 @@
                         </small>
                     </div>
                 </div>
+            </div>
+            <div class="col-md">
+                <a th:href="@{/usage}" class="text-decoration-none">
+                    <div class="card text-white" th:classappend="${aiErrorCount > 0} ? 'bg-danger' : 'bg-secondary'">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="card-title mb-0">AI Errors</h6>
+                                    <h2 class="mt-2 mb-0" th:text="${aiErrorCount}">0</h2>
+                                </div>
+                                <i class="bi bi-exclamation-triangle fs-1 opacity-50"></i>
+                            </div>
+                            <small class="opacity-75">Last 7 days</small>
+                        </div>
+                    </div>
+                </a>
             </div>
         </div>
 

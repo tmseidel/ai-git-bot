@@ -7,6 +7,7 @@ import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.agent.writerimpl.WriterAgentService;
+import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
@@ -96,6 +97,7 @@ public class BotWebhookService {
      */
     @Async
     public void reviewPullRequest(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request review event", bot.getName());
             return;
@@ -129,6 +131,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleBotCommand(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isPullRequestAuthor(payload)) {
             log.debug("[Bot '{}'] Ignoring pull request command from non-author", bot.getName());
             return;
@@ -173,6 +176,7 @@ public class BotWebhookService {
      */
     @Async
     public void handlePrComment(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request comment", bot.getName());
             return;
@@ -227,6 +231,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleInlineComment(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isPullRequestAuthor(payload)) {
             log.debug("[Bot '{}'] Ignoring inline review comment from non-author", bot.getName());
             return;
@@ -256,6 +261,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleReviewSubmitted(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores submitted review", bot.getName());
             return;
@@ -323,6 +329,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleIssueAssigned(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
@@ -353,6 +360,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleIssueComment(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
@@ -464,6 +472,21 @@ public class BotWebhookService {
             sb.append("No interactive commands are configured for this bot.\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * Builds the logical session id ({@code owner/repo#number}) used to tag AI
+     * usage and error audit records for this webhook event.
+     */
+    private String auditSessionId(WebhookPayload payload) {
+        if (payload == null || payload.getRepository() == null
+                || payload.getRepository().getOwner() == null) {
+            return null;
+        }
+        Long number = resolvePrOrIssueNumber(payload);
+        return payload.getRepository().getOwner().getLogin() + "/"
+                + payload.getRepository().getName()
+                + (number != null ? "#" + number : "");
     }
 
     private Long resolvePrOrIssueNumber(WebhookPayload payload) {
