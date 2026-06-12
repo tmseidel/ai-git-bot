@@ -45,11 +45,11 @@ The Usage page (`/usage`) audits all AI provider interactions. It contains two c
 
 ### AI usage
 
-A paginated table (100 entries per page) of every AI interaction with the columns **Timestamp**, **AI-Integration**, **Session-ID**, **Input tokens**, and **Output tokens**. The Session-ID has the form `owner/repo#number` and identifies the pull request or issue that triggered the interaction. Click a column header to sort ascending/descending.
+A paginated table (20 entries per page) of every AI interaction with the columns **Timestamp**, **AI-Integration**, **Session-ID**, **Input tokens**, and **Output tokens**. The Session-ID has the form `owner/repo#number` and identifies the pull request or issue that triggered the interaction. Click a column header to sort ascending/descending. Use **Clear all** in the section header (a confirmation dialog is shown) to remove all recorded usage entries.
 
 ### Errors
 
-A paginated table (100 entries per page) of failed AI interactions — for example when a provider responds with an HTTP error code such as `401 Unauthorized`. Columns: **Timestamp**, **AI-Integration**, **Session-ID**, and **Error-Log**. Click *Stack trace* on an entry to expand the full stack trace. The complete error log (respecting the active timespan filter) can be downloaded with **Export as JSON**.
+A paginated table (20 entries per page) of failed AI interactions — for example when a provider responds with an HTTP error code such as `401 Unauthorized`. Columns: **Timestamp**, **AI-Integration**, **Session-ID**, and **Error-Log**. Click *Stack trace* on an entry to expand the full stack trace. The complete error log (respecting the active timespan filter) can be downloaded with **Export as JSON**.
 
 ### Timespan filter
 

@@ -56,6 +56,13 @@ class AiUsageServiceTest {
     }
 
     @Test
+    void clearUsage_deletesAllUsageEntries() {
+        service.clearUsage();
+
+        verify(usageRepository).deleteAllInBatch();
+    }
+
+    @Test
     void recordError_persistsMessageAndStackTrace() {
         service.recordError("my-anthropic", "owner/repo#7",
                 new IllegalStateException("401 Unauthorized"));

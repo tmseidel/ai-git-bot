@@ -9,7 +9,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -56,6 +58,16 @@ public class UsageController {
         model.addAttribute("errorDir", errorDir);
         model.addAttribute("activeNav", "usage");
         return "usage/list";
+    }
+
+    /**
+     * Removes all recorded AI usage entries.
+     */
+    @PostMapping("/usage/clear")
+    public String clearUsage(RedirectAttributes redirectAttributes) {
+        aiUsageService.clearUsage();
+        redirectAttributes.addFlashAttribute("success", "All AI usage entries have been cleared");
+        return "redirect:/usage";
     }
 
     /**

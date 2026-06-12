@@ -59,8 +59,16 @@
                                 <small class="text-secondary">Token consumption of every AI interaction.</small>
                             </div>
                         </div>
-                        <span class="badge text-bg-secondary flex-shrink-0"
-                              th:text="${usagePage.totalElements} + ' entries'">0 entries</span>
+                        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                            <span class="badge text-bg-secondary"
+                                  th:text="${usagePage.totalElements} + ' entries'">0 entries</span>
+                            <form th:action="@{/usage/clear}" method="post" class="d-inline"
+                                  onsubmit="return confirm('Are you sure you want to clear all AI usage entries?');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">
+                                    <i class="bi bi-trash"></i> Clear all
+                                </button>
+                            </form>
+                        </div>
                     </div>
                     <div class="collapse show" id="section-ai-usage">
                         <div class="card-body">

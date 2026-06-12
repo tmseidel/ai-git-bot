@@ -24,7 +24,7 @@ import java.util.Set;
 public class AiUsageService {
 
     /** Page size of the tables on the "Usage" page. */
-    public static final int PAGE_SIZE = 100;
+    public static final int PAGE_SIZE = 20;
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 2000;
     private static final int MAX_STACK_TRACE_LENGTH = 100_000;
@@ -75,6 +75,14 @@ public class AiUsageService {
         } catch (Exception e) {
             log.warn("Failed to persist AI error entry: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Removes all recorded AI usage entries.
+     */
+    @Transactional
+    public void clearUsage() {
+        usageRepository.deleteAllInBatch();
     }
 
     @Transactional(readOnly = true)

@@ -24,12 +24,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
@@ -71,9 +75,9 @@ class UsageControllerTest {
         error.setStackTrace("org.example.SomeException: 401 Unauthorized");
 
         when(aiUsageService.findUsage(any(), any(), anyInt(), anyString(), anyBoolean()))
-                .thenReturn(new PageImpl<>(List.of(usage), PageRequest.of(0, 100), 1));
+                .thenReturn(new PageImpl<>(List.of(usage), PageRequest.of(0, 20), 1));
         when(aiUsageService.findErrors(any(), any(), anyInt(), anyString(), anyBoolean()))
-                .thenReturn(new PageImpl<>(List.of(error), PageRequest.of(0, 100), 1));
+                .thenReturn(new PageImpl<>(List.of(error), PageRequest.of(0, 20), 1));
 
         mockMvc.perform(get("/usage").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -89,6 +93,15 @@ class UsageControllerTest {
     void usage_requiresAuthentication() throws Exception {
         mockMvc.perform(get("/usage"))
                 .andExpect(status().is3xxRedirection());
+    }
+
+    @Test
+    void clearUsage_clearsEntriesAndRedirects() throws Exception {
+        mockMvc.perform(post("/usage/clear").with(csrf()).with(user("admin").roles("ADMIN")))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/usage"));
+
+        verify(aiUsageService).clearUsage();
     }
 
     @Test
