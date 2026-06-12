@@ -1,5 +1,8 @@
 package org.remus.giteabot.ai;
 
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+
 import java.util.List;
 
 /**
@@ -13,22 +16,16 @@ import java.util.List;
  * are already reported per diff chunk by {@link AbstractAiClient}, so the
  * {@code reviewDiff} methods delegate without additional auditing.</p>
  */
+@RequiredArgsConstructor
 public class AuditingAiClient implements AiClient {
 
+    /**
+     * -- GETTER --
+     *  Returns the wrapped provider-specific client.
+     */
+    @Getter
     private final AiClient delegate;
     private final AiAuditRecorder recorder;
-
-    public AuditingAiClient(AiClient delegate, AiAuditRecorder recorder) {
-        this.delegate = delegate;
-        this.recorder = recorder;
-    }
-
-    /**
-     * Returns the wrapped provider-specific client.
-     */
-    public AiClient getDelegate() {
-        return delegate;
-    }
 
     @Override
     public String reviewDiff(String prTitle, String prBody, String diff) {

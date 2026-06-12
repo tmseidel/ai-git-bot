@@ -1,11 +1,11 @@
 package org.remus.giteabot.aiusage;
 
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,10 +13,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.List;
 
 /**
  * Admin page that audits AI usage: token consumption per AI interaction and
@@ -72,28 +72,18 @@ public class UsageController {
 
     /**
      * Exports the error log (filtered by the same timespan as the page) as a
-     * downloadable JSON document.
+     * downloadable JSON document.  The response is streamed incrementally —
+     * rows are fetched in pages and written directly to the HTTP output stream
+     * so that heap usage stays bounded regardless of the result set size.
      */
     @GetMapping("/usage/errors/export")
-    public ResponseEntity<List<ErrorExportEntry>> exportErrors(
-            @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to) {
-        List<ErrorExportEntry> entries = aiUsageService
-                .exportErrors(parseFrom(from), parseTo(to))
-                .stream()
-                .map(e -> new ErrorExportEntry(e.getTimestamp(), e.getAiIntegrationName(),
-                        e.getSessionId(), e.getErrorMessage(), e.getStackTrace()))
-                .toList();
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"ai-error-log.json\"")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(entries);
-    }
-
-    /** JSON shape of one exported error-log entry. */
-    public record ErrorExportEntry(Instant timestamp, String aiIntegration, String sessionId,
-                                   String errorMessage, String stackTrace) {
+    public void exportErrors(@RequestParam(required = false) String from,
+                             @RequestParam(required = false) String to,
+                             HttpServletResponse response) throws IOException {
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"ai-error-log.json\"");
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        aiUsageService.exportErrors(parseFrom(from), parseTo(to), response.getOutputStream());
     }
 
     private static Instant parseFrom(String from) {

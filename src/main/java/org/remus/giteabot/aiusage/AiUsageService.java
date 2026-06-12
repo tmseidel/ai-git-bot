@@ -1,5 +1,7 @@
 package org.remus.giteabot.aiusage;
 
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -8,10 +10,11 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Instant;
-import java.util.List;
 import java.util.Set;
 
 /**
@@ -25,6 +28,9 @@ public class AiUsageService {
 
     /** Page size of the tables on the "Usage" page. */
     public static final int PAGE_SIZE = 20;
+
+    /** Page size for streaming exports — keeps heap bounded (~10 MB worst case). */
+    private static final int EXPORT_PAGE_SIZE = 100;
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 2000;
     private static final int MAX_STACK_TRACE_LENGTH = 100_000;
@@ -102,12 +108,42 @@ public class AiUsageService {
     }
 
     /**
-     * Returns all error entries in the given timespan for the JSON export.
+     * Streams all error entries in the given timespan as a JSON array directly
+     * to the provided output stream.  Results are fetched in pages of
+     * {@value #EXPORT_PAGE_SIZE} rows so that heap usage stays bounded
+     * regardless of the total number of matching rows.
+     *
+     * <p>This method intentionally does <em>not</em> carry a
+     * {@code @Transactional} annotation — each page query opens its own
+     * short-lived read-only transaction via the Spring Data proxy, which is
+     * the correct pattern for streaming responses that outlive a single
+     * transaction.</p>
      */
-    @Transactional(readOnly = true)
-    public List<AiErrorLog> exportErrors(Instant from, Instant to) {
-        return errorRepository.findAllByTimestampBetweenOrderByTimestampDesc(
-                effectiveFrom(from), effectiveTo(to));
+    public void exportErrors(Instant from, Instant to, OutputStream outputStream) throws IOException {
+        Instant f = effectiveFrom(from);
+        Instant t = effectiveTo(to);
+
+        try (JsonGenerator gen = new ObjectMapper().getFactory().createGenerator(outputStream)) {
+            gen.writeStartArray();
+            int page = 0;
+            Page<AiErrorLog> result;
+            do {
+                result = errorRepository.findAllByTimestampBetweenOrderByTimestampDesc(
+                        f, t, PageRequest.of(page, EXPORT_PAGE_SIZE));
+                for (AiErrorLog entry : result.getContent()) {
+                    gen.writeStartObject();
+                    gen.writeObjectField("timestamp", entry.getTimestamp());
+                    gen.writeStringField("aiIntegration", entry.getAiIntegrationName());
+                    gen.writeStringField("sessionId", entry.getSessionId());
+                    gen.writeStringField("errorMessage", entry.getErrorMessage());
+                    gen.writeStringField("stackTrace", entry.getStackTrace());
+                    gen.writeEndObject();
+                }
+                gen.flush();
+                page++;
+            } while (result.hasNext());
+            gen.writeEndArray();
+        }
     }
 
     /**

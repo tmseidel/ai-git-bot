@@ -16,6 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.remus.giteabot.admin.AdminUserRepository;
 import org.remus.giteabot.admin.SecurityConfig;
 
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 
@@ -24,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
@@ -106,15 +109,17 @@ class UsageControllerTest {
 
     @Test
     void exportErrors_returnsJsonAttachment() throws Exception {
-        AiErrorLog error = new AiErrorLog();
-        error.setId(2L);
-        error.setTimestamp(Instant.parse("2026-06-02T11:00:00Z"));
-        error.setAiIntegrationName("my-anthropic");
-        error.setSessionId("owner/repo#7");
-        error.setErrorMessage("401 Unauthorized");
-        error.setStackTrace("org.example.SomeException: 401 Unauthorized");
-
-        when(aiUsageService.exportErrors(any(), any())).thenReturn(List.of(error));
+        doAnswer(invocation -> {
+            OutputStream os = invocation.getArgument(2);
+            os.write((
+                    "[{\"timestamp\":\"2026-06-02T11:00:00Z\"," +
+                    "\"aiIntegration\":\"my-anthropic\"," +
+                    "\"sessionId\":\"owner/repo#7\"," +
+                    "\"errorMessage\":\"401 Unauthorized\"," +
+                    "\"stackTrace\":\"org.example.SomeException: 401 Unauthorized\"}]"
+            ).getBytes(StandardCharsets.UTF_8));
+            return null;
+        }).when(aiUsageService).exportErrors(any(), any(), any(OutputStream.class));
 
         mockMvc.perform(get("/usage/errors/export").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
