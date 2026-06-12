@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+>
+<body>
+<div th:replace="~{layout :: layout('Usage', ~{::pageContent})}">
+    <div th:fragment="pageContent">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-graph-up"></i> Usage</h2>
+            <div>
+                <button type="button" class="btn btn-outline-secondary btn-sm me-2" id="expandAllSections">
+                    <i class="bi bi-arrows-expand"></i> Expand all
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="collapseAllSections">
+                    <i class="bi bi-arrows-collapse"></i> Collapse all
+                </button>
+            </div>
+        </div>
+
+        <style>
+            .collapsible-card-header { cursor: default; }
+            .section-collapse-toggle { cursor: pointer; flex: 1; min-width: 0; }
+            .section-collapse-toggle .section-chevron { transition: transform 0.2s ease-in-out; }
+            .section-collapse-toggle.collapsed .section-chevron { transform: rotate(-90deg); }
+            .sort-link { text-decoration: none; color: inherit; }
+            .error-log-pre { white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow-y: auto; }
+        </style>
+
+        <!-- Timespan filter -->
+        <form method="get" th:action="@{/usage}" class="row g-2 align-items-end mb-4">
+            <div class="col-auto">
+                <label for="filterFrom" class="form-label mb-0 small">From</label>
+                <input type="date" class="form-control form-control-sm" id="filterFrom" name="from" th:value="${from}"/>
+            </div>
+            <div class="col-auto">
+                <label for="filterTo" class="form-label mb-0 small">To</label>
+                <input type="date" class="form-control form-control-sm" id="filterTo" name="to" th:value="${to}"/>
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-funnel"></i> Filter
+                </button>
+                <a th:href="@{/usage}" class="btn btn-outline-secondary btn-sm">Reset</a>
+            </div>
+        </form>
+
+        <div class="row g-4">
+
+            <!-- AI usage section -->
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-ai-usage"
+                             role="button" aria-expanded="true" aria-controls="section-ai-usage">
+                            <i class="bi bi-chevron-down section-chevron me-2"></i>
+                            <div>
+                                <h5 class="mb-0">AI usage</h5>
+                                <small class="text-secondary">Token consumption of every AI interaction.</small>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                            <span class="badge text-bg-secondary"
+                                  th:text="${usagePage.totalElements} + ' entries'">0 entries</span>
+                            <form th:action="@{/usage/clear}" method="post" class="d-inline"
+                                  onsubmit="return confirm('Are you sure you want to clear all AI usage entries?');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">
+                                    <i class="bi bi-trash"></i> Clear all
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="collapse show" id="section-ai-usage">
+                        <div class="card-body">
+                            <div th:if="${usagePage.totalElements == 0}" class="text-center py-4">
+                                <i class="bi bi-inbox fs-1 text-secondary"></i>
+                                <p class="text-secondary mt-2">No AI usage recorded yet.</p>
+                            </div>
+                            <div th:if="${usagePage.totalElements > 0}" class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-group-divider">
+                                    <tr>
+                                        <th th:each="col : ${ {'timestamp', 'aiIntegrationName', 'sessionId', 'inputTokens', 'outputTokens'} }">
+                                            <a class="sort-link"
+                                               th:href="@{/usage(from=${from}, to=${to}, usagePage=0,
+                                                          usageSort=${col},
+                                                          usageDir=${usageSort == col && usageDir == 'desc'} ? 'asc' : 'desc',
+                                                          errorPage=${errorPage.number}, errorSort=${errorSort}, errorDir=${errorDir})}">
+                                                <span th:text="${col == 'timestamp' ? 'Timestamp'
+                                                        : (col == 'aiIntegrationName' ? 'AI-Integration'
+                                                        : (col == 'sessionId' ? 'Session-ID'
+                                                        : (col == 'inputTokens' ? 'Input tokens' : 'Output tokens')))}">Column</span>
+                                                <i th:if="${usageSort == col}"
+                                                   th:class="${usageDir == 'asc'} ? 'bi bi-caret-up-fill' : 'bi bi-caret-down-fill'"></i>
+                                            </a>
+                                        </th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <tr th:each="entry : ${usagePage.content}">
+                                        <td th:text="${#temporals.format(entry.timestamp, 'yyyy-MM-dd HH:mm:ss')}">2024-01-01</td>
+                                        <td th:text="${entry.aiIntegrationName}">integration</td>
+                                        <td><code th:text="${entry.sessionId != null ? entry.sessionId : '—'}">session</code></td>
+                                        <td th:text="${entry.inputTokens}">0</td>
+                                        <td th:text="${entry.outputTokens}">0</td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <nav th:if="${usagePage.totalPages > 1}" class="mt-3" aria-label="AI usage pagination">
+                                <ul class="pagination pagination-sm mb-0">
+                                    <li class="page-item" th:classappend="${usagePage.first} ? 'disabled'">
+                                        <a class="page-link"
+                                           th:href="@{/usage(from=${from}, to=${to}, usagePage=${usagePage.number - 1},
+                                                      usageSort=${usageSort}, usageDir=${usageDir},
+                                                      errorPage=${errorPage.number}, errorSort=${errorSort}, errorDir=${errorDir})}">Previous</a>
+                                    </li>
+                                    <li class="page-item disabled">
+                                        <span class="page-link"
+                                              th:text="'Page ' + (${usagePage.number} + 1) + ' of ' + ${usagePage.totalPages}">Page 1</span>
+                                    </li>
+                                    <li class="page-item" th:classappend="${usagePage.last} ? 'disabled'">
+                                        <a class="page-link"
+                                           th:href="@{/usage(from=${from}, to=${to}, usagePage=${usagePage.number + 1},
+                                                      usageSort=${usageSort}, usageDir=${usageDir},
+                                                      errorPage=${errorPage.number}, errorSort=${errorSort}, errorDir=${errorDir})}">Next</a>
+                                    </li>
+                                </ul>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Errors section -->
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header collapsible-card-header d-flex justify-content-between align-items-center gap-2">
+                        <div class="d-flex align-items-center section-collapse-toggle"
+                             data-bs-toggle="collapse" data-bs-target="#section-ai-errors"
+                             role="button" aria-expanded="true" aria-controls="section-ai-errors">
+                            <i class="bi bi-chevron-down section-chevron me-2"></i>
+                            <div>
+                                <h5 class="mb-0">Errors</h5>
+                                <small class="text-secondary">Failed AI interactions (e.g. HTTP error responses).</small>
+                            </div>
+                        </div>
+                        <a th:href="@{/usage/errors/export(from=${from}, to=${to})}"
+                           class="btn btn-outline-secondary btn-sm flex-shrink-0">
+                            <i class="bi bi-download"></i> Export as JSON
+                        </a>
+                    </div>
+                    <div class="collapse show" id="section-ai-errors">
+                        <div class="card-body">
+                            <div th:if="${errorPage.totalElements == 0}" class="text-center py-4">
+                                <i class="bi bi-check-circle fs-1 text-success"></i>
+                                <p class="text-secondary mt-2">No AI errors recorded.</p>
+                            </div>
+                            <div th:if="${errorPage.totalElements > 0}" class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-group-divider">
+                                    <tr>
+                                        <th th:each="col : ${ {'timestamp', 'aiIntegrationName', 'sessionId', 'errorMessage'} }">
+                                            <a class="sort-link"
+                                               th:href="@{/usage(from=${from}, to=${to},
+                                                          usagePage=${usagePage.number}, usageSort=${usageSort}, usageDir=${usageDir},
+                                                          errorPage=0, errorSort=${col},
+                                                          errorDir=${errorSort == col && errorDir == 'desc'} ? 'asc' : 'desc')}">
+                                                <span th:text="${col == 'timestamp' ? 'Timestamp'
+                                                        : (col == 'aiIntegrationName' ? 'AI-Integration'
+                                                        : (col == 'sessionId' ? 'Session-ID' : 'Error-Log'))}">Column</span>
+                                                <i th:if="${errorSort == col}"
+                                                   th:class="${errorDir == 'asc'} ? 'bi bi-caret-up-fill' : 'bi bi-caret-down-fill'"></i>
+                                            </a>
+                                        </th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <tr th:each="entry : ${errorPage.content}">
+                                        <td th:text="${#temporals.format(entry.timestamp, 'yyyy-MM-dd HH:mm:ss')}">2024-01-01</td>
+                                        <td th:text="${entry.aiIntegrationName}">integration</td>
+                                        <td><code th:text="${entry.sessionId != null ? entry.sessionId : '—'}">session</code></td>
+                                        <td>
+                                            <span th:text="${entry.errorMessage}">error</span>
+                                            <div th:if="${entry.stackTrace != null}">
+                                                <a class="small" data-bs-toggle="collapse" role="button"
+                                                   th:href="'#stack-trace-' + ${entry.id}"
+                                                   aria-expanded="false"
+                                                   th:attr="aria-controls='stack-trace-' + ${entry.id}">
+                                                    <i class="bi bi-chevron-expand"></i> Stack trace
+                                                </a>
+                                                <div class="collapse" th:id="'stack-trace-' + ${entry.id}">
+                                                    <pre class="error-log-pre border rounded p-2 small mt-1 mb-0"
+                                                         th:text="${entry.stackTrace}">trace</pre>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <nav th:if="${errorPage.totalPages > 1}" class="mt-3" aria-label="AI errors pagination">
+                                <ul class="pagination pagination-sm mb-0">
+                                    <li class="page-item" th:classappend="${errorPage.first} ? 'disabled'">
+                                        <a class="page-link"
+                                           th:href="@{/usage(from=${from}, to=${to},
+                                                      usagePage=${usagePage.number}, usageSort=${usageSort}, usageDir=${usageDir},
+                                                      errorPage=${errorPage.number - 1}, errorSort=${errorSort}, errorDir=${errorDir})}">Previous</a>
+                                    </li>
+                                    <li class="page-item disabled">
+                                        <span class="page-link"
+                                              th:text="'Page ' + (${errorPage.number} + 1) + ' of ' + ${errorPage.totalPages}">Page 1</span>
+                                    </li>
+                                    <li class="page-item" th:classappend="${errorPage.last} ? 'disabled'">
+                                        <a class="page-link"
+                                           th:href="@{/usage(from=${from}, to=${to},
+                                                      usagePage=${usagePage.number}, usageSort=${usageSort}, usageDir=${usageDir},
+                                                      errorPage=${errorPage.number + 1}, errorSort=${errorSort}, errorDir=${errorDir})}">Next</a>
+                                    </li>
+                                </ul>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                initCollapsibleSections({
+                    storageKey: 'usage.collapsedSections',
+                    collapses: document.querySelectorAll('[id^="section-"].collapse'),
+                    expandButton: document.getElementById('expandAllSections'),
+                    collapseButton: document.getElementById('collapseAllSections')
+                });
+            });
+        </script>
+
+    </div>
+</div>
+</body>
+</html>

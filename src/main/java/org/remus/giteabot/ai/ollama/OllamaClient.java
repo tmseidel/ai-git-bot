@@ -219,6 +219,7 @@ public class OllamaClient extends AbstractAiClient {
         if (response.getPromptEvalCount() != null && response.getEvalCount() != null) {
             log.info("Ollama chat-with-tools: {} prompt tokens, {} eval tokens, {} tool_call(s)",
                     response.getPromptEvalCount(), response.getEvalCount(), calls.size());
+            reportUsage(response.getPromptEvalCount(), response.getEvalCount());
         }
         return new ChatTurn(text, calls, reason);
     }
@@ -295,6 +296,7 @@ public class OllamaClient extends AbstractAiClient {
                     context,
                     response.getPromptEvalCount(),
                     response.getEvalCount());
+            reportUsage(response.getPromptEvalCount(), response.getEvalCount());
         }
 
         return result;

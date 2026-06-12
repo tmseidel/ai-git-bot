@@ -214,6 +214,8 @@ public class OpenAiClient extends AbstractAiClient {
                     response.getUsage().getPromptTokens(),
                     response.getUsage().getCompletionTokens(),
                     calls.size());
+            reportUsage(response.getUsage().getPromptTokens(),
+                    response.getUsage().getCompletionTokens());
         }
         return new ChatTurn(text, calls, reason);
     }
@@ -272,6 +274,8 @@ public class OpenAiClient extends AbstractAiClient {
             log.info("OpenAI {} response: {} prompt tokens, {} completion tokens",
                     context,
                     response.getUsage().getPromptTokens(),
+                    response.getUsage().getCompletionTokens());
+            reportUsage(response.getUsage().getPromptTokens(),
                     response.getUsage().getCompletionTokens());
         }
 
