@@ -6,7 +6,7 @@
   "url": "https://github.com/tmseidel/ai-git-bot",
   "issueTracker": "https://github.com/tmseidel/ai-git-bot/issues",
   "license": "https://spdx.org/licenses/MIT.html",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "programmingLanguage": [
     "Java",
     "HTML",
