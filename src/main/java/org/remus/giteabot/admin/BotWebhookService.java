@@ -294,33 +294,37 @@ public class BotWebhookService {
      * test suites on PR close would otherwise accumulate silently.</p>
      */
     public void handlePrClosed(Bot bot, WebhookPayload payload) {
-        AiAuditContext.setSessionId(auditSessionId(payload));
-        if (bot.getBotType() == BotType.WRITER) {
-            log.debug("[Bot '{}'] Writer bot ignores pull request closed event", bot.getName());
-            return;
-        }
         try {
-            createCodeReviewService(bot).handlePrClosed(payload);
-        } catch (RuntimeException e) {
-            log.warn("[Bot '{}'] CodeReviewService.handlePrClosed threw {} — continuing with E2E teardown",
-                    bot.getName(), e.toString());
-        }
-        try {
-            Long prNumber = payload.getPullRequest() == null
-                    ? null
-                    : payload.getPullRequest().getNumber();
-            String owner = payload.getRepository() == null || payload.getRepository().getOwner() == null
-                    ? null
-                    : payload.getRepository().getOwner().getLogin();
-            String repoName = payload.getRepository() == null
-                    ? null
-                    : payload.getRepository().getName();
-            boolean merged = payload.getPullRequest() != null
-                    && Boolean.TRUE.equals(payload.getPullRequest().getMerged());
-            e2eTestPrCloseHandler.onPrClosed(bot.getId(), owner, repoName, prNumber, merged, payload);
-        } catch (RuntimeException e) {
-            log.warn("[Bot '{}'] E2eTestPrCloseHandler threw {} — ignoring",
-                    bot.getName(), e.toString());
+            AiAuditContext.setSessionId(auditSessionId(payload));
+            if (bot.getBotType() == BotType.WRITER) {
+                log.debug("[Bot '{}'] Writer bot ignores pull request closed event", bot.getName());
+                return;
+            }
+            try {
+                createCodeReviewService(bot).handlePrClosed(payload);
+            } catch (RuntimeException e) {
+                log.warn("[Bot '{}'] CodeReviewService.handlePrClosed threw {} — continuing with E2E teardown",
+                        bot.getName(), e.toString());
+            }
+            try {
+                Long prNumber = payload.getPullRequest() == null
+                        ? null
+                        : payload.getPullRequest().getNumber();
+                String owner = payload.getRepository() == null || payload.getRepository().getOwner() == null
+                        ? null
+                        : payload.getRepository().getOwner().getLogin();
+                String repoName = payload.getRepository() == null
+                        ? null
+                        : payload.getRepository().getName();
+                boolean merged = payload.getPullRequest() != null
+                        && Boolean.TRUE.equals(payload.getPullRequest().getMerged());
+                e2eTestPrCloseHandler.onPrClosed(bot.getId(), owner, repoName, prNumber, merged, payload);
+            } catch (RuntimeException e) {
+                log.warn("[Bot '{}'] E2eTestPrCloseHandler threw {} — ignoring",
+                        bot.getName(), e.toString());
+            }
+        } finally {
+            AiAuditContext.clear();
         }
     }
 
