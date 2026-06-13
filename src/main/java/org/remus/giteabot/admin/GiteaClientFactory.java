@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryProviderMetadata;
@@ -22,6 +23,7 @@ import java.util.concurrent.ConcurrentMap;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class GiteaClientFactory {
 
     private final GitIntegrationService gitIntegrationService;
@@ -29,13 +31,6 @@ public class GiteaClientFactory {
 
     /** Cache key = integrationId, value = (updatedAt-millis, restClient, apiClient). */
     private final ConcurrentMap<Long, CachedClient> cache = new ConcurrentHashMap<>();
-
-    public GiteaClientFactory(GitIntegrationService gitIntegrationService,
-                              RepositoryProviderRegistry providerRegistry) {
-        this.gitIntegrationService = gitIntegrationService;
-        this.providerRegistry = providerRegistry;
-    }
-
 
     /**
      * Returns a {@link RepositoryApiClient} for the given Git integration.

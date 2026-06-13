@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.ai.AiProviderRegistry;
 import org.springframework.stereotype.Controller;
@@ -12,16 +13,11 @@ import java.util.List;
 @Slf4j
 @Controller
 @RequestMapping("/ai-integrations")
+@RequiredArgsConstructor
 public class AiIntegrationController {
 
     private final AiIntegrationService aiIntegrationService;
     private final AiProviderRegistry providerRegistry;
-
-    public AiIntegrationController(AiIntegrationService aiIntegrationService,
-                                   AiProviderRegistry providerRegistry) {
-        this.aiIntegrationService = aiIntegrationService;
-        this.providerRegistry = providerRegistry;
-    }
 
     @GetMapping
     public String list(Model model) {

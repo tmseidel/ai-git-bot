@@ -1,5 +1,6 @@
 package org.remus.giteabot.systemsettings;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.prworkflow.config.DeploymentTargetService;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationService;
@@ -21,6 +22,7 @@ import java.util.Map;
 @Slf4j
 @Controller
 @RequestMapping("/system-settings")
+@RequiredArgsConstructor
 public class SystemSettingsController {
 
     private final SystemPromptService systemPromptService;
@@ -30,22 +32,6 @@ public class SystemSettingsController {
     private final BotToolSelectionService botToolSelectionService;
     private final WorkflowConfigurationService workflowConfigurationService;
     private final DeploymentTargetService deploymentTargetService;
-
-    public SystemSettingsController(SystemPromptService systemPromptService,
-                                    McpConfigurationService mcpConfigurationService,
-                                    McpToolSelectionService mcpToolSelectionService,
-                                    BotToolConfigurationService botToolConfigurationService,
-                                    BotToolSelectionService botToolSelectionService,
-                                    WorkflowConfigurationService workflowConfigurationService,
-                                    DeploymentTargetService deploymentTargetService) {
-        this.systemPromptService = systemPromptService;
-        this.mcpConfigurationService = mcpConfigurationService;
-        this.mcpToolSelectionService = mcpToolSelectionService;
-        this.botToolConfigurationService = botToolConfigurationService;
-        this.botToolSelectionService = botToolSelectionService;
-        this.workflowConfigurationService = workflowConfigurationService;
-        this.deploymentTargetService = deploymentTargetService;
-    }
 
     @GetMapping
     public String list(Model model) {

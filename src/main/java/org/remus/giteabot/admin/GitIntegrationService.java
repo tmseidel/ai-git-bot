@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.RepositoryType;
 import org.springframework.stereotype.Service;
@@ -11,15 +12,11 @@ import java.util.Optional;
 @Slf4j
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class GitIntegrationService {
 
     private final GitIntegrationRepository gitIntegrationRepository;
     private final EncryptionService encryptionService;
-
-    public GitIntegrationService(GitIntegrationRepository gitIntegrationRepository, EncryptionService encryptionService) {
-        this.gitIntegrationRepository = gitIntegrationRepository;
-        this.encryptionService = encryptionService;
-    }
 
     @Transactional(readOnly = true)
     public List<GitIntegration> findAll() {

@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.e2e;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
@@ -56,6 +57,7 @@ import java.util.Set;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class E2eTestPrCloseHandler {
 
     private static final Set<SuiteLifecycleMode> CLEANUP_MODES = Set.of(
@@ -69,22 +71,6 @@ public class E2eTestPrCloseHandler {
     private final SuitePromotionService suitePromotionService;
     private final BotRepository botRepository;
     private final WorkflowSelectionService workflowSelectionService;
-
-    public E2eTestPrCloseHandler(PrWorkflowRunRepository runRepository,
-                                 PrTestSuiteRepository suiteRepository,
-                                 PrTestWorkspaceManager workspaceManager,
-                                 DeploymentStrategyRegistry strategyRegistry,
-                                 SuitePromotionService suitePromotionService,
-                                 BotRepository botRepository,
-                                 WorkflowSelectionService workflowSelectionService) {
-        this.runRepository = runRepository;
-        this.suiteRepository = suiteRepository;
-        this.workspaceManager = workspaceManager;
-        this.strategyRegistry = strategyRegistry;
-        this.suitePromotionService = suitePromotionService;
-        this.botRepository = botRepository;
-        this.workflowSelectionService = workflowSelectionService;
-    }
 
     @Transactional
     public void onPrClosed(Long botId, String repoOwner, String repoName,

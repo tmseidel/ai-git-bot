@@ -4,7 +4,6 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -41,7 +40,6 @@ public class AgentMetrics {
     private final ConcurrentMap<String, Timer> latencyTimers = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Counter> criticOutcomeCounters = new ConcurrentHashMap<>();
 
-    @Autowired
     public AgentMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
     }

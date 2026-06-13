@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.EncryptionService;
@@ -40,6 +41,7 @@ import java.util.Set;
 @Slf4j
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class DeploymentTargetService {
 
     private final DeploymentTargetRepository repository;
@@ -51,18 +53,6 @@ public class DeploymentTargetService {
 
     @PersistenceContext
     private EntityManager entityManager;
-
-    public DeploymentTargetService(DeploymentTargetRepository repository,
-                                   BotRepository botRepository,
-                                   EncryptionService encryptionService,
-                                   McpConfigurationRepository mcpConfigurationRepository,
-                                   McpToolSelectionService mcpToolSelectionService) {
-        this.repository = repository;
-        this.botRepository = botRepository;
-        this.encryptionService = encryptionService;
-        this.mcpConfigurationRepository = mcpConfigurationRepository;
-        this.mcpToolSelectionService = mcpToolSelectionService;
-    }
 
     /** Test seam: lets unit tests inject a mock EntityManager. */
     void setEntityManager(EntityManager entityManager) {

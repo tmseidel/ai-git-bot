@@ -11,8 +11,8 @@
 
         <!-- Summary Cards -->
         <div class="row g-3 mb-4">
-            <div class="col-md-3">
-                <div class="card text-white bg-primary">
+            <div class="col-md">
+                <div class="card text-white bg-primary h-100">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
@@ -24,8 +24,8 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card text-white bg-success">
+            <div class="col-md">
+                <div class="card text-white bg-success h-100">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
@@ -37,8 +37,8 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card text-white bg-info">
+            <div class="col-md">
+                <div class="card text-white bg-info h-100">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
@@ -50,22 +50,39 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card text-white bg-warning">
+            <div class="col-md">
+                <div class="card text-white bg-warning h-100">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center">
                             <div>
                                 <h6 class="card-title mb-0">Total AI Tokens</h6>
-                                <h2 class="mt-2 mb-0" th:text="${totalTokensSent + totalTokensReceived}">0</h2>
+                                <h2 class="mt-2 mb-0" data-format="compact"
+                                    th:text="${totalTokensSent + totalTokensReceived}">0</h2>
                             </div>
                             <i class="bi bi-lightning fs-1 opacity-50"></i>
                         </div>
                         <small class="opacity-75">
-                            Sent: <span th:text="${totalTokensSent}">0</span> /
-                            Received: <span th:text="${totalTokensReceived}">0</span>
+                            Sent: <span data-format="compact" th:text="${totalTokensSent}">0</span> /
+                            Received: <span data-format="compact" th:text="${totalTokensReceived}">0</span>
                         </small>
                     </div>
                 </div>
+            </div>
+            <div class="col-md">
+                <a th:href="@{/usage}" class="text-decoration-none d-block h-100">
+                    <div class="card text-white h-100" th:classappend="${aiErrorCount > 0} ? 'bg-danger' : 'bg-secondary'">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h6 class="card-title mb-0">AI Errors</h6>
+                                    <h2 class="mt-2 mb-0" th:text="${aiErrorCount}">0</h2>
+                                </div>
+                                <i class="bi bi-exclamation-triangle fs-1 opacity-50"></i>
+                            </div>
+                            <small class="opacity-75">Last 7 days</small>
+                        </div>
+                    </div>
+                </a>
             </div>
         </div>
 
@@ -160,8 +177,19 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
+        // Tooltip init
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
         tooltipTriggerList.map(function (el) { return new bootstrap.Tooltip(el); });
+
+        // Compact number formatting (K / M / B / T) for elements with data-format="compact"
+        var formatter = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+        document.querySelectorAll('[data-format="compact"]').forEach(function (el) {
+            var raw = parseInt(el.textContent.replace(/,/g, ''), 10);
+            if (!isNaN(raw) && raw !== 0) {
+                el.setAttribute('title', raw.toLocaleString('en'));
+                el.textContent = formatter.format(raw);
+            }
+        });
     });
 </script>
 </body>

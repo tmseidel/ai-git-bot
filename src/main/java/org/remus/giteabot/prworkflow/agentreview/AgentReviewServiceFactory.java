@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.agentreview;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
@@ -26,6 +28,7 @@ import org.springframework.stereotype.Component;
  * {@link AgentReviewWorkflow} stays free of bean-wiring concerns.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class AgentReviewServiceFactory {
 
     private final AiClientFactory aiClientFactory;
@@ -38,28 +41,6 @@ public class AgentReviewServiceFactory {
     private final ToolCatalog toolCatalog;
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
-
-    public AgentReviewServiceFactory(AiClientFactory aiClientFactory,
-                                     GiteaClientFactory giteaClientFactory,
-                                     McpToolSelectionService mcpToolSelectionService,
-                                     McpOrchestrationService mcpOrchestrationService,
-                                     BotToolSelectionService botToolSelectionService,
-                                     AgentSessionService agentSessionService,
-                                     ToolExecutionService toolExecutionService,
-                                     ToolCatalog toolCatalog,
-                                     WorkspaceService workspaceService,
-                                     AgentConfigProperties agentConfig) {
-        this.aiClientFactory = aiClientFactory;
-        this.giteaClientFactory = giteaClientFactory;
-        this.mcpToolSelectionService = mcpToolSelectionService;
-        this.mcpOrchestrationService = mcpOrchestrationService;
-        this.botToolSelectionService = botToolSelectionService;
-        this.agentSessionService = agentSessionService;
-        this.toolExecutionService = toolExecutionService;
-        this.toolCatalog = toolCatalog;
-        this.workspaceService = workspaceService;
-        this.agentConfig = agentConfig;
-    }
 
     /**
      * Builds a read-only {@link AgentReviewService} for the given bot using its

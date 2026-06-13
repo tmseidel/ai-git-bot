@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.e2e.runner;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
@@ -49,6 +50,7 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
 
     private final AiClientFactory aiClientFactory;
@@ -58,22 +60,6 @@ public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
     private final TestRunnerAgent runnerAgent;
     private final PrTestCaseRepository caseRepository;
     private final PrWorkflowToolExecutor toolExecutor;
-
-    public PlaywrightTestSuiteRunner(AiClientFactory aiClientFactory,
-                                     GiteaClientFactory giteaClientFactory,
-                                     TestPlannerAgent plannerAgent,
-                                     TestAuthorAgent authorAgent,
-                                     TestRunnerAgent runnerAgent,
-                                     PrTestCaseRepository caseRepository,
-                                     PrWorkflowToolExecutor toolExecutor) {
-        this.aiClientFactory = aiClientFactory;
-        this.giteaClientFactory = giteaClientFactory;
-        this.plannerAgent = plannerAgent;
-        this.authorAgent = authorAgent;
-        this.runnerAgent = runnerAgent;
-        this.caseRepository = caseRepository;
-        this.toolExecutor = toolExecutor;
-    }
 
     @Override
     public E2eTestFramework framework() {

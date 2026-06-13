@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.deployment.mcp;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -46,6 +47,7 @@ import java.util.Set;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class MCPDeploymentStrategy implements DeploymentStrategy {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -53,14 +55,6 @@ public class MCPDeploymentStrategy implements DeploymentStrategy {
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpConfigurationRepository mcpConfigurationRepository;
     private final McpToolSelectionService mcpToolSelectionService;
-
-    public MCPDeploymentStrategy(McpOrchestrationService mcpOrchestrationService,
-                                 McpConfigurationRepository mcpConfigurationRepository,
-                                 McpToolSelectionService mcpToolSelectionService) {
-        this.mcpOrchestrationService = mcpOrchestrationService;
-        this.mcpConfigurationRepository = mcpConfigurationRepository;
-        this.mcpToolSelectionService = mcpToolSelectionService;
-    }
 
     @Override
     public DeploymentStrategyType typeKey() {

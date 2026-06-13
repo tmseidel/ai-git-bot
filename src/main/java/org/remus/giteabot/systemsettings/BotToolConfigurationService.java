@@ -1,5 +1,7 @@
 package org.remus.giteabot.systemsettings;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.springframework.stereotype.Service;
@@ -20,19 +22,12 @@ import java.util.Optional;
  */
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class BotToolConfigurationService {
 
     private final BotToolConfigurationRepository configurationRepository;
     private final BotToolSelectionRepository selectionRepository;
     private final BotRepository botRepository;
-
-    public BotToolConfigurationService(BotToolConfigurationRepository configurationRepository,
-                                       BotToolSelectionRepository selectionRepository,
-                                       BotRepository botRepository) {
-        this.configurationRepository = configurationRepository;
-        this.selectionRepository = selectionRepository;
-        this.botRepository = botRepository;
-    }
 
     @Transactional(readOnly = true)
     public List<BotToolConfiguration> findAll() {

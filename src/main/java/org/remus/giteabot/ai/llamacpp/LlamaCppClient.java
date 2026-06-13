@@ -183,6 +183,7 @@ public class LlamaCppClient extends AbstractAiClient {
                     context,
                     response.getTokensEvaluated(),
                     response.getTokensPredicted());
+            reportUsage(response.getTokensEvaluated(), response.getTokensPredicted());
         }
 
         // Log if stopped due to limits

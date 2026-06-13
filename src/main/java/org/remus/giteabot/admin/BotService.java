@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
 import org.springframework.stereotype.Service;
@@ -17,16 +18,11 @@ import java.util.UUID;
 @Slf4j
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class BotService {
 
     private final BotRepository botRepository;
     private final BotToolConfigurationRepository botToolConfigurationRepository;
-
-    public BotService(BotRepository botRepository,
-                      BotToolConfigurationRepository botToolConfigurationRepository) {
-        this.botRepository = botRepository;
-        this.botToolConfigurationRepository = botToolConfigurationRepository;
-    }
 
     @Transactional(readOnly = true)
     public List<Bot> findAll() {

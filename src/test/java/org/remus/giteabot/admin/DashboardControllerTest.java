@@ -39,6 +39,9 @@ class DashboardControllerTest {
     private BotService botService;
 
     @MockitoBean
+    private org.remus.giteabot.aiusage.AiUsageService aiUsageService;
+
+    @MockitoBean
     private AdminUserRepository adminUserRepository;
 
     @Test

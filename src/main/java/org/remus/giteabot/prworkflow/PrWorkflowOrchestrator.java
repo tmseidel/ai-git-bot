@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.gitea.model.WebhookPayload;
@@ -35,6 +36,7 @@ import java.util.Map;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PrWorkflowOrchestrator {
 
     private final PrWorkflowRegistry registry;
@@ -42,18 +44,6 @@ public class PrWorkflowOrchestrator {
     private final PrWorkflowMetrics metrics;
     private final PrWorkflowRunLockManager lockManager;
     private final WorkflowSelectionService workflowSelectionService;
-
-    public PrWorkflowOrchestrator(PrWorkflowRegistry registry,
-                                  PrWorkflowRunService runService,
-                                  PrWorkflowMetrics metrics,
-                                  PrWorkflowRunLockManager lockManager,
-                                  WorkflowSelectionService workflowSelectionService) {
-        this.registry = registry;
-        this.runService = runService;
-        this.metrics = metrics;
-        this.lockManager = lockManager;
-        this.workflowSelectionService = workflowSelectionService;
-    }
 
     /**
      * Runs <em>all</em> workflows enabled for the given bot in stable order

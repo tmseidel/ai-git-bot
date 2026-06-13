@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.unittest;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Component;
  * {@code AgentReviewServiceFactory}.
  */
 @Component
+@RequiredArgsConstructor
 public class UnitTestServiceFactory {
 
     private final AiClientFactory aiClientFactory;
@@ -25,22 +28,6 @@ public class UnitTestServiceFactory {
     private final UnitTestAuthorAgent authorAgent;
     private final UnitTestRunner runner;
     private final UnitTestSuiteRepository suiteRepository;
-
-    public UnitTestServiceFactory(AiClientFactory aiClientFactory,
-                                  GiteaClientFactory giteaClientFactory,
-                                  WorkspaceService workspaceService,
-                                  FrameworkDetector frameworkDetector,
-                                  UnitTestAuthorAgent authorAgent,
-                                  UnitTestRunner runner,
-                                  UnitTestSuiteRepository suiteRepository) {
-        this.aiClientFactory = aiClientFactory;
-        this.giteaClientFactory = giteaClientFactory;
-        this.workspaceService = workspaceService;
-        this.frameworkDetector = frameworkDetector;
-        this.authorAgent = authorAgent;
-        this.runner = runner;
-        this.suiteRepository = suiteRepository;
-    }
 
     public UnitTestService create(Bot bot) {
         if (bot.getSystemPrompt() == null) {

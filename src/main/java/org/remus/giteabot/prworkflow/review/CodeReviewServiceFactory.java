@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.review;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
@@ -20,22 +22,13 @@ import org.springframework.stereotype.Component;
  * {@code BotWebhookService#createCodeReviewService(...)} helper.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class CodeReviewServiceFactory {
 
     private final AiClientFactory aiClientFactory;
     private final GiteaClientFactory giteaClientFactory;
     private final SessionService sessionService;
     private final ReviewConfigProperties reviewConfig;
-
-    public CodeReviewServiceFactory(AiClientFactory aiClientFactory,
-                                    GiteaClientFactory giteaClientFactory,
-                                    SessionService sessionService,
-                                    ReviewConfigProperties reviewConfig) {
-        this.aiClientFactory = aiClientFactory;
-        this.giteaClientFactory = giteaClientFactory;
-        this.sessionService = sessionService;
-        this.reviewConfig = reviewConfig;
-    }
 
     /**
      * Builds a fresh {@link CodeReviewService} for the given bot, using the

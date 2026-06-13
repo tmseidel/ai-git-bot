@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.unittest.runner;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
@@ -36,19 +37,12 @@ import java.util.List;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class UnitTestRunner {
 
     private final ToolExecutionService toolExecutionService;
     private final UnitTestCaseRepository caseRepository;
     private final CoverageParser coverageParser;
-
-    public UnitTestRunner(ToolExecutionService toolExecutionService,
-                          UnitTestCaseRepository caseRepository,
-                          CoverageParser coverageParser) {
-        this.toolExecutionService = toolExecutionService;
-        this.caseRepository = caseRepository;
-        this.coverageParser = coverageParser;
-    }
 
     public UnitTestOutcome run(UnitTestRunRequest request) {
         UnitTestFramework framework = request.framework();

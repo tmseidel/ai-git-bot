@@ -40,6 +40,8 @@ public abstract class AbstractAiClient implements AiClient {
     private final int maxDiffChunks;
     private final int retryTruncatedChunkChars;
 
+    private AiAuditRecorder auditRecorder;
+
     protected AbstractAiClient(String model, int maxTokens, int maxDiffCharsPerChunk,
                                int maxDiffChunks, int retryTruncatedChunkChars) {
         this.model = model;
@@ -55,6 +57,46 @@ public abstract class AbstractAiClient implements AiClient {
 
     protected int getMaxTokens() {
         return maxTokens;
+    }
+
+    /**
+     * Attaches an {@link AiAuditRecorder} that receives token usage and error
+     * reports for this client. Set by the {@code AiClientFactory}.
+     */
+    public void setAuditRecorder(AiAuditRecorder auditRecorder) {
+        this.auditRecorder = auditRecorder;
+    }
+
+    /**
+     * Reports the token usage of a single provider interaction to the attached
+     * audit recorder (no-op when no recorder is attached).
+     */
+    protected void reportUsage(Number inputTokens, Number outputTokens) {
+        if (auditRecorder == null) {
+            return;
+        }
+        try {
+            auditRecorder.recordUsage(
+                    inputTokens != null ? inputTokens.longValue() : 0L,
+                    outputTokens != null ? outputTokens.longValue() : 0L);
+        } catch (Exception e) {
+            log.warn("Failed to record AI usage: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Reports a failed provider interaction to the attached audit recorder
+     * (no-op when no recorder is attached).
+     */
+    protected void reportError(Throwable error) {
+        if (auditRecorder == null) {
+            return;
+        }
+        try {
+            auditRecorder.recordError(error);
+        } catch (Exception e) {
+            log.warn("Failed to record AI error: {}", e.getMessage());
+        }
     }
 
     /**
@@ -164,6 +206,7 @@ public abstract class AbstractAiClient implements AiClient {
                 failedChunks++;
                 lastException = e;
                 log.warn("Review failed for chunk {}/{}: {}", chunkNumber, totalChunks, e.getMessage());
+                reportError(e);
                 if (totalChunks > 1) {
                     reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks
                             + "\n_Review for this chunk failed: " + e.getMessage() + "_");

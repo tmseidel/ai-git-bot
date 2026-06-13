@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.unittest;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
@@ -34,6 +35,7 @@ import java.util.Set;
  * post a single Markdown summary comment.</p>
  */
 @Slf4j
+@RequiredArgsConstructor
 public class UnitTestService {
 
     static final int MAX_DIFF_CHARS_FOR_CONTEXT = 60_000;
@@ -52,24 +54,6 @@ public class UnitTestService {
     private final UnitTestAuthorAgent authorAgent;
     private final UnitTestRunner runner;
     private final UnitTestSuiteRepository suiteRepository;
-
-    public UnitTestService(RepositoryApiClient repositoryClient,
-                           AiClient aiClient,
-                           SystemPrompt systemPrompt,
-                           WorkspaceService workspaceService,
-                           FrameworkDetector frameworkDetector,
-                           UnitTestAuthorAgent authorAgent,
-                           UnitTestRunner runner,
-                           UnitTestSuiteRepository suiteRepository) {
-        this.repositoryClient = repositoryClient;
-        this.aiClient = aiClient;
-        this.systemPrompt = systemPrompt;
-        this.workspaceService = workspaceService;
-        this.frameworkDetector = frameworkDetector;
-        this.authorAgent = authorAgent;
-        this.runner = runner;
-        this.suiteRepository = suiteRepository;
-    }
 
     /** Inputs resolved from the workflow params by {@link UnitTestWorkflow}. */
     public record Request(PrWorkflowContext context,

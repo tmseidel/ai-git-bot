@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.deployment;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
@@ -51,6 +52,7 @@ import java.util.Optional;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class CiActionTriggerStrategy implements DeploymentStrategy {
 
     public static final String CONFIG_WORKFLOW_REF = "workflowRef";
@@ -78,12 +80,6 @@ public class CiActionTriggerStrategy implements DeploymentStrategy {
 
     private final BotRepository botRepository;
     private final GiteaClientFactory clientFactory;
-
-    public CiActionTriggerStrategy(BotRepository botRepository,
-                                   GiteaClientFactory clientFactory) {
-        this.botRepository = botRepository;
-        this.clientFactory = clientFactory;
-    }
 
     @Override
     public DeploymentStrategyType typeKey() {

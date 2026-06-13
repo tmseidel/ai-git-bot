@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.deployment;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GitIntegrationService;
@@ -43,6 +44,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class CiActionPoller {
 
     private final PrWorkflowRunRepository runRepository;
@@ -53,18 +55,6 @@ public class CiActionPoller {
 
     /** Run id → epoch-millis of last status call. */
     private final Map<Long, Long> lastPolledAt = new ConcurrentHashMap<>();
-
-    public CiActionPoller(PrWorkflowRunRepository runRepository,
-                          DeploymentTargetService deploymentTargetService,
-                          DeploymentCallbackNotifier callbackNotifier,
-                          GitIntegrationService gitIntegrationService,
-                          GiteaClientFactory clientFactory) {
-        this.runRepository = runRepository;
-        this.deploymentTargetService = deploymentTargetService;
-        this.callbackNotifier = callbackNotifier;
-        this.gitIntegrationService = gitIntegrationService;
-        this.clientFactory = clientFactory;
-    }
 
     @Scheduled(fixedDelayString = "${prworkflow.ci-action.poll-interval-ms:10000}",
             initialDelayString = "${prworkflow.ci-action.poll-initial-delay-ms:15000}")

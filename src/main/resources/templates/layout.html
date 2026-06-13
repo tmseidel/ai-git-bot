@@ -56,6 +56,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" th:href="@{/usage}"
+                           th:classappend="${activeNav == 'usage'} ? 'active'">
+                            <i class="bi bi-graph-up"></i> Usage
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" th:href="@{/system-settings}"
                            th:classappend="${activeNav == 'system-settings'} ? 'active'">
                             <i class="bi bi-gear"></i> System settings

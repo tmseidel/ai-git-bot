@@ -1,5 +1,7 @@
 package org.remus.giteabot.systemsettings;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
@@ -10,19 +12,12 @@ import java.util.*;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class McpToolSelectionService {
 
     private final McpConfigurationRepository mcpConfigurationRepository;
     private final McpSelectedToolRepository mcpSelectedToolRepository;
     private final McpOrchestrationService mcpOrchestrationService;
-
-    public McpToolSelectionService(McpConfigurationRepository mcpConfigurationRepository,
-                                   McpSelectedToolRepository mcpSelectedToolRepository,
-                                   McpOrchestrationService mcpOrchestrationService) {
-        this.mcpConfigurationRepository = mcpConfigurationRepository;
-        this.mcpSelectedToolRepository = mcpSelectedToolRepository;
-        this.mcpOrchestrationService = mcpOrchestrationService;
-    }
 
     @Transactional(readOnly = true)
     public List<McpToolSelectionRow> loadAvailableTools(Long mcpConfigurationId) {

@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.e2e.tools;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.PrTestCase;
@@ -54,6 +55,7 @@ import java.util.Optional;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class PrWorkflowToolExecutor {
 
     /** Default cap for {@code pr-test-run} per-invocation runtime. */
@@ -69,16 +71,6 @@ public class PrWorkflowToolExecutor {
     private final PrTestWorkspaceManager workspaceManager;
     private final WorkspaceProcessRunner processRunner;
     private final PreviewHttpProbe httpProbe;
-
-    public PrWorkflowToolExecutor(PrTestCaseRepository caseRepository,
-                                  PrTestWorkspaceManager workspaceManager,
-                                  WorkspaceProcessRunner processRunner,
-                                  PreviewHttpProbe httpProbe) {
-        this.caseRepository = caseRepository;
-        this.workspaceManager = workspaceManager;
-        this.processRunner = processRunner;
-        this.httpProbe = httpProbe;
-    }
 
     // ----------------------------------------------------------------- dispatch
 

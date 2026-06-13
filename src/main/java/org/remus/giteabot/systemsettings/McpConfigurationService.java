@@ -1,5 +1,7 @@
 package org.remus.giteabot.systemsettings;
 
+import lombok.RequiredArgsConstructor;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.remus.giteabot.admin.Bot;
@@ -12,18 +14,13 @@ import java.util.Optional;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class McpConfigurationService {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final McpConfigurationRepository mcpConfigurationRepository;
     private final BotRepository botRepository;
-
-    public McpConfigurationService(McpConfigurationRepository mcpConfigurationRepository,
-                                   BotRepository botRepository) {
-        this.mcpConfigurationRepository = mcpConfigurationRepository;
-        this.botRepository = botRepository;
-    }
 
     @Transactional(readOnly = true)
     public List<McpConfiguration> findAll() {

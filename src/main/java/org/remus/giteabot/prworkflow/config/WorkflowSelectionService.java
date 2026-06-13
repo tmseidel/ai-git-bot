@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.config;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.prworkflow.PrWorkflow;
 import org.remus.giteabot.prworkflow.PrWorkflowRegistry;
 import org.remus.giteabot.prworkflow.WorkflowParamsSchema;
@@ -26,22 +28,13 @@ import java.util.Set;
  */
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class WorkflowSelectionService {
 
     private final WorkflowConfigurationRepository configurationRepository;
     private final WorkflowSelectionRepository selectionRepository;
     private final PrWorkflowRegistry workflowRegistry;
     private final WorkflowParamsValidator paramsValidator;
-
-    public WorkflowSelectionService(WorkflowConfigurationRepository configurationRepository,
-                                    WorkflowSelectionRepository selectionRepository,
-                                    PrWorkflowRegistry workflowRegistry,
-                                    WorkflowParamsValidator paramsValidator) {
-        this.configurationRepository = configurationRepository;
-        this.selectionRepository = selectionRepository;
-        this.workflowRegistry = workflowRegistry;
-        this.paramsValidator = paramsValidator;
-    }
 
     @Transactional(readOnly = true)
     public List<WorkflowSelectionRow> loadAvailableWorkflows(Long configurationId) {

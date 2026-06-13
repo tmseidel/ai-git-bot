@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.e2e.promotion;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
@@ -64,6 +65,7 @@ import java.util.Set;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class SuitePromotionService {
 
     private static final String GIT_AUTHOR_NAME = "AI-Git-Bot";
@@ -72,14 +74,6 @@ public class SuitePromotionService {
     private final WorkspaceService workspaceService;
     private final GiteaClientFactory giteaClientFactory;
     private final PrWorkflowRunRepository runRepository;
-
-    public SuitePromotionService(WorkspaceService workspaceService,
-                                 GiteaClientFactory giteaClientFactory,
-                                 PrWorkflowRunRepository runRepository) {
-        this.workspaceService = workspaceService;
-        this.giteaClientFactory = giteaClientFactory;
-        this.runRepository = runRepository;
-    }
 
     public Outcome promote(Bot bot, PrWorkflowRun run, PrTestSuite suite,
                            String repoOwner, String repoName, String featureBranch) {

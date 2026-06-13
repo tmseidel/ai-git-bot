@@ -398,6 +398,8 @@ public class AnthropicAiClient extends AbstractAiClient {
                     response.getUsage().getInputTokens(),
                     response.getUsage().getOutputTokens(),
                     calls.size());
+            reportUsage(response.getUsage().getInputTokens(),
+                    response.getUsage().getOutputTokens());
         }
         return new ChatTurn(text.toString(), calls, reason);
     }
@@ -439,6 +441,8 @@ public class AnthropicAiClient extends AbstractAiClient {
             log.info("Anthropic {} response: {} input tokens, {} output tokens",
                     context,
                     response.getUsage().getInputTokens(),
+                    response.getUsage().getOutputTokens());
+            reportUsage(response.getUsage().getInputTokens(),
                     response.getUsage().getOutputTokens());
         }
         return result;

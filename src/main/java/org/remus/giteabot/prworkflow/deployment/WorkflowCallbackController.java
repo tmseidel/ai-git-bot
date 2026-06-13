@@ -2,6 +2,7 @@ package org.remus.giteabot.prworkflow.deployment;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunService;
@@ -51,6 +52,7 @@ import java.util.Locale;
 @Slf4j
 @RestController
 @RequestMapping("/api")
+@RequiredArgsConstructor
 public class WorkflowCallbackController {
 
     static final int MAX_LOG_CHUNK_CHARS = 4 * 1024;
@@ -60,12 +62,6 @@ public class WorkflowCallbackController {
 
     private final PrWorkflowRunService runService;
     private final DeploymentCallbackNotifier callbackNotifier;
-
-    public WorkflowCallbackController(PrWorkflowRunService runService,
-                                      DeploymentCallbackNotifier callbackNotifier) {
-        this.runService = runService;
-        this.callbackNotifier = callbackNotifier;
-    }
 
     @PostMapping("/workflow-callback/{runId}/{secret}")
     public ResponseEntity<String> callback(@PathVariable Long runId,

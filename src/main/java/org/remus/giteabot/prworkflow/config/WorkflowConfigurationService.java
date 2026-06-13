@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.config;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.springframework.stereotype.Service;
@@ -24,19 +26,12 @@ import java.util.Optional;
  */
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class WorkflowConfigurationService {
 
     private final WorkflowConfigurationRepository configurationRepository;
     private final WorkflowSelectionRepository selectionRepository;
     private final BotRepository botRepository;
-
-    public WorkflowConfigurationService(WorkflowConfigurationRepository configurationRepository,
-                                        WorkflowSelectionRepository selectionRepository,
-                                        BotRepository botRepository) {
-        this.configurationRepository = configurationRepository;
-        this.selectionRepository = selectionRepository;
-        this.botRepository = botRepository;
-    }
 
     @Transactional(readOnly = true)
     public List<WorkflowConfiguration> findAll() {

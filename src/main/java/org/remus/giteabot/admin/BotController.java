@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.prworkflow.config.DeploymentTarget;
 import org.remus.giteabot.prworkflow.config.DeploymentTargetService;
@@ -31,6 +32,7 @@ import java.util.Map;
 @Slf4j
 @Controller
 @RequestMapping("/bots")
+@RequiredArgsConstructor
 public class BotController {
 
     private final BotService botService;
@@ -43,28 +45,6 @@ public class BotController {
     private final BotToolSelectionService botToolSelectionService;
     private final WorkflowConfigurationService workflowConfigurationService;
     private final DeploymentTargetService deploymentTargetService;
-
-    public BotController(BotService botService,
-                         AiIntegrationService aiIntegrationService,
-                         GitIntegrationService gitIntegrationService,
-                         SystemPromptService systemPromptService,
-                         McpConfigurationService mcpConfigurationService,
-                         McpToolSelectionService mcpToolSelectionService,
-                         BotToolConfigurationService botToolConfigurationService,
-                         BotToolSelectionService botToolSelectionService,
-                         WorkflowConfigurationService workflowConfigurationService,
-                         DeploymentTargetService deploymentTargetService) {
-        this.botService = botService;
-        this.aiIntegrationService = aiIntegrationService;
-        this.gitIntegrationService = gitIntegrationService;
-        this.systemPromptService = systemPromptService;
-        this.mcpConfigurationService = mcpConfigurationService;
-        this.mcpToolSelectionService = mcpToolSelectionService;
-        this.botToolConfigurationService = botToolConfigurationService;
-        this.botToolSelectionService = botToolSelectionService;
-        this.workflowConfigurationService = workflowConfigurationService;
-        this.deploymentTargetService = deploymentTargetService;
-    }
 
     @GetMapping
     public String list(Model model) {

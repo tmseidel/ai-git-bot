@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,15 +11,11 @@ import java.util.Optional;
 @Slf4j
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class AiIntegrationService {
 
     private final AiIntegrationRepository aiIntegrationRepository;
     private final EncryptionService encryptionService;
-
-    public AiIntegrationService(AiIntegrationRepository aiIntegrationRepository, EncryptionService encryptionService) {
-        this.aiIntegrationRepository = aiIntegrationRepository;
-        this.encryptionService = encryptionService;
-    }
 
     @Transactional(readOnly = true)
     public List<AiIntegration> findAll() {

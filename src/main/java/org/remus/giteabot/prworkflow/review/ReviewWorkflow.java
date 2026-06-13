@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.review;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
@@ -33,6 +34,7 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ReviewWorkflow implements PrWorkflow {
 
     /** Public, stable identifier referenced by config rows and metrics tags. */
@@ -40,12 +42,6 @@ public class ReviewWorkflow implements PrWorkflow {
 
     private final CodeReviewServiceFactory codeReviewServiceFactory;
     private final GiteaClientFactory giteaClientFactory;
-
-    public ReviewWorkflow(CodeReviewServiceFactory codeReviewServiceFactory,
-                          GiteaClientFactory giteaClientFactory) {
-        this.codeReviewServiceFactory = codeReviewServiceFactory;
-        this.giteaClientFactory = giteaClientFactory;
-    }
 
     @Override
     public String key() {

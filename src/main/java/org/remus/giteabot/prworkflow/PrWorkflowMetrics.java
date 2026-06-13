@@ -3,7 +3,6 @@ package org.remus.giteabot.prworkflow;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -31,7 +30,6 @@ public class PrWorkflowMetrics {
     private final ConcurrentMap<String, Counter> runCounters = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Timer> runTimers = new ConcurrentHashMap<>();
 
-    @Autowired
     public PrWorkflowMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
     }

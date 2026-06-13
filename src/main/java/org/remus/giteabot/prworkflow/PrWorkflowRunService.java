@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +23,7 @@ import java.util.List;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class PrWorkflowRunService {
 
     static final int MAX_LOG_EXCERPT_CHARS = 8 * 1024;
@@ -33,12 +35,6 @@ public class PrWorkflowRunService {
 
     private final PrWorkflowRunRepository runRepository;
     private final PrWorkflowStepRepository stepRepository;
-
-    public PrWorkflowRunService(PrWorkflowRunRepository runRepository,
-                                PrWorkflowStepRepository stepRepository) {
-        this.runRepository = runRepository;
-        this.stepRepository = stepRepository;
-    }
 
     @Transactional
     public PrWorkflowRun start(Long botId, String repoOwner, String repoName, Long prNumber,

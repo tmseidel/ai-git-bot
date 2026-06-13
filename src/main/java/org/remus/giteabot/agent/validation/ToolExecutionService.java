@@ -1,5 +1,6 @@
 package org.remus.giteabot.agent.validation;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
@@ -32,6 +33,7 @@ import java.util.stream.Stream;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ToolExecutionService {
 
     private static final int MAX_TOOL_OUTPUT_CHARS = 10_000;
@@ -44,11 +46,6 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
-
-    public ToolExecutionService(AgentConfigProperties agentConfig, ToolCatalog catalog) {
-        this.agentConfig = agentConfig;
-        this.catalog = catalog;
-    }
 
     /**
      * Executes a configured validation tool (mvn, gradle, …) in the given

@@ -1,5 +1,7 @@
 package org.remus.giteabot.systemsettings;
 
+import lombok.RequiredArgsConstructor;
+
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.springframework.stereotype.Service;
@@ -11,15 +13,11 @@ import java.util.Optional;
 
 @Service
 @Transactional
+@RequiredArgsConstructor
 public class SystemPromptService {
 
     private final SystemPromptRepository systemPromptRepository;
     private final BotRepository botRepository;
-
-    public SystemPromptService(SystemPromptRepository systemPromptRepository, BotRepository botRepository) {
-        this.systemPromptRepository = systemPromptRepository;
-        this.botRepository = botRepository;
-    }
 
     @Transactional(readOnly = true)
     public List<SystemPrompt> findAll() {

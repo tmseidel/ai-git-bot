@@ -1,5 +1,6 @@
 package org.remus.giteabot.webhook;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
@@ -30,6 +31,7 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/webhook")
+@RequiredArgsConstructor
 public class UnifiedWebhookController {
 
     private final BotService botService;
@@ -37,18 +39,6 @@ public class UnifiedWebhookController {
     private final GitHubWebhookHandler gitHubHandler;
     private final BitbucketWebhookHandler bitbucketHandler;
     private final GitLabWebhookHandler gitLabHandler;
-
-    public UnifiedWebhookController(BotService botService,
-                                    GiteaWebhookHandler giteaHandler,
-                                    GitHubWebhookHandler gitHubHandler,
-                                    BitbucketWebhookHandler bitbucketHandler,
-                                    GitLabWebhookHandler gitLabHandler) {
-        this.botService = botService;
-        this.giteaHandler = giteaHandler;
-        this.gitHubHandler = gitHubHandler;
-        this.bitbucketHandler = bitbucketHandler;
-        this.gitLabHandler = gitLabHandler;
-    }
 
     /**
      * Unified webhook endpoint. Routes to the appropriate handler based on

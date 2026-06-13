@@ -32,11 +32,28 @@ The dashboard (`/dashboard`) provides an overview of all your bots and key stati
 - **Total Bots**: Number of configured bots
 - **Active Bots**: Number of enabled bots
 - **Total Webhook Calls**: Sum of all webhook calls across all bots
-- **AI Tokens**: Total tokens sent to and received from AI providers
+- **AI Tokens**: Total tokens sent to and received from AI providers (taken from the AI usage audit log)
+- **AI Errors**: Number of failed AI interactions (e.g. HTTP 401 responses from a provider) in the last 7 days. The card turns red when errors occurred and links to the [Usage page](#usage) for details.
 
 The bot table shows each bot's name, status, integrations, and recent activity.
 
 Use the theme toggle in the navbar to cycle between **auto**, **dark**, and **light**. The preference is stored in your browser.
+
+## Usage
+
+The Usage page (`/usage`) audits all AI provider interactions. It contains two collapsible sections (expand/collapse them individually or with the *Expand all* / *Collapse all* buttons, like on the System settings page):
+
+### AI usage
+
+A paginated table (20 entries per page) of every AI interaction with the columns **Timestamp**, **AI-Integration**, **Session-ID**, **Input tokens**, and **Output tokens**. The Session-ID has the form `owner/repo#number` and identifies the pull request or issue that triggered the interaction. Click a column header to sort ascending/descending. Use **Clear all** in the section header (a confirmation dialog is shown) to remove all recorded usage entries.
+
+### Errors
+
+A paginated table (20 entries per page) of failed AI interactions — for example when a provider responds with an HTTP error code such as `401 Unauthorized`. Columns: **Timestamp**, **AI-Integration**, **Session-ID**, and **Error-Log**. Click *Stack trace* on an entry to expand the full stack trace. The complete error log (respecting the active timespan filter) can be downloaded with **Export as JSON**.
+
+### Timespan filter
+
+Both tables can be restricted to a timespan with the **From**/**To** date filter at the top of the page. The filter also applies to the JSON export of the error log.
 
 ## Managing AI Integrations
 

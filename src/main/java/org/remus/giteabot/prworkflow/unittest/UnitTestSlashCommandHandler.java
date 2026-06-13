@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.unittest;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
@@ -27,6 +28,7 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class UnitTestSlashCommandHandler {
 
     private static final Pattern COMMAND_PATTERN = Pattern.compile(
@@ -35,14 +37,6 @@ public class UnitTestSlashCommandHandler {
     private final PrWorkflowOrchestrator orchestrator;
     private final WorkflowSelectionService selectionService;
     private final GiteaClientFactory repositoryClientFactory;
-
-    public UnitTestSlashCommandHandler(PrWorkflowOrchestrator orchestrator,
-                                       WorkflowSelectionService selectionService,
-                                       GiteaClientFactory repositoryClientFactory) {
-        this.orchestrator = orchestrator;
-        this.selectionService = selectionService;
-        this.repositoryClientFactory = repositoryClientFactory;
-    }
 
     /**
      * @return {@code true} when the comment was recognized as a unit-test

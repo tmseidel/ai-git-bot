@@ -1,5 +1,6 @@
 package org.remus.giteabot.agent.writerimpl;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.loop.AgentRunContext;
 import org.remus.giteabot.agent.loop.AgentStrategy;
@@ -33,6 +34,7 @@ import java.util.List;
  * {@code WriterConfig.maxToolRounds} cap.</p>
  */
 @Slf4j
+@RequiredArgsConstructor
 public final class WriterAgentStrategy implements AgentStrategy {
 
 
@@ -47,31 +49,6 @@ public final class WriterAgentStrategy implements AgentStrategy {
     private final ToolCatalog catalog;
     private final java.util.Set<String> allowedBuiltinTools;
     private final int maxToolRounds;
-
-    public WriterAgentStrategy(String systemPrompt,
-                               WriterPromptBuilder promptBuilder,
-                               WriterResponseParser responseParser,
-                               AgentSessionService sessionService,
-                               RepositoryApiClient repositoryClient,
-                               BranchSwitcher branchSwitcher,
-                               AgentToolRouter toolRouter,
-                               McpToolCatalog mcpToolCatalog,
-                               ToolCatalog catalog,
-                               java.util.Set<String> allowedBuiltinTools,
-                               int maxToolRounds) {
-        this.systemPrompt = systemPrompt;
-        this.promptBuilder = promptBuilder;
-        this.responseParser = responseParser;
-        this.sessionService = sessionService;
-        this.repositoryClient = repositoryClient;
-        this.branchSwitcher = branchSwitcher;
-        this.toolRouter = toolRouter;
-        this.mcpToolCatalog = mcpToolCatalog;
-        this.catalog = catalog;
-        this.allowedBuiltinTools = allowedBuiltinTools;
-        this.maxToolRounds = maxToolRounds;
-    }
-
 
     @Override
     public String systemPrompt() {

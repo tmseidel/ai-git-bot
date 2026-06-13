@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.e2e;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.admin.Bot;
@@ -39,6 +40,7 @@ import java.util.regex.Pattern;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class E2eTestSlashCommandHandler {
 
     /**
@@ -63,14 +65,6 @@ public class E2eTestSlashCommandHandler {
      * based on {@code bot.getGitIntegration().getProviderType()}.
      */
     private final GiteaClientFactory repositoryClientFactory;
-
-    public E2eTestSlashCommandHandler(PrWorkflowOrchestrator orchestrator,
-                                      WorkflowSelectionService selectionService,
-                                      GiteaClientFactory repositoryClientFactory) {
-        this.orchestrator = orchestrator;
-        this.selectionService = selectionService;
-        this.repositoryClientFactory = repositoryClientFactory;
-    }
 
     /**
      * @return {@code true} when the comment was recognized as an E2E slash

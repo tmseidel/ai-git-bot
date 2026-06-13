@@ -1,9 +1,15 @@
 package org.remus.giteabot.admin;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.ai.AbstractAiClient;
+import org.remus.giteabot.ai.AiAuditContext;
+import org.remus.giteabot.ai.AiAuditRecorder;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.AiProviderRegistry;
+import org.remus.giteabot.ai.AuditingAiClient;
+import org.remus.giteabot.aiusage.AiUsageService;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -18,19 +24,15 @@ import java.util.concurrent.ConcurrentMap;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AiClientFactory {
 
     private final AiIntegrationService aiIntegrationService;
     private final AiProviderRegistry providerRegistry;
+    private final AiUsageService aiUsageService;
 
     /** Cache key = integrationId, value = (updatedAt-millis, client). */
     private final ConcurrentMap<Long, CachedClient> cache = new ConcurrentHashMap<>();
-
-    public AiClientFactory(AiIntegrationService aiIntegrationService,
-                           AiProviderRegistry providerRegistry) {
-        this.aiIntegrationService = aiIntegrationService;
-        this.providerRegistry = providerRegistry;
-    }
 
     /**
      * Returns an {@link AiClient} configured according to the given integration.
@@ -66,7 +68,33 @@ public class AiClientFactory {
                 : null;
 
         RestClient restClient = provider.buildRestClient(integration, decryptedApiKey);
-        return provider.createClient(restClient, integration);
+        AiClient client = provider.createClient(restClient, integration);
+
+        AiAuditRecorder recorder = new IntegrationAuditRecorder(integration.getName(), aiUsageService);
+        if (client instanceof AbstractAiClient abstractClient) {
+            abstractClient.setAuditRecorder(recorder);
+        }
+        return new AuditingAiClient(client, recorder);
+    }
+
+    /**
+     * Bridges client-side audit callbacks to the {@link AiUsageService},
+     * tagging every record with the integration name and the session id from
+     * the {@link AiAuditContext} thread-local.
+     */
+    private record IntegrationAuditRecorder(String integrationName,
+                                            AiUsageService aiUsageService) implements AiAuditRecorder {
+
+        @Override
+        public void recordUsage(long inputTokens, long outputTokens) {
+            aiUsageService.recordUsage(integrationName, AiAuditContext.getSessionId(),
+                    inputTokens, outputTokens);
+        }
+
+        @Override
+        public void recordError(Throwable error) {
+            aiUsageService.recordError(integrationName, AiAuditContext.getSessionId(), error);
+        }
     }
 
     private record CachedClient(long updatedAtMillis, AiClient client) {}

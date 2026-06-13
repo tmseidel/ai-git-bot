@@ -1,19 +1,18 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
-import org.remus.giteabot.agent.IssueImplementationContext;
 import org.remus.giteabot.agent.IssueImplementationService;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.agent.writerimpl.WriterAgentService;
+import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
-import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow;
@@ -48,24 +47,16 @@ import java.util.Set;
 @Service
 public class BotWebhookService {
 
-    private final AiClientFactory aiClientFactory;
     private final GiteaClientFactory giteaClientFactory;
-    private final PromptService promptService;
-    private final AgentConfigProperties agentConfig;
     private final AgentSessionService agentSessionService;
-    private final ToolExecutionService toolExecutionService;
-    private final ToolCatalog toolCatalog;
-    private final WorkspaceService workspaceService;
     private final BotService botService;
-    private final McpOrchestrationService mcpOrchestrationService;
-    private final McpToolSelectionService mcpToolSelectionService;
-    private final BotToolSelectionService botToolSelectionService;
     private final PrWorkflowOrchestrator prWorkflowOrchestrator;
     private final CodeReviewServiceFactory codeReviewServiceFactory;
     private final E2eTestPrCloseHandler e2eTestPrCloseHandler;
     private final E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     private final UnitTestSlashCommandHandler unitTestSlashCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
+    private final AgentServiceFactory agentServiceFactory;
 
     public BotWebhookService(AiClientFactory aiClientFactory,
                              GiteaClientFactory giteaClientFactory,
@@ -75,34 +66,28 @@ public class BotWebhookService {
                              ToolExecutionService toolExecutionService,
                              ToolCatalog toolCatalog,
                              WorkspaceService workspaceService,
-                              BotService botService,
-                              McpOrchestrationService mcpOrchestrationService,
-                              McpToolSelectionService mcpToolSelectionService,
-                              BotToolSelectionService botToolSelectionService,
-                              PrWorkflowOrchestrator prWorkflowOrchestrator,
-                              CodeReviewServiceFactory codeReviewServiceFactory,
-                              E2eTestPrCloseHandler e2eTestPrCloseHandler,
-                              E2eTestSlashCommandHandler e2eTestSlashCommandHandler,
-                              UnitTestSlashCommandHandler unitTestSlashCommandHandler,
-                              WorkflowSelectionService workflowSelectionService) {
-        this.aiClientFactory = aiClientFactory;
+                             BotService botService,
+                             McpOrchestrationService mcpOrchestrationService,
+                             McpToolSelectionService mcpToolSelectionService,
+                             BotToolSelectionService botToolSelectionService,
+                             PrWorkflowOrchestrator prWorkflowOrchestrator,
+                             CodeReviewServiceFactory codeReviewServiceFactory,
+                             E2eTestPrCloseHandler e2eTestPrCloseHandler,
+                             E2eTestSlashCommandHandler e2eTestSlashCommandHandler,
+                             UnitTestSlashCommandHandler unitTestSlashCommandHandler,
+                             WorkflowSelectionService workflowSelectionService) {
         this.giteaClientFactory = giteaClientFactory;
-        this.promptService = promptService;
-        this.agentConfig = agentConfig;
         this.agentSessionService = agentSessionService;
-        this.toolExecutionService = toolExecutionService;
-        this.toolCatalog = toolCatalog;
-        this.workspaceService = workspaceService;
         this.botService = botService;
-        this.mcpOrchestrationService = mcpOrchestrationService;
-        this.mcpToolSelectionService = mcpToolSelectionService;
-        this.botToolSelectionService = botToolSelectionService;
         this.prWorkflowOrchestrator = prWorkflowOrchestrator;
         this.codeReviewServiceFactory = codeReviewServiceFactory;
         this.e2eTestPrCloseHandler = e2eTestPrCloseHandler;
         this.e2eTestSlashCommandHandler = e2eTestSlashCommandHandler;
         this.unitTestSlashCommandHandler = unitTestSlashCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
+        this.agentServiceFactory = new AgentServiceFactory(aiClientFactory, giteaClientFactory,
+                promptService, agentConfig, agentSessionService, toolExecutionService, toolCatalog,
+                workspaceService, mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService);
     }
 
     /**
@@ -112,6 +97,7 @@ public class BotWebhookService {
      */
     @Async
     public void reviewPullRequest(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request review event", bot.getName());
             return;
@@ -145,6 +131,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleBotCommand(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isPullRequestAuthor(payload)) {
             log.debug("[Bot '{}'] Ignoring pull request command from non-author", bot.getName());
             return;
@@ -189,6 +176,7 @@ public class BotWebhookService {
      */
     @Async
     public void handlePrComment(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request comment", bot.getName());
             return;
@@ -243,6 +231,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleInlineComment(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isPullRequestAuthor(payload)) {
             log.debug("[Bot '{}'] Ignoring inline review comment from non-author", bot.getName());
             return;
@@ -272,6 +261,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleReviewSubmitted(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores submitted review", bot.getName());
             return;
@@ -304,32 +294,37 @@ public class BotWebhookService {
      * test suites on PR close would otherwise accumulate silently.</p>
      */
     public void handlePrClosed(Bot bot, WebhookPayload payload) {
-        if (bot.getBotType() == BotType.WRITER) {
-            log.debug("[Bot '{}'] Writer bot ignores pull request closed event", bot.getName());
-            return;
-        }
         try {
-            createCodeReviewService(bot).handlePrClosed(payload);
-        } catch (RuntimeException e) {
-            log.warn("[Bot '{}'] CodeReviewService.handlePrClosed threw {} — continuing with E2E teardown",
-                    bot.getName(), e.toString());
-        }
-        try {
-            Long prNumber = payload.getPullRequest() == null
-                    ? null
-                    : payload.getPullRequest().getNumber();
-            String owner = payload.getRepository() == null || payload.getRepository().getOwner() == null
-                    ? null
-                    : payload.getRepository().getOwner().getLogin();
-            String repoName = payload.getRepository() == null
-                    ? null
-                    : payload.getRepository().getName();
-            boolean merged = payload.getPullRequest() != null
-                    && Boolean.TRUE.equals(payload.getPullRequest().getMerged());
-            e2eTestPrCloseHandler.onPrClosed(bot.getId(), owner, repoName, prNumber, merged, payload);
-        } catch (RuntimeException e) {
-            log.warn("[Bot '{}'] E2eTestPrCloseHandler threw {} — ignoring",
-                    bot.getName(), e.toString());
+            AiAuditContext.setSessionId(auditSessionId(payload));
+            if (bot.getBotType() == BotType.WRITER) {
+                log.debug("[Bot '{}'] Writer bot ignores pull request closed event", bot.getName());
+                return;
+            }
+            try {
+                createCodeReviewService(bot).handlePrClosed(payload);
+            } catch (RuntimeException e) {
+                log.warn("[Bot '{}'] CodeReviewService.handlePrClosed threw {} — continuing with E2E teardown",
+                        bot.getName(), e.toString());
+            }
+            try {
+                Long prNumber = payload.getPullRequest() == null
+                        ? null
+                        : payload.getPullRequest().getNumber();
+                String owner = payload.getRepository() == null || payload.getRepository().getOwner() == null
+                        ? null
+                        : payload.getRepository().getOwner().getLogin();
+                String repoName = payload.getRepository() == null
+                        ? null
+                        : payload.getRepository().getName();
+                boolean merged = payload.getPullRequest() != null
+                        && Boolean.TRUE.equals(payload.getPullRequest().getMerged());
+                e2eTestPrCloseHandler.onPrClosed(bot.getId(), owner, repoName, prNumber, merged, payload);
+            } catch (RuntimeException e) {
+                log.warn("[Bot '{}'] E2eTestPrCloseHandler threw {} — ignoring",
+                        bot.getName(), e.toString());
+            }
+        } finally {
+            AiAuditContext.clear();
         }
     }
 
@@ -339,6 +334,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleIssueAssigned(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
@@ -369,6 +365,7 @@ public class BotWebhookService {
      */
     @Async
     public void handleIssueComment(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
@@ -480,6 +477,21 @@ public class BotWebhookService {
             sb.append("No interactive commands are configured for this bot.\n");
         }
         return sb.toString();
+    }
+
+    /**
+     * Builds the logical session id ({@code owner/repo#number}) used to tag AI
+     * usage and error audit records for this webhook event.
+     */
+    private String auditSessionId(WebhookPayload payload) {
+        if (payload == null || payload.getRepository() == null
+                || payload.getRepository().getOwner() == null) {
+            return null;
+        }
+        Long number = resolvePrOrIssueNumber(payload);
+        return payload.getRepository().getOwner().getLogin() + "/"
+                + payload.getRepository().getName()
+                + (number != null ? "#" + number : "");
     }
 
     private Long resolvePrOrIssueNumber(WebhookPayload payload) {
@@ -658,48 +670,11 @@ public class BotWebhookService {
         return codeReviewServiceFactory.create(bot);
     }
 
-    /**
-     * Creates a per-bot {@link IssueImplementationService} using the bot's AI and Git integrations.
-     */
     private IssueImplementationService createIssueImplementationService(Bot bot) {
-        AiClient aiClient = getAiClient(bot);
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
-        McpToolCatalog mcpToolCatalog = mcpToolSelectionService.filterCatalogForPrompt(
-                bot.getMcpConfiguration(),
-                mcpOrchestrationService.discoverTools(bot.getMcpConfiguration()));
-        if (bot.getSystemPrompt() == null) {
-            throw new IllegalStateException("Bot must have a system prompt assigned");
-        }
-        IssueImplementationContext context = new IssueImplementationContext(
-                repoClient,
-                aiClient,
-                bot.getSystemPrompt().getIssueAgentSystemPrompt(),
-                bot.getUsername(),
-                mcpOrchestrationService,
-                bot.getMcpConfiguration(),
-                mcpToolCatalog,
-                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
-        return new IssueImplementationService(context, promptService, agentConfig,
-                agentSessionService, toolExecutionService, toolCatalog, workspaceService);
+        return agentServiceFactory.createIssueImplementationService(bot);
     }
 
     private WriterAgentService createWriterAgentService(Bot bot) {
-        AiClient aiClient = getAiClient(bot);
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
-        McpToolCatalog mcpToolCatalog = mcpToolSelectionService.filterCatalogForPrompt(
-                bot.getMcpConfiguration(),
-                mcpOrchestrationService.discoverTools(bot.getMcpConfiguration()));
-        if (bot.getSystemPrompt() == null) {
-            throw new IllegalStateException("Bot must have a system prompt assigned");
-        }
-        return new WriterAgentService(repoClient, aiClient, promptService, agentConfig,
-                agentSessionService, toolExecutionService, toolCatalog, workspaceService,
-                bot.getSystemPrompt().getWriterAgentSystemPrompt(), bot.getUsername(),
-                mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
-                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
-    }
-
-    private AiClient getAiClient(Bot bot) {
-        return aiClientFactory.getClient(bot.getAiIntegration());
+        return agentServiceFactory.createWriterAgentService(bot);
     }
 }

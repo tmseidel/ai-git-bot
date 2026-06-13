@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.config;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
@@ -25,16 +26,11 @@ import java.util.Map;
 @Slf4j
 @Controller
 @RequestMapping("/system-settings/workflow-configurations")
+@RequiredArgsConstructor
 public class WorkflowConfigurationController {
 
     private final WorkflowConfigurationService configurationService;
     private final WorkflowSelectionService selectionService;
-
-    public WorkflowConfigurationController(WorkflowConfigurationService configurationService,
-                                           WorkflowSelectionService selectionService) {
-        this.configurationService = configurationService;
-        this.selectionService = selectionService;
-    }
 
     @GetMapping("/new")
     public String newForm(Model model) {

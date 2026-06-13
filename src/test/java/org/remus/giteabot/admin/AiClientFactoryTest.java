@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.ai.AuditingAiClient;
 import org.remus.giteabot.ai.AiProviderRegistry;
 import org.remus.giteabot.ai.anthropic.AnthropicAiClient;
 import org.remus.giteabot.ai.anthropic.AnthropicProviderMetadata;
@@ -17,6 +18,7 @@ import org.remus.giteabot.ai.ollama.OllamaClient;
 import org.remus.giteabot.ai.ollama.OllamaProviderMetadata;
 import org.remus.giteabot.ai.openai.OpenAiClient;
 import org.remus.giteabot.ai.openai.OpenAiProviderMetadata;
+import org.remus.giteabot.aiusage.AiUsageService;
 
 import java.time.Instant;
 import java.util.List;
@@ -30,6 +32,9 @@ class AiClientFactoryTest {
     @Mock
     private AiIntegrationService aiIntegrationService;
 
+    @Mock
+    private AiUsageService aiUsageService;
+
     private AiClientFactory aiClientFactory;
 
     @BeforeEach
@@ -42,7 +47,7 @@ class AiClientFactoryTest {
                 new OllamaProviderMetadata(),
                 new LlamaCppProviderMetadata()
         ));
-        aiClientFactory = new AiClientFactory(aiIntegrationService, providerRegistry);
+        aiClientFactory = new AiClientFactory(aiIntegrationService, providerRegistry, aiUsageService);
     }
 
     @Test
@@ -51,7 +56,7 @@ class AiClientFactoryTest {
         when(aiIntegrationService.decryptApiKey(integration)).thenReturn("sk-test");
 
         AiClient client = aiClientFactory.getClient(integration);
-        assertInstanceOf(AnthropicAiClient.class, client);
+        assertInstanceOf(AnthropicAiClient.class, unwrap(client));
     }
 
     @Test
@@ -60,7 +65,7 @@ class AiClientFactoryTest {
         when(aiIntegrationService.decryptApiKey(integration)).thenReturn("sk-test");
 
         AiClient client = aiClientFactory.getClient(integration);
-        assertInstanceOf(OpenAiClient.class, client);
+        assertInstanceOf(OpenAiClient.class, unwrap(client));
     }
 
     @Test
@@ -69,7 +74,7 @@ class AiClientFactoryTest {
         when(aiIntegrationService.decryptApiKey(integration)).thenReturn("google-key");
 
         AiClient client = aiClientFactory.getClient(integration);
-        assertInstanceOf(GoogleAiClient.class, client);
+        assertInstanceOf(GoogleAiClient.class, unwrap(client));
     }
 
     @Test
@@ -78,7 +83,7 @@ class AiClientFactoryTest {
         // Ollama doesn't require API key, so decryptApiKey should not be called
 
         AiClient client = aiClientFactory.getClient(integration);
-        assertInstanceOf(OllamaClient.class, client);
+        assertInstanceOf(OllamaClient.class, unwrap(client));
         verify(aiIntegrationService, never()).decryptApiKey(any());
     }
 
@@ -88,8 +93,13 @@ class AiClientFactoryTest {
         // llamacpp doesn't require API key, so decryptApiKey should not be called
 
         AiClient client = aiClientFactory.getClient(integration);
-        assertInstanceOf(LlamaCppClient.class, client);
+        assertInstanceOf(LlamaCppClient.class, unwrap(client));
         verify(aiIntegrationService, never()).decryptApiKey(any());
+    }
+
+    private static AiClient unwrap(AiClient client) {
+        assertInstanceOf(AuditingAiClient.class, client);
+        return ((AuditingAiClient) client).getDelegate();
     }
 
     @Test

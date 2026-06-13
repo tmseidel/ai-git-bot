@@ -1,5 +1,6 @@
 package org.remus.giteabot.agent.issueimpl;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.tools.ToolCatalog;
@@ -15,6 +16,7 @@ import java.util.Map;
  * to keep users informed about the agent's activity.
  */
 @Slf4j
+@RequiredArgsConstructor
 public class IssueNotificationService {
 
     /** Maximum number of characters shown per tool argument in comments. */
@@ -23,14 +25,6 @@ public class IssueNotificationService {
     private final RepositoryApiClient repositoryClient;
     private final AiResponseParser responseParser;
     private final ToolCatalog catalog;
-
-    public IssueNotificationService(RepositoryApiClient repositoryClient,
-                                     AiResponseParser responseParser,
-                                     ToolCatalog catalog) {
-        this.repositoryClient = repositoryClient;
-        this.responseParser = responseParser;
-        this.catalog = catalog;
-    }
 
     /**
      * Posts the AI's thinking/reasoning as a comment on the issue, excluding JSON content.
