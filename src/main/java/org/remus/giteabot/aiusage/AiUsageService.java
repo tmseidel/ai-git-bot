@@ -1,7 +1,5 @@
 package org.remus.giteabot.aiusage;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -9,6 +7,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JsonGenerator;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -119,11 +118,11 @@ public class AiUsageService {
      * the correct pattern for streaming responses that outlive a single
      * transaction.</p>
      */
-    public void exportErrors(Instant from, Instant to, OutputStream outputStream) throws IOException {
+    public void exportErrors(Instant from, Instant to, OutputStream outputStream) {
         Instant f = effectiveFrom(from);
         Instant t = effectiveTo(to);
 
-        try (JsonGenerator gen = new ObjectMapper().getFactory().createGenerator(outputStream)) {
+        try (JsonGenerator gen = tools.jackson.core.ObjectWriteContext.empty().createGenerator(outputStream)) {
             gen.writeStartArray();
             int page = 0;
             Page<AiErrorLog> result;
@@ -132,11 +131,11 @@ public class AiUsageService {
                         f, t, PageRequest.of(page, EXPORT_PAGE_SIZE));
                 for (AiErrorLog entry : result.getContent()) {
                     gen.writeStartObject();
-                    gen.writeObjectField("timestamp", entry.getTimestamp());
-                    gen.writeStringField("aiIntegration", entry.getAiIntegrationName());
-                    gen.writeStringField("sessionId", entry.getSessionId());
-                    gen.writeStringField("errorMessage", entry.getErrorMessage());
-                    gen.writeStringField("stackTrace", entry.getStackTrace());
+                    gen.writePOJOProperty("timestamp", entry.getTimestamp());
+                    gen.writeStringProperty("aiIntegration", entry.getAiIntegrationName());
+                    gen.writeStringProperty("sessionId", entry.getSessionId());
+                    gen.writeStringProperty("errorMessage", entry.getErrorMessage());
+                    gen.writeStringProperty("stackTrace", entry.getStackTrace());
                     gen.writeEndObject();
                 }
                 gen.flush();

@@ -1,8 +1,8 @@
 package org.remus.giteabot.prworkflow.deployment.mcp;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.ToolResult;
@@ -363,7 +363,7 @@ public class MCPDeploymentStrategy implements DeploymentStrategy {
 
     private static String textOrNull(JsonNode node, String field) {
         JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+        return (v == null || v.isNull()) ? null : v.asString();
     }
 }
 

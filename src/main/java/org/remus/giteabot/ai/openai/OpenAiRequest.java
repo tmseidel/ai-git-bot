@@ -90,5 +90,3 @@ public class OpenAiRequest {
         private String arguments;
     }
 }
-
-

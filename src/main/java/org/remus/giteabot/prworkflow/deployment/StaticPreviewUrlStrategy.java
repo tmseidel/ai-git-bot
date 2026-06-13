@@ -1,7 +1,7 @@
 package org.remus.giteabot.prworkflow.deployment;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -109,7 +109,7 @@ public class StaticPreviewUrlStrategy implements DeploymentStrategy {
                 JsonNode extra = config.get(CONFIG_EXTRA_HEADERS);
                 if (extra != null && extra.isObject()) {
                     extra.properties().iterator().forEachRemaining(entry ->
-                            builder.header(entry.getKey(), entry.getValue().asText()));
+                            builder.header(entry.getKey(), entry.getValue().asString()));
                 }
                 HttpResponse<Void> response = httpClient.send(builder.build(),
                         HttpResponse.BodyHandlers.discarding());
@@ -140,7 +140,7 @@ public class StaticPreviewUrlStrategy implements DeploymentStrategy {
 
     private static String textOr(JsonNode node, String field, String fallback) {
         JsonNode v = node == null ? null : node.get(field);
-        return (v == null || v.isNull()) ? fallback : v.asText();
+        return (v == null || v.isNull()) ? fallback : v.asString();
     }
 
     private static int intOr(JsonNode node, String field, int fallback) {

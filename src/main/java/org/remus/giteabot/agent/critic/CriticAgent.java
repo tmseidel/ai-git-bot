@@ -1,7 +1,7 @@
 package org.remus.giteabot.agent.critic;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.AgentMetricsHolder;
 import org.remus.giteabot.ai.AiClient;
@@ -120,9 +120,9 @@ public class CriticAgent {
         String json = extractJson(response);
         try {
             JsonNode node = objectMapper.readTree(json);
-            String outcome = node.path("outcome").asText("APPROVE")
+            String outcome = node.path("outcome").asString("APPROVE")
                     .trim().toUpperCase(Locale.ROOT);
-            String feedback = node.path("feedback").asText("").trim();
+            String feedback = node.path("feedback").asString("").trim();
             return switch (outcome) {
                 case "ITERATE" -> ReflectionResult.iterate(feedback);
                 case "ABORT"   -> ReflectionResult.abort(feedback);

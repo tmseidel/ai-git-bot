@@ -93,4 +93,3 @@ public class OllamaRequest {
         private Map<String, Object> arguments;
     }
 }
-
