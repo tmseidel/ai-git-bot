@@ -294,6 +294,7 @@ public class BotWebhookService {
      * test suites on PR close would otherwise accumulate silently.</p>
      */
     public void handlePrClosed(Bot bot, WebhookPayload payload) {
+        AiAuditContext.setSessionId(auditSessionId(payload));
         if (bot.getBotType() == BotType.WRITER) {
             log.debug("[Bot '{}'] Writer bot ignores pull request closed event", bot.getName());
             return;
