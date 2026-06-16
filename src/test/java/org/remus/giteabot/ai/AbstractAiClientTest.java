@@ -185,7 +185,7 @@ class AbstractAiClientTest {
         }
 
         @Override
-        protected boolean isPromptTooLongError(HttpClientErrorException e) {
+        public boolean isPromptTooLongError(HttpClientErrorException e) {
             return false;
         }
     }

@@ -1,6 +1,9 @@
 package org.remus.giteabot.ai;
 
+import org.springframework.web.client.HttpClientErrorException;
+
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Provider-agnostic interface for AI-powered code review and agent chat.
@@ -87,5 +90,33 @@ public interface AiClient {
         String text = chat(conversationHistory, newUserMessage, systemPrompt,
                 modelOverride, maxTokensOverride);
         return ChatTurn.text(text);
+    }
+
+    // ---------------------------------------------------------------------
+    // Error classification
+    // ---------------------------------------------------------------------
+
+    /**
+     * Heuristic check whether an HTTP client error indicates the prompt
+     * exceeded the model's context window. The default implementation matches
+     * common provider error patterns; concrete providers should override with
+     * their own, more specific patterns.
+     */
+    default boolean isPromptTooLongError(HttpClientErrorException e) {
+        String body = e.getResponseBodyAsString();
+        if (body == null) {
+            return false;
+        }
+        String normalized = body.toLowerCase(Locale.ROOT);
+        String status = String.valueOf(e.getStatusCode().value());
+        return normalized.contains("prompt is too long")
+                || normalized.contains("maximum context length")
+                || normalized.contains("request too large")
+                || normalized.contains("input too long")
+                || normalized.contains("too many tokens")
+                || normalized.contains("context_length_exceeded")
+                || normalized.contains("context length")
+                || normalized.contains("token limit")
+                || ("400".equals(status) && normalized.contains("too large"));
     }
 }

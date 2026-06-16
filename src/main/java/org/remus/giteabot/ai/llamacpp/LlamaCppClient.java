@@ -78,7 +78,7 @@ public class LlamaCppClient extends AbstractAiClient {
     }
 
     @Override
-    protected boolean isPromptTooLongError(HttpClientErrorException e) {
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
         if (body == null) {
             return false;

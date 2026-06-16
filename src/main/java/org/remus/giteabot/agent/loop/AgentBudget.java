@@ -18,10 +18,24 @@ package org.remus.giteabot.agent.loop;
  *                               failed validations. The loop itself does not
  *                               enforce this.
  * @param maxTokensPerCall       passed to {@code aiClient.chat} for every call.
+ * @param maxToolResultChars     maximum characters retained from a single tool
+ *                               result in the in-memory history. Longer results
+ *                               are truncated with a head+tail strategy.
+ * @param maxHistoryChars        character budget for the in-memory history list.
+ *                               When exceeded, the HistoryCompactor prunes older
+ *                               tool-pair groups and replaces them with a summary.
+ * @param contextWindowTokens     the model's context window size in tokens, used
+ *                               by TokenUsageTracker for proactive compaction.
+ * @param proactiveCompactionThreshold fraction (0.0-1.0) of context window at
+ *                               which proactive compaction triggers.
  */
 public record AgentBudget(int maxRounds,
                           int maxContextRounds,
                           int maxValidationRetries,
-                          int maxTokensPerCall) {
+                          int maxTokensPerCall,
+                          int maxToolResultChars,
+                          int maxHistoryChars,
+                          int contextWindowTokens,
+                          double proactiveCompactionThreshold) {
 }
 

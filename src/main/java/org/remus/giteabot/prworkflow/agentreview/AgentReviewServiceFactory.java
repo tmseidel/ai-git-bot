@@ -56,6 +56,8 @@ public class AgentReviewServiceFactory {
                 bot.getMcpConfiguration(),
                 mcpOrchestrationService.discoverTools(bot.getMcpConfiguration()));
 
+        int contextWindowTokens = bot.getAiIntegration() != null
+                ? bot.getAiIntegration().getContextWindowTokens() : 200_000;
         AgentReviewContext context = new AgentReviewContext(
                 repoClient,
                 aiClient,
@@ -64,7 +66,8 @@ public class AgentReviewServiceFactory {
                 mcpOrchestrationService,
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
-                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
+                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
+                contextWindowTokens);
 
         return new AgentReviewService(context, agentSessionService, toolExecutionService,
                 toolCatalog, workspaceService, agentConfig);

@@ -112,7 +112,7 @@ public class OpenAiClient extends AbstractAiClient {
     }
 
     @Override
-    protected boolean isPromptTooLongError(HttpClientErrorException e) {
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
         String normalized = body.toLowerCase(Locale.ROOT);
         return normalized.contains("maximum context length")
@@ -209,15 +209,16 @@ public class OpenAiClient extends AbstractAiClient {
                 reason = StopReason.TOOL_USE;
             }
         }
+        long inputTokens = 0L;
+        long outputTokens = 0L;
         if (response.getUsage() != null) {
+            inputTokens = response.getUsage().getPromptTokens();
+            outputTokens = response.getUsage().getCompletionTokens();
             log.info("OpenAI chat-with-tools: {} prompt tokens, {} completion tokens, {} tool_call(s)",
-                    response.getUsage().getPromptTokens(),
-                    response.getUsage().getCompletionTokens(),
-                    calls.size());
-            reportUsage(response.getUsage().getPromptTokens(),
-                    response.getUsage().getCompletionTokens());
+                    inputTokens, outputTokens, calls.size());
+            reportUsage(inputTokens, outputTokens);
         }
-        return new ChatTurn(text, calls, reason);
+        return new ChatTurn(text, calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String finishReason) {

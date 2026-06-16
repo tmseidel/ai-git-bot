@@ -64,6 +64,9 @@ public class AiIntegration {
     @Column(name = "use_legacy_tool_calling", nullable = false)
     private boolean useLegacyToolCalling = false;
 
+    @Column(nullable = false)
+    private int contextWindowTokens = 200_000;
+
     /**
      * UI-facing inverse of {@link #useLegacyToolCalling}. The admin form
      * binds to this property so the checkbox semantics read positively

@@ -2,6 +2,7 @@ package org.remus.giteabot.ai;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.List;
 
@@ -62,6 +63,11 @@ public class AuditingAiClient implements AiClient {
     @Override
     public boolean supportsNativeTools() {
         return delegate.supportsNativeTools();
+    }
+
+    @Override
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
+        return delegate.isPromptTooLongError(e);
     }
 
     @Override

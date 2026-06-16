@@ -3,6 +3,8 @@ package org.remus.giteabot.prworkflow.e2e.agents;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentLoop;
+import org.remus.giteabot.agent.loop.HistoryCompactor;
+import org.remus.giteabot.agent.loop.ToolResultTruncator;
 import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.ai.AiClient;
@@ -12,6 +14,7 @@ import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolContext;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolExecutor;
+import org.springframework.web.client.HttpClientErrorException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -49,6 +52,8 @@ public final class E2eAgentRunner {
     private final int maxRounds;
     private final Integer maxTokens;
     private final String agentLabel;
+    private final ToolResultTruncator truncator;
+    private final HistoryCompactor compactor;
     /** Tool name → ordered argument-property names (required first, then optional,
      *  schema-insertion order) — used to zip the legacy envelope's positional
      *  `args` array back to a named map for {@link PrWorkflowToolExecutor}. */
@@ -70,6 +75,19 @@ public final class E2eAgentRunner {
                           int maxRounds,
                           Integer maxTokens,
                           String agentLabel) {
+        this(aiClient, toolExecutor, toolContext, toolDescriptors, systemPrompt,
+             maxRounds, maxTokens, agentLabel, 8_000);
+    }
+
+    public E2eAgentRunner(AiClient aiClient,
+                          PrWorkflowToolExecutor toolExecutor,
+                          PrWorkflowToolContext toolContext,
+                          List<ToolDescriptor> toolDescriptors,
+                          String systemPrompt,
+                          int maxRounds,
+                          Integer maxTokens,
+                          String agentLabel,
+                          int maxToolResultChars) {
         this.aiClient = aiClient;
         this.toolExecutor = toolExecutor;
         this.toolContext = toolContext;
@@ -78,6 +96,8 @@ public final class E2eAgentRunner {
         this.maxRounds = maxRounds;
         this.maxTokens = maxTokens;
         this.agentLabel = agentLabel == null ? "e2e-agent" : agentLabel;
+        this.truncator = new ToolResultTruncator(maxToolResultChars);
+        this.compactor = new HistoryCompactor(120_000, 4);
         this.argOrderByTool = buildArgOrderIndex(this.toolDescriptors);
         this.argTypeByTool = buildArgTypeIndex(this.toolDescriptors);
     }
@@ -180,13 +200,7 @@ public final class E2eAgentRunner {
         for (int round = 1; round <= maxRounds; round++) {
             ChatTurn turn;
             try {
-                if (mode == ToolingMode.NATIVE) {
-                    turn = aiClient.chatWithTools(history, currentMessage, toolDescriptors,
-                            systemPrompt, null, maxTokens);
-                } else {
-                    String text = aiClient.chat(history, currentMessage, systemPrompt, null, maxTokens);
-                    turn = ChatTurn.text(text);
-                }
+                turn = callAiWithRetry(history, currentMessage, mode, maxTokens);
             } catch (RuntimeException e) {
                 log.warn("[{}] AI call failed in round {}: {}", agentLabel, round, e.getMessage(), e);
                 return new Result(lastAssistantText, invocations, round - 1, true);
@@ -217,13 +231,16 @@ public final class E2eAgentRunner {
                 for (ImplementationPlan.ToolRequest req : requests) {
                     Map<String, Object> args = positionalToNamedArgs(req.getTool(), req.getArgs());
                     String result = toolExecutor.execute(req.getTool(), args, toolContext);
+                    String truncated = truncator.truncate(result);
                     invocations.add(new ToolInvocation(req.getTool(), args, result));
                     feedback.append("### `").append(req.getId() == null ? "?" : req.getId())
                             .append("` (").append(req.getTool()).append(")\n")
-                            .append(result == null ? "(no output)" : result)
+                            .append(truncated == null ? "(no output)" : truncated)
                             .append("\n\n");
                 }
                 currentMessage = feedback.toString();
+                // Compact in-memory history if it exceeds the budget
+                compactor.compact(history);
                 continue;
             }
 
@@ -247,14 +264,17 @@ public final class E2eAgentRunner {
                 Map<String, Object> args = extractArgs(call.args());
                 String result = toolExecutor.execute(call.name(), args, toolContext);
                 invocations.add(new ToolInvocation(call.name(), args, result));
+                String truncated = truncator.truncate(result);
                 history.add(AiMessage.builder()
                         .role("tool")
                         .toolCallId(call.id())
-                        .toolResult(result)
+                        .toolResult(truncated)
                         .build());
             }
             // Default to an empty user message so the model continues from tool results.
             currentMessage = "";
+            // Compact in-memory history if it exceeds the budget
+            compactor.compact(history);
         }
 
         log.warn("[{}] exhausted {} rounds without a terminal text turn", agentLabel, maxRounds);
@@ -376,6 +396,45 @@ public final class E2eAgentRunner {
         // Objects: keep as JSON string so the executor's arg validation can fail loud
         // rather than us silently passing a Map that no executor branch handles.
         return node.toString();
+    }
+
+    /**
+     * Calls the AI with retry-and-compact logic for "prompt too long" errors.
+     * When the provider rejects the request because the prompt exceeds its
+     * context window, this method aggressively compacts the in-memory history
+     * (keeping only the last 2 compaction units) and retries once.
+     *
+     * <p>If the second attempt also fails with a prompt-too-long error, the
+     * exception is re-thrown to the caller.</p>
+     *
+     * @return the {@link ChatTurn} from the successful AI call
+     * @throws RuntimeException if the retry also fails
+     */
+    private ChatTurn callAiWithRetry(List<AiMessage> history, String currentMessage,
+                                     ToolingMode mode, int maxTokens) {
+        int maxRetries = 2;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                if (mode == ToolingMode.NATIVE) {
+                    return aiClient.chatWithTools(history, currentMessage, toolDescriptors,
+                            systemPrompt, null, maxTokens);
+                } else {
+                    String text = aiClient.chat(history, currentMessage, systemPrompt, null, maxTokens);
+                    return ChatTurn.text(text);
+                }
+            } catch (HttpClientErrorException e) {
+                if (!aiClient.isPromptTooLongError(e) || attempt == maxRetries) {
+                    throw e;
+                }
+                log.warn("[{}] AI call failed with prompt-too-long error on attempt {}/{}. "
+                        + "Aggressively compacting history and retrying. Error: {}",
+                        agentLabel, attempt, maxRetries, e.getMessage());
+                // Aggressive compaction: keep only the last 2 compaction units
+                compactor.compactAggressively(history);
+            }
+        }
+        // Unreachable, but keeps the compiler happy
+        throw new IllegalStateException("callAiWithRetry: exceeded max retries");
     }
 
 }

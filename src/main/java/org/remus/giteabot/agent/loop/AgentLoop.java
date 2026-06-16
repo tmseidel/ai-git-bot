@@ -7,6 +7,7 @@ import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.ToolDescriptor;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -37,6 +38,9 @@ public final class AgentLoop {
     private final AgentSessionService sessionService;
     private final AgentBudget budget;
     private final String providerTag;
+    private final ToolResultTruncator truncator;
+    private final HistoryCompactor compactor;
+    private final TokenUsageTracker tokenTracker;
 
     public AgentLoop(AiClient aiClient, AgentSessionService sessionService, AgentBudget budget) {
         this.aiClient = aiClient;
@@ -44,6 +48,10 @@ public final class AgentLoop {
         this.budget = budget;
         this.providerTag = aiClient == null ? "unknown"
                 : aiClient.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+        this.truncator = new ToolResultTruncator(budget.maxToolResultChars());
+        this.compactor = new HistoryCompactor(budget.maxHistoryChars(), 4);
+        this.tokenTracker = new TokenUsageTracker(
+                sessionService, budget.contextWindowTokens(), budget.proactiveCompactionThreshold());
     }
 
     public AgentBudget budget() {
@@ -76,14 +84,7 @@ public final class AgentLoop {
             long started = System.nanoTime();
             ChatTurn turn;
             try {
-                if (resolvedMode == ToolingMode.NATIVE) {
-                    turn = aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,
-                            null, budget.maxTokensPerCall());
-                } else {
-                    String text = aiClient.chat(history, currentMessage, systemPrompt,
-                            null, budget.maxTokensPerCall());
-                    turn = ChatTurn.text(text);
-                }
+                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt, resolvedMode);
             } finally {
                 AgentMetricsHolder.recordLatency(modeTag(resolvedMode), providerTag,
                         Duration.ofNanos(System.nanoTime() - started));
@@ -95,6 +96,16 @@ public final class AgentLoop {
                     aiResponse == null ? 0 : aiResponse.length(),
                     turn.toolCalls().size(), turn.stopReason());
             sessionService.addMessage(ctx.session(), "assistant", aiResponse);
+
+            // Track token usage and trigger proactive compaction if needed
+            int promptChars = currentMessage == null ? 0 : currentMessage.length();
+            tokenTracker.record(ctx.session(), turn, promptChars);
+            if (tokenTracker.shouldCompactProactively(ctx.session())) {
+                log.info("AgentLoop round {}/{} for issue #{}: proactive compaction triggered (usage: {}%)",
+                        round, budget.maxRounds(), ctx.issueNumber(),
+                        String.format("%.1f", tokenTracker.usageFraction(ctx.session()) * 100));
+                compactor.compact(history);
+            }
 
             StepDecision decision;
             try {
@@ -128,21 +139,24 @@ public final class AgentLoop {
                 log.debug("AgentLoop round {}/{} for issue #{}: strategy decided CONTINUE_WITH_TOOL_RESULTS ({} results)",
                         round, budget.maxRounds(), ctx.issueNumber(), nativeContinue.results().size());
                 for (StepDecision.ToolCallResult r : nativeContinue.results()) {
+                    String truncated = truncator.truncate(r.resultText());
                     history.add(AiMessage.builder()
                             .role("tool")
                             .toolCallId(r.toolCallId())
-                            .toolResult(r.resultText())
+                            .toolResult(truncated)
                             .build());
                     // Persist a textual marker in the session log so post-hoc review still shows
                     // the tool flow. Full structured replay is intentionally out of scope here.
                     sessionService.addMessage(ctx.session(), "tool",
-                            "[" + r.toolCallId() + "] " + r.resultText());
+                            "[" + r.toolCallId() + "] " + truncated);
                 }
                 String follow = nativeContinue.nextUserMessage();
                 currentMessage = (follow == null || follow.isEmpty()) ? "" : follow;
                 if (!currentMessage.isEmpty()) {
                     sessionService.addMessage(ctx.session(), "user", currentMessage);
                 }
+                // Compact in-memory history if it exceeds the budget
+                compactor.compact(history);
                 continue;
             }
 
@@ -151,6 +165,8 @@ public final class AgentLoop {
             String next = ((StepDecision.Continue) decision).nextUserMessage();
             currentMessage = next;
             sessionService.addMessage(ctx.session(), "user", currentMessage);
+            // Compact in-memory history if it exceeds the budget
+            compactor.compact(history);
         }
 
         log.warn("AgentLoop exhausted {} rounds without final decision (issue #{})",
@@ -177,6 +193,47 @@ public final class AgentLoop {
 
     private static String modeTag(ToolingMode mode) {
         return mode == ToolingMode.NATIVE ? "native" : "legacy";
+    }
+
+    /**
+     * Calls the AI with retry-and-compact logic for "prompt too long" errors.
+     * When the provider rejects the request because the prompt exceeds its
+     * context window, this method aggressively compacts the in-memory history
+     * (keeping only the last 2 compaction units) and retries once.
+     *
+     * <p>If the second attempt also fails with a prompt-too-long error, the
+     * exception is re-thrown to the caller.</p>
+     *
+     * @return the {@link ChatTurn} from the successful AI call
+     * @throws HttpClientErrorException if the retry also fails
+     */
+    private ChatTurn callAiWithRetry(List<AiMessage> history, String currentMessage,
+                                     List<ToolDescriptor> tools, String systemPrompt,
+                                     ToolingMode resolvedMode) {
+        int maxRetries = 2;
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                if (resolvedMode == ToolingMode.NATIVE) {
+                    return aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,
+                            null, budget.maxTokensPerCall());
+                } else {
+                    String text = aiClient.chat(history, currentMessage, systemPrompt,
+                            null, budget.maxTokensPerCall());
+                    return ChatTurn.text(text);
+                }
+            } catch (HttpClientErrorException e) {
+                if (!aiClient.isPromptTooLongError(e) || attempt == maxRetries) {
+                    throw e;
+                }
+                log.warn("AgentLoop: AI call failed with prompt-too-long error on attempt {}/{}. "
+                        + "Aggressively compacting history and retrying. Error: {}",
+                        attempt, maxRetries, e.getMessage());
+                // Aggressive compaction: keep only the last 2 compaction units
+                compactor.compactAggressively(history);
+            }
+        }
+        // Unreachable, but keeps the compiler happy
+        throw new IllegalStateException("callAiWithRetry: exceeded max retries");
     }
 }
 

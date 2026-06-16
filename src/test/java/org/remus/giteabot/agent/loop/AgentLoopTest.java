@@ -40,7 +40,9 @@ class AgentLoopTest {
     @Test
     void run_strategyFinishesImmediately_singleAiCall() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(5, 3, 3, 8000));
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
         when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), eq(8000)))
                 .thenReturn("ai-final");
 
@@ -68,7 +70,9 @@ class AgentLoopTest {
     @Test
     void run_strategyContinuesOnce_thenFinishes_synchronizesHistoryBetweenCalls() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(5, 3, 3, 8000));
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
         // Snapshot the history list passed to each call (Mockito captures a live reference).
         java.util.List<java.util.List<AiMessage>> historySnapshots = new java.util.ArrayList<>();
         java.util.List<String> userMessages = new java.util.ArrayList<>();
@@ -110,7 +114,9 @@ class AgentLoopTest {
     @Test
     void run_budgetExhausted_invokesStrategyHook_returnsItsOutcome() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(2, 3, 3, 8000));
+                new AgentBudget(2, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
         when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
                 .thenReturn("a", "b");
 

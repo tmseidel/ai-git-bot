@@ -53,7 +53,7 @@ public final class StubAiClient implements AiClient {
                     toJson(spec.args()),
                     Map.of()));
         }
-        scriptedTurns.add(new ChatTurn("", tcalls, StopReason.TOOL_USE));
+        scriptedTurns.add(new ChatTurn("", tcalls, StopReason.TOOL_USE, 0L, 0L));
         return this;
     }
 

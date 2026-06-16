@@ -158,7 +158,9 @@ public class AgentReviewService {
         // model can always produce a final review turn after its last tool call.
         int hardCap = Math.max(budgetCfg.getMaxRounds(), rounds + 2);
         AgentBudget budget = new AgentBudget(hardCap, budgetCfg.getMaxContextRounds(),
-                budgetCfg.getMaxValidationRetries(), budgetCfg.getMaxTokensPerCall());
+                budgetCfg.getMaxValidationRetries(), budgetCfg.getMaxTokensPerCall(),
+                budgetCfg.getMaxToolResultChars(), budgetCfg.getMaxHistoryChars(),
+                context.contextWindowTokens(), budgetCfg.getProactiveCompactionThreshold());
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);

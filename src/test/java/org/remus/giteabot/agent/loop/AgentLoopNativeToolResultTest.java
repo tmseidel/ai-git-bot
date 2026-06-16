@@ -65,15 +65,17 @@ class AgentLoopNativeToolResultTest {
         // Round 1: model emits two tool_calls.
         ToolCall call1 = new ToolCall("call_aaa", "cat", null);
         ToolCall call2 = new ToolCall("call_bbb", "rg",  null);
-        ChatTurn round1 = new ChatTurn("inspecting…", List.of(call1, call2), StopReason.TOOL_USE);
+        ChatTurn round1 = new ChatTurn("inspecting…", List.of(call1, call2), StopReason.TOOL_USE, 0L, 0L);
         // Round 2: model returns final text and we Finish.
-        ChatTurn round2 = new ChatTurn("done", List.of(), StopReason.END_TURN);
+        ChatTurn round2 = new ChatTurn("done", List.of(), StopReason.END_TURN, 0L, 0L);
 
         when(aiClient.chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt()))
                 .thenReturn(round1, round2);
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(3, 2, 2, 4000));
+                new AgentBudget(3, 2, 2, 4000,
+                        8_000, 120_000,
+                        200_000, 0.7));
 
         AtomicInteger callCount = new AtomicInteger();
         AgentStrategy strategy = new AgentStrategy() {

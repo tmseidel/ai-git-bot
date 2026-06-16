@@ -117,8 +117,12 @@ public abstract class AbstractAiClient implements AiClient {
 
     /**
      * Detects whether a client error indicates the prompt exceeded the model's input limit.
+     * Subclasses override with provider-specific patterns.
      */
-    protected abstract boolean isPromptTooLongError(HttpClientErrorException e);
+    @Override
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
+        return AiClient.super.isPromptTooLongError(e);
+    }
 
     @Override
     public String reviewDiff(String prTitle, String prBody, String diff) {

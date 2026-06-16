@@ -84,6 +84,7 @@ public class IssueImplementationService {
     private final BranchSwitcher branchSwitcher;
     private final AgentToolRouter toolRouter;
     private final CriticAgent criticAgent;
+    private final int contextWindowTokens;
 
     public IssueImplementationService(IssueImplementationContext context,
                                       AgentCollaborators collaborators) {
@@ -105,6 +106,7 @@ public class IssueImplementationService {
         this.mcpToolCatalog = context.mcpToolCatalog();
         this.systemPromptAssembler = new SystemPromptAssembler();
         this.allowedBuiltinTools = context.allowedBuiltinTools();
+        this.contextWindowTokens = context.contextWindowTokens();
 
         this.responseParser = new AiResponseParser();
         this.promptBuilder = new AgentPromptBuilder(agentConfig != null ? agentConfig.getContext() : null);
@@ -315,7 +317,9 @@ public class IssueImplementationService {
         int hardCap = Math.max(budgetCfg.getMaxRounds(),
                 maxRetries + maxToolRounds + budgetCfg.getMaxContextRounds() + 2 /* slack */);
         AgentBudget budget = new AgentBudget(hardCap, budgetCfg.getMaxContextRounds(),
-                maxRetries, budgetCfg.getMaxTokensPerCall());
+                maxRetries, budgetCfg.getMaxTokensPerCall(),
+                budgetCfg.getMaxToolResultChars(), budgetCfg.getMaxHistoryChars(),
+                contextWindowTokens, budgetCfg.getProactiveCompactionThreshold());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(
                 session, owner, repo, issueNumber, workspaceDir, initialContextBranch);
@@ -363,6 +367,10 @@ public class IssueImplementationService {
             }
 
             sessionService.setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
+
+            // Compact persisted history before starting a new agent run to prevent
+            // unbounded growth across follow-up sessions.
+            sessionService.compactContextWindow(session);
 
             String branchName    = session.getBranchName();
             String defaultBranch = repositoryClient.getDefaultBranch(owner, repo);

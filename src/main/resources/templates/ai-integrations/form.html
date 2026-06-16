@@ -77,6 +77,14 @@
                                    min="1" required/>
                         </div>
                         <div class="col-md-3">
+                            <label for="contextWindowTokens" class="form-label">Context Window (tokens)</label>
+                            <input type="number" class="form-control" id="contextWindowTokens"
+                                   th:field="*{contextWindowTokens}" min="1" required/>
+                            <div class="form-text">
+                                Model's total context window size. Used for proactive history compaction.
+                            </div>
+                        </div>
+                        <div class="col-md-3">
                             <label for="maxDiffCharsPerChunk" class="form-label">Max Diff Chars/Chunk</label>
                             <input type="number" class="form-control" id="maxDiffCharsPerChunk"
                                    th:field="*{maxDiffCharsPerChunk}" min="1" required/>

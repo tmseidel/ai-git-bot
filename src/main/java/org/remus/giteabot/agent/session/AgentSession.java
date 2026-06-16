@@ -120,6 +120,22 @@ public class AgentSession {
     @Column(name = "last_plan_at")
     private Instant lastPlanAt;
 
+    /**
+     * Cumulative input tokens consumed across all AI calls in this session.
+     * Used for cost monitoring only — <em>not</em> for context-window pressure,
+     * since each call's input already includes the full history and summing
+     * across rounds grows superlinearly.
+     */
+    @Column(name = "total_input_tokens", nullable = false)
+    private long totalInputTokens = 0L;
+
+    /**
+     * Cumulative output tokens generated across all AI calls in this session.
+     * Used for cost monitoring.
+     */
+    @Column(name = "total_output_tokens", nullable = false)
+    private long totalOutputTokens = 0L;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -149,6 +165,14 @@ public class AgentSession {
 
     public void addMessage(String role, String content) {
         messages.add(new ConversationMessage(role, content));
+    }
+
+    /**
+     * Accumulates token usage from a single AI call.
+     */
+    public void accumulateTokens(long inputTokens, long outputTokens) {
+        this.totalInputTokens += inputTokens;
+        this.totalOutputTokens += outputTokens;
     }
 
 

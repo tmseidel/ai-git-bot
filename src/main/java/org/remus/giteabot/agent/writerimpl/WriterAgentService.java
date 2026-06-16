@@ -60,6 +60,7 @@ public class WriterAgentService {
     private final WriterPromptBuilder promptBuilder = new WriterPromptBuilder();
     private final WriterResponseParser responseParser = new WriterResponseParser();
     private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler();
+    private final int contextWindowTokens;
 
 
     public WriterAgentService(RepositoryApiClient repositoryClient,
@@ -75,7 +76,8 @@ public class WriterAgentService {
                               McpOrchestrationService mcpOrchestrationService,
                               McpConfiguration mcpConfiguration,
                               McpToolCatalog mcpToolCatalog,
-                              java.util.Set<String> allowedBuiltinTools) {
+                              java.util.Set<String> allowedBuiltinTools,
+                              int contextWindowTokens) {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.promptService = promptService;
@@ -91,6 +93,7 @@ public class WriterAgentService {
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog, mcpOrchestrationService,
                 mcpConfiguration, this.mcpToolCatalog, repositoryClient, allowedBuiltinTools);
+        this.contextWindowTokens = contextWindowTokens;
     }
 
     public void handleIssueAssigned(WebhookPayload payload) {
@@ -199,6 +202,9 @@ public class WriterAgentService {
             return;
         }
         session = claimedSession.get();
+        // Compact persisted history before starting a new writer run to prevent
+        // unbounded growth across follow-up sessions.
+        sessionService.compactContextWindow(session);
         Path workspaceDir = null;
         try {
             String baseBranch = resolveBaseBranch(owner, repo, payload, session);
@@ -245,7 +251,9 @@ public class WriterAgentService {
         // terminal answer after exhausting context. Mirror that by setting the loop's hard
         // cap to maxToolRounds + 1.
         AgentBudget budget = new AgentBudget(
-                maxToolRounds() + 1, maxToolRounds(), 0, agentConfig.getBudget().getMaxTokensPerCall());
+                maxToolRounds() + 1, maxToolRounds(), 0, agentConfig.getBudget().getMaxTokensPerCall(),
+                agentConfig.getBudget().getMaxToolResultChars(), agentConfig.getBudget().getMaxHistoryChars(),
+                contextWindowTokens, agentConfig.getBudget().getProactiveCompactionThreshold());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(
                 session, owner, repo, issueNumber, workspaceDir, session.getBranchName());

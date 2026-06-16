@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -17,6 +18,21 @@ import java.util.Optional;
 @Slf4j
 @Service
 public class AgentSessionService {
+
+    /**
+     * Threshold for total content size (in characters) that triggers compaction
+     * of persisted agent session history. Set higher than the classic
+     * {@link org.remus.giteabot.session.SessionService} threshold (50k) because
+     * agentic workflows produce longer conversations.
+     */
+    private static final int COMPACT_THRESHOLD_CHARS = 80_000;
+
+    /**
+     * Maximum number of messages to retain in persisted context after compaction.
+     * Set higher than classic (4) because agentic follow-up runs need more
+     * continuity from the previous conversation.
+     */
+    private static final int MAX_MESSAGES_AFTER_COMPACT = 8;
 
     private final AgentSessionRepository repository;
 
@@ -120,6 +136,111 @@ public class AgentSessionService {
     public AgentSession setStatus(AgentSession session, AgentSession.AgentSessionStatus status) {
         session.setStatus(status);
         return repository.save(session);
+    }
+
+    /**
+     * Persists cumulative token usage for an agent session.
+     *
+     * @param session the agent session
+     * @param totalInputTokens cumulative input tokens
+     * @param totalOutputTokens cumulative output tokens
+     */
+    @Transactional
+    public void recordTokenUsage(AgentSession session, long totalInputTokens, long totalOutputTokens) {
+        session.setTotalInputTokens(totalInputTokens);
+        session.setTotalOutputTokens(totalOutputTokens);
+        repository.save(session);
+    }
+
+    /**
+     * Compacts the persisted agent session history when total content size
+     * exceeds {@value #COMPACT_THRESHOLD_CHARS} characters. Keeps the
+     * {@value #MAX_MESSAGES_AFTER_COMPACT} most recent messages and replaces
+     * the removed portion with a summary placeholder.
+     *
+     * <p>This is the agentic equivalent of
+     * {@link org.remus.giteabot.session.SessionService#compactContextWindow}.
+     * It should be called between agent runs (e.g., after a follow-up comment
+     * triggers a new coding round) to prevent the DB-persisted history from
+     * growing without bound across sessions.</p>
+     *
+     * <p>Tool-role messages and blank-content assistant messages are already
+     * dropped by {@link #toAiMessages} during replay, so this method only
+     * operates on the meaningful user/assistant messages.</p>
+     *
+     * @param session the session to compact (mutated in place and saved)
+     * @return the saved session
+     */
+    @Transactional
+    public AgentSession compactContextWindow(AgentSession session) {
+        List<ConversationMessage> sorted = new ArrayList<>(session.getMessages());
+        sorted.sort(Comparator.comparing(ConversationMessage::getCreatedAt,
+                Comparator.nullsFirst(Comparator.naturalOrder())));
+
+        if (sorted.size() <= MAX_MESSAGES_AFTER_COMPACT) {
+            log.debug("Agent session {} has {} messages, no compaction needed",
+                    session.getId(), sorted.size());
+            return session;
+        }
+
+        int totalChars = sorted.stream()
+                .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0)
+                .sum();
+
+        if (totalChars < COMPACT_THRESHOLD_CHARS) {
+            log.debug("Agent session {} has {} chars, below threshold {}, no compaction needed",
+                    session.getId(), totalChars, COMPACT_THRESHOLD_CHARS);
+            return session;
+        }
+
+        log.info("Compacting agent session {} context window: {} messages, {} chars -> keeping last {}",
+                session.getId(), sorted.size(), totalChars, MAX_MESSAGES_AFTER_COMPACT);
+
+        // Identify messages to remove (all but the most recent N)
+        int removeCount = sorted.size() - MAX_MESSAGES_AFTER_COMPACT;
+        List<ConversationMessage> toRemove = sorted.subList(0, removeCount);
+
+        // Build a summary of what was removed
+        String summary = buildAgentContextSummary(toRemove);
+
+        // Remove old messages from the Set (orphanRemoval = true will DELETE from DB)
+        session.getMessages().removeAll(toRemove);
+
+        // Add a summary message as the first message in the surviving history
+        if (!summary.isBlank()) {
+            session.addMessage("user", summary);
+        }
+
+        int newTotalChars = session.getMessages().stream()
+                .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0)
+                .sum();
+
+        log.info("Agent session {} compacted: {} messages, {} chars remaining",
+                session.getId(), session.getMessages().size(), newTotalChars);
+
+        return repository.save(session);
+    }
+
+    /**
+     * Builds a brief summary of removed conversation context for the agentic
+     * workflow. Tailored to coding sessions (references files, PRs, tool calls).
+     */
+    private String buildAgentContextSummary(List<ConversationMessage> removedMessages) {
+        if (removedMessages.isEmpty()) {
+            return "";
+        }
+
+        long userMessages = removedMessages.stream()
+                .filter(m -> "user".equals(m.getRole())).count();
+        long assistantMessages = removedMessages.stream()
+                .filter(m -> "assistant".equals(m.getRole())).count();
+
+        return String.format(
+                "[Previous agent session context was compacted to save space. "
+                + "This is a coding agent session. "
+                + "%d previous exchanges were summarized. "
+                + "You can re-read files or re-run tools if you need to recover earlier context.]",
+                Math.min(userMessages, assistantMessages));
     }
 
 
