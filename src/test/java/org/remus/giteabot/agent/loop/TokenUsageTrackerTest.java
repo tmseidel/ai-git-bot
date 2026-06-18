@@ -4,10 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.agent.session.AgentSession;
-import org.remus.giteabot.agent.session.AgentSessionService;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 /**
  * Tests for {@link TokenUsageTracker}, focusing on the corrected threshold
@@ -16,12 +14,10 @@ import static org.mockito.Mockito.*;
  */
 class TokenUsageTrackerTest {
 
-    private AgentSessionService sessionService;
     private AgentSession session;
 
     @BeforeEach
     void setUp() {
-        sessionService = mock(AgentSessionService.class);
         session = new AgentSession();
         session.setId(1L);
         session.setRepoOwner("test");
@@ -31,19 +27,18 @@ class TokenUsageTrackerTest {
 
     @Test
     void record_withExplicitTokens_usesProvidedValues() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
         ChatTurn turn = new ChatTurn("response", null, null, 1000L, 500L);
 
         tracker.record(session, turn, 10_000);
 
         assertEquals(1000L, session.getTotalInputTokens());
         assertEquals(500L, session.getTotalOutputTokens());
-        verify(sessionService).recordTokenUsage(session, 1000L, 500L);
     }
 
     @Test
     void record_withoutExplicitTokens_estimatesFromChars() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
         ChatTurn turn = ChatTurn.text("response"); // 8 chars -> 2 tokens
 
         tracker.record(session, turn, 4000); // 4000 chars -> 1000 tokens
@@ -54,7 +49,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void record_accumulatesTokensAcrossCalls() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         ChatTurn turn1 = new ChatTurn("r1", null, null, 1000L, 100L);
         ChatTurn turn2 = new ChatTurn("r2", null, null, 2000L, 200L);
@@ -68,7 +63,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void shouldCompactProactively_belowThreshold_returnsFalse() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // Record a call with 100k input tokens (50% of 200k context)
         ChatTurn turn = new ChatTurn("r", null, null, 100_000L, 1000L);
@@ -79,7 +74,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void shouldCompactProactively_aboveThreshold_returnsTrue() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // Record a call with 150k input tokens (75% of 200k context)
         ChatTurn turn = new ChatTurn("r", null, null, 150_000L, 1000L);
@@ -90,7 +85,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void shouldCompactProactively_usesLastCallNotCumulative() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // First call: 50k tokens
         ChatTurn turn1 = new ChatTurn("r1", null, null, 50_000L, 1000L);
@@ -109,7 +104,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void shouldCompactProactively_largeLastCall_triggers() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // Multiple small calls
         for (int i = 0; i < 10; i++) {
@@ -127,14 +122,14 @@ class TokenUsageTrackerTest {
 
     @Test
     void shouldCompactProactively_nullSession_returnsFalse() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         assertFalse(tracker.shouldCompactProactively(null));
     }
 
     @Test
     void shouldCompactProactively_zeroContextWindow_returnsFalse() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 0, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(0, 0.7);
 
         ChatTurn turn = new ChatTurn("r", null, null, 150_000L, 1000L);
         tracker.record(session, turn, 600_000);
@@ -144,7 +139,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void usageFraction_belowThreshold_returnsCorrectFraction() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         ChatTurn turn = new ChatTurn("r", null, null, 100_000L, 1000L);
         tracker.record(session, turn, 400_000);
@@ -154,7 +149,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void usageFraction_zeroContextWindow_returnsZero() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 0, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(0, 0.7);
 
         ChatTurn turn = new ChatTurn("r", null, null, 100_000L, 1000L);
         tracker.record(session, turn, 400_000);
@@ -164,7 +159,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void usageFraction_reflectsLastCallOnly() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // Large call
         ChatTurn large = new ChatTurn("r", null, null, 150_000L, 1000L);
@@ -181,18 +176,16 @@ class TokenUsageTrackerTest {
 
     @Test
     void record_nullSession_noOp() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
         ChatTurn turn = new ChatTurn("r", null, null, 1000L, 100L);
 
-        // Should not throw
-        tracker.record(null, turn, 4000);
-
-        verifyNoInteractions(sessionService);
+        // Should not throw and should leave the (null) session untouched
+        assertDoesNotThrow(() -> tracker.record(null, turn, 4000));
     }
 
     @Test
     void threshold_atExactBoundary_triggers() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // Exactly at 70%
         ChatTurn turn = new ChatTurn("r", null, null, 140_000L, 1000L);
@@ -203,7 +196,7 @@ class TokenUsageTrackerTest {
 
     @Test
     void threshold_justBelowBoundary_doesNotTrigger() {
-        TokenUsageTracker tracker = new TokenUsageTracker(sessionService, 200_000, 0.7);
+        TokenUsageTracker tracker = new TokenUsageTracker(200_000, 0.7);
 
         // Just below 70%
         ChatTurn turn = new ChatTurn("r", null, null, 139_999L, 1000L);

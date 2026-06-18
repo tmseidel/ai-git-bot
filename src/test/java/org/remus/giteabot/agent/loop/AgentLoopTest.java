@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 
@@ -62,9 +63,11 @@ class AgentLoopTest {
         assertThat(outcome.success()).isTrue();
         assertThat(outcome.payload()).isEqualTo("payload");
         verify(aiClient, times(1)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
-        // Both initial user message and the assistant response are persisted.
-        verify(sessionService).addMessage(session, "user", "go");
-        verify(sessionService).addMessage(session, "assistant", "ai-final");
+        // The round is flushed once with both the initial user message and the
+        // assistant response, instead of one transaction per message.
+        verify(sessionService).flushMessages(any(), eq(List.of(
+                new PendingMessage("user", "go"),
+                new PendingMessage("assistant", "ai-final"))), anyLong(), anyLong());
     }
 
     @Test
@@ -107,8 +110,12 @@ class AgentLoopTest {
         assertThat(historySnapshots.get(1).get(1).getContent()).isEqualTo("first-ai");
         assertThat(userMessages.get(1)).isEqualTo("follow-up-prompt");
 
-        // Persisted session also receives the follow-up user prompt.
-        verify(sessionService).addMessage(session, "user", "follow-up-prompt");
+        // The first round is flushed as a single batch containing the kickoff
+        // user message, the assistant turn, and the follow-up user prompt.
+        verify(sessionService).flushMessages(any(), eq(List.of(
+                new PendingMessage("user", "kickoff"),
+                new PendingMessage("assistant", "first-ai"),
+                new PendingMessage("user", "follow-up-prompt"))), anyLong(), anyLong());
     }
 
     @Test

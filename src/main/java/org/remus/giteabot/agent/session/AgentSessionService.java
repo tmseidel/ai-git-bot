@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -87,16 +88,40 @@ public class AgentSessionService {
         return repository.findByRepoOwnerAndRepoNameAndPrNumber(owner, repo, prNumber);
     }
 
+    /**
+     * Persists a batch of messages and the latest cumulative token counts for a
+     * single agent-loop round in one transaction. This replaces the per-message
+     * {@link #addMessage} calls (and the separate token-usage write) that the
+     * loop previously issued, collapsing N micro-transactions per round into one.
+     *
+     * <p>The messages are appended to a freshly-fetched managed entity, so a
+     * (possibly detached) caller object whose {@code messages} collection may
+     * reference rows deleted by a prior compaction is never traversed by
+     * {@code merge()}. Callers must rebind to the returned managed entity.</p>
+     *
+     * @param sessionId         id of the session to update
+     * @param messages          the round's pending messages, in order
+     * @param totalInputTokens  cumulative input tokens to persist
+     * @param totalOutputTokens cumulative output tokens to persist
+     * @return the managed entity with the appended messages and updated token counts
+     */
     @Transactional
-    public AgentSession addMessage(AgentSession session, String role, String content) {
-        AgentSession managed = repository.getReferenceById(session.getId());
-        if (managed == session) {
-            managed.addMessage(role, content);
-        } else {
-            session.addMessage(role, content);
-            managed.addMessage(role, content);
+    public AgentSession flushMessages(Long sessionId, List<PendingMessage> messages,
+                                      long totalInputTokens, long totalOutputTokens) {
+        AgentSession managed = repository.getReferenceById(sessionId);
+        // Stamp call-ordered, strictly-increasing timestamps (1µs apart, which
+        // survives microsecond-resolution timestamp columns). The messages are an
+        // unordered Set replayed by createdAt, so relying on the @PrePersist
+        // default would scramble a batch into hash-iteration order. Subsequent
+        // rounds flush seconds later, so cross-round order follows wall-clock.
+        Instant base = Instant.now();
+        for (int i = 0; i < messages.size(); i++) {
+            PendingMessage msg = messages.get(i);
+            managed.addMessage(msg.role(), msg.content(), base.plus(i, ChronoUnit.MICROS));
         }
-        return session;
+        managed.setTotalInputTokens(totalInputTokens);
+        managed.setTotalOutputTokens(totalOutputTokens);
+        return managed; // dirty checking flushes inserts + token counts on commit
     }
 
     /**
@@ -105,76 +130,52 @@ public class AgentSessionService {
      * the latest plan in O(1) instead of re-parsing the entire conversation
      * history.
      *
-     * @param session the session to update (mutated in place and saved)
+     * @param session the session to update (identified by its id)
      * @param summary short human-readable summary (typically {@code plan.summary()}); may be {@code null}
      * @param rawJson raw JSON representation of the plan; may be {@code null}
-     * @return the saved entity
+     * @return the managed entity with the updated plan
      */
     @Transactional
     public AgentSession recordPlan(AgentSession session, String summary, String rawJson) {
-        // Mutate caller's object so subsequent reads (e.g. getLastPlanFromSession)
-        // see the new values, and persist via a managed proxy to avoid merge() on
-        // a detached entity whose messages collection may reference deleted rows.
-        session.setLastPlanSummary(summary);
-        session.setLastPlanJson(rawJson);
-        session.setLastPlanAt(Instant.now());
+        // Mutate only a managed proxy and return it. Persisting via the managed
+        // entity avoids merge() on a (possibly detached) caller object whose
+        // messages collection may reference rows deleted by a prior compaction.
+        // Callers must rebind to the returned entity to observe the new values.
         AgentSession managed = repository.getReferenceById(session.getId());
         managed.setLastPlanSummary(summary);
         managed.setLastPlanJson(rawJson);
-        managed.setLastPlanAt(session.getLastPlanAt());
-        return session;
+        managed.setLastPlanAt(Instant.now());
+        return managed;
     }
 
     @Transactional
     public AgentSession setBranchName(AgentSession session, String branchName) {
-        session.setBranchName(branchName);
         AgentSession managed = repository.getReferenceById(session.getId());
         managed.setBranchName(branchName);
-        return session;
+        return managed;
     }
 
     @Transactional
     public AgentSession setPrNumber(AgentSession session, Long prNumber) {
-        session.setPrNumber(prNumber);
-        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
         AgentSession managed = repository.getReferenceById(session.getId());
         managed.setPrNumber(prNumber);
         managed.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
-        return session;
+        return managed;
     }
 
     @Transactional
     public AgentSession setGeneratedIssueNumber(AgentSession session, Long generatedIssueNumber) {
-        session.setGeneratedIssueNumber(generatedIssueNumber);
-        session.setStatus(AgentSession.AgentSessionStatus.ISSUE_CREATED);
         AgentSession managed = repository.getReferenceById(session.getId());
         managed.setGeneratedIssueNumber(generatedIssueNumber);
         managed.setStatus(AgentSession.AgentSessionStatus.ISSUE_CREATED);
-        return session;
+        return managed;
     }
 
     @Transactional
     public AgentSession setStatus(AgentSession session, AgentSession.AgentSessionStatus status) {
-        session.setStatus(status);
         AgentSession managed = repository.getReferenceById(session.getId());
         managed.setStatus(status);
-        return session;
-    }
-
-    /**
-     * Persists cumulative token usage for an agent session.
-     *
-     * @param session the agent session
-     * @param totalInputTokens cumulative input tokens
-     * @param totalOutputTokens cumulative output tokens
-     */
-    @Transactional
-    public void recordTokenUsage(AgentSession session, long totalInputTokens, long totalOutputTokens) {
-        session.setTotalInputTokens(totalInputTokens);
-        session.setTotalOutputTokens(totalOutputTokens);
-        AgentSession managed = repository.getReferenceById(session.getId());
-        managed.setTotalInputTokens(totalInputTokens);
-        managed.setTotalOutputTokens(totalOutputTokens);
+        return managed;
     }
 
     /**

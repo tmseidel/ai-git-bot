@@ -75,6 +75,15 @@ class IssueImplementationServiceTest {
         service = new IssueImplementationService(context, collaborators(agentConfig));
 
         lenient().when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
+        // createSession returns a managed entity with an id in production; stub it
+        // so the AgentRunContext carries a non-null, identified session.
+        lenient().when(sessionService.createSession(anyString(), anyString(), any(), anyString()))
+                .thenAnswer(inv -> {
+                    AgentSession created = new AgentSession(
+                            inv.getArgument(0), inv.getArgument(1), inv.getArgument(2), inv.getArgument(3));
+                    created.setId(1L);
+                    return created;
+                });
     }
 
     // ---- handleIssueAssigned tests ----

@@ -12,8 +12,12 @@ import static org.mockito.Mockito.when;
 
 /**
  * Step 7.1 — verifies that {@link AgentSessionService#recordPlan} writes the
- * latest plan summary, raw JSON and timestamp to both the caller's object
- * (for in-process reads) and the managed proxy (for DB persistence).
+ * latest plan summary, raw JSON and timestamp to the managed proxy (for DB
+ * persistence) and returns that managed entity.
+ *
+ * <p>Phase 1 of the AgentSession state cleanup removed the dual-mutation
+ * workaround: the caller's (possibly detached) object is no longer mutated,
+ * so callers must rebind to the returned managed entity.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class AgentSessionServicePlanPersistenceTest {
@@ -21,7 +25,7 @@ class AgentSessionServicePlanPersistenceTest {
     @Mock private AgentSessionRepository repository;
 
     @Test
-    void recordPlanWritesAllThreeColumnsAndSaves() {
+    void recordPlanWritesAllThreeColumnsToManagedEntityAndReturnsIt() {
         AgentSession managed = new AgentSession("o", "r", 1L, "title");
         managed.setId(42L);
         when(repository.getReferenceById(42L)).thenReturn(managed);
@@ -33,16 +37,16 @@ class AgentSessionServicePlanPersistenceTest {
         Instant before = Instant.now();
         AgentSession result = svc.recordPlan(session, "short summary", "{\"summary\":\"short summary\"}");
 
-        // Caller's object is mutated and returned
-        assertThat(result).isSameAs(session);
+        // The managed entity is mutated and returned
+        assertThat(result).isSameAs(managed);
         assertThat(result.getLastPlanSummary()).isEqualTo("short summary");
         assertThat(result.getLastPlanJson()).isEqualTo("{\"summary\":\"short summary\"}");
         assertThat(result.getLastPlanAt()).isAfterOrEqualTo(before);
 
-        // Managed proxy also updated for DB persistence
-        assertThat(managed.getLastPlanSummary()).isEqualTo("short summary");
-        assertThat(managed.getLastPlanJson()).isEqualTo("{\"summary\":\"short summary\"}");
-        assertThat(managed.getLastPlanAt()).isAfterOrEqualTo(before);
+        // The caller's detached object is no longer mutated
+        assertThat(session.getLastPlanSummary()).isNull();
+        assertThat(session.getLastPlanJson()).isNull();
+        assertThat(session.getLastPlanAt()).isNull();
     }
 
     @Test
@@ -58,9 +62,7 @@ class AgentSessionServicePlanPersistenceTest {
         svc.recordPlan(session, "first", "{\"v\":1}");
         svc.recordPlan(session, "second", "{\"v\":2}");
 
-        // Both caller's object and managed proxy reflect the latest values
-        assertThat(session.getLastPlanSummary()).isEqualTo("second");
-        assertThat(session.getLastPlanJson()).isEqualTo("{\"v\":2}");
+        // The managed proxy reflects the latest values
         assertThat(managed.getLastPlanSummary()).isEqualTo("second");
         assertThat(managed.getLastPlanJson()).isEqualTo("{\"v\":2}");
     }

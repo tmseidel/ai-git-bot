@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.loop;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.agent.shared.AgentMetricsHolder;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
@@ -51,7 +52,7 @@ public final class AgentLoop {
         this.truncator = new ToolResultTruncator(budget.maxToolResultChars());
         this.compactor = new HistoryCompactor(budget.maxHistoryChars(), 4);
         this.tokenTracker = new TokenUsageTracker(
-                sessionService, budget.contextWindowTokens(), budget.proactiveCompactionThreshold());
+                budget.contextWindowTokens(), budget.proactiveCompactionThreshold());
     }
 
     public AgentBudget budget() {
@@ -65,7 +66,11 @@ public final class AgentLoop {
     public LoopOutcome run(AgentRunContext ctx, String initialUserMessage, AgentStrategy strategy) {
         String systemPrompt = strategy.systemPrompt();
         List<AiMessage> history = new ArrayList<>(sessionService.toAiMessages(ctx.session()));
-        sessionService.addMessage(ctx.session(), "user", initialUserMessage);
+        // Messages produced during a round are accumulated here and persisted in a
+        // single transaction at the round boundary (see flushRound) instead of one
+        // transaction per message.
+        List<PendingMessage> pending = new ArrayList<>();
+        pending.add(new PendingMessage("user", initialUserMessage));
         String currentMessage = initialUserMessage;
 
         ToolingMode resolvedMode = resolveMode(strategy);
@@ -95,9 +100,10 @@ public final class AgentLoop {
                     round, budget.maxRounds(), ctx.issueNumber(),
                     aiResponse == null ? 0 : aiResponse.length(),
                     turn.toolCalls().size(), turn.stopReason());
-            sessionService.addMessage(ctx.session(), "assistant", aiResponse);
+            pending.add(new PendingMessage("assistant", aiResponse));
 
-            // Track token usage and trigger proactive compaction if needed
+            // Track token usage (accumulated in-memory on the session; persisted by
+            // flushRound) and trigger proactive compaction if needed.
             int promptChars = currentMessage == null ? 0 : currentMessage.length();
             tokenTracker.record(ctx.session(), turn, promptChars);
             if (tokenTracker.shouldCompactProactively(ctx.session())) {
@@ -119,6 +125,7 @@ public final class AgentLoop {
             if (decision instanceof StepDecision.Finish finish) {
                 log.debug("AgentLoop round {}/{} for issue #{}: strategy decided FINISH",
                         round, budget.maxRounds(), ctx.issueNumber());
+                flushRound(ctx, pending);
                 return finish.outcome();
             }
             // The user message that drove this round and the assistant turn must always be
@@ -147,16 +154,17 @@ public final class AgentLoop {
                             .build());
                     // Persist a textual marker in the session log so post-hoc review still shows
                     // the tool flow. Full structured replay is intentionally out of scope here.
-                    sessionService.addMessage(ctx.session(), "tool",
-                            "[" + r.toolCallId() + "] " + truncated);
+                    pending.add(new PendingMessage("tool",
+                            "[" + r.toolCallId() + "] " + truncated));
                 }
                 String follow = nativeContinue.nextUserMessage();
                 currentMessage = (follow == null || follow.isEmpty()) ? "" : follow;
                 if (!currentMessage.isEmpty()) {
-                    sessionService.addMessage(ctx.session(), "user", currentMessage);
+                    pending.add(new PendingMessage("user", currentMessage));
                 }
                 // Compact in-memory history if it exceeds the budget
                 compactor.compact(history);
+                flushRound(ctx, pending);
                 continue;
             }
 
@@ -164,14 +172,41 @@ public final class AgentLoop {
                     round, budget.maxRounds(), ctx.issueNumber());
             String next = ((StepDecision.Continue) decision).nextUserMessage();
             currentMessage = next;
-            sessionService.addMessage(ctx.session(), "user", currentMessage);
+            pending.add(new PendingMessage("user", currentMessage));
             // Compact in-memory history if it exceeds the budget
             compactor.compact(history);
+            flushRound(ctx, pending);
         }
 
         log.warn("AgentLoop exhausted {} rounds without final decision (issue #{})",
                 budget.maxRounds(), ctx.issueNumber());
         return strategy.onBudgetExhausted(ctx);
+    }
+
+    /**
+     * Persists the round's accumulated messages and the session's current
+     * cumulative token counts in a single transaction, then clears the pending
+     * buffer. A no-op when there is nothing to flush.
+     *
+     * <p>The context's session reference is intentionally <em>not</em> rebound to
+     * the returned managed entity: {@link AgentSessionService#flushMessages}
+     * re-fetches the row by id every round and the in-memory cumulative token
+     * totals accumulate on the stable session reference, so rebinding would only
+     * churn object identity (and risk lazy-loading a detached proxy) for no
+     * functional gain.</p>
+     */
+    private void flushRound(AgentRunContext ctx, List<PendingMessage> pending) {
+        if (pending.isEmpty()) {
+            return;
+        }
+        // Pass an immutable snapshot: the caller clears the live buffer right
+        // after this returns, and the service must not alias the loop's state.
+        sessionService.flushMessages(
+                ctx.session().getId(),
+                List.copyOf(pending),
+                ctx.session().getTotalInputTokens(),
+                ctx.session().getTotalOutputTokens());
+        pending.clear();
     }
 
     private ToolingMode resolveMode(AgentStrategy strategy) {
