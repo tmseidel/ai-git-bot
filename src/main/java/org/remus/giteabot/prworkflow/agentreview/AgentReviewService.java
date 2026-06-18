@@ -24,7 +24,6 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Core business logic of the agentic PR-review workflow. Not a Spring
@@ -119,7 +118,12 @@ public class AgentReviewService {
             String systemPrompt = resolveSystemPrompt();
             String userMessage = buildKickoffMessage(prTitle, prBody, diff);
 
-            AgentSession session = getOrCreateSession(owner, repo, prNumber, prTitle);
+            // The review agent is strictly read-only: the session is only a
+            // conversation-history carrier through the loop. Use a transient
+            // (unpersisted, id == null) session so no agent_sessions row is
+            // created and no transaction spans the clone + AI calls. The loop
+            // skips persistence for id-less sessions (see AgentLoop#flushRound).
+            AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds);
@@ -165,16 +169,6 @@ public class AgentReviewService {
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);
         return loop.run(ctx, userMessage, strategy);
-    }
-
-    /**
-     * Reuses an existing session for this PR number when present (avoids the
-     * {@code (owner, repo, issueNumber)} unique-constraint clash) and creates a
-     * fresh one otherwise.
-     */
-    private AgentSession getOrCreateSession(String owner, String repo, Long prNumber, String prTitle) {
-        Optional<AgentSession> existing = sessionService.getSessionByIssue(owner, repo, prNumber);
-        return existing.orElseGet(() -> sessionService.createSession(owner, repo, prNumber, prTitle));
     }
 
     private String resolveSystemPrompt() {

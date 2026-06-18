@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
@@ -20,8 +21,10 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -54,6 +57,7 @@ class AgentLoopNativeToolResultTest {
     @BeforeEach
     void setUp() {
         session = new AgentSession("owner", "repo", 11L, "issue title");
+        session.setId(1L); // persisted session — the loop flushes id-bearing sessions
         ctx = new AgentRunContext(session, "owner", "repo", 11L, Path.of("/tmp/ws"), "main");
         when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
@@ -137,11 +141,15 @@ class AgentLoopNativeToolResultTest {
         assertThat(toolB.getToolCallId()).isEqualTo("call_bbb");
         assertThat(toolB.getToolResult()).isEqualTo("rg found 3 matches");
 
-        // Session log received the tool results too (textual mirror).
-        verify(sessionService).addMessage(eq(session), eq("tool"),
-                eq("[call_aaa] file content of cat"));
-        verify(sessionService).addMessage(eq(session), eq("tool"),
-                eq("[call_bbb] rg found 3 matches"));
+        // The first round is flushed as one batch; the session log receives the
+        // tool results too (textual mirror), with no spurious follow-up user
+        // message since the strategy supplied none.
+        verify(sessionService).flushMessages(any(), eq(List.of(
+                new PendingMessage("user", "go"),
+                new PendingMessage("assistant", "inspecting…"),
+                new PendingMessage("tool", "[call_aaa] file content of cat"),
+                new PendingMessage("tool", "[call_bbb] rg found 3 matches"))),
+                anyLong(), anyLong());
     }
 }
 

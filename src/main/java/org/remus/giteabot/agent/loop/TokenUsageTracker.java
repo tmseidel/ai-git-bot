@@ -2,7 +2,6 @@ package org.remus.giteabot.agent.loop;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.session.AgentSession;
-import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.ChatTurn;
 
 /**
@@ -30,7 +29,6 @@ public final class TokenUsageTracker {
     /** Rough approximation: 1 token ≈ 4 characters for English text. */
     private static final int CHARS_PER_TOKEN = 4;
 
-    private final AgentSessionService sessionService;
     private final int contextWindowTokens;
     private final double proactiveCompactionThreshold;
 
@@ -42,14 +40,11 @@ public final class TokenUsageTracker {
     private long lastInputTokens;
 
     /**
-     * @param sessionService             the session service for persisting token counts
      * @param contextWindowTokens        the model's context window size in tokens
      * @param proactiveCompactionThreshold fraction (0.0-1.0) at which proactive
      *                                   compaction triggers (e.g. 0.7 = 70%)
      */
-    public TokenUsageTracker(AgentSessionService sessionService,
-                             int contextWindowTokens, double proactiveCompactionThreshold) {
-        this.sessionService = sessionService;
+    public TokenUsageTracker(int contextWindowTokens, double proactiveCompactionThreshold) {
         this.contextWindowTokens = contextWindowTokens;
         this.proactiveCompactionThreshold = proactiveCompactionThreshold;
     }
@@ -59,9 +54,11 @@ public final class TokenUsageTracker {
      * token counts, those are used. Otherwise, usage is estimated from character
      * counts.
      *
-     * <p>Cumulative totals are persisted on the session for cost/audit.
-     * The {@link #lastInputTokens} field is updated with this call's input
-     * tokens for the compaction decision.</p>
+     * <p>Cumulative totals are accumulated in-memory on the session for
+     * cost/audit; persistence is handled by the agent loop's per-round flush
+     * ({@code AgentSessionService.flushMessages}). The {@link #lastInputTokens}
+     * field is updated with this call's input tokens for the compaction
+     * decision.</p>
      *
      * @param session     the agent session to accumulate tokens into
      * @param turn        the AI response turn
@@ -88,7 +85,6 @@ public final class TokenUsageTracker {
 
         this.lastInputTokens = inputTokens;
         session.accumulateTokens(inputTokens, outputTokens);
-        sessionService.recordTokenUsage(session, session.getTotalInputTokens(), session.getTotalOutputTokens());
 
         log.debug("TokenUsageTracker: session={} round tokens: in={}, out={}, cumulative: in={}, out={}",
                 session.getId(), inputTokens, outputTokens,

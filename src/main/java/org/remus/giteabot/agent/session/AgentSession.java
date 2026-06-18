@@ -168,6 +168,20 @@ public class AgentSession {
     }
 
     /**
+     * Adds a message with an explicit creation timestamp. Because
+     * {@link #messages} is an unordered {@link java.util.Set} that is replayed
+     * in {@code createdAt} order, batch inserts (a whole agent-loop round
+     * flushed in one transaction) must carry distinct, call-ordered timestamps
+     * rather than relying on the {@code @PrePersist} default, which would stamp
+     * every row at flush time in hash-iteration order.
+     */
+    public void addMessage(String role, String content, java.time.Instant createdAt) {
+        ConversationMessage message = new ConversationMessage(role, content);
+        message.setCreatedAt(createdAt);
+        messages.add(message);
+    }
+
+    /**
      * Accumulates token usage from a single AI call.
      */
     public void accumulateTokens(long inputTokens, long outputTokens) {

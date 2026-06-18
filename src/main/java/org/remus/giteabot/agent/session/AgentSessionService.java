@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -87,10 +88,40 @@ public class AgentSessionService {
         return repository.findByRepoOwnerAndRepoNameAndPrNumber(owner, repo, prNumber);
     }
 
+    /**
+     * Persists a batch of messages and the latest cumulative token counts for a
+     * single agent-loop round in one transaction. This replaces the per-message
+     * {@link #addMessage} calls (and the separate token-usage write) that the
+     * loop previously issued, collapsing N micro-transactions per round into one.
+     *
+     * <p>The messages are appended to a freshly-fetched managed entity, so a
+     * (possibly detached) caller object whose {@code messages} collection may
+     * reference rows deleted by a prior compaction is never traversed by
+     * {@code merge()}. Callers must rebind to the returned managed entity.</p>
+     *
+     * @param sessionId         id of the session to update
+     * @param messages          the round's pending messages, in order
+     * @param totalInputTokens  cumulative input tokens to persist
+     * @param totalOutputTokens cumulative output tokens to persist
+     * @return the managed entity with the appended messages and updated token counts
+     */
     @Transactional
-    public AgentSession addMessage(AgentSession session, String role, String content) {
-        session.addMessage(role, content);
-        return repository.save(session);
+    public AgentSession flushMessages(Long sessionId, List<PendingMessage> messages,
+                                      long totalInputTokens, long totalOutputTokens) {
+        AgentSession managed = repository.getReferenceById(sessionId);
+        // Stamp call-ordered, strictly-increasing timestamps (1µs apart, which
+        // survives microsecond-resolution timestamp columns). The messages are an
+        // unordered Set replayed by createdAt, so relying on the @PrePersist
+        // default would scramble a batch into hash-iteration order. Subsequent
+        // rounds flush seconds later, so cross-round order follows wall-clock.
+        Instant base = Instant.now();
+        for (int i = 0; i < messages.size(); i++) {
+            PendingMessage msg = messages.get(i);
+            managed.addMessage(msg.role(), msg.content(), base.plus(i, ChronoUnit.MICROS));
+        }
+        managed.setTotalInputTokens(totalInputTokens);
+        managed.setTotalOutputTokens(totalOutputTokens);
+        return managed; // dirty checking flushes inserts + token counts on commit
     }
 
     /**
@@ -99,57 +130,52 @@ public class AgentSessionService {
      * the latest plan in O(1) instead of re-parsing the entire conversation
      * history.
      *
-     * @param session the session to update (mutated in place and saved)
+     * @param session the session to update (identified by its id)
      * @param summary short human-readable summary (typically {@code plan.summary()}); may be {@code null}
      * @param rawJson raw JSON representation of the plan; may be {@code null}
-     * @return the saved entity
+     * @return the managed entity with the updated plan
      */
     @Transactional
     public AgentSession recordPlan(AgentSession session, String summary, String rawJson) {
-        session.setLastPlanSummary(summary);
-        session.setLastPlanJson(rawJson);
-        session.setLastPlanAt(Instant.now());
-        return repository.save(session);
+        // Mutate only a managed proxy and return it. Persisting via the managed
+        // entity avoids merge() on a (possibly detached) caller object whose
+        // messages collection may reference rows deleted by a prior compaction.
+        // Callers must rebind to the returned entity to observe the new values.
+        AgentSession managed = repository.getReferenceById(session.getId());
+        managed.setLastPlanSummary(summary);
+        managed.setLastPlanJson(rawJson);
+        managed.setLastPlanAt(Instant.now());
+        return managed;
     }
 
     @Transactional
     public AgentSession setBranchName(AgentSession session, String branchName) {
-        session.setBranchName(branchName);
-        return repository.save(session);
+        AgentSession managed = repository.getReferenceById(session.getId());
+        managed.setBranchName(branchName);
+        return managed;
     }
 
     @Transactional
     public AgentSession setPrNumber(AgentSession session, Long prNumber) {
-        session.setPrNumber(prNumber);
-        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
-        return repository.save(session);
+        AgentSession managed = repository.getReferenceById(session.getId());
+        managed.setPrNumber(prNumber);
+        managed.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
+        return managed;
     }
 
     @Transactional
     public AgentSession setGeneratedIssueNumber(AgentSession session, Long generatedIssueNumber) {
-        session.setGeneratedIssueNumber(generatedIssueNumber);
-        session.setStatus(AgentSession.AgentSessionStatus.ISSUE_CREATED);
-        return repository.save(session);
+        AgentSession managed = repository.getReferenceById(session.getId());
+        managed.setGeneratedIssueNumber(generatedIssueNumber);
+        managed.setStatus(AgentSession.AgentSessionStatus.ISSUE_CREATED);
+        return managed;
     }
 
     @Transactional
     public AgentSession setStatus(AgentSession session, AgentSession.AgentSessionStatus status) {
-        session.setStatus(status);
-        return repository.save(session);
-    }
-
-    /**
-     * Persists cumulative token usage for an agent session.
-     *
-     * @param session the agent session
-     * @param totalInputTokens cumulative input tokens
-     * @param totalOutputTokens cumulative output tokens
-     */
-    @Transactional
-    public void recordTokenUsage(AgentSession session, long totalInputTokens, long totalOutputTokens) {
-        session.setTotalInputTokens(totalInputTokens);
-        session.setTotalOutputTokens(totalOutputTokens);
-        repository.save(session);
+        AgentSession managed = repository.getReferenceById(session.getId());
+        managed.setStatus(status);
+        return managed;
     }
 
     /**
@@ -168,19 +194,27 @@ public class AgentSessionService {
      * dropped by {@link #toAiMessages} during replay, so this method only
      * operates on the meaningful user/assistant messages.</p>
      *
-     * @param session the session to compact (mutated in place and saved)
-     * @return the saved session
+     * @param sessionId id of the session to compact
+     * @return the managed (compacted) entity; callers must rebind to it because
+     *         their detached object's {@code messages} collection still
+     *         references the rows this method deleted
      */
     @Transactional
-    public AgentSession compactContextWindow(AgentSession session) {
-        List<ConversationMessage> sorted = new ArrayList<>(session.getMessages());
+    public AgentSession compactContextWindow(Long sessionId) {
+        // Operate on a freshly-fetched managed entity so the caller's detached
+        // object — whose messages collection may reference rows a prior compaction
+        // deleted — is never traversed (a merge() of it would resolve each element
+        // by id and fail with ObjectNotFoundException on the deleted rows).
+        AgentSession managed = repository.findById(sessionId).orElseThrow();
+
+        List<ConversationMessage> sorted = new ArrayList<>(managed.getMessages());
         sorted.sort(Comparator.comparing(ConversationMessage::getCreatedAt,
                 Comparator.nullsFirst(Comparator.naturalOrder())));
 
         if (sorted.size() <= MAX_MESSAGES_AFTER_COMPACT) {
             log.debug("Agent session {} has {} messages, no compaction needed",
-                    session.getId(), sorted.size());
-            return session;
+                    managed.getId(), sorted.size());
+            return managed;
         }
 
         int totalChars = sorted.stream()
@@ -189,12 +223,12 @@ public class AgentSessionService {
 
         if (totalChars < COMPACT_THRESHOLD_CHARS) {
             log.debug("Agent session {} has {} chars, below threshold {}, no compaction needed",
-                    session.getId(), totalChars, COMPACT_THRESHOLD_CHARS);
-            return session;
+                    managed.getId(), totalChars, COMPACT_THRESHOLD_CHARS);
+            return managed;
         }
 
         log.info("Compacting agent session {} context window: {} messages, {} chars -> keeping last {}",
-                session.getId(), sorted.size(), totalChars, MAX_MESSAGES_AFTER_COMPACT);
+                managed.getId(), sorted.size(), totalChars, MAX_MESSAGES_AFTER_COMPACT);
 
         // Identify messages to remove (all but the most recent N)
         int removeCount = sorted.size() - MAX_MESSAGES_AFTER_COMPACT;
@@ -203,22 +237,22 @@ public class AgentSessionService {
         // Build a summary of what was removed
         String summary = buildAgentContextSummary(toRemove);
 
-        // Remove old messages from the Set (orphanRemoval = true will DELETE from DB)
-        session.getMessages().removeAll(toRemove);
+        // Remove old messages from the managed Set (orphanRemoval = true will DELETE from DB)
+        toRemove.forEach(managed.getMessages()::remove);
 
         // Add a summary message as the first message in the surviving history
         if (!summary.isBlank()) {
-            session.addMessage("user", summary);
+            managed.addMessage("user", summary);
         }
 
-        int newTotalChars = session.getMessages().stream()
+        int newTotalChars = managed.getMessages().stream()
                 .mapToInt(m -> m.getContent() != null ? m.getContent().length() : 0)
                 .sum();
 
         log.info("Agent session {} compacted: {} messages, {} chars remaining",
-                session.getId(), session.getMessages().size(), newTotalChars);
+                managed.getId(), managed.getMessages().size(), newTotalChars);
 
-        return repository.save(session);
+        return managed; // dirty checking + orphanRemoval handle the flush
     }
 
     /**
