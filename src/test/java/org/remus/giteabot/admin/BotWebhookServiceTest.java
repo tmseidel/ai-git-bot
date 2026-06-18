@@ -622,6 +622,9 @@ class BotWebhookServiceTest {
         when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.of(session));
         when(agentSessionService.claimSessionForUpdate("Test", "my-repo", 12L,
                 AgentSession.AgentSessionType.WRITER)).thenReturn(Optional.of(session));
+        // The follow-up flow rebinds to the compacted managed entity; return the
+        // same session so subsequent state reads are preserved.
+        when(agentSessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));

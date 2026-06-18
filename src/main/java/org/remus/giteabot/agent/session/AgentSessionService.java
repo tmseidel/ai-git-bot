@@ -194,16 +194,18 @@ public class AgentSessionService {
      * dropped by {@link #toAiMessages} during replay, so this method only
      * operates on the meaningful user/assistant messages.</p>
      *
-     * @param session the session to compact (mutated in place and saved)
-     * @return the saved session
+     * @param sessionId id of the session to compact
+     * @return the managed (compacted) entity; callers must rebind to it because
+     *         their detached object's {@code messages} collection still
+     *         references the rows this method deleted
      */
     @Transactional
-    public AgentSession compactContextWindow(AgentSession session) {
-        // Re-fetch a managed entity to avoid merge() on a detached entity whose
-        // messages collection may reference ConversationMessages deleted by a prior
-        // compaction. merge() traverses the entire collection graph, resolving each
-        // element by ID — deleted rows cause ObjectNotFoundException.
-        AgentSession managed = repository.findById(session.getId()).orElseThrow();
+    public AgentSession compactContextWindow(Long sessionId) {
+        // Operate on a freshly-fetched managed entity so the caller's detached
+        // object — whose messages collection may reference rows a prior compaction
+        // deleted — is never traversed (a merge() of it would resolve each element
+        // by id and fail with ObjectNotFoundException on the deleted rows).
+        AgentSession managed = repository.findById(sessionId).orElseThrow();
 
         List<ConversationMessage> sorted = new ArrayList<>(managed.getMessages());
         sorted.sort(Comparator.comparing(ConversationMessage::getCreatedAt,

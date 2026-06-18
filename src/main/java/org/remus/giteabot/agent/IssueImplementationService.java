@@ -25,7 +25,6 @@ import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
-import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
@@ -217,7 +216,7 @@ public class IssueImplementationService {
 
             // Step 7.3 — optional Critic / Reflection step. With critic.enabled=false
             // (default) this short-circuits without an LLM call.
-            ImplementationPlan plannedPlan = getLastPlanFromSession(session);
+            ImplementationPlan plannedPlan = implementationResult.plan();
             ReflectionResult reflection = criticAgent.review(
                     issueTitle, issueBody,
                     plannedPlan != null ? plannedPlan.getSummary() : null,
@@ -254,7 +253,7 @@ public class IssueImplementationService {
             }
 
             // Create pull request
-            ImplementationPlan lastPlan = getLastPlanFromSession(session);
+            ImplementationPlan lastPlan = implementationResult.plan();
             String prTitle = String.format("AI Agent: %s (fixes #%d)", issueTitle, issueNumber);
             String prBody  = promptBuilder.buildPrBody(issueNumber, lastPlan != null ? lastPlan
                     : ImplementationPlan.builder().summary("Automated implementation").build());
@@ -324,7 +323,11 @@ public class IssueImplementationService {
         AgentRunContext ctx = new AgentRunContext(
                 session, owner, repo, issueNumber, workspaceDir, initialContextBranch);
         LoopOutcome outcome = loop.run(ctx, userMessage, strategy);
-        return new ToolImplementationLoopResult(outcome.success(), outcome.selectedBranch());
+        // The strategy returns the final ImplementationPlan as the outcome payload.
+        // Read it from here rather than from the (detached) session object, whose
+        // in-memory state is no longer mutated by the persistence layer.
+        ImplementationPlan plan = outcome.payload() instanceof ImplementationPlan p ? p : null;
+        return new ToolImplementationLoopResult(outcome.success(), outcome.selectedBranch(), plan);
     }
 
     /**
@@ -369,8 +372,11 @@ public class IssueImplementationService {
             sessionService.setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
 
             // Compact persisted history before starting a new agent run to prevent
-            // unbounded growth across follow-up sessions.
-            sessionService.compactContextWindow(session);
+            // unbounded growth across follow-up sessions. Rebind to the returned
+            // managed entity: our current reference's messages collection still
+            // points at the rows compaction just deleted, and feeding that to the
+            // loop would trigger ObjectNotFoundException.
+            session = sessionService.compactContextWindow(session.getId());
 
             String branchName    = session.getBranchName();
             String defaultBranch = repositoryClient.getDefaultBranch(owner, repo);
@@ -420,20 +426,23 @@ public class IssueImplementationService {
                 return;
             }
 
-            // Create PR if not yet existing
-            if (session.getPrNumber() == null) {
+            // Create PR if not yet existing. Track the effective PR number in a
+            // local: setPrNumber persists to the DB but does not mutate our
+            // detached session, so session.getPrNumber() would read stale below.
+            ImplementationPlan latestPlan = implementationResult.plan();
+            Long prNumber = session.getPrNumber();
+            if (prNumber == null) {
                 String prTitle = String.format("AI Agent: %s (fixes #%d)", session.getIssueTitle(), issueNumber);
-                ImplementationPlan latestPlan = getLastPlanFromSession(session);
                 String prBody = promptBuilder.buildPrBody(issueNumber, latestPlan != null ? latestPlan
                         : ImplementationPlan.builder().summary("Automated implementation").build());
-                Long prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
+                prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
                         branchName, createNew ? selectedContextBranch : defaultBranch);
                 sessionService.setPrNumber(session, prNumber);
             }
 
             sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
             notificationService.postFollowUpSuccessComment(owner, repo, issueNumber,
-                    getLastPlanFromSession(session), session.getPrNumber());
+                    latestPlan, prNumber);
             log.info("Successfully applied follow-up changes for issue #{}", issueNumber);
 
         } catch (Exception e) {
@@ -638,53 +647,13 @@ public class IssueImplementationService {
     }
 
 
-    /** Result of the implementation loop including the final branch used for context lookups. */
-    private record ToolImplementationLoopResult(boolean success, String selectedBranch) {
+    /**
+     * Result of the implementation loop: success flag, the final branch used for
+     * context lookups, and the final {@link ImplementationPlan} produced by the
+     * agent (may be {@code null} on failure).
+     */
+    private record ToolImplementationLoopResult(boolean success, String selectedBranch,
+                                                ImplementationPlan plan) {
     }
 
-    /**
-     * Step 7.1 — retrieves the most recently parsed implementation plan from
-     * the session row in O(1). Falls back to the legacy history-walk for old
-     * sessions persisted before V11 (no {@code last_plan_json} populated) or
-     * when the session itself is {@code null} (test scaffolding).
-     */
-    private ImplementationPlan getLastPlanFromSession(AgentSession session) {
-        if (session == null) {
-            return null;
-        }
-        String rawJson = session.getLastPlanJson();
-        if (rawJson != null && !rawJson.isBlank()) {
-            ImplementationPlan p = responseParser.parseAiResponse(rawJson);
-            if (p != null) {
-                return p;
-            }
-        }
-        // Fallback for legacy sessions without persisted plan.
-        List<AiMessage> messages = sessionService.toAiMessages(session);
-        if (messages == null) {
-            return null;
-        }
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            AiMessage msg = messages.get(i);
-            if (!"assistant".equals(msg.getRole())) {
-                continue;
-            }
-            String content = msg.getContent();
-            // Skip messages that obviously cannot contain a JSON plan. In native
-            // tool-calling mode most assistant turns are plain reasoning text or
-            // pure tool_call envelopes — running the parser on them would only
-            // log "Could not extract JSON" warnings without ever returning a plan.
-            if (content == null || content.isBlank()) {
-                continue;
-            }
-            if (!content.contains("{")) {
-                continue;
-            }
-            ImplementationPlan p = responseParser.parseAiResponse(content);
-            if (p != null) {
-                return p;
-            }
-        }
-        return null;
-    }
 }

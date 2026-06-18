@@ -604,6 +604,9 @@ class IssueImplementationServiceTest {
 
         when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
                 .thenReturn(Optional.of(session));
+        // compactContextWindow now reloads + returns the managed entity; the
+        // handler rebinds to it, so return the same session to preserve state.
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
                 .thenReturn(List.of(Map.of("body", "Existing clarification from issue author", "user", Map.of("login", "alice"))));
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
@@ -679,6 +682,9 @@ class IssueImplementationServiceTest {
 
         when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
                 .thenReturn(Optional.of(session));
+        // compactContextWindow now reloads + returns the managed entity; the
+        // handler rebinds to it, so return the same session to preserve state.
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(
@@ -737,6 +743,9 @@ class IssueImplementationServiceTest {
 
         when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
                 .thenReturn(Optional.of(session));
+        // compactContextWindow now reloads + returns the managed entity; the
+        // handler rebinds to it, so return the same session to preserve state.
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
@@ -763,6 +772,9 @@ class IssueImplementationServiceTest {
 
         when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
                 .thenReturn(Optional.of(session));
+        // compactContextWindow now reloads + returns the managed entity; the
+        // handler rebinds to it, so return the same session to preserve state.
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(
