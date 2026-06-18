@@ -24,6 +24,16 @@ public class WriterResponseParser {
     private static final Pattern GENERIC_JSON_BLOCK_PATTERN = Pattern.compile("```\\s*\\n(\\{.*?})\\n\\s*```", Pattern.DOTALL);
     private final ObjectMapper objectMapper = AgentJackson.mapper();
 
+    /**
+     * Returns {@code true} when {@code aiResponse} contains an extractable JSON
+     * payload (a fenced ```json block, a generic fenced block, or a bare
+     * object). Used by the strategy to tell a structured final answer apart from
+     * plain-language narration in NATIVE tool-calling mode.
+     */
+    public boolean hasJsonPayload(String aiResponse) {
+        return aiResponse != null && !aiResponse.isBlank() && extractJson(aiResponse) != null;
+    }
+
     public WriterPlan parse(String aiResponse) {
         if (aiResponse == null || aiResponse.isBlank()) {
             // Always populate clarifyingQuestions with at least an empty list so

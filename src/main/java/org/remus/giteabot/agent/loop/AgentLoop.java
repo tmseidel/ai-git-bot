@@ -74,6 +74,7 @@ public final class AgentLoop {
         String currentMessage = initialUserMessage;
 
         ToolingMode resolvedMode = resolveMode(strategy);
+        ctx.setToolingMode(resolvedMode);
         List<ToolDescriptor> tools = resolvedMode == ToolingMode.NATIVE
                 ? strategy.toolDescriptors() : List.of();
         log.debug("AgentLoop starting for issue #{}: provider={}, mode={}, tools={}",

@@ -48,6 +48,15 @@ class WriterResponseParserTest {
     }
 
     @Test
+    void hasJsonPayload_distinguishesStructuredAnswersFromProse() {
+        assertThat(parser.hasJsonPayload("{\"readyToCreate\":true}")).isTrue();
+        assertThat(parser.hasJsonPayload("Intro text.\n```json\n{\"readyToCreate\":false}\n```")).isTrue();
+        assertThat(parser.hasJsonPayload("I've reviewed the issue and it looks complete.")).isFalse();
+        assertThat(parser.hasJsonPayload("")).isFalse();
+        assertThat(parser.hasJsonPayload(null)).isFalse();
+    }
+
+    @Test
     void parse_plainTextWithoutJson_fallsBackToQualityAssessment() {
         WriterPlan plan = parser.parse("Please provide the expected behavior for non-authors.");
 

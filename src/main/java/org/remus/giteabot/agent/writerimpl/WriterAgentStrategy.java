@@ -50,6 +50,14 @@ public final class WriterAgentStrategy implements AgentStrategy {
     private final java.util.Set<String> allowedBuiltinTools;
     private final int maxToolRounds;
 
+    /**
+     * One-shot guard so a NATIVE model that narrates in prose (no JSON answer)
+     * is nudged for its structured answer exactly once before we fall back to
+     * the legacy clarifying-questions path. Prevents a nudge loop ending in
+     * {@link #onBudgetExhausted} (a silent no-op).
+     */
+    private boolean nudgedForJsonAnswer;
+
     @Override
     public String systemPrompt() {
         return systemPrompt;
@@ -78,6 +86,22 @@ public final class WriterAgentStrategy implements AgentStrategy {
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
         if (!turn.hasToolCalls()) {
+            // In NATIVE mode the model must return its structured JSON answer once
+            // it stops calling tools. A plain-language turn with no JSON is
+            // narration, not a final answer — nudge once for the contract JSON
+            // rather than prematurely concluding with prose-as-clarifying-questions.
+            // If it still replies in prose, fall through to the legacy path so the
+            // user still gets feedback (instead of looping into the no-op
+            // onBudgetExhausted).
+            if (ctx.toolingMode() == ToolingMode.NATIVE
+                    && !nudgedForJsonAnswer
+                    && !responseParser.hasJsonPayload(turn.assistantText())) {
+                nudgedForJsonAnswer = true;
+                return new StepDecision.Continue(
+                        "Please provide your final answer as a single JSON object exactly as "
+                        + "instructed (with `qualityAssessment`, `readyToCreate`, and either "
+                        + "`clarifyingQuestions` or `revisedIssueDraft`) — not as prose.");
+            }
             return step(ctx, turn.assistantText(), round);
         }
         int writerRound = round - 1;
