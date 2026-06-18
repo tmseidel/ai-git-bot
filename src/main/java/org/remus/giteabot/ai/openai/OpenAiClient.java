@@ -34,17 +34,8 @@ public class OpenAiClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
-    public OpenAiClient(RestClient restClient, String model, int maxTokens,
-                        int maxDiffCharsPerChunk, int maxDiffChunks,
-                        int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
-
-    public OpenAiClient(RestClient restClient, String model, int maxTokens,
-                        int maxDiffCharsPerChunk, int maxDiffChunks,
-                        int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+    public OpenAiClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }

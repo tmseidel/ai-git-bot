@@ -53,7 +53,8 @@ class CodeReviewServiceTest {
     @BeforeEach
     void setUp() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT);
+                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                120000, 8, 60000);
     }
 
     @Test
@@ -65,8 +66,7 @@ class CodeReviewServiceTest {
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
-        when(aiClient.reviewDiff(eq("Test PR"), eq("Test body"), anyString(),
-                eq(TEST_PROMPT), isNull(), anyString()))
+        when(aiClient.submitReviewPrompt(eq(TEST_PROMPT), isNull(), anyString()))
                 .thenReturn("Looks good!");
 
         codeReviewService.reviewPullRequest(payload, null);
@@ -86,8 +86,7 @@ class CodeReviewServiceTest {
 
         codeReviewService.reviewPullRequest(payload, null);
 
-        verify(aiClient, never()).reviewDiff(anyString(), anyString(), anyString(), anyString(), anyString());
-        verify(aiClient, never()).reviewDiff(anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(aiClient, never()).submitReviewPrompt(anyString(), anyString(), anyString());
         verify(repositoryClient, never()).postReviewComment(anyString(), anyString(), anyLong(), anyString());
     }
 
@@ -100,8 +99,7 @@ class CodeReviewServiceTest {
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
-        when(aiClient.reviewDiff(eq("Test PR"), eq("Test body"), anyString(),
-                eq(TEST_PROMPT), isNull(), anyString()))
+        when(aiClient.submitReviewPrompt(eq(TEST_PROMPT), isNull(), anyString()))
                 .thenReturn("Bot prompt used.");
 
         codeReviewService.reviewPullRequest(payload, "security");
@@ -113,7 +111,8 @@ class CodeReviewServiceTest {
     @Test
     void reviewPullRequest_withConfiguredSystemPrompt_usesBotPrompt() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt");
+                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt",
+                120000, 8, 60000);
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
 
@@ -121,8 +120,7 @@ class CodeReviewServiceTest {
         when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
         when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
                 .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
-        when(aiClient.reviewDiff(eq("Test PR"), eq("Test body"), anyString(),
-                eq("Configured review prompt"), isNull(), anyString()))
+        when(aiClient.submitReviewPrompt(eq("Configured review prompt"), isNull(), anyString()))
                 .thenReturn("Configured prompt used.");
 
         codeReviewService.reviewPullRequest(payload, null);
@@ -152,8 +150,7 @@ class CodeReviewServiceTest {
         codeReviewService.reviewPullRequest(payload, null);
 
         verify(aiClient).chat(anyList(), anyString(), eq(TEST_PROMPT), isNull());
-        verify(aiClient, never()).reviewDiff(anyString(), anyString(), anyString(), anyString(), anyString());
-        verify(aiClient, never()).reviewDiff(anyString(), anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(aiClient, never()).submitReviewPrompt(anyString(), anyString(), anyString());
     }
 
     @Test

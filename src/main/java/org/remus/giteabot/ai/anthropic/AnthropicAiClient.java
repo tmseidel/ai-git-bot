@@ -42,17 +42,10 @@ public class AnthropicAiClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
-    public AnthropicAiClient(RestClient restClient, String model, int maxTokens,
-                             int maxDiffCharsPerChunk, int maxDiffChunks,
-                             int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
 
     public AnthropicAiClient(RestClient restClient, String model, int maxTokens,
-                             int maxDiffCharsPerChunk, int maxDiffChunks,
-                             int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                             boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }
@@ -293,7 +286,7 @@ public class AnthropicAiClient extends AbstractAiClient {
                         .content(kept)
                         .build());
             } else if ("user".equals(m.getRole()) && m.getContent() instanceof List<?> blocks) {
-                Set<String> requestedIds = collectToolUseIds(out.isEmpty() ? null : out.get(out.size() - 1));
+                Set<String> requestedIds = collectToolUseIds(out.isEmpty() ? null : out.getLast());
                 List<AnthropicRequest.ContentBlock> kept = new ArrayList<>();
                 int droppedToolResults = 0;
                 for (Object o : blocks) {

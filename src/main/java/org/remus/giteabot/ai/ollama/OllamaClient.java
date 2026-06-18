@@ -39,17 +39,8 @@ public class OllamaClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
-    public OllamaClient(RestClient restClient, String model, int maxTokens,
-                        int maxDiffCharsPerChunk, int maxDiffChunks,
-                        int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
-
-    public OllamaClient(RestClient restClient, String model, int maxTokens,
-                        int maxDiffCharsPerChunk, int maxDiffChunks,
-                        int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+    public OllamaClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }
@@ -122,9 +113,6 @@ public class OllamaClient extends AbstractAiClient {
     @Override
     public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
-        if (body == null) {
-            return false;
-        }
         String normalized = body.toLowerCase(Locale.ROOT);
         return normalized.contains("too long") || normalized.contains("context length");
     }

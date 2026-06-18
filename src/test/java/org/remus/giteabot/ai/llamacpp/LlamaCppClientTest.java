@@ -16,7 +16,7 @@ class LlamaCppClientTest {
 
     private LlamaCppClient createClient() {
         RestClient restClient = mock(RestClient.class);
-        return new LlamaCppClient(restClient, "qwen2.5-coder-7b-instruct", 4096, 30000, 4, 15000);
+        return new LlamaCppClient(restClient, "qwen2.5-coder-7b-instruct", 4096);
     }
 
     @Test

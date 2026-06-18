@@ -54,10 +54,8 @@ public class LlamaCppClient extends AbstractAiClient {
             "<|endoftext|>"
     );
 
-    public LlamaCppClient(RestClient restClient, String model, int maxTokens,
-                          int maxDiffCharsPerChunk, int maxDiffChunks,
-                          int retryTruncatedChunkChars) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+    public LlamaCppClient(RestClient restClient, String model, int maxTokens) {
+        super(model, maxTokens);
         this.restClient = restClient;
     }
 

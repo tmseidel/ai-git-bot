@@ -99,7 +99,8 @@ class BotWebhookServiceTest {
                             repositoryApiClient, aiClient, sessionService,
                             b.getUsername(), new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
-                            b.getSystemPrompt().getReviewSystemPrompt());
+                            b.getSystemPrompt().getReviewSystemPrompt(),
+                            120000, 8, 60000);
                 });
         // Step 7.2 — provide a real BudgetConfig so production code that reads
         // agentConfig.getBudget().getMaxTokensPerCall() does not NPE on the mock.

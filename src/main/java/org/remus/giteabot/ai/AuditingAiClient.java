@@ -13,9 +13,7 @@ import java.util.List;
  *
  * <p>Token usage is reported by the concrete clients themselves (they are the
  * only place where the provider-specific usage payload is parsed); this
- * decorator complements that with centralized error auditing. Review errors
- * are already reported per diff chunk by {@link AbstractAiClient}, so the
- * {@code reviewDiff} methods delegate without additional auditing.</p>
+ * decorator complements that with centralized error auditing.</p>
  */
 @RequiredArgsConstructor
 public class AuditingAiClient implements AiClient {
@@ -29,21 +27,8 @@ public class AuditingAiClient implements AiClient {
     private final AiAuditRecorder recorder;
 
     @Override
-    public String reviewDiff(String prTitle, String prBody, String diff) {
-        return delegate.reviewDiff(prTitle, prBody, diff);
-    }
-
-    @Override
-    public String reviewDiff(String prTitle, String prBody, String diff,
-                             String systemPrompt, String modelOverride) {
-        return delegate.reviewDiff(prTitle, prBody, diff, systemPrompt, modelOverride);
-    }
-
-    @Override
-    public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt,
-                             String modelOverride, String additionalContext) {
-        return delegate.reviewDiff(prTitle, prBody, diff, systemPrompt,
-                modelOverride, additionalContext);
+    public String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage) {
+        return delegate.submitReviewPrompt(systemPrompt, modelOverride, userMessage);
     }
 
     @Override

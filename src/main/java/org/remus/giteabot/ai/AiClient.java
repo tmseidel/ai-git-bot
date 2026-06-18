@@ -9,27 +9,21 @@ import java.util.Locale;
  * Provider-agnostic interface for AI-powered code review and agent chat.
  *
  * <p>As of Step 6 the contract additionally exposes native function/tool
- * calling via {@link #chatWithTools(List, List, String, String, Integer)}.
+ * calling via {@link #chatWithTools(List, String, List, String, String, Integer)}.
  * Implementations that do not yet support native tools should leave
  * {@link #supportsNativeTools()} returning {@code false}; the default
  * delegation falls back to the textual {@link #chat(List, String, String, String, Integer)}
- * path, which preserves the historical JSON-in-prompt behaviour.</p>
+ * path, which preserves the historical JSON-in-prompt behavior.</p>
  */
 public interface AiClient {
 
-    String reviewDiff(String prTitle, String prBody, String diff);
-
-    String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt, String modelOverride);
-
     /**
-     * Reviews a pull request diff with additional context about the repository.
-     *
-     * @param additionalContext extra context (repo tree, file contents, commit messages, etc.)
+     * Sends a single review prompt to the AI provider and returns the response.
+     * This is the primitive operation that the code-review service uses for each
+     * diff chunk. The provider resolves its own model, token budget, and default
+     * prompt internally.
      */
-    default String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt,
-                              String modelOverride, String additionalContext) {
-        return reviewDiff(prTitle, prBody, diff, systemPrompt, modelOverride);
-    }
+    String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage);
 
     /**
      * Sends a multi-turn conversation to the AI provider and returns the assistant's response.
@@ -53,7 +47,7 @@ public interface AiClient {
      * Capability flag: true when the implementation can advertise tools to
      * the underlying provider and parse {@code tool_use}/{@code tool_calls}
      * responses. Defaults to {@code false}; override in providers that
-     * implement {@link #chatWithTools(List, List, String, String, Integer)}
+     * implement {@link #chatWithTools(List, String, List, String, String, Integer)}
      * natively.
      *
      * <p>Per-integration overrides (e.g. the {@code use_legacy_tool_calling}

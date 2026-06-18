@@ -56,17 +56,10 @@ public class GoogleAiClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final tools.jackson.databind.ObjectMapper jackson3 = AgentJackson.mapper();
 
-    public GoogleAiClient(RestClient restClient, String model, int maxTokens,
-                          int maxDiffCharsPerChunk, int maxDiffChunks,
-                          int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
 
     public GoogleAiClient(RestClient restClient, String model, int maxTokens,
-                          int maxDiffCharsPerChunk, int maxDiffChunks,
-                          int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                          boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }
