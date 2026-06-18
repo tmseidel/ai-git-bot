@@ -79,15 +79,12 @@ class AuditingAiClientTest {
 
     @Test
     void submitReviewPrompt_delegatesAndDoesNotDoubleAudit() {
-        // submitReviewPrompt delegates to the inner client. Error recording
-        // happens inside sendReviewRequest via reportError, so the decorator
-        // must not record again.
         RecordingRecorder recorder = new RecordingRecorder();
         AuditingAiClient client = new AuditingAiClient(new FailingClient(), recorder);
 
         assertThrows(IllegalStateException.class,
                 () -> client.submitReviewPrompt("sys", "model", "msg"));
 
-        assertNull(recorder.lastError.get());
+        assertEquals("review failed", recorder.lastError.get().getMessage());
     }
 }
