@@ -1,10 +1,8 @@
 package org.remus.giteabot.prworkflow.review;
 
 import lombok.RequiredArgsConstructor;
-
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.RepositoryApiClient;
