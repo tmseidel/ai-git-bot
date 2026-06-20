@@ -84,22 +84,6 @@
                                 Model's total context window size. Used for proactive history compaction.
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <label for="maxDiffCharsPerChunk" class="form-label">Max Diff Chars/Chunk</label>
-                            <input type="number" class="form-control" id="maxDiffCharsPerChunk"
-                                   th:field="*{maxDiffCharsPerChunk}" min="1" required/>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="maxDiffChunks" class="form-label">Max Diff Chunks</label>
-                            <input type="number" class="form-control" id="maxDiffChunks"
-                                   th:field="*{maxDiffChunks}" min="1" required/>
-                        </div>
-                        <div class="col-md-3">
-                            <label for="retryTruncatedChunkChars" class="form-label">Retry Truncated Chars</label>
-                            <input type="number" class="form-control" id="retryTruncatedChunkChars"
-                                   th:field="*{retryTruncatedChunkChars}" min="1" required/>
-                        </div>
-
                         <div class="col-12">
                             <hr/>
                             <h5 class="mb-3">

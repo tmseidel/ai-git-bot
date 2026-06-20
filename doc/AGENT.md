@@ -78,11 +78,13 @@ Common issue-agent settings can be set as environment variables or Spring proper
 | `AGENT_CONTEXT_MAX_ISSUE_COMMENTS_CHARS` | `agent.context.max-issue-comments-chars` | `20000` | Coding | Total issue-comment context budget |
 | `AGENT_CONTEXT_MAX_SINGLE_ISSUE_COMMENT_CHARS` | `agent.context.max-single-issue-comment-chars` | `4000` | Coding | Per-comment context budget |
 | `AGENT_VALIDATION_ENABLED` | `agent.validation.enabled` | `true` | Coding | Require build/test validation before finishing |
-| `AGENT_BUDGET_MAX_ROUNDS` | `agent.budget.max-rounds` | `10` | Both | Maximum agent loop rounds |
-| `AGENT_BUDGET_MAX_CONTENT_ROUNDS` | `agent.budget.max-context-rounds` | `5` | Both | Maximum context-only rounds |
-| `AGENT_BUDGET_MAX_CONTEXT_TOOL_REQUESTS_PER_ROUND` | `agent.budget.max-context-tool-requests-per-round` | `5` | Coding | Context-tool requests per AI round |
+| `AGENT_BUDGET_MAX_ROUNDS` | `agent.budget.max-rounds` | `20` | Both | Maximum agent loop rounds |
+| `AGENT_BUDGET_MAX_CONTENT_ROUNDS` | `agent.budget.max-context-rounds` | `10` | Both | Maximum context-only rounds |
+| `AGENT_BUDGET_MAX_CONTEXT_TOOL_REQUESTS_PER_ROUND` | `agent.budget.max-context-tool-requests-per-round` | `10` | Coding | Context-tool requests per AI round |
 | `AGENT_BUDGET_MAX_TOKENS_PER_CALL` | `agent.budget.max-tokens-per-call` | `16384` | Both | Token budget per AI call |
-| `AGENT_BUDGET_MAX_VALIDATION_RETRIES` | `agent.budget.max-validation-retries` | `3` | Coding | AI correction attempts after validation failure |
+| `AGENT_BUDGET_MAX_VALIDATION_RETRIES` | `agent.budget.max-validation-retries` | `10` | Coding | AI correction attempts after validation failure |
+| `AGENT_BUDGET_MAX_HISTORY_CHARS` | `agent.budget.max-history-chars` | `180000` | Both | Maximum characters for agent conversation history |
+| `AGENT_BUDGET_MAX_TOOL_RESULT_CHARS` | `agent.budget.max-tool-result-chars` | `8000` | Both | Maximum characters for tool execution results |
 
 Additional advanced properties include `agent.validation.max-tool-executions`, `agent.validation.tool-timeout-seconds`, `agent.validation.available-tools`, `agent.schema.enforce`, and the opt-in `agent.critic.*` settings. Keep defaults unless you are tuning cost, reliability, or the installed toolchain.
 

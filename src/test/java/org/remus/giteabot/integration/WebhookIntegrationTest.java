@@ -158,9 +158,6 @@ class WebhookIntegrationTest {
         ai.setApiVersion("2023-06-01");
         ai.setModel("claude-sonnet-4-20250514");
         ai.setMaxTokens(1024);
-        ai.setMaxDiffCharsPerChunk(50000);
-        ai.setMaxDiffChunks(4);
-        ai.setRetryTruncatedChunkChars(20000);
         ai = aiIntegrationService.save(ai);
 
         GitIntegration git = new GitIntegration();
@@ -220,9 +217,6 @@ class WebhookIntegrationTest {
         ai.setApiVersion("2023-06-01");
         ai.setModel("claude-sonnet-4-20250514");
         ai.setMaxTokens(1024);
-        ai.setMaxDiffCharsPerChunk(50000);
-        ai.setMaxDiffChunks(4);
-        ai.setRetryTruncatedChunkChars(20000);
         ai = aiIntegrationService.save(ai);
 
         GitIntegration git = new GitIntegration();

@@ -7,19 +7,24 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.config.ReviewChunkingProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowCategory;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.prworkflow.WorkflowResult;
 import org.remus.giteabot.prworkflow.WorkflowResultStatus;
+import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.review.CodeReviewService;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -39,6 +44,8 @@ class ReviewWorkflowTest {
 
     @Mock private CodeReviewServiceFactory factory;
     @Mock private GiteaClientFactory giteaClientFactory;
+    @Mock private WorkflowSelectionService selectionService;
+    @Mock private ReviewChunkingProperties chunkingProperties;
     @Mock private RepositoryApiClient repoClient;
     @Mock private CodeReviewService codeReviewService;
 
@@ -46,9 +53,15 @@ class ReviewWorkflowTest {
 
     @BeforeEach
     void setUp() {
-        workflow = new ReviewWorkflow(factory, giteaClientFactory);
+        lenient().when(chunkingProperties.getMaxDiffCharsPerChunk()).thenReturn(120_000);
+        lenient().when(chunkingProperties.getMaxDiffChunks()).thenReturn(8);
+        lenient().when(chunkingProperties.getRetryTruncatedChunkChars()).thenReturn(60_000);
+
+        workflow = new ReviewWorkflow(factory, giteaClientFactory, selectionService, chunkingProperties);
         lenient().when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
-        lenient().when(factory.create(any(Bot.class), eq(repoClient))).thenReturn(codeReviewService);
+        lenient().when(factory.create(any(Bot.class), eq(repoClient),
+                anyInt(), anyInt(), anyInt())).thenReturn(codeReviewService);
+        lenient().when(selectionService.resolveParams(any(), any())).thenReturn(Map.of());
     }
 
     @Test
@@ -130,5 +143,3 @@ class ReviewWorkflowTest {
         return payload;
     }
 }
-
-
