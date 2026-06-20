@@ -16,7 +16,7 @@ class OllamaClientTest {
 
     private OllamaClient createClient() {
         RestClient restClient = mock(RestClient.class);
-        return new OllamaClient(restClient, "llama3.2:1b", 1024, 10, 2, 6);
+        return new OllamaClient(restClient, "llama3.2:1b", 1024, true);
     }
 
     @Test
@@ -69,7 +69,7 @@ class OllamaClientTest {
     @Test
     void supportsNativeTools_canBeDisabled() {
         OllamaClient client = new OllamaClient(mock(RestClient.class),
-                "llama3.2:1b", 1024, 10, 2, 6, false);
+                "llama3.2:1b", 1024, false);
         assertFalse(client.supportsNativeTools());
     }
 

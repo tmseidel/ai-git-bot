@@ -2,6 +2,7 @@ package org.remus.giteabot.ai;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.List;
 
@@ -12,9 +13,7 @@ import java.util.List;
  *
  * <p>Token usage is reported by the concrete clients themselves (they are the
  * only place where the provider-specific usage payload is parsed); this
- * decorator complements that with centralized error auditing. Review errors
- * are already reported per diff chunk by {@link AbstractAiClient}, so the
- * {@code reviewDiff} methods delegate without additional auditing.</p>
+ * decorator complements that with centralized error auditing.</p>
  */
 @RequiredArgsConstructor
 public class AuditingAiClient implements AiClient {
@@ -28,21 +27,8 @@ public class AuditingAiClient implements AiClient {
     private final AiAuditRecorder recorder;
 
     @Override
-    public String reviewDiff(String prTitle, String prBody, String diff) {
-        return delegate.reviewDiff(prTitle, prBody, diff);
-    }
-
-    @Override
-    public String reviewDiff(String prTitle, String prBody, String diff,
-                             String systemPrompt, String modelOverride) {
-        return delegate.reviewDiff(prTitle, prBody, diff, systemPrompt, modelOverride);
-    }
-
-    @Override
-    public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt,
-                             String modelOverride, String additionalContext) {
-        return delegate.reviewDiff(prTitle, prBody, diff, systemPrompt,
-                modelOverride, additionalContext);
+    public String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage) {
+        return audited(() -> delegate.submitReviewPrompt(systemPrompt, modelOverride, userMessage));
     }
 
     @Override
@@ -62,6 +48,21 @@ public class AuditingAiClient implements AiClient {
     @Override
     public boolean supportsNativeTools() {
         return delegate.supportsNativeTools();
+    }
+
+    @Override
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
+        return delegate.isPromptTooLongError(e);
+    }
+
+    @Override
+    public void reportError(Throwable error) {
+        delegate.reportError(error);
+    }
+
+    @Override
+    public String getModel() {
+        return delegate.getModel();
     }
 
     @Override

@@ -56,17 +56,10 @@ public class GoogleAiClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final tools.jackson.databind.ObjectMapper jackson3 = AgentJackson.mapper();
 
-    public GoogleAiClient(RestClient restClient, String model, int maxTokens,
-                          int maxDiffCharsPerChunk, int maxDiffChunks,
-                          int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
 
     public GoogleAiClient(RestClient restClient, String model, int maxTokens,
-                          int maxDiffCharsPerChunk, int maxDiffChunks,
-                          int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                          boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }
@@ -293,15 +286,16 @@ public class GoogleAiClient extends AbstractAiClient {
         if (!calls.isEmpty()) {
             reason = StopReason.TOOL_USE;
         }
+        long inputTokens = 0L;
+        long outputTokens = 0L;
         if (response.getUsageMetadata() != null) {
+            inputTokens = response.getUsageMetadata().getPromptTokenCount();
+            outputTokens = response.getUsageMetadata().getCandidatesTokenCount();
             log.info("Google AI chat-with-tools: {} prompt tokens, {} candidate tokens, {} functionCall(s)",
-                    response.getUsageMetadata().getPromptTokenCount(),
-                    response.getUsageMetadata().getCandidatesTokenCount(),
-                    calls.size());
-            reportUsage(response.getUsageMetadata().getPromptTokenCount(),
-                    response.getUsageMetadata().getCandidatesTokenCount());
+                    inputTokens, outputTokens, calls.size());
+            reportUsage(inputTokens, outputTokens);
         }
-        return new ChatTurn(text.toString(), calls, reason);
+        return new ChatTurn(text.toString(), calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String finishReason) {
@@ -317,7 +311,7 @@ public class GoogleAiClient extends AbstractAiClient {
     }
 
     @Override
-    protected boolean isPromptTooLongError(HttpClientErrorException e) {
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
         if (body == null) {
             return false;

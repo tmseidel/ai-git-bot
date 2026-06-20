@@ -213,11 +213,13 @@ public class WorkflowSelectionService {
     }
 
     /**
-     * Mask {@link org.remus.giteabot.prworkflow.WorkflowParamField.ParamType#SECRET}
-     * values for display in the bot Details modal.
+     * Builds a display-ready parameter map for the bot Details modal by
+     * iterating every field in the schema. Persisted values take precedence;
+     * absent fields are filled from defaults so the popup always lists all
+     * available parameters. SECRET fields are masked.
      */
-    public Map<String, Object> maskSecrets(String workflowKey, Map<String, String> raw) {
-        return paramsValidator.maskSecrets(raw, schemaFor(workflowKey));
+    public Map<String, Object> describeParams(String workflowKey, Map<String, String> raw) {
+        return paramsValidator.describeParams(raw, schemaFor(workflowKey));
     }
 
     private WorkflowParamsSchema schemaFor(String workflowKey) {

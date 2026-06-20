@@ -12,7 +12,9 @@ import org.remus.giteabot.repository.model.ReviewComment;
 import org.remus.giteabot.review.enrichment.PrContextEnricher;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.session.SessionService;
+import org.springframework.web.client.HttpClientErrorException;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,10 +34,14 @@ public class CodeReviewService {
     private final String sessionPromptKey;
     private final String reviewSystemPrompt;
     private final PrContextEnricher contextEnricher;
+    private final int maxDiffCharsPerChunk;
+    private final int maxDiffChunks;
+    private final int retryTruncatedChunkChars;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
                              SessionService sessionService, String botUsername, ReviewConfigProperties reviewConfig,
-                             String sessionPromptKey, String reviewSystemPrompt) {
+                             String sessionPromptKey, String reviewSystemPrompt,
+                             int maxDiffCharsPerChunk, int maxDiffChunks, int retryTruncatedChunkChars) {
         if (sessionPromptKey == null || sessionPromptKey.isBlank()) {
             throw new IllegalArgumentException("Session prompt key is required");
         }
@@ -49,6 +55,9 @@ public class CodeReviewService {
         this.sessionPromptKey = sessionPromptKey;
         this.reviewSystemPrompt = reviewSystemPrompt;
         this.contextEnricher = new PrContextEnricher(repositoryClient, reviewConfig);
+        this.maxDiffCharsPerChunk = maxDiffCharsPerChunk;
+        this.maxDiffChunks = maxDiffChunks;
+        this.retryTruncatedChunkChars = retryTruncatedChunkChars;
     }
 
     public boolean reviewPullRequest(WebhookPayload payload, String promptName) {
@@ -82,10 +91,10 @@ public class CodeReviewService {
                         prNumber, systemPrompt != null ? systemPrompt.length() : 0, prTitle,
                         prBody != null ? prBody.length() : 0, diff.length(),
                         additionalContext != null ? additionalContext.length() : 0);
-                review = aiClient.reviewDiff(prTitle, prBody, diff, systemPrompt, null, additionalContext);
+                review = reviewDiffWithChunking(prTitle, prBody, diff, systemPrompt, additionalContext);
                 log.debug("LLM response [reviewDiff] for PR #{}: length={}, preview='{}'",
-                        prNumber, review != null ? review.length() : 0,
-                        review != null ? review.substring(0, Math.min(review.length(), 500)) : "null");
+                        prNumber, review.length(),
+                        review.substring(0, Math.min(review.length(), 500)));
 
                 // Store a summary user message and the review in the session
                 String userSummary = buildPrSummaryMessage(prTitle, prBody);
@@ -338,7 +347,7 @@ public class CodeReviewService {
                     .reduce((a, b) -> (b.getId() != null && (a.getId() == null || b.getId() > a.getId())) ? b : a)
                     .orElse(null);
 
-            if (latestReview == null || latestReview.getId() == null) {
+            if (latestReview.getId() == null) {
                 log.warn("No valid review found for PR #{} in {}/{}", prNumber, owner, repo);
                 return;
             }
@@ -555,4 +564,154 @@ public class CodeReviewService {
             return "";
         }
     }
+
+    // ── Diff chunking (moved from AbstractAiClient) ──
+
+    /**
+     * Reviews a diff by splitting it into chunks, sending each to the AI provider,
+     * and joining the results.
+     */
+    private String reviewDiffWithChunking(String prTitle, String prBody, String diff,
+                                          String systemPrompt, String additionalContext) {
+        log.info("Requesting code review from AI provider model={} (via chunking)", aiClient.getModel());
+        ChunkingResult chunkingResult = splitDiffIntoChunks(diff);
+        List<String> reviews = new ArrayList<>();
+        int failedChunks = 0;
+        Exception lastException = null;
+
+        for (int i = 0; i < chunkingResult.chunks().size(); i++) {
+            String chunk = chunkingResult.chunks().get(i);
+            int chunkNumber = i + 1;
+            int totalChunks = chunkingResult.chunks().size();
+
+            try {
+                String review = reviewSingleChunk(prTitle, prBody, chunk, chunkNumber, totalChunks, false,
+                        systemPrompt, additionalContext);
+
+                if (totalChunks > 1) {
+                    reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks + "\n" + review);
+                } else {
+                    reviews.add(review);
+                }
+            } catch (Exception e) {
+                failedChunks++;
+                lastException = e;
+                aiClient.reportError(e);
+                log.warn("Review failed for chunk {}/{}: {}", chunkNumber, totalChunks, e.getMessage());
+                if (totalChunks > 1) {
+                    reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks
+                            + "\n_Review for this chunk failed: " + e.getMessage() + "_");
+                }
+            }
+        }
+
+        if (failedChunks > 0 && failedChunks == chunkingResult.chunks().size()) {
+            throw new RuntimeException("All " + failedChunks + " chunk(s) failed during review", lastException);
+        }
+
+        if (failedChunks > 0) {
+            reviews.add("**Note:** " + failedChunks + " of " + chunkingResult.chunks().size()
+                    + " diff chunk(s) could not be reviewed due to API errors.");
+        }
+
+        if (chunkingResult.wasTruncated()) {
+            reviews.add("**Warning:** review is incomplete because the diff was truncated after " + maxDiffChunks + " chunks.");
+        }
+
+        return String.join("\n\n", reviews);
+    }
+
+    private String reviewSingleChunk(String prTitle, String prBody, String diffChunk, int chunkNumber, int totalChunks,
+                                     boolean isRetry, String systemPrompt, String additionalContext) {
+        try {
+            return reviewSingleChunkInternal(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry,
+                    systemPrompt, additionalContext);
+        } catch (HttpClientErrorException.BadRequest e) {
+            if (aiClient.isPromptTooLongError(e) && !isRetry && diffChunk.length() > retryTruncatedChunkChars) {
+                log.warn("Prompt too long for chunk {}/{} (chars={}), retrying with truncated chunk (chars={})",
+                        chunkNumber,
+                        totalChunks,
+                        diffChunk.length(),
+                        retryTruncatedChunkChars);
+                String truncatedChunk = truncateDiff(diffChunk, retryTruncatedChunkChars);
+                return reviewSingleChunk(prTitle, prBody, truncatedChunk, chunkNumber, totalChunks, true,
+                        systemPrompt, additionalContext);
+            }
+            throw e;
+        }
+    }
+
+    private String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
+                                             int chunkNumber, int totalChunks, boolean isRetry,
+                                             String systemPrompt, String additionalContext) {
+        String userMessage = buildUserMessage(prTitle, prBody, diffChunk, chunkNumber, totalChunks,
+                isRetry, additionalContext);
+        return aiClient.submitReviewPrompt(systemPrompt, null, userMessage);
+    }
+
+    ChunkingResult splitDiffIntoChunks(String diff) {
+        if (diff == null || diff.isBlank()) {
+            return new ChunkingResult(List.of(""), false);
+        }
+
+        List<String> chunks = new ArrayList<>();
+        boolean truncated = false;
+        String remaining = diff;
+
+        while (!remaining.isEmpty() && chunks.size() < maxDiffChunks) {
+            if (remaining.length() <= maxDiffCharsPerChunk) {
+                chunks.add(remaining);
+                remaining = "";
+                break;
+            }
+
+            int splitIndex = findSplitIndex(remaining, maxDiffCharsPerChunk);
+            chunks.add(remaining.substring(0, splitIndex));
+            remaining = remaining.substring(splitIndex);
+        }
+
+        if (!remaining.isEmpty()) {
+            truncated = true;
+        }
+
+        return new ChunkingResult(chunks, truncated);
+    }
+
+    int findSplitIndex(String text, int maxChars) {
+        int candidate = text.lastIndexOf('\n', maxChars);
+        if (candidate > 0) {
+            return candidate;
+        }
+        return maxChars;
+    }
+
+    String buildUserMessage(String prTitle, String prBody, String diff, int chunkNumber, int totalChunks,
+                            boolean isRetry, String additionalContext) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Please review the following pull request.\n\n");
+        sb.append("**Title:** ").append(prTitle).append("\n");
+        if (prBody != null && !prBody.isBlank()) {
+            sb.append("**Description:** ").append(prBody).append("\n");
+        }
+        if (totalChunks > 1) {
+            sb.append("**Diff chunk:** ").append(chunkNumber).append("/").append(totalChunks).append("\n");
+        }
+        if (isRetry) {
+            sb.append("**Note:** The diff for this chunk was truncated to fit model limits.\n");
+        }
+        if (additionalContext != null && !additionalContext.isBlank()) {
+            sb.append("\n**Additional Context:**\n").append(additionalContext).append("\n");
+        }
+        sb.append("\n**Diff:**\n```diff\n").append(diff).append("\n```");
+        return sb.toString();
+    }
+
+    String truncateDiff(String diffChunk, int maxChars) {
+        if (diffChunk.length() <= maxChars) {
+            return diffChunk;
+        }
+        return diffChunk.substring(0, maxChars) + "\n\n# ... truncated due to model input limit ...";
+    }
+
+    record ChunkingResult(List<String> chunks, boolean wasTruncated) {}
 }

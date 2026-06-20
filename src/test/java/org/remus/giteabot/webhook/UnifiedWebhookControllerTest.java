@@ -176,9 +176,6 @@ class UnifiedWebhookControllerTest {
         ai.setApiUrl("http://localhost:8081");
         ai.setModel("claude-sonnet-4-20250514");
         ai.setMaxTokens(4096);
-        ai.setMaxDiffCharsPerChunk(120000);
-        ai.setMaxDiffChunks(8);
-        ai.setRetryTruncatedChunkChars(60000);
         ai.setCreatedAt(Instant.now());
         ai.setUpdatedAt(Instant.now());
         bot.setAiIntegration(ai);

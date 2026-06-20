@@ -23,13 +23,13 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 class GoogleAiClientTest {
 
     @Test
-    void reviewDiff_sendsGeminiRequestAndExtractsText() {
+    void submitReviewPrompt_sendsGeminiRequestAndExtractsText() {
         RestClient.Builder builder = RestClient.builder()
                 .baseUrl("https://generativelanguage.googleapis.com")
                 .defaultHeader("x-goog-api-key", "secret-key")
                 .defaultHeader("Content-Type", "application/json");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GoogleAiClient client = new GoogleAiClient(builder.build(), "gemini-2.5-flash", 1024, 120000, 8, 60000);
+        GoogleAiClient client = new GoogleAiClient(builder.build(), "gemini-2.5-flash", 1024, true);
 
         server.expect(once(), requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
                 .andExpect(method(HttpMethod.POST))
@@ -37,7 +37,7 @@ class GoogleAiClientTest {
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.systemInstruction.parts[0].text").value("System prompt"))
                 .andExpect(jsonPath("$.contents[0].role").value("user"))
-                .andExpect(content().string(containsString("Please review the following pull request.")))
+                .andExpect(content().string(containsString("Please review this diff")))
                 .andExpect(jsonPath("$.generationConfig.maxOutputTokens").value(1024))
                 .andRespond(withSuccess("""
                         {
@@ -46,7 +46,7 @@ class GoogleAiClientTest {
                         }
                         """, MediaType.APPLICATION_JSON));
 
-        String result = client.reviewDiff("Title", null, "diff", "System prompt", null);
+        String result = client.submitReviewPrompt("System prompt", null, "Please review this diff");
 
         assertEquals("Looks good.", result);
         server.verify();
@@ -56,7 +56,7 @@ class GoogleAiClientTest {
     void chat_mapsAssistantRoleToGoogleModelRole() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GoogleAiClient client = new GoogleAiClient(builder.build(), "models/gemini-2.5-pro", 2048, 120000, 8, 60000);
+        GoogleAiClient client = new GoogleAiClient(builder.build(), "models/gemini-2.5-pro", 2048, true);
 
         server.expect(once(), requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"))
                 .andExpect(jsonPath("$.contents[0].role").value("user"))
@@ -99,7 +99,7 @@ class GoogleAiClientTest {
     void chat_wrapsInvalidKeyErrorWithClearMessage() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://generativelanguage.googleapis.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GoogleAiClient client = new GoogleAiClient(builder.build(), "gemini-2.5-flash", 1024, 120000, 8, 60000);
+        GoogleAiClient client = new GoogleAiClient(builder.build(), "gemini-2.5-flash", 1024, true);
 
         server.expect(once(), requestTo("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"))
                 .andRespond(withBadRequest().body("""
@@ -116,7 +116,7 @@ class GoogleAiClientTest {
     }
 
     private GoogleAiClient createClient() {
-        return new GoogleAiClient(RestClient.builder().build(), "gemini-2.5-flash", 1024, 10, 2, 6);
+        return new GoogleAiClient(RestClient.builder().build(), "gemini-2.5-flash", 1024, true);
     }
 
     @Test
@@ -127,7 +127,7 @@ class GoogleAiClientTest {
     @Test
     void supportsNativeTools_canBeDisabled() {
         GoogleAiClient client = new GoogleAiClient(RestClient.builder().build(),
-                "gemini-2.5-flash", 1024, 10, 2, 6, false);
+                "gemini-2.5-flash", 1024,  false);
         assertFalse(client.supportsNativeTools());
     }
 }

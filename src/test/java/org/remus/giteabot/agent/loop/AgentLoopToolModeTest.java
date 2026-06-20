@@ -49,10 +49,12 @@ class AgentLoopToolModeTest {
     void run_nativeStrategyAndCapableClient_callsChatWithTools() {
         when(aiClient.supportsNativeTools()).thenReturn(true);
         when(aiClient.chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt()))
-                .thenReturn(new ChatTurn("done", List.of(), StopReason.END_TURN));
+                .thenReturn(new ChatTurn("done", List.of(), StopReason.END_TURN, 0L, 0L));
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(3, 2, 2, 4000));
+                new AgentBudget(3, 2, 2, 4000,
+                        8_000, 120_000,
+                        200_000, 0.7));
 
         ToolDescriptor descriptor = new ToolDescriptor("ping", "ping the server", null);
         AgentStrategy strategy = nativeStrategy(List.of(descriptor));
@@ -73,7 +75,9 @@ class AgentLoopToolModeTest {
                 .thenReturn("plain text");
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(3, 2, 2, 4000));
+                new AgentBudget(3, 2, 2, 4000,
+                        8_000, 120_000,
+                        200_000, 0.7));
 
         AgentStrategy strategy = nativeStrategy(List.of(
                 new ToolDescriptor("ping", "ping", null)));
@@ -93,7 +97,9 @@ class AgentLoopToolModeTest {
                 .thenReturn("plain text");
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(3, 2, 2, 4000));
+                new AgentBudget(3, 2, 2, 4000,
+                        8_000, 120_000,
+                        200_000, 0.7));
 
         AgentStrategy strategy = nativeStrategy(List.of());
 
@@ -109,10 +115,12 @@ class AgentLoopToolModeTest {
         when(aiClient.supportsNativeTools()).thenReturn(true);
         ToolCall call = new ToolCall("call_1", "ping", null);
         when(aiClient.chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt()))
-                .thenReturn(new ChatTurn("intermediate", List.of(call), StopReason.TOOL_USE));
+                .thenReturn(new ChatTurn("intermediate", List.of(call), StopReason.TOOL_USE, 0L, 0L));
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(3, 2, 2, 4000));
+                new AgentBudget(3, 2, 2, 4000,
+                        8_000, 120_000,
+                        200_000, 0.7));
 
         java.util.concurrent.atomic.AtomicReference<ChatTurn> seen = new java.util.concurrent.atomic.AtomicReference<>();
         AgentStrategy strategy = new AgentStrategy() {

@@ -75,7 +75,7 @@ public class TestAuthorAgent {
         E2eAgentRunner runner = new E2eAgentRunner(
                 aiClient, toolExecutor, toolContext, descriptors,
                 systemPromptText,
-                maxRounds, DEFAULT_MAX_TOKENS, "test-author");
+                maxRounds, DEFAULT_MAX_TOKENS, 120_000, "test-author");
 
         String userMessage = renderUserMessage(toolContext.framework(), plan);
         E2eAgentRunner.Result raw = runner.run(userMessage);

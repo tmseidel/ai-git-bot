@@ -22,6 +22,15 @@ public final class AgentRunContext {
     private final Path workspaceDir;
     @Setter
     private String baseBranch;
+    /**
+     * The tooling mode the {@link AgentLoop} actually resolved for this run
+     * (NATIVE function-calling vs LEGACY JSON). Set by the loop before the first
+     * round so strategies can interpret a no-tool-call turn correctly: in NATIVE
+     * mode a plain-language turn is a normal completion signal, whereas in LEGACY
+     * mode the model is expected to emit a JSON plan.
+     */
+    @Setter
+    private ToolingMode toolingMode;
 
     public AgentRunContext(AgentSession session, String owner, String repo,
                            Long issueNumber, Path workspaceDir, String baseBranch) {
@@ -39,5 +48,6 @@ public final class AgentRunContext {
     public Long issueNumber() { return issueNumber; }
     public Path workspaceDir() { return workspaceDir; }
     public String baseBranch() { return baseBranch; }
+    public ToolingMode toolingMode() { return toolingMode; }
 }
 

@@ -56,10 +56,7 @@ public class LlamaCppProviderMetadata implements AiProviderMetadata {
         return new LlamaCppClient(
                 restClient,
                 integration.getModel(),
-                integration.getMaxTokens(),
-                integration.getMaxDiffCharsPerChunk(),
-                integration.getMaxDiffChunks(),
-                integration.getRetryTruncatedChunkChars()
+                integration.getMaxTokens()
         );
     }
 }

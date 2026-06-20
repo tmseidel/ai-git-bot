@@ -15,8 +15,7 @@ class AnthropicAiClientTest {
 
     private AnthropicAiClient createClient() {
         RestClient restClient = mock(RestClient.class);
-        return new AnthropicAiClient(restClient, "claude-sonnet-4-20250514", 1024,
-                10, 2, 6);
+        return new AnthropicAiClient(restClient, "claude-sonnet-4-20250514", 1024,true);
     }
 
     @Test
@@ -56,7 +55,7 @@ class AnthropicAiClientTest {
     @Test
     void supportsNativeTools_canBeDisabled() {
         AnthropicAiClient client = new AnthropicAiClient(mock(RestClient.class),
-                "claude-sonnet-4-20250514", 1024, 10, 2, 6, false);
+                "claude-sonnet-4-20250514", 1024, false);
         assertFalse(client.supportsNativeTools());
     }
 

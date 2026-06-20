@@ -56,7 +56,8 @@ class AgentServiceFactory {
                 mcpOrchestrationService,
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
-                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
+                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
+                getContextWindowTokens(bot));
         return new IssueImplementationService(context, collaborators());
     }
 
@@ -77,7 +78,8 @@ class AgentServiceFactory {
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService,
                 bot.getSystemPrompt().getWriterAgentSystemPrompt(), bot.getUsername(),
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
-                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()));
+                botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
+                getContextWindowTokens(bot));
     }
 
     private McpToolCatalog discoverMcpToolCatalog(Bot bot) {
@@ -94,5 +96,10 @@ class AgentServiceFactory {
 
     private AiClient getAiClient(Bot bot) {
         return aiClientFactory.getClient(bot.getAiIntegration());
+    }
+
+    private int getContextWindowTokens(Bot bot) {
+        AiIntegration ai = bot.getAiIntegration();
+        return ai != null ? ai.getContextWindowTokens() : 200_000;
     }
 }

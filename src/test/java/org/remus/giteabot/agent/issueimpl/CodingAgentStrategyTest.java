@@ -141,6 +141,39 @@ class CodingAgentStrategyTest {
     }
 
     @Test
+    void step_nativeTextOnlyTurnAfterWorkspaceChanges_finishesAsSuccess() {
+        // Native models routinely end (or interleave) with a plain-language turn
+        // that carries no tool_calls and is NOT a JSON plan. When the agent has
+        // already produced workspace changes, such a turn means "I'm done" and
+        // must finish successfully — not be fed to the JSON parser and hard-fail.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
+        ctx.setToolingMode(org.remus.giteabot.agent.loop.ToolingMode.NATIVE);
+        org.remus.giteabot.ai.ChatTurn textOnly = new org.remus.giteabot.ai.ChatTurn(
+                "I've implemented the feature and the build passes.",
+                List.of(), org.remus.giteabot.ai.StopReason.END_TURN, 0L, 0L);
+
+        StepDecision d = newStrategy().step(ctx, textOnly, 1);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        assertThat(((StepDecision.Finish) d).outcome().success()).isTrue();
+    }
+
+    @Test
+    void step_nativeTextOnlyTurnWithoutChanges_nudgesInsteadOfFailing() {
+        // A plain-language turn before any work is done (no tool_calls, no
+        // workspace changes) must not fail the run — nudge the model to use tools.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        ctx.setToolingMode(org.remus.giteabot.agent.loop.ToolingMode.NATIVE);
+        org.remus.giteabot.ai.ChatTurn textOnly = new org.remus.giteabot.ai.ChatTurn(
+                "Let me think about how to approach this.",
+                List.of(), org.remus.giteabot.ai.StopReason.END_TURN, 0L, 0L);
+
+        StepDecision d = newStrategy().step(ctx, textOnly, 1);
+
+        assertThat(d).isInstanceOf(StepDecision.Continue.class);
+    }
+
+    @Test
     void step_fileOnlyResponseWithoutValidationTool_finishesAsSuccess() {
         String response = """
                 ```json

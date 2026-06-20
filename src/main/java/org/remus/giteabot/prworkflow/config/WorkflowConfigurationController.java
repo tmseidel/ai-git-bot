@@ -151,7 +151,7 @@ public class WorkflowConfigurationController {
                     out.put("workflowKey", row.workflowKey());
                     out.put("displayName", row.displayName());
                     out.put("category", row.category());
-                    out.put("params", selectionService.maskSecrets(row.workflowKey(), row.persistedParams()));
+                    out.put("params", selectionService.describeParams(row.workflowKey(), row.persistedParams()));
                     return out;
                 })
                 .toList();

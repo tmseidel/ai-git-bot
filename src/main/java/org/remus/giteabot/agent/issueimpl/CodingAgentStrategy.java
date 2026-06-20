@@ -144,9 +144,33 @@ public final class CodingAgentStrategy implements AgentStrategy {
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
         if (!turn.hasToolCalls()) {
-            // Model returned text only — defer to the legacy parser, which
-            // covers the "no tool calls but a final summary" case and the
-            // "model emitted a JSON envelope despite NATIVE" fallback.
+            // A turn with no tool_calls is either a JSON envelope (some models
+            // still emit one) or a plain-language message. If it parses as a plan,
+            // reuse the legacy decision logic for both modes.
+            ImplementationPlan parsed = responseParser.parseAiResponse(turn.assistantText());
+            if (parsed != null) {
+                return step(ctx, turn.assistantText(), round);
+            }
+            // Non-JSON text. In NATIVE mode this is how the model signals it is
+            // done narrating — do NOT feed it to the JSON parser (which would
+            // hard-fail the whole run and never open a PR). If the agent already
+            // produced workspace changes, finish successfully; otherwise nudge it
+            // to actually call tools. In LEGACY mode the model is contractually
+            // expected to return JSON, so an unparseable response is a genuine
+            // failure and keeps the legacy hard-fail behaviour.
+            if (ctx.toolingMode() == ToolingMode.NATIVE) {
+                if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+                    ImplementationPlan plan = ImplementationPlan.builder()
+                            .summary(turn.assistantText() == null || turn.assistantText().isBlank()
+                                    ? "Implementation produced workspace changes."
+                                    : turn.assistantText())
+                            .build();
+                    sessionService.recordPlan(ctx.session(), plan.getSummary(), turn.assistantText());
+                    return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
+                }
+                attempt++;
+                return new StepDecision.Continue(promptBuilder.buildMissingToolFeedback());
+            }
             return step(ctx, turn.assistantText(), round);
         }
         if (attempt > maxRetries) {

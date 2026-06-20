@@ -27,13 +27,7 @@ class AuditingAiClientTest {
 
     private static class FailingClient implements AiClient {
         @Override
-        public String reviewDiff(String prTitle, String prBody, String diff) {
-            throw new IllegalStateException("review failed");
-        }
-
-        @Override
-        public String reviewDiff(String prTitle, String prBody, String diff,
-                                 String systemPrompt, String modelOverride) {
+        public String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage) {
             throw new IllegalStateException("review failed");
         }
 
@@ -47,6 +41,16 @@ class AuditingAiClientTest {
         public String chat(List<AiMessage> conversationHistory, String newUserMessage,
                            String systemPrompt, String modelOverride, Integer maxTokensOverride) {
             throw new IllegalStateException("401 Unauthorized");
+        }
+
+        @Override
+        public void reportError(Throwable error) {
+
+        }
+
+        @Override
+        public String getModel() {
+            return "";
         }
     }
 
@@ -74,15 +78,13 @@ class AuditingAiClientTest {
     }
 
     @Test
-    void reviewDiff_isNotDoubleAudited() {
-        // Chunk-level review errors are reported by AbstractAiClient itself,
-        // so the decorator must delegate reviewDiff without recording again.
+    void submitReviewPrompt_delegatesAndDoesNotDoubleAudit() {
         RecordingRecorder recorder = new RecordingRecorder();
         AuditingAiClient client = new AuditingAiClient(new FailingClient(), recorder);
 
         assertThrows(IllegalStateException.class,
-                () -> client.reviewDiff("t", "b", "diff"));
+                () -> client.submitReviewPrompt("sys", "model", "msg"));
 
-        assertNull(recorder.lastError.get());
+        assertEquals("review failed", recorder.lastError.get().getMessage());
     }
 }

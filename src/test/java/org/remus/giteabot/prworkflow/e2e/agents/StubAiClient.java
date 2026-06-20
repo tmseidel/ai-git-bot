@@ -6,6 +6,7 @@ import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
+import org.springframework.web.client.HttpClientErrorException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -53,7 +54,7 @@ public final class StubAiClient implements AiClient {
                     toJson(spec.args()),
                     Map.of()));
         }
-        scriptedTurns.add(new ChatTurn("", tcalls, StopReason.TOOL_USE));
+        scriptedTurns.add(new ChatTurn("", tcalls, StopReason.TOOL_USE, 0L, 0L));
         return this;
     }
 
@@ -89,8 +90,18 @@ public final class StubAiClient implements AiClient {
         return nextOrEmpty().assistantText();
     }
 
-    @Override public String reviewDiff(String t, String b, String d) { return ""; }
-    @Override public String reviewDiff(String t, String b, String d, String s, String m) { return ""; }
+    @Override public String submitReviewPrompt(String s, String m, String u) { return ""; }
+    @Override public boolean isPromptTooLongError(HttpClientErrorException e) { return false; }
+
+    @Override
+    public void reportError(Throwable error) {
+
+    }
+
+    @Override
+    public String getModel() {
+        return "";
+    }
 
     private ChatTurn nextOrEmpty() {
         ChatTurn next = scriptedTurns.poll();

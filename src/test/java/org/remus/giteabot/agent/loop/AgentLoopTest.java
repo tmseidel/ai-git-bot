@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 
@@ -33,14 +34,18 @@ class AgentLoopTest {
     @BeforeEach
     void setUp() {
         session = new AgentSession("owner", "repo", 42L, "title");
+        session.setId(1L); // persisted session — the loop flushes id-bearing sessions
         ctx = new AgentRunContext(session, "owner", "repo", 42L, Path.of("/tmp/ws"), "main");
-        when(sessionService.toAiMessages(session)).thenReturn(List.of());
+        // lenient: the transient-session test below uses its own id-less session.
+        lenient().when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
 
     @Test
     void run_strategyFinishesImmediately_singleAiCall() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(5, 3, 3, 8000));
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
         when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), eq(8000)))
                 .thenReturn("ai-final");
 
@@ -60,15 +65,49 @@ class AgentLoopTest {
         assertThat(outcome.success()).isTrue();
         assertThat(outcome.payload()).isEqualTo("payload");
         verify(aiClient, times(1)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
-        // Both initial user message and the assistant response are persisted.
-        verify(sessionService).addMessage(session, "user", "go");
-        verify(sessionService).addMessage(session, "assistant", "ai-final");
+        // The round is flushed once with both the initial user message and the
+        // assistant response, instead of one transaction per message.
+        verify(sessionService).flushMessages(any(), eq(List.of(
+                new PendingMessage("user", "go"),
+                new PendingMessage("assistant", "ai-final"))), anyLong(), anyLong());
+    }
+
+    @Test
+    void run_transientSession_neverPersists() {
+        // A session with no id (e.g. the read-only review agent) must never be
+        // written to the database; the loop is purely an in-memory conversation.
+        AgentSession transientSession = new AgentSession("owner", "repo", 42L, "title");
+        AgentRunContext transientCtx = new AgentRunContext(
+                transientSession, "owner", "repo", 42L, Path.of("/tmp/ws"), "main");
+        when(sessionService.toAiMessages(transientSession)).thenReturn(List.of());
+
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                new AgentBudget(5, 3, 3, 8000, 8_000, 120_000, 200_000, 0.7));
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn("review-text");
+
+        AgentStrategy strategy = new AgentStrategy() {
+            @Override public String systemPrompt() { return "sys"; }
+            @Override public StepDecision step(AgentRunContext c, String r, int round) {
+                return new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), r));
+            }
+            @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) {
+                throw new AssertionError("budget should not be exhausted");
+            }
+        };
+
+        LoopOutcome outcome = loop.run(transientCtx, "go", strategy);
+
+        assertThat(outcome.success()).isTrue();
+        verify(sessionService, never()).flushMessages(any(), anyList(), anyLong(), anyLong());
     }
 
     @Test
     void run_strategyContinuesOnce_thenFinishes_synchronizesHistoryBetweenCalls() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(5, 3, 3, 8000));
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
         // Snapshot the history list passed to each call (Mockito captures a live reference).
         java.util.List<java.util.List<AiMessage>> historySnapshots = new java.util.ArrayList<>();
         java.util.List<String> userMessages = new java.util.ArrayList<>();
@@ -103,14 +142,20 @@ class AgentLoopTest {
         assertThat(historySnapshots.get(1).get(1).getContent()).isEqualTo("first-ai");
         assertThat(userMessages.get(1)).isEqualTo("follow-up-prompt");
 
-        // Persisted session also receives the follow-up user prompt.
-        verify(sessionService).addMessage(session, "user", "follow-up-prompt");
+        // The first round is flushed as a single batch containing the kickoff
+        // user message, the assistant turn, and the follow-up user prompt.
+        verify(sessionService).flushMessages(any(), eq(List.of(
+                new PendingMessage("user", "kickoff"),
+                new PendingMessage("assistant", "first-ai"),
+                new PendingMessage("user", "follow-up-prompt"))), anyLong(), anyLong());
     }
 
     @Test
     void run_budgetExhausted_invokesStrategyHook_returnsItsOutcome() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
-                new AgentBudget(2, 3, 3, 8000));
+                new AgentBudget(2, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
         when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
                 .thenReturn("a", "b");
 

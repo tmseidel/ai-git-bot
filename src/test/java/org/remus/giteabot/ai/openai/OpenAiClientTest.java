@@ -16,7 +16,7 @@ class OpenAiClientTest {
 
     private OpenAiClient createClient() {
         RestClient restClient = mock(RestClient.class);
-        return new OpenAiClient(restClient, "gpt-4o", 1024, 10, 2, 6);
+        return new OpenAiClient(restClient, "gpt-4o", 1024,true);
     }
 
     @Test
@@ -69,8 +69,7 @@ class OpenAiClientTest {
 
     @Test
     void supportsNativeTools_canBeDisabled() {
-        OpenAiClient client = new OpenAiClient(mock(RestClient.class), "gpt-4o", 1024,
-                10, 2, 6, false);
+        OpenAiClient client = new OpenAiClient(mock(RestClient.class), "gpt-4o", 1024,false);
         assertFalse(client.supportsNativeTools());
     }
 

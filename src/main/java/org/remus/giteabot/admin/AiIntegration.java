@@ -36,15 +36,6 @@ public class AiIntegration {
     @Column(nullable = false)
     private int maxTokens = 4096;
 
-    @Column(nullable = false)
-    private int maxDiffCharsPerChunk = 120000;
-
-    @Column(nullable = false)
-    private int maxDiffChunks = 8;
-
-    @Column(nullable = false)
-    private int retryTruncatedChunkChars = 60000;
-
     /**
      * If {@code false} (the current default), tool descriptors are sent
      * natively via the provider's {@code tools}/{@code tool_use}/{@code
@@ -63,6 +54,9 @@ public class AiIntegration {
      */
     @Column(name = "use_legacy_tool_calling", nullable = false)
     private boolean useLegacyToolCalling = false;
+
+    @Column(nullable = false)
+    private int contextWindowTokens = 200_000;
 
     /**
      * UI-facing inverse of {@link #useLegacyToolCalling}. The admin form

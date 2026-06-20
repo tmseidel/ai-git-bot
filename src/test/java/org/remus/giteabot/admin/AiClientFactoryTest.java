@@ -139,9 +139,6 @@ class AiClientFactoryTest {
         integration.setApiVersion("2023-06-01");
         integration.setModel("test-model");
         integration.setMaxTokens(4096);
-        integration.setMaxDiffCharsPerChunk(120000);
-        integration.setMaxDiffChunks(8);
-        integration.setRetryTruncatedChunkChars(60000);
         integration.setUpdatedAt(Instant.now());
         return integration;
     }

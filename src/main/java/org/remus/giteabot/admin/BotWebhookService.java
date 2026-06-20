@@ -18,7 +18,6 @@ import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow;
 import org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler;
 import org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler;
-import org.remus.giteabot.prworkflow.review.CodeReviewServiceFactory;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
@@ -29,6 +28,7 @@ import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -39,7 +39,7 @@ import java.util.Set;
  * services.  Each bot gets its own {@link AiClient} (via {@link AiClientFactory})
  * and its own {@link RepositoryApiClient} (via {@link GiteaClientFactory}).
  * <p>
- * Actual business logic is delegated to {@link CodeReviewService} and
+ * Actual business logic is delegated to {@link org.remus.giteabot.review.CodeReviewService} and
  * {@link IssueImplementationService}, which are instantiated per-bot with the
  * bot's specific AI and Git clients.
  */
@@ -51,7 +51,6 @@ public class BotWebhookService {
     private final AgentSessionService agentSessionService;
     private final BotService botService;
     private final PrWorkflowOrchestrator prWorkflowOrchestrator;
-    private final CodeReviewServiceFactory codeReviewServiceFactory;
     private final E2eTestPrCloseHandler e2eTestPrCloseHandler;
     private final E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     private final UnitTestSlashCommandHandler unitTestSlashCommandHandler;
@@ -71,7 +70,6 @@ public class BotWebhookService {
                              McpToolSelectionService mcpToolSelectionService,
                              BotToolSelectionService botToolSelectionService,
                              PrWorkflowOrchestrator prWorkflowOrchestrator,
-                             CodeReviewServiceFactory codeReviewServiceFactory,
                              E2eTestPrCloseHandler e2eTestPrCloseHandler,
                              E2eTestSlashCommandHandler e2eTestSlashCommandHandler,
                              UnitTestSlashCommandHandler unitTestSlashCommandHandler,
@@ -80,7 +78,6 @@ public class BotWebhookService {
         this.agentSessionService = agentSessionService;
         this.botService = botService;
         this.prWorkflowOrchestrator = prWorkflowOrchestrator;
-        this.codeReviewServiceFactory = codeReviewServiceFactory;
         this.e2eTestPrCloseHandler = e2eTestPrCloseHandler;
         this.e2eTestSlashCommandHandler = e2eTestSlashCommandHandler;
         this.unitTestSlashCommandHandler = unitTestSlashCommandHandler;
@@ -151,7 +148,9 @@ public class BotWebhookService {
                 return;
             }
             if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
-                createCodeReviewService(bot).handleBotCommand(payload, null);
+                // Route through the PrWorkflow orchestrator for uniform lifecycle management.
+                var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND);
+                prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
                 return;
             }
             log.info("[Bot '{}'] Comment mentions bot but no slash command matched and review workflow is not enabled — replying with unrecognised-command notice",
@@ -212,7 +211,9 @@ public class BotWebhookService {
                     return;
                 }
                 if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
-                    createCodeReviewService(bot).handleBotCommand(payload, null);
+                    // Route through the PrWorkflow orchestrator for uniform lifecycle management.
+                    var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND);
+                    prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
                     return;
                 }
                 log.info("[Bot '{}'] Comment mentions bot but no slash command matched and review workflow is not enabled — replying with unrecognised-command notice",
@@ -248,9 +249,10 @@ public class BotWebhookService {
             return;
         }
         try {
-            createCodeReviewService(bot).handleInlineComment(payload, null);
+            var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_INLINE_COMMENT);
+            prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
         } catch (Exception e) {
-            log.error("[Bot '{}'] Failed to handle inline comment: {}", bot.getName(), e.getMessage(), e);
+            log.error("[Bot '{}'] Failed to handle inline comment via workflow: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
         }
     }
@@ -274,9 +276,10 @@ public class BotWebhookService {
             return;
         }
         try {
-            createCodeReviewService(bot).handleReviewSubmitted(payload, null);
+            var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_REVIEW_SUBMITTED);
+            prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
         } catch (Exception e) {
-            log.error("[Bot '{}'] Failed to handle review submitted: {}", bot.getName(), e.getMessage(), e);
+            log.error("[Bot '{}'] Failed to handle review submitted via workflow: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
         }
     }
@@ -301,7 +304,8 @@ public class BotWebhookService {
                 return;
             }
             try {
-                createCodeReviewService(bot).handlePrClosed(payload);
+                var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_PR_CLOSED);
+                prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
             } catch (RuntimeException e) {
                 log.warn("[Bot '{}'] CodeReviewService.handlePrClosed threw {} — continuing with E2E teardown",
                         bot.getName(), e.toString());
@@ -658,16 +662,6 @@ public class BotWebhookService {
         String normalized = body.toLowerCase();
         return normalized.contains("review")
                 && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
-    }
-
-    /**
-     * Creates a per-bot {@link CodeReviewService} via the shared
-     * {@link CodeReviewServiceFactory}. Used by the non-review webhook
-     * handlers (bot commands, inline comments, review submissions, PR-closed)
-     * that have not yet been extracted into their own {@code PrWorkflow}.
-     */
-    private CodeReviewService createCodeReviewService(Bot bot) {
-        return codeReviewServiceFactory.create(bot);
     }
 
     private IssueImplementationService createIssueImplementationService(Bot bot) {

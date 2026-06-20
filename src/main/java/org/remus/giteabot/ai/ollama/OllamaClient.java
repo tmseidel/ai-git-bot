@@ -39,17 +39,8 @@ public class OllamaClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
-    public OllamaClient(RestClient restClient, String model, int maxTokens,
-                        int maxDiffCharsPerChunk, int maxDiffChunks,
-                        int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
-
-    public OllamaClient(RestClient restClient, String model, int maxTokens,
-                        int maxDiffCharsPerChunk, int maxDiffChunks,
-                        int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+    public OllamaClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }
@@ -120,11 +111,8 @@ public class OllamaClient extends AbstractAiClient {
     }
 
     @Override
-    protected boolean isPromptTooLongError(HttpClientErrorException e) {
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
-        if (body == null) {
-            return false;
-        }
         String normalized = body.toLowerCase(Locale.ROOT);
         return normalized.contains("too long") || normalized.contains("context length");
     }
@@ -216,12 +204,16 @@ public class OllamaClient extends AbstractAiClient {
             }
         }
         StopReason reason = mapStopReason(response.getDoneReason(), !calls.isEmpty());
+        long inputTokens = 0L;
+        long outputTokens = 0L;
         if (response.getPromptEvalCount() != null && response.getEvalCount() != null) {
+            inputTokens = response.getPromptEvalCount();
+            outputTokens = response.getEvalCount();
             log.info("Ollama chat-with-tools: {} prompt tokens, {} eval tokens, {} tool_call(s)",
-                    response.getPromptEvalCount(), response.getEvalCount(), calls.size());
-            reportUsage(response.getPromptEvalCount(), response.getEvalCount());
+                    inputTokens, outputTokens, calls.size());
+            reportUsage(inputTokens, outputTokens);
         }
-        return new ChatTurn(text, calls, reason);
+        return new ChatTurn(text, calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String doneReason, boolean hasToolCalls) {

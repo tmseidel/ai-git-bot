@@ -165,6 +165,30 @@ public class AgentConfigProperties {
          * every AI call. Mirrors the legacy {@code agent.max-tokens} setting.
          */
         private int maxTokensPerCall = 16384;
+
+        /**
+         * Maximum characters retained from a single tool result in the
+         * in-memory history. This field is currently unused — individual
+         * tool results are kept at full size; all tool messages are truncated
+         * together when the context window budget is exceeded.
+         * Default: 8_000.
+         */
+        private int maxToolResultChars = 8_000;
+
+        /**
+         * Character budget for the in-memory history list during a single
+         * AgentLoop run. When exceeded, the HistoryCompactor prunes older
+         * tool-pair groups and replaces them with a summary. Default: 120_000.
+         */
+        private int maxHistoryChars = 120_000;
+
+        /**
+         * Fraction (0.0-1.0) of the model's context window at which proactive
+         * compaction triggers. When token usage reaches this threshold, the
+         * TokenUsageTracker compacts the history before the next AI call.
+         * Default: 0.7 (70%).
+         */
+        private double proactiveCompactionThreshold = 0.7;
     }
 
     /**

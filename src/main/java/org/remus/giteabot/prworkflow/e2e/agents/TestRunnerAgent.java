@@ -83,7 +83,7 @@ public class TestRunnerAgent {
         E2eAgentRunner runner = new E2eAgentRunner(
                 aiClient, toolExecutor, toolContext, descriptors,
                 systemPromptText,
-                maxRounds, DEFAULT_MAX_TOKENS, "test-runner");
+                maxRounds, DEFAULT_MAX_TOKENS, 120_000, "test-runner");
 
         E2eAgentRunner.Result raw = runner.run(renderUserMessage(toolContext.framework(), plan, maxRetries));
 

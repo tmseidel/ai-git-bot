@@ -15,6 +15,7 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
+import org.remus.giteabot.config.ReviewChunkingProperties;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.atLeastOnce;
@@ -67,6 +69,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler unitTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
+    @Mock private ReviewChunkingProperties chunkingProperties;
 
     private BotWebhookService botWebhookService;
 
@@ -79,7 +82,7 @@ class BotWebhookServiceTest {
                 promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService, botService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
-                prWorkflowOrchestrator, codeReviewServiceFactory, e2eTestPrCloseHandler,
+                prWorkflowOrchestrator, e2eTestPrCloseHandler,
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler, workflowSelectionService);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
@@ -87,19 +90,40 @@ class BotWebhookServiceTest {
         // Built-in tool whitelist: tests don't exercise the gating layer, so return
         // null (= unrestricted) to keep the historic test surface.
         lenient().when(botToolSelectionService.allowedBuiltinTools(any())).thenReturn(null);
+        // Wire the orchestrator mock to delegate to a real ReviewWorkflow so
+        // the existing sessionService/repositoryApiClient verifications still pass.
+        lenient().when(chunkingProperties.getMaxDiffCharsPerChunk()).thenReturn(120_000);
+        lenient().when(chunkingProperties.getMaxDiffChunks()).thenReturn(8);
+        lenient().when(chunkingProperties.getRetryTruncatedChunkChars()).thenReturn(60_000);
+        var reviewWorkflow = new org.remus.giteabot.prworkflow.review.ReviewWorkflow(
+                codeReviewServiceFactory, giteaClientFactory, workflowSelectionService,
+                chunkingProperties);
+        lenient().when(prWorkflowOrchestrator.run(
+                        any(Bot.class), any(WebhookPayload.class), eq("review"), anyMap()))
+                .thenAnswer(invocation -> {
+                    Bot b = invocation.getArgument(0);
+                    WebhookPayload p = invocation.getArgument(1);
+                    @SuppressWarnings("unchecked")
+                    java.util.Map<String, String> h = invocation.getArgument(3, java.util.Map.class);
+                    var ctx = new org.remus.giteabot.prworkflow.PrWorkflowContext(
+                            b, p, 1L, (name, log) -> { /* no-op */ }, () -> false, h);
+                    return reviewWorkflow.run(ctx);
+                });
         // M1: the CodeReviewService construction was extracted into
         // CodeReviewServiceFactory. Reproduce the legacy behaviour (real
         // CodeReviewService built from mocked AI/Git/session deps) here so
         // the existing handlePrComment / handleBotCommand routing tests
         // keep observing the same downstream side-effects on `sessionService`.
-        lenient().when(codeReviewServiceFactory.create(any(Bot.class)))
+        lenient().when(codeReviewServiceFactory.create(any(Bot.class),
+                        any(RepositoryApiClient.class), eq(120000), eq(8), eq(60000)))
                 .thenAnswer(invocation -> {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
                             repositoryApiClient, aiClient, sessionService,
                             b.getUsername(), new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
-                            b.getSystemPrompt().getReviewSystemPrompt());
+                            b.getSystemPrompt().getReviewSystemPrompt(),
+                            120000, 8, 60000);
                 });
         // Step 7.2 — provide a real BudgetConfig so production code that reads
         // agentConfig.getBudget().getMaxTokensPerCall() does not NPE on the mock.
@@ -622,6 +646,9 @@ class BotWebhookServiceTest {
         when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.of(session));
         when(agentSessionService.claimSessionForUpdate("Test", "my-repo", 12L,
                 AgentSession.AgentSessionType.WRITER)).thenReturn(Optional.of(session));
+        // The follow-up flow rebinds to the compacted managed entity; return the
+        // same session so subsequent state reads are preserved.
+        when(agentSessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));

@@ -25,7 +25,8 @@ public record IssueImplementationContext(
         McpOrchestrationService mcpOrchestrationService,
         McpConfiguration mcpConfiguration,
         McpToolCatalog mcpToolCatalog,
-        Set<String> allowedBuiltinTools
+        Set<String> allowedBuiltinTools,
+        int contextWindowTokens
 ) {
 
     public IssueImplementationContext {

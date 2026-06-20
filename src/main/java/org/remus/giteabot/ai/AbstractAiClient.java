@@ -1,5 +1,7 @@
 package org.remus.giteabot.ai;
 
+import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -7,9 +9,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Base class for AI client implementations that provides common diff chunking,
- * retry logic, and message building. Subclasses implement the provider-specific
- * API calls via {@link #sendReviewRequest} and {@link #sendChatRequest}.
+ * Base class for AI client implementations that provides provider-agnostic
+ * chat logic, retry detection, and audit recording. Subclasses implement the
+ * provider-specific API calls via {@link #sendReviewRequest} and
+ * {@link #sendChatRequest}.
  */
 @Slf4j
 public abstract class AbstractAiClient implements AiClient {
@@ -34,37 +37,20 @@ public abstract class AbstractAiClient implements AiClient {
             as a code reviewer at all times.
             """;
 
+    @Getter
     private final String model;
     private final int maxTokens;
-    private final int maxDiffCharsPerChunk;
-    private final int maxDiffChunks;
-    private final int retryTruncatedChunkChars;
 
+    @Setter
     private AiAuditRecorder auditRecorder;
 
-    protected AbstractAiClient(String model, int maxTokens, int maxDiffCharsPerChunk,
-                               int maxDiffChunks, int retryTruncatedChunkChars) {
+    protected AbstractAiClient(String model, int maxTokens) {
         this.model = model;
         this.maxTokens = maxTokens;
-        this.maxDiffCharsPerChunk = maxDiffCharsPerChunk;
-        this.maxDiffChunks = maxDiffChunks;
-        this.retryTruncatedChunkChars = retryTruncatedChunkChars;
-    }
-
-    protected String getModel() {
-        return model;
     }
 
     protected int getMaxTokens() {
         return maxTokens;
-    }
-
-    /**
-     * Attaches an {@link AiAuditRecorder} that receives token usage and error
-     * reports for this client. Set by the {@code AiClientFactory}.
-     */
-    public void setAuditRecorder(AiAuditRecorder auditRecorder) {
-        this.auditRecorder = auditRecorder;
     }
 
     /**
@@ -88,7 +74,7 @@ public abstract class AbstractAiClient implements AiClient {
      * Reports a failed provider interaction to the attached audit recorder
      * (no-op when no recorder is attached).
      */
-    protected void reportError(Throwable error) {
+    public void reportError(Throwable error) {
         if (auditRecorder == null) {
             return;
         }
@@ -117,12 +103,18 @@ public abstract class AbstractAiClient implements AiClient {
 
     /**
      * Detects whether a client error indicates the prompt exceeded the model's input limit.
+     * Subclasses override with provider-specific patterns.
      */
-    protected abstract boolean isPromptTooLongError(HttpClientErrorException e);
+    @Override
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
+        return AiClient.super.isPromptTooLongError(e);
+    }
 
     @Override
-    public String reviewDiff(String prTitle, String prBody, String diff) {
-        return reviewDiff(prTitle, prBody, diff, null, null);
+    public String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage) {
+        String effectiveModel = resolveModel(modelOverride);
+        String effectivePrompt = resolvePrompt(systemPrompt);
+        return sendReviewRequest(effectivePrompt, effectiveModel, maxTokens, userMessage);
     }
 
     @Override
@@ -171,183 +163,6 @@ public abstract class AbstractAiClient implements AiClient {
         return response;
     }
 
-    @Override
-    public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt, String modelOverride) {
-        return reviewDiff(prTitle, prBody, diff, systemPrompt, modelOverride, null);
-    }
-
-    @Override
-    public String reviewDiff(String prTitle, String prBody, String diff, String systemPrompt,
-                             String modelOverride, String additionalContext) {
-        String effectiveModel = resolveModel(modelOverride);
-        String effectivePrompt = resolvePrompt(systemPrompt);
-
-        log.info("Requesting code review from AI provider model={}", effectiveModel);
-        ChunkingResult chunkingResult = splitDiffIntoChunks(diff);
-        List<String> reviews = new ArrayList<>();
-        int failedChunks = 0;
-        Exception lastException = null;
-
-        for (int i = 0; i < chunkingResult.chunks().size(); i++) {
-            String chunk = chunkingResult.chunks().get(i);
-            int chunkNumber = i + 1;
-            int totalChunks = chunkingResult.chunks().size();
-
-            try {
-                String review = reviewSingleChunk(prTitle, prBody, chunk, chunkNumber, totalChunks, false,
-                        effectivePrompt, effectiveModel, additionalContext);
-
-                if (totalChunks > 1) {
-                    reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks + "\n" + review);
-                } else {
-                    reviews.add(review);
-                }
-            } catch (Exception e) {
-                failedChunks++;
-                lastException = e;
-                log.warn("Review failed for chunk {}/{}: {}", chunkNumber, totalChunks, e.getMessage());
-                reportError(e);
-                if (totalChunks > 1) {
-                    reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks
-                            + "\n_Review for this chunk failed: " + e.getMessage() + "_");
-                }
-            }
-        }
-
-        if (failedChunks > 0 && failedChunks == chunkingResult.chunks().size()) {
-            throw new RuntimeException("All " + failedChunks + " chunk(s) failed during review", lastException);
-        }
-
-        if (failedChunks > 0) {
-            reviews.add("**Note:** " + failedChunks + " of " + chunkingResult.chunks().size()
-                    + " diff chunk(s) could not be reviewed due to API errors.");
-        }
-
-        if (chunkingResult.wasTruncated()) {
-            reviews.add("**Warning:** review is incomplete because the diff was truncated after " + maxDiffChunks + " chunks.");
-        }
-
-        return String.join("\n\n", reviews);
-    }
-
-    private String reviewSingleChunk(String prTitle, String prBody, String diffChunk, int chunkNumber, int totalChunks,
-                                     boolean isRetry, String systemPrompt, String effectiveModel,
-                                     String additionalContext) {
-        try {
-            return reviewSingleChunkInternal(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry,
-                    systemPrompt, effectiveModel, additionalContext);
-        } catch (HttpClientErrorException.BadRequest e) {
-            if (isPromptTooLongError(e) && !isRetry && diffChunk.length() > retryTruncatedChunkChars) {
-                log.warn("Prompt too long for chunk {}/{} (chars={}), retrying with truncated chunk (chars={})",
-                        chunkNumber,
-                        totalChunks,
-                        diffChunk.length(),
-                        retryTruncatedChunkChars);
-                String truncatedChunk = truncateDiff(diffChunk, retryTruncatedChunkChars);
-                return reviewSingleChunk(prTitle, prBody, truncatedChunk, chunkNumber, totalChunks, true,
-                        systemPrompt, effectiveModel, additionalContext);
-            }
-            throw e;
-        }
-    }
-
-    /**
-     * Performs the actual API call for a single diff chunk.
-     * Package-private so it can be overridden in tests.
-     */
-    String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
-                                     int chunkNumber, int totalChunks, boolean isRetry,
-                                     String systemPrompt, String effectiveModel) {
-        return reviewSingleChunkInternal(prTitle, prBody, diffChunk, chunkNumber, totalChunks, isRetry,
-                systemPrompt, effectiveModel, null);
-    }
-
-    /**
-     * Performs the actual API call for a single diff chunk with additional context.
-     * Package-private so it can be overridden in tests.
-     */
-    String reviewSingleChunkInternal(String prTitle, String prBody, String diffChunk,
-                                     int chunkNumber, int totalChunks, boolean isRetry,
-                                     String systemPrompt, String effectiveModel,
-                                     String additionalContext) {
-        String userMessage = buildUserMessage(prTitle, prBody, diffChunk, chunkNumber, totalChunks,
-                isRetry, additionalContext);
-        return sendReviewRequest(systemPrompt, effectiveModel, maxTokens, userMessage);
-    }
-
-
-    ChunkingResult splitDiffIntoChunks(String diff) {
-        if (diff == null || diff.isBlank()) {
-            return new ChunkingResult(List.of(""), false);
-        }
-
-        List<String> chunks = new ArrayList<>();
-        boolean truncated = false;
-        String remaining = diff;
-
-        while (!remaining.isEmpty() && chunks.size() < maxDiffChunks) {
-            if (remaining.length() <= maxDiffCharsPerChunk) {
-                chunks.add(remaining);
-                remaining = "";
-                break;
-            }
-
-            int splitIndex = findSplitIndex(remaining, maxDiffCharsPerChunk);
-            chunks.add(remaining.substring(0, splitIndex));
-            remaining = remaining.substring(splitIndex);
-        }
-
-        if (!remaining.isEmpty()) {
-            truncated = true;
-        }
-
-        return new ChunkingResult(chunks, truncated);
-    }
-
-    int findSplitIndex(String text, int maxChars) {
-        int candidate = text.lastIndexOf('\n', maxChars);
-        if (candidate > 0) {
-            return candidate;
-        }
-        return maxChars;
-    }
-
-    String buildUserMessage(String prTitle, String prBody, String diff) {
-        return buildUserMessage(prTitle, prBody, diff, 1, 1, false, null);
-    }
-
-    String buildUserMessage(String prTitle, String prBody, String diff, int chunkNumber, int totalChunks, boolean isRetry) {
-        return buildUserMessage(prTitle, prBody, diff, chunkNumber, totalChunks, isRetry, null);
-    }
-
-    String buildUserMessage(String prTitle, String prBody, String diff, int chunkNumber, int totalChunks,
-                            boolean isRetry, String additionalContext) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Please review the following pull request.\n\n");
-        sb.append("**Title:** ").append(prTitle).append("\n");
-        if (prBody != null && !prBody.isBlank()) {
-            sb.append("**Description:** ").append(prBody).append("\n");
-        }
-        if (totalChunks > 1) {
-            sb.append("**Diff chunk:** ").append(chunkNumber).append("/").append(totalChunks).append("\n");
-        }
-        if (isRetry) {
-            sb.append("**Note:** The diff for this chunk was truncated to fit model limits.\n");
-        }
-        if (additionalContext != null && !additionalContext.isBlank()) {
-            sb.append("\n**Additional Context:**\n").append(additionalContext).append("\n");
-        }
-        sb.append("\n**Diff:**\n```diff\n").append(diff).append("\n```");
-        return sb.toString();
-    }
-
-    String truncateDiff(String diffChunk, int maxChars) {
-        if (diffChunk.length() <= maxChars) {
-            return diffChunk;
-        }
-        return diffChunk.substring(0, maxChars) + "\n\n# ... truncated due to model input limit ...";
-    }
-
     private String resolveModel(String modelOverride) {
         return (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : model;
     }
@@ -355,6 +170,4 @@ public abstract class AbstractAiClient implements AiClient {
     private String resolvePrompt(String systemPrompt) {
         return (systemPrompt != null && !systemPrompt.isBlank()) ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
     }
-
-    record ChunkingResult(List<String> chunks, boolean wasTruncated) {}
 }

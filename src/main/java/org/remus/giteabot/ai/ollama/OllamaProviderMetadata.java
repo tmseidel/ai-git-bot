@@ -57,9 +57,6 @@ public class OllamaProviderMetadata implements AiProviderMetadata {
                 restClient,
                 integration.getModel(),
                 integration.getMaxTokens(),
-                integration.getMaxDiffCharsPerChunk(),
-                integration.getMaxDiffChunks(),
-                integration.getRetryTruncatedChunkChars(),
                 !integration.isUseLegacyToolCalling()
         );
     }

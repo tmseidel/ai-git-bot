@@ -42,17 +42,10 @@ public class AnthropicAiClient extends AbstractAiClient {
     private final boolean nativeToolsEnabled;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
-    public AnthropicAiClient(RestClient restClient, String model, int maxTokens,
-                             int maxDiffCharsPerChunk, int maxDiffChunks,
-                             int retryTruncatedChunkChars) {
-        this(restClient, model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks,
-                retryTruncatedChunkChars, true);
-    }
 
     public AnthropicAiClient(RestClient restClient, String model, int maxTokens,
-                             int maxDiffCharsPerChunk, int maxDiffChunks,
-                             int retryTruncatedChunkChars, boolean nativeToolsEnabled) {
-        super(model, maxTokens, maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                             boolean nativeToolsEnabled) {
+        super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
     }
@@ -293,7 +286,7 @@ public class AnthropicAiClient extends AbstractAiClient {
                         .content(kept)
                         .build());
             } else if ("user".equals(m.getRole()) && m.getContent() instanceof List<?> blocks) {
-                Set<String> requestedIds = collectToolUseIds(out.isEmpty() ? null : out.get(out.size() - 1));
+                Set<String> requestedIds = collectToolUseIds(out.isEmpty() ? null : out.getLast());
                 List<AnthropicRequest.ContentBlock> kept = new ArrayList<>();
                 int droppedToolResults = 0;
                 for (Object o : blocks) {
@@ -393,15 +386,16 @@ public class AnthropicAiClient extends AbstractAiClient {
         if (!calls.isEmpty()) {
             reason = StopReason.TOOL_USE;
         }
+        long inputTokens = 0L;
+        long outputTokens = 0L;
         if (response.getUsage() != null) {
+            inputTokens = response.getUsage().getInputTokens();
+            outputTokens = response.getUsage().getOutputTokens();
             log.info("Anthropic chat-with-tools: {} input tokens, {} output tokens, {} tool_use block(s)",
-                    response.getUsage().getInputTokens(),
-                    response.getUsage().getOutputTokens(),
-                    calls.size());
-            reportUsage(response.getUsage().getInputTokens(),
-                    response.getUsage().getOutputTokens());
+                    inputTokens, outputTokens, calls.size());
+            reportUsage(inputTokens, outputTokens);
         }
-        return new ChatTurn(text.toString(), calls, reason);
+        return new ChatTurn(text.toString(), calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String stopReason) {
@@ -417,7 +411,7 @@ public class AnthropicAiClient extends AbstractAiClient {
     }
 
     @Override
-    protected boolean isPromptTooLongError(HttpClientErrorException e) {
+    public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
         if (body == null) {
             return false;
