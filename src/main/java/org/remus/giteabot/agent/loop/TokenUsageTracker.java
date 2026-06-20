@@ -93,7 +93,8 @@ public final class TokenUsageTracker {
 
     /**
      * Returns {@code true} if the most recent AI call's input tokens exceed
-     * the proactive compaction threshold of the context window.
+     * the threshold of the context window, signalling that tool messages
+     * should be truncated from history.
      */
     public boolean shouldCompactProactively(AgentSession session) {
         if (session == null || contextWindowTokens <= 0) {
@@ -122,7 +123,7 @@ public final class TokenUsageTracker {
         return (double) lastInputTokens / contextWindowTokens;
     }
 
-    private static long estimateTokens(int chars) {
+    public static long estimateTokens(int chars) {
         return Math.max(1L, (long) Math.ceil((double) chars / CHARS_PER_TOKEN));
     }
 }

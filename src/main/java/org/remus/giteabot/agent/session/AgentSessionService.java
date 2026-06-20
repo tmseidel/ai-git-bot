@@ -171,6 +171,54 @@ public class AgentSessionService {
         return managed;
     }
 
+    /**
+     * Truncates the content of all persisted tool-role messages for a session,
+     * shortening each one with head+tail truncation. Called when the context
+     * window token budget is exceeded — this keeps tool results compact in
+     * the persisted history rather than deleting them entirely.
+     *
+     * @param sessionId id of the session whose tool messages should be truncated
+     * @param maxResultChars max characters to keep per tool result after truncation
+     * @return the managed entity
+     */
+    @Transactional
+    public AgentSession truncateToolMessages(Long sessionId, int maxResultChars) {
+        AgentSession managed = repository.findById(sessionId).orElseThrow();
+        int truncated = 0;
+        for (ConversationMessage msg : managed.getMessages()) {
+            if ("tool".equalsIgnoreCase(msg.getRole())
+                    && msg.getContent() != null
+                    && msg.getContent().length() > maxResultChars) {
+                msg.setContent(truncateToolResult(msg.getContent(), maxResultChars));
+                truncated++;
+            }
+        }
+        if (truncated > 0) {
+            log.debug("Truncated {} tool message(s) to max {} chars in session {}",
+                    truncated, maxResultChars, sessionId);
+        }
+        return managed;
+    }
+
+    /**
+     * Head+tail truncation for a tool result string. Keeps the first half of
+     * {@code maxChars} from the head, the second half from the tail, with a
+     * marker showing how many characters were removed.
+     */
+    public static String truncateToolResult(String text, int maxChars) {
+        if (text == null || text.length() <= maxChars) return text;
+        int headSize = maxChars / 2;
+        int markerOverhead = 60; // "… [N chars truncated] …"
+        int tailSize = maxChars - headSize - markerOverhead;
+        if (tailSize <= 0) {
+            return text.substring(0, maxChars) + "\n… [truncated]";
+        }
+        int truncatedChars = text.length() - headSize - tailSize;
+        return text.substring(0, headSize)
+                + "\n… [" + truncatedChars + " chars truncated] …\n"
+                + text.substring(text.length() - tailSize);
+    }
+
     @Transactional
     public AgentSession setStatus(AgentSession session, AgentSession.AgentSessionStatus status) {
         AgentSession managed = repository.getReferenceById(session.getId());

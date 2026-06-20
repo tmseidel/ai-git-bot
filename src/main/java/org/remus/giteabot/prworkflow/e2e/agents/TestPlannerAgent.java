@@ -60,6 +60,7 @@ public class TestPlannerAgent {
                 E2ePromptLibrary.plannerSystemPromptOrDefault(systemPrompt, framework),
                 DEFAULT_MAX_ROUNDS,
                 DEFAULT_MAX_TOKENS,
+                120_000,
                 "test-planner");
 
         E2eAgentRunner.Result result = runner.run(renderUserMessage(framework, input));

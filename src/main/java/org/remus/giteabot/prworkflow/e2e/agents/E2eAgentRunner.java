@@ -4,7 +4,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentLoop;
 import org.remus.giteabot.agent.loop.HistoryCompactor;
-import org.remus.giteabot.agent.loop.ToolResultTruncator;
 import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.ai.AiClient;
@@ -52,7 +51,6 @@ public final class E2eAgentRunner {
     private final int maxRounds;
     private final Integer maxTokens;
     private final String agentLabel;
-    private final ToolResultTruncator truncator;
     private final HistoryCompactor compactor;
     /** Tool name → ordered argument-property names (required first, then optional,
      *  schema-insertion order) — used to zip the legacy envelope's positional
@@ -74,20 +72,8 @@ public final class E2eAgentRunner {
                           String systemPrompt,
                           int maxRounds,
                           Integer maxTokens,
+                          int maxHistoryChars,
                           String agentLabel) {
-        this(aiClient, toolExecutor, toolContext, toolDescriptors, systemPrompt,
-             maxRounds, maxTokens, agentLabel, 8_000);
-    }
-
-    public E2eAgentRunner(AiClient aiClient,
-                          PrWorkflowToolExecutor toolExecutor,
-                          PrWorkflowToolContext toolContext,
-                          List<ToolDescriptor> toolDescriptors,
-                          String systemPrompt,
-                          int maxRounds,
-                          Integer maxTokens,
-                          String agentLabel,
-                          int maxToolResultChars) {
         this.aiClient = aiClient;
         this.toolExecutor = toolExecutor;
         this.toolContext = toolContext;
@@ -96,8 +82,7 @@ public final class E2eAgentRunner {
         this.maxRounds = maxRounds;
         this.maxTokens = maxTokens;
         this.agentLabel = agentLabel == null ? "e2e-agent" : agentLabel;
-        this.truncator = new ToolResultTruncator(maxToolResultChars);
-        this.compactor = new HistoryCompactor(120_000, 4);
+        this.compactor = new HistoryCompactor(maxHistoryChars, 4);
         this.argOrderByTool = buildArgOrderIndex(this.toolDescriptors);
         this.argTypeByTool = buildArgTypeIndex(this.toolDescriptors);
     }
@@ -231,16 +216,13 @@ public final class E2eAgentRunner {
                 for (ImplementationPlan.ToolRequest req : requests) {
                     Map<String, Object> args = positionalToNamedArgs(req.getTool(), req.getArgs());
                     String result = toolExecutor.execute(req.getTool(), args, toolContext);
-                    String truncated = truncator.truncate(result);
                     invocations.add(new ToolInvocation(req.getTool(), args, result));
                     feedback.append("### `").append(req.getId() == null ? "?" : req.getId())
                             .append("` (").append(req.getTool()).append(")\n")
-                            .append(truncated == null ? "(no output)" : truncated)
+                            .append(result == null ? "(no output)" : result)
                             .append("\n\n");
                 }
                 currentMessage = feedback.toString();
-                // Compact in-memory history if it exceeds the budget
-                compactor.compact(history);
                 continue;
             }
 
@@ -264,17 +246,14 @@ public final class E2eAgentRunner {
                 Map<String, Object> args = extractArgs(call.args());
                 String result = toolExecutor.execute(call.name(), args, toolContext);
                 invocations.add(new ToolInvocation(call.name(), args, result));
-                String truncated = truncator.truncate(result);
                 history.add(AiMessage.builder()
                         .role("tool")
                         .toolCallId(call.id())
-                        .toolResult(truncated)
+                        .toolResult(result)
                         .build());
             }
             // Default to an empty user message so the model continues from tool results.
             currentMessage = "";
-            // Compact in-memory history if it exceeds the budget
-            compactor.compact(history);
         }
 
         log.warn("[{}] exhausted {} rounds without a terminal text turn", agentLabel, maxRounds);

@@ -39,7 +39,6 @@ public final class AgentLoop {
     private final AgentSessionService sessionService;
     private final AgentBudget budget;
     private final String providerTag;
-    private final ToolResultTruncator truncator;
     private final HistoryCompactor compactor;
     private final TokenUsageTracker tokenTracker;
 
@@ -49,7 +48,6 @@ public final class AgentLoop {
         this.budget = budget;
         this.providerTag = aiClient == null ? "unknown"
                 : aiClient.getClass().getSimpleName().toLowerCase(Locale.ROOT);
-        this.truncator = new ToolResultTruncator(budget.maxToolResultChars());
         this.compactor = new HistoryCompactor(budget.maxHistoryChars(), 4);
         this.tokenTracker = new TokenUsageTracker(
                 budget.contextWindowTokens(), budget.proactiveCompactionThreshold());
@@ -104,14 +102,51 @@ public final class AgentLoop {
             pending.add(new PendingMessage("assistant", aiResponse));
 
             // Track token usage (accumulated in-memory on the session; persisted by
-            // flushRound) and trigger proactive compaction if needed.
+            // flushRound) and trigger tool-message truncation when the context
+            // budget is exceeded. Two-stage: (1) head+tail truncate tool message
+            // content (in-memory and persisted); (2) if the total history still
+            // exceeds the context window after truncation, compact it.
             int promptChars = currentMessage == null ? 0 : currentMessage.length();
             tokenTracker.record(ctx.session(), turn, promptChars);
             if (tokenTracker.shouldCompactProactively(ctx.session())) {
-                log.info("AgentLoop round {}/{} for issue #{}: proactive compaction triggered (usage: {}%)",
+                log.info("AgentLoop round {}/{} for issue #{}: context budget exceeded (usage: {}%),"
+                                + " truncating tool messages",
                         round, budget.maxRounds(), ctx.issueNumber(),
                         String.format("%.1f", tokenTracker.usageFraction(ctx.session()) * 100));
-                compactor.compact(history);
+                int maxResultChars = budget.maxToolResultChars();
+                // Stage 1: truncate tool message content in-memory
+                for (AiMessage msg : history) {
+                    if ("tool".equals(msg.getRole())) {
+                        if (msg.getContent() != null) {
+                            msg.setContent(AgentSessionService.truncateToolResult(msg.getContent(), maxResultChars));
+                        }
+                        if (msg.getToolResult() != null) {
+                            msg.setToolResult(AgentSessionService.truncateToolResult(msg.getToolResult(), maxResultChars));
+                        }
+                    }
+                }
+                // Mirror truncation on persisted tool messages
+                if (ctx.session().getId() != null) {
+                    sessionService.truncateToolMessages(ctx.session().getId(), maxResultChars);
+                }
+                // Stage 2: if the total history still exceeds the context
+                // window budget after truncation, compact messages.
+                int historyChars = history.stream()
+                        .mapToInt(m -> m.getContent() == null ? 0 : m.getContent().length())
+                        .sum();
+                int systemPromptChars = systemPrompt != null ? systemPrompt.length() : 0;
+                int currentMessageChars = currentMessage != null ? currentMessage.length() : 0;
+                long estimatedPromptTokens = TokenUsageTracker.estimateTokens(
+                        historyChars + systemPromptChars + currentMessageChars);
+                long thresholdTokens = (long) (budget.contextWindowTokens()
+                        * budget.proactiveCompactionThreshold());
+                if (estimatedPromptTokens > thresholdTokens) {
+                    log.info("AgentLoop round {}/{} for issue #{}: still over budget after tool truncation"
+                                    + " (est. {} tokens > {} threshold), compacting messages",
+                            round, budget.maxRounds(), ctx.issueNumber(),
+                            estimatedPromptTokens, thresholdTokens);
+                    compactor.compact(history);
+                }
             }
 
             StepDecision decision;
@@ -149,23 +184,20 @@ public final class AgentLoop {
                 log.debug("AgentLoop round {}/{} for issue #{}: strategy decided CONTINUE_WITH_TOOL_RESULTS ({} results)",
                         round, budget.maxRounds(), ctx.issueNumber(), results.size());
                 for (StepDecision.ToolCallResult r : results) {
-                    String truncated = truncator.truncate(r.resultText());
                     history.add(AiMessage.builder()
                             .role("tool")
                             .toolCallId(r.toolCallId())
-                            .toolResult(truncated)
+                            .toolResult(r.resultText())
                             .build());
                     // Persist a textual marker in the session log so post-hoc review still shows
                     // the tool flow. Full structured replay is intentionally out of scope here.
                     pending.add(new PendingMessage("tool",
-                            "[" + r.toolCallId() + "] " + truncated));
+                            "[" + r.toolCallId() + "] " + r.resultText()));
                 }
                 currentMessage = (follow == null || follow.isEmpty()) ? "" : follow;
                 if (!currentMessage.isEmpty()) {
                     pending.add(new PendingMessage("user", currentMessage));
                 }
-                // Compact in-memory history if it exceeds the budget
-                compactor.compact(history);
                 flushRound(ctx, pending);
                 continue;
             }
@@ -175,8 +207,6 @@ public final class AgentLoop {
             String next = ((StepDecision.Continue) decision).nextUserMessage();
             currentMessage = next;
             pending.add(new PendingMessage("user", currentMessage));
-            // Compact in-memory history if it exceeds the budget
-            compactor.compact(history);
             flushRound(ctx, pending);
         }
 

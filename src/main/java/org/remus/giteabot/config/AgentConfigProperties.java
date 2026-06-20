@@ -168,8 +168,9 @@ public class AgentConfigProperties {
 
         /**
          * Maximum characters retained from a single tool result in the
-         * in-memory history. Longer results are truncated with a head+tail
-         * strategy (first N/2 chars + last N/2 chars + truncation marker).
+         * in-memory history. This field is currently unused — individual
+         * tool results are kept at full size; all tool messages are truncated
+         * together when the context window budget is exceeded.
          * Default: 8_000.
          */
         private int maxToolResultChars = 8_000;
