@@ -24,7 +24,7 @@ You run the software, connect it to your Git hosts and AI providers, and configu
 |---|---|
 | [Deployment](DEPLOYMENT.md) | Docker Compose deployment, environment variables, production setup |
 | [Admin Guide](USER_GUIDE.md) | The admin web UI: creating bots, AI integrations, Git integrations, workflow configurations |
-| [Migration 1.0 → 1.1](MIGRATION_1.0_TO_1.1.md) · [Migration 1.6 → 1.7](MIGRATION_1.6_TO_1.7.md) | Upgrade notes between releases |
+| [Migration 1.0 → 1.1](MIGRATION_1.0_TO_1.1.md) · [Migration 1.6 → 1.7](MIGRATION_1.6_TO_1.7.md) · [Migration 1.12 → 1.13](MIGRATION_1.12_TO_1.13.md) | Upgrade notes between releases |
 
 ### Connect a Git provider
 
