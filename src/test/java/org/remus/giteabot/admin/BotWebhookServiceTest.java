@@ -15,6 +15,7 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
+import org.remus.giteabot.config.ReviewChunkingProperties;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -68,6 +69,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler unitTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
+    @Mock private ReviewChunkingProperties chunkingProperties;
 
     private BotWebhookService botWebhookService;
 
@@ -90,8 +92,12 @@ class BotWebhookServiceTest {
         lenient().when(botToolSelectionService.allowedBuiltinTools(any())).thenReturn(null);
         // Wire the orchestrator mock to delegate to a real ReviewWorkflow so
         // the existing sessionService/repositoryApiClient verifications still pass.
+        lenient().when(chunkingProperties.getMaxDiffCharsPerChunk()).thenReturn(120_000);
+        lenient().when(chunkingProperties.getMaxDiffChunks()).thenReturn(8);
+        lenient().when(chunkingProperties.getRetryTruncatedChunkChars()).thenReturn(60_000);
         var reviewWorkflow = new org.remus.giteabot.prworkflow.review.ReviewWorkflow(
-                codeReviewServiceFactory, giteaClientFactory);
+                codeReviewServiceFactory, giteaClientFactory, workflowSelectionService,
+                chunkingProperties);
         lenient().when(prWorkflowOrchestrator.run(
                         any(Bot.class), any(WebhookPayload.class), eq("review"), anyMap()))
                 .thenAnswer(invocation -> {
@@ -108,7 +114,8 @@ class BotWebhookServiceTest {
         // CodeReviewService built from mocked AI/Git/session deps) here so
         // the existing handlePrComment / handleBotCommand routing tests
         // keep observing the same downstream side-effects on `sessionService`.
-        lenient().when(codeReviewServiceFactory.create(any(Bot.class)))
+        lenient().when(codeReviewServiceFactory.create(any(Bot.class),
+                        any(RepositoryApiClient.class), eq(120000), eq(8), eq(60000)))
                 .thenAnswer(invocation -> {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(

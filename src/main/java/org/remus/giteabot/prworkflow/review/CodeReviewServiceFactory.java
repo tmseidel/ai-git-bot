@@ -20,6 +20,11 @@ import org.springframework.stereotype.Component;
  * code-review handlers (bot commands, inline review replies, …) can share a
  * single construction path. Behaviourally identical to the previous private
  * {@code BotWebhookService#createCodeReviewService(...)} helper.</p>
+ *
+ * <p>All callers must use the full variant that accepts explicit chunking
+ * parameters. The chunking values are sourced from workflow configuration
+ * (or {@code review.chunking.*} application properties as a fallback) and
+ * passed through by {@link ReviewWorkflow#run}.</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -32,21 +37,12 @@ public class CodeReviewServiceFactory {
 
     /**
      * Builds a fresh {@link CodeReviewService} for the given bot, using the
-     * bot's configured AI integration and Git integration. The bot's
-     * {@link RepositoryApiClient} is resolved internally via
-     * {@link GiteaClientFactory}.
+     * bot's configured AI integration, the supplied repository client, and
+     * explicit diff-chunking parameters sourced from workflow configuration.
      */
-    public CodeReviewService create(Bot bot) {
-        return create(bot, giteaClientFactory.getApiClient(bot.getGitIntegration()));
-    }
-
-    /**
-     * Variant accepting an externally resolved {@link RepositoryApiClient}.
-     * Used by {@link ReviewWorkflow} to share the same client across the
-     * review call and the follow-up {@code postReviewAction} call without
-     * looking it up twice.
-     */
-    public CodeReviewService create(Bot bot, RepositoryApiClient repoClient) {
+    public CodeReviewService create(Bot bot, RepositoryApiClient repoClient,
+                                    int maxDiffCharsPerChunk, int maxDiffChunks,
+                                    int retryTruncatedChunkChars) {
         if (bot.getSystemPrompt() == null) {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
@@ -55,10 +51,8 @@ public class CodeReviewServiceFactory {
         }
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         String sessionPromptKey = "system-prompt:" + bot.getSystemPrompt().getId();
-        var ai = bot.getAiIntegration();
         return new CodeReviewService(repoClient, aiClient, sessionService, bot.getUsername(),
                 reviewConfig, sessionPromptKey, bot.getSystemPrompt().getReviewSystemPrompt(),
-                ai.getMaxDiffCharsPerChunk(), ai.getMaxDiffChunks(), ai.getRetryTruncatedChunkChars());
+                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
     }
 }
-
