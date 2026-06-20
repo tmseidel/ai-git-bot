@@ -12,13 +12,7 @@ import lombok.extern.slf4j.Slf4j;
  * inject 100k+ chars that the model will never fully read.</p>
  */
 @Slf4j
-public final class ToolResultTruncator {
-
-    private final int maxChars;
-
-    public ToolResultTruncator(int maxChars) {
-        this.maxChars = maxChars;
-    }
+public record ToolResultTruncator(int maxChars) {
 
     /**
      * Returns the original text if ≤ maxChars, otherwise a truncated version with a
@@ -61,7 +55,4 @@ public final class ToolResultTruncator {
         return truncated;
     }
 
-    public int getMaxChars() {
-        return maxChars;
-    }
 }

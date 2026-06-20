@@ -130,7 +130,7 @@ class ToolResultTruncatorTest {
     void getMaxChars_returnsConfiguredValue() {
         ToolResultTruncator truncator = new ToolResultTruncator(5000);
 
-        assertEquals(5000, truncator.getMaxChars());
+        assertEquals(5000, truncator.maxChars());
     }
 
     @Test

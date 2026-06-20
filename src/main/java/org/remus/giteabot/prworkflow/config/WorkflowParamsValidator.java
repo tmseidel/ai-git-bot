@@ -100,24 +100,35 @@ public class WorkflowParamsValidator {
     }
 
     /**
-     * Returns a copy of {@code raw} with any value mapped to a
-     * {@link WorkflowParamField.ParamType#SECRET} field replaced by a fixed
-     * mask. Used by the bot Details modal.
+     * Builds a display-ready parameter map for the bot Details modal by
+     * iterating every field in the schema. Persisted values from {@code raw}
+     * take precedence; absent fields are filled from
+     * {@link WorkflowParamField#defaultValue()} so the popup always lists
+     * all available parameters. SECRET fields are masked.
      */
-    public Map<String, Object> maskSecrets(Map<String, String> raw, WorkflowParamsSchema schema) {
-        Map<String, Object> masked = new LinkedHashMap<>(typed(raw, schema));
+    public Map<String, Object> describeParams(Map<String, String> raw, WorkflowParamsSchema schema) {
+        Map<String, Object> display = new LinkedHashMap<>();
         if (schema == null) {
-            return masked;
+            if (raw != null) {
+                display.putAll(raw);
+            }
+            return display;
         }
         for (WorkflowParamField field : schema.fields()) {
-            if (field.type() == WorkflowParamField.ParamType.SECRET && masked.containsKey(field.name())) {
-                Object current = masked.get(field.name());
-                if (current != null && !current.toString().isBlank()) {
-                    masked.put(field.name(), "********");
+            String rawValue = raw != null ? raw.get(field.name()) : null;
+            if (rawValue == null || rawValue.isBlank()) {
+                if (field.defaultValue() != null && !field.defaultValue().isBlank()) {
+                    display.put(field.name(), toTyped(field.defaultValue(), field));
                 }
+                continue;
+            }
+            if (field.type() == WorkflowParamField.ParamType.SECRET && !rawValue.isBlank()) {
+                display.put(field.name(), "********");
+            } else {
+                display.put(field.name(), toTyped(rawValue, field));
             }
         }
-        return masked;
+        return display;
     }
 
     private String coerce(String text, WorkflowParamField field, List<String> errors) {
