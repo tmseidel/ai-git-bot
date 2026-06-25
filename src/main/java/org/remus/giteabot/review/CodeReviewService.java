@@ -117,6 +117,10 @@ public class CodeReviewService {
                 sessionService.addMessage(session, "assistant", review);
             }
 
+            if (review == null || review.strip().isEmpty()) {
+                review = "⚠️ *The review feedback was empty or could not be generated.*";
+            }
+
             String commentBody = formatReviewComment(review);
             repositoryClient.postReviewComment(owner, repo, prNumber, commentBody);
 
@@ -173,6 +177,10 @@ public class CodeReviewService {
             log.debug("LLM response [chat/botCommand] for PR #{}: length={}, preview='{}'",
                     prNumber, response != null ? response.length() : 0,
                     response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
+
+            if (response == null || response.strip().isEmpty()) {
+                response = "⚠️ *The response was empty or could not be generated.*";
+            }
 
             // Store messages in session
             sessionService.addMessage(session, "user", commentBody);
@@ -310,6 +318,10 @@ public class CodeReviewService {
         log.debug("LLM response [chat/inline] for file '{}': length={}, preview='{}'",
                 filePath, response != null ? response.length() : 0,
                 response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
+
+        if (response == null || response.strip().isEmpty()) {
+            response = "⚠️ *The response was empty or could not be generated.*";
+        }
 
         // Store in session
         sessionService.addMessage(session, "user", contextMessage);
