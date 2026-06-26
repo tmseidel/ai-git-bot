@@ -386,10 +386,6 @@ public class AnthropicAiClient extends AbstractAiClient {
         if (!calls.isEmpty()) {
             reason = StopReason.TOOL_USE;
         }
-        if (text.toString().isBlank() && calls.isEmpty()) {
-            log.warn("Empty text response and no tool calls from Anthropic API");
-            return ChatTurn.text("Unable to generate response - empty reply from AI.");
-        }
         long inputTokens = 0L;
         long outputTokens = 0L;
         if (response.getUsage() != null) {
@@ -434,11 +430,6 @@ public class AnthropicAiClient extends AbstractAiClient {
                 .filter(block -> "text".equals(block.getType()))
                 .map(AnthropicResponse.ContentBlock::getText)
                 .reduce("", (a, b) -> a + b);
-
-        if (result.isBlank()) {
-            log.warn("Empty text response from Anthropic API");
-            return "Unable to generate " + context + " - empty response from AI.";
-        }
 
         if (response.getUsage() != null) {
             log.info("Anthropic {} response: {} input tokens, {} output tokens",

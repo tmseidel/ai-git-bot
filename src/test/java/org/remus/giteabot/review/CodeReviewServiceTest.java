@@ -521,7 +521,7 @@ class CodeReviewServiceTest {
         verify(repositoryClient).postReviewComment(
                 eq("testowner"), eq("testrepo"), eq(1L), contains("was empty or could not be generated"));
         verify(sessionService).addMessage(eq(session), eq("user"), contains("Test PR"));
-        verify(sessionService).addMessage(eq(session), eq("assistant"), eq(""));
+        verify(sessionService).addMessage(eq(session), eq("assistant"), contains("was empty or could not be generated"));
     }
 
     @Test

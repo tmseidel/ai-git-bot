@@ -204,10 +204,6 @@ public class OllamaClient extends AbstractAiClient {
             }
         }
         StopReason reason = mapStopReason(response.getDoneReason(), !calls.isEmpty());
-        if (text.isBlank() && calls.isEmpty()) {
-            log.warn("Empty text response and no tool calls from Ollama API");
-            return ChatTurn.text("Unable to generate response - empty reply from AI.");
-        }
         long inputTokens = 0L;
         long outputTokens = 0L;
         if (response.getPromptEvalCount() != null && response.getEvalCount() != null) {
@@ -286,11 +282,6 @@ public class OllamaClient extends AbstractAiClient {
         }
 
         String result = response.getMessage().getContent();
-
-        if (result.isBlank()) {
-            log.warn("Empty text response from Ollama API");
-            return "Unable to generate " + context + " - empty response from AI.";
-        }
 
         if (response.getPromptEvalCount() != null && response.getEvalCount() != null) {
             log.info("Ollama {} response: {} prompt tokens, {} eval tokens",

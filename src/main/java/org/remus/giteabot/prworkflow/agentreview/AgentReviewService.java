@@ -128,7 +128,7 @@ public class AgentReviewService {
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds);
 
-            String review = outcome.success() && outcome.payload() instanceof String s ? s : null;
+            String review = outcome.payload() instanceof String s ? s : null;
             if (review == null || review.isBlank()) {
                 log.warn("Agentic review for PR #{} produced no review text", prNumber);
                 return false;
@@ -136,7 +136,7 @@ public class AgentReviewService {
 
             repositoryClient.postReviewComment(owner, repo, prNumber, formatReview(review));
             log.info("Agentic review completed for PR #{} in {}/{}", prNumber, owner, repo);
-            return true;
+            return outcome.success();
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
             return false;

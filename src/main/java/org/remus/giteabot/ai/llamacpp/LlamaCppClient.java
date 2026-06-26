@@ -175,11 +175,6 @@ public class LlamaCppClient extends AbstractAiClient {
 
         String result = response.getContent();
 
-        if (result.isBlank()) {
-            log.warn("Empty text response from llama.cpp server");
-            return "Unable to generate " + context + " - empty response from AI.";
-        }
-
         // Log token usage
         if (response.getTokensEvaluated() != null && response.getTokensPredicted() != null) {
             log.info("llama.cpp {} response: {} prompt tokens, {} generated tokens",
