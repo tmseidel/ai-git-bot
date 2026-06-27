@@ -570,7 +570,7 @@ public class ToolExecutionService {
                     .toList();
 
             for (Path file : files) {
-                String relativeFilePath = workspaceDir.relativize(file).toString().replace('\\', '/');
+                String relativeFilePath = workspaceDir.relativize(file).toString();
                 if (!matchesAnyGlob(relativeFilePath, searchRequest.includeGlobs(), searchRequest.caseInsensitive())) {
                     continue;
                 }
@@ -687,7 +687,6 @@ public class ToolExecutionService {
                     .sorted()
                     .map(workspaceDir::relativize)
                     .map(Path::toString)
-                    .map(s -> s.replace('\\', '/'))
                     .filter(path -> matchesGlob(path, globPattern, request.caseInsensitive()))
                     .filter(path -> matchesAnyGlob(path, request.includeGlobs(), request.caseInsensitive()))
                     .toList();
