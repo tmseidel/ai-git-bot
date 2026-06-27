@@ -38,6 +38,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git bash gnupg lsb-release apt-transport-https \
         unzip xz-utils tini \
+        universal-ctags \
         maven \
         python3 python3-pip python3-venv \
         golang-go \
