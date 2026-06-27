@@ -45,7 +45,7 @@ class ToolExecutionServiceCtagsTest {
 
         assertThat(result).contains("### OrderProcessor.java");
         assertThat(result).contains("```java");
-        assertThat(result).contains("OrderProcessor {");
+        assertThat(result).contains("class OrderProcessor");
         assertThat(result).contains("constructor OrderProcessor");
         assertThat(result).contains("  method process()");
         assertThat(result).contains("  method cleanup()");
@@ -74,7 +74,7 @@ class ToolExecutionServiceCtagsTest {
 
         String result = formatCtagsSignatures("Repository.java", ctagsJson, 100);
 
-        assertThat(result).contains("interface Repository {");
+        assertThat(result).contains("interface Repository");
         assertThat(result).contains("  method findById(Long id)");
     }
 
@@ -90,7 +90,7 @@ class ToolExecutionServiceCtagsTest {
 
         assertThat(result).contains("### order_processor.py");
         assertThat(result).contains("```python");
-        assertThat(result).contains("OrderProcessor {");
+        assertThat(result).contains("class OrderProcessor");
         assertThat(result).contains("  method __init__");
         assertThat(result).contains("  method process_order");
     }
@@ -145,7 +145,7 @@ class ToolExecutionServiceCtagsTest {
 
         String result = formatCtagsSignatures("MyClass.java", ctagsJson, 100);
 
-        assertThat(result).contains("MyClass {");
+        assertThat(result).contains("class MyClass");
         assertThat(result).contains("method doWork()");
         assertThat(result).doesNotContain("counter");  // variables are skipped
     }

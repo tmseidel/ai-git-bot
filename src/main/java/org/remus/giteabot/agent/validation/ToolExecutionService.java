@@ -1105,9 +1105,9 @@ public class ToolExecutionService {
     static String renderCtagsTag(CtagsTag tag) {
         String indent = tag.scope() != null ? "  " : "";
         return switch (tag.kind().toLowerCase()) {
-            case "c", "class" -> tag.name() + " {";
-            case "i", "interface" -> "interface " + tag.name() + " {";
-            case "namespace", "module" -> "namespace " + tag.name() + " {";
+            case "c", "class" -> "class " + tag.name();
+            case "i", "interface" -> "interface " + tag.name();
+            case "namespace", "module" -> "namespace " + tag.name();
             case "f", "function" -> indent + "function " + tag.name()
                     + (tag.signature() != null ? tag.signature() : "()");
             case "constructor" -> indent + "constructor " + tag.name()
@@ -1170,7 +1170,13 @@ public class ToolExecutionService {
             return new ToolResult(false, 1, "", "File not found: " + relativePath);
         }
 
+        // Use --kinds-all to restrict ctags to dependency-related kinds only
+        // (i = import/include, n = namespace, p = package).
+        // The single-letter codes are language-specific but are the standard ctags
+        // convention across the main supported languages. Java-side post-filtering
+        // in formatCtagsDependencies() provides a second safety layer.
         String[] command = {"ctags", "--output-format=json",
+                "--kinds-all=-*", "--kinds-all=+i+n+p",
                 "--fields=+k",
                 filePath.toAbsolutePath().toString()};
         ToolResult raw = executeCommand(workspaceDir, command);
@@ -1200,7 +1206,8 @@ public class ToolExecutionService {
                 String kindLower = kind.toLowerCase();
                 if ("import".equals(kindLower) || "include".equals(kindLower)) {
                     deps.add(name);
-                } else if ("namespace".equals(kindLower) || "package".equals(kindLower)) {
+                } else if ("namespace".equals(kindLower) || "package".equals(kindLower)
+                        || "module".equals(kindLower)) {
                     if (namespace == null) {
                         namespace = name;
                     }
