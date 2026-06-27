@@ -25,5 +25,9 @@ public record LoopOutcome(boolean success, String selectedBranch, Object payload
     public static LoopOutcome fail(String selectedBranch) {
         return new LoopOutcome(false, selectedBranch, null);
     }
+
+    public static LoopOutcome fail(String selectedBranch, Object payload) {
+        return new LoopOutcome(false, selectedBranch, payload);
+    }
 }
 

@@ -503,4 +503,77 @@ class CodeReviewServiceTest {
 
         return payload;
     }
+
+    @Test
+    void reviewPullRequest_emptyReview_fallsBackToWarning() {
+        WebhookPayload payload = createTestPayload();
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY)).thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn("diff --git a/file.txt b/file.txt\n+new line");
+        when(aiClient.submitReviewPrompt(eq(TEST_PROMPT), isNull(), anyString()))
+                .thenReturn("");
+
+        codeReviewService.reviewPullRequest(payload, null);
+
+        verify(repositoryClient).postReviewComment(
+                eq("testowner"), eq("testrepo"), eq(1L), contains("was empty or could not be generated"));
+        verify(sessionService).addMessage(eq(session), eq("user"), contains("Test PR"));
+        verify(sessionService).addMessage(eq(session), eq("assistant"), contains("was empty or could not be generated"));
+    }
+
+    @Test
+    void handleBotCommand_emptyResponse_fallsBackToWarning() {
+        WebhookPayload payload = createCommentPayload("@ai_bot explain this");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY)).thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(aiClient.chat(anyList(), eq("@ai_bot explain this"), eq(TEST_PROMPT), isNull()))
+                .thenReturn("");
+
+        codeReviewService.handleBotCommand(payload, null);
+
+        verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
+        verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), contains("was empty or could not be generated"));
+        verify(sessionService).addMessage(eq(session), eq("user"), eq("@ai_bot explain this"));
+        verify(sessionService).addMessage(eq(session), eq("assistant"), contains("was empty or could not be generated"));
+    }
+
+    @Test
+    void handleInlineComment_emptyResponse_fallsBackToWarning() {
+        WebhookPayload payload = createInlineCommentPayload(
+                "@ai_bot explain this", "src/main/java/Foo.java",
+                "@@ -10,7 +10,7 @@\n code context", 15);
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY)).thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(aiClient.chat(anyList(), contains("src/main/java/Foo.java"), eq(TEST_PROMPT), isNull()))
+                .thenReturn("");
+
+        codeReviewService.handleInlineComment(payload, null);
+
+        verify(repositoryClient).addReaction("testowner", "testrepo", 55L, "eyes");
+        verify(repositoryClient).postInlineReviewComment(
+                eq("testowner"), eq("testrepo"), eq(1L),
+                eq("src/main/java/Foo.java"), eq(15),
+                contains("was empty or could not be generated"));
+        verify(sessionService).addMessage(eq(session), eq("user"), contains("src/main/java/Foo.java"));
+        verify(sessionService).addMessage(eq(session), eq("assistant"), contains("was empty or could not be generated"));
+    }
 }
