@@ -90,6 +90,9 @@ class ToolExecutionServiceCtagsTest {
 
         assertThat(result).contains("### order_processor.py");
         assertThat(result).contains("```python");
+        assertThat(result).contains("OrderProcessor {");
+        assertThat(result).contains("  method __init__");
+        assertThat(result).contains("  method process_order");
     }
 
     @Test

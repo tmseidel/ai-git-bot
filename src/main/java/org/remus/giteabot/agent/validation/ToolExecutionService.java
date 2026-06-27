@@ -1069,10 +1069,18 @@ public class ToolExecutionService {
     }
 
     private static String extractCtagsField(String jsonLine, String fieldName) {
-        String search = "\"" + fieldName + "\":\"";
-        int start = jsonLine.indexOf(search);
-        if (start == -1) return null;
-        start += search.length();
+        // ctags JSON may or may not have a space after the colon (both formats exist
+        // across versions). Find the key, skip optional whitespace, then read the value.
+        String keyPattern = "\"" + fieldName + "\"";
+        int keyStart = jsonLine.indexOf(keyPattern);
+        if (keyStart == -1) return null;
+        int pos = keyStart + keyPattern.length();
+        while (pos < jsonLine.length()
+                && (jsonLine.charAt(pos) == ' ' || jsonLine.charAt(pos) == ':')) {
+            pos++;
+        }
+        if (pos >= jsonLine.length() || jsonLine.charAt(pos) != '"') return null;
+        int start = pos + 1;
         // Walk forward, handling JSON string escapes
         StringBuilder value = new StringBuilder();
         for (int i = start; i < jsonLine.length(); i++) {
@@ -1112,6 +1120,15 @@ public class ToolExecutionService {
                 }
                 yield indent + "method " + tag.name()
                         + (tag.signature() != null ? tag.signature() : "()");
+            }
+            case "member" -> {
+                // Python (and some other languages) emits "member" for class methods.
+                // Render as a method when scoped inside a class; skip top-level members.
+                if (tag.scope() != null) {
+                    yield indent + "method " + tag.name()
+                            + (tag.signature() != null ? tag.signature() : "()");
+                }
+                yield null;
             }
             case "macro" -> indent + "macro " + tag.name();
             default -> null;  // skip variables, enums, local scopes, etc.
@@ -1154,7 +1171,6 @@ public class ToolExecutionService {
         }
 
         String[] command = {"ctags", "--output-format=json",
-                "--kinds-all=-*", "--kinds-all=+i+n",
                 "--fields=+k",
                 filePath.toAbsolutePath().toString()};
         ToolResult raw = executeCommand(workspaceDir, command);
