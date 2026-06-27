@@ -7,6 +7,7 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -95,6 +96,8 @@ public class ToolExecutionService {
             case "git-blame" -> executeGitBlameTool(workspaceDir, arguments);
             case "tree" -> executeTreeTool(workspaceDir, arguments);
             case "branch-switcher" -> executeBranchSwitcherTool(workspaceDir, arguments);
+            case "ctags-signatures" -> executeCtagsSignaturesTool(workspaceDir, arguments);
+            case "ctags-deps"       -> executeCtagsDepsTool(workspaceDir, arguments);
             default -> new ToolResult(false, -1, "",
                     "Repository tool '" + tool + "' is not implemented");
         };
@@ -963,6 +966,261 @@ public class ToolExecutionService {
             return false;
         }
     }
+
+    // ---- ctags-signatures tool ----
+
+    private static final int DEFAULT_CTAGS_SIGNATURES_LIMIT = 100;
+    private static final int MAX_CTAGS_SIGNATURES_LIMIT = 500;
+
+    private ToolResult executeCtagsSignaturesTool(Path workspaceDir, List<String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return new ToolResult(false, -1, "", "ctags-signatures requires a file path");
+        }
+        String relativePath = arguments.getFirst();
+        int limit = DEFAULT_CTAGS_SIGNATURES_LIMIT;
+        if (arguments.size() > 1 && isInteger(arguments.get(1))) {
+            limit = Integer.parseInt(arguments.get(1));
+        }
+        limit = Math.clamp(limit, 1, MAX_CTAGS_SIGNATURES_LIMIT);
+
+        Path filePath;
+        try {
+            filePath = resolveWorkspacePath(workspaceDir, relativePath);
+        } catch (IOException e) {
+            return new ToolResult(false, -1, "", e.getMessage());
+        }
+        if (!Files.isRegularFile(filePath)) {
+            return new ToolResult(false, 1, "", "File not found: " + relativePath);
+        }
+
+        String[] command = {"ctags", "--output-format=json", "--fields=+neKz",
+                filePath.toAbsolutePath().toString()};
+        ToolResult raw = executeCommand(workspaceDir, command);
+        if (!raw.success()) {
+            return raw;
+        }
+
+        String formatted = formatCtagsSignatures(relativePath, raw.output(), limit);
+        return new ToolResult(true, 0, formatted, "");
+    }
+
+    /**
+     * Parses ctags JSON lines into a Markdown code block with pseudo-code signatures.
+     * Filters to classes, interfaces, methods, functions, constructors, macros, namespaces.
+     * Skips variables and local scopes to minimise context consumption.
+     * <p>
+     * Ctags 5.9 (Ubuntu Noble default) does not emit a distinct {@code constructor} kind —
+     * constructors are tagged as {@code method}. We detect them by name equality with the
+     * enclosing class. Ctags 6.x adds a native {@code constructor} kind which we also handle.
+     */
+    static String formatCtagsSignatures(String filePath, String ctagsJsonOutput, int limit) {
+        if (ctagsJsonOutput == null || ctagsJsonOutput.isBlank()) {
+            return "### `" + new File(filePath).getName() + "`\n```text\nNo classes or methods detected.\n```";
+        }
+
+        List<CtagsTag> tags = new ArrayList<>();
+        for (String line : ctagsJsonOutput.split("\n")) {
+            line = line.strip();
+            if (line.isEmpty()) continue;
+            CtagsTag tag = parseCtagsLine(line);
+            if (tag != null) {
+                tags.add(tag);
+            }
+        }
+
+        String langMarker = languageMarker(filePath);
+        StringBuilder sb = new StringBuilder();
+        sb.append("### ").append(new File(filePath).getName()).append("\n");
+        sb.append("```").append(langMarker).append("\n");
+
+        int count = 0;
+        for (CtagsTag tag : tags) {
+            if (count >= limit) {
+                sb.append("// ... (").append(tags.size() - count)
+                        .append(" more signature(s) omitted)\n");
+                break;
+            }
+            String rendered = renderCtagsTag(tag);
+            if (rendered != null) {
+                sb.append(rendered).append("\n");
+                count++;
+            }
+        }
+
+        if (count == 0) {
+            sb.append("// No classes or methods detected in this file.\n");
+        }
+        sb.append("```");
+        return sb.toString();
+    }
+
+    private record CtagsTag(String name, String kind, String signature, String scope, String scopeKind) {}
+
+    private static CtagsTag parseCtagsLine(String jsonLine) {
+        // ctags JSON lines are flat: {"_type": "tag", "name": "foo", "kind": "class", ...}
+        // Use minimal extraction to avoid a full Jackson dependency in a static method.
+        String name = extractCtagsField(jsonLine, "name");
+        String kind = extractCtagsField(jsonLine, "kind");
+        if (name == null || kind == null) return null;
+        return new CtagsTag(name, kind,
+                extractCtagsField(jsonLine, "signature"),
+                extractCtagsField(jsonLine, "scope"),
+                extractCtagsField(jsonLine, "scopeKind"));
+    }
+
+    private static String extractCtagsField(String jsonLine, String fieldName) {
+        String search = "\"" + fieldName + "\":\"";
+        int start = jsonLine.indexOf(search);
+        if (start == -1) return null;
+        start += search.length();
+        // Walk forward, handling JSON string escapes
+        StringBuilder value = new StringBuilder();
+        for (int i = start; i < jsonLine.length(); i++) {
+            char c = jsonLine.charAt(i);
+            if (c == '\\' && i + 1 < jsonLine.length()) {
+                value.append(jsonLine.charAt(i + 1));
+                i++;
+            } else if (c == '"') {
+                break;
+            } else {
+                value.append(c);
+            }
+        }
+        String s = value.toString();
+        return s.isEmpty() ? null : s;
+    }
+
+    /**
+     * Renders a single ctags tag as a pseudo-code declaration line.
+     * Returns null for kinds we intentionally skip (variables, local scopes).
+     */
+    static String renderCtagsTag(CtagsTag tag) {
+        String indent = tag.scope() != null ? "  " : "";
+        return switch (tag.kind().toLowerCase()) {
+            case "c", "class" -> tag.name() + " {";
+            case "i", "interface" -> "interface " + tag.name() + " {";
+            case "namespace", "module" -> "namespace " + tag.name() + " {";
+            case "f", "function" -> indent + "function " + tag.name()
+                    + (tag.signature() != null ? tag.signature() : "()");
+            case "constructor" -> indent + "constructor " + tag.name()
+                    + (tag.signature() != null ? tag.signature() : "()");
+            case "m", "method" -> {
+                // ctags 5.9: constructors are tagged as "method" — detect by name == enclosing class
+                if (tag.scope() != null && tag.name().equals(tag.scope())) {
+                    yield indent + "constructor " + tag.scope()
+                            + (tag.signature() != null ? tag.signature() : "()");
+                }
+                yield indent + "method " + tag.name()
+                        + (tag.signature() != null ? tag.signature() : "()");
+            }
+            case "macro" -> indent + "macro " + tag.name();
+            default -> null;  // skip variables, enums, local scopes, etc.
+        };
+    }
+
+    private static String languageMarker(String filePath) {
+        String name = filePath.toLowerCase();
+        if (name.endsWith(".py") || name.endsWith(".pyi")) return "python";
+        if (name.endsWith(".ts") || name.endsWith(".tsx")) return "typescript";
+        if (name.endsWith(".js") || name.endsWith(".jsx") || name.endsWith(".mjs") || name.endsWith(".cjs")) return "javascript";
+        if (name.endsWith(".java")) return "java";
+        if (name.endsWith(".cs")) return "csharp";
+        if (name.endsWith(".c") || name.endsWith(".h")) return "c";
+        if (name.endsWith(".cpp") || name.endsWith(".cc") || name.endsWith(".cxx") || name.endsWith(".hpp")) return "cpp";
+        if (name.endsWith(".go")) return "go";
+        if (name.endsWith(".rs")) return "rust";
+        if (name.endsWith(".rb")) return "ruby";
+        if (name.endsWith(".swift")) return "swift";
+        if (name.endsWith(".kt") || name.endsWith(".kts")) return "kotlin";
+        if (name.endsWith(".scala")) return "scala";
+        return "text";
+    }
+
+    // ---- ctags-deps tool ----
+
+    private ToolResult executeCtagsDepsTool(Path workspaceDir, List<String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return new ToolResult(false, -1, "", "ctags-deps requires a file path");
+        }
+        String relativePath = arguments.getFirst();
+        Path filePath;
+        try {
+            filePath = resolveWorkspacePath(workspaceDir, relativePath);
+        } catch (IOException e) {
+            return new ToolResult(false, -1, "", e.getMessage());
+        }
+        if (!Files.isRegularFile(filePath)) {
+            return new ToolResult(false, 1, "", "File not found: " + relativePath);
+        }
+
+        String[] command = {"ctags", "--output-format=json",
+                "--kinds-all=-*", "--kinds-all=+i+n",
+                "--fields=+k",
+                filePath.toAbsolutePath().toString()};
+        ToolResult raw = executeCommand(workspaceDir, command);
+        if (!raw.success()) {
+            return raw;
+        }
+
+        String json = formatCtagsDependencies(new File(relativePath).getName(), raw.output());
+        return new ToolResult(true, 0, json, "");
+    }
+
+    /**
+     * Parses ctags JSON lines into a compact JSON dependency map.
+     * Extracts imports/includes and namespace/package declarations.
+     */
+    static String formatCtagsDependencies(String fileName, String ctagsJsonOutput) {
+        List<String> deps = new ArrayList<>();
+        String namespace = null;
+
+        if (ctagsJsonOutput != null && !ctagsJsonOutput.isBlank()) {
+            for (String line : ctagsJsonOutput.split("\n")) {
+                line = line.strip();
+                if (line.isEmpty()) continue;
+                String name = extractCtagsField(line, "name");
+                String kind = extractCtagsField(line, "kind");
+                if (name == null || kind == null) continue;
+                String kindLower = kind.toLowerCase();
+                if ("import".equals(kindLower) || "include".equals(kindLower)) {
+                    deps.add(name);
+                } else if ("namespace".equals(kindLower) || "package".equals(kindLower)) {
+                    if (namespace == null) {
+                        namespace = name;
+                    }
+                }
+            }
+        }
+
+        // Compact single-line JSON (not pretty-printed — the AI doesn't care)
+        StringBuilder json = new StringBuilder();
+        json.append("{\"file\":\"").append(escapeJson(fileName)).append("\"");
+        json.append(",\"declared_namespace_or_package\":\"").append(
+                namespace != null ? escapeJson(namespace) : "none").append("\"");
+        json.append(",\"dependencies\":[");
+        for (int i = 0; i < deps.size(); i++) {
+            if (i > 0) json.append(",");
+            json.append("\"").append(escapeJson(deps.get(i))).append("\"");
+        }
+        json.append("]}");
+        return json.toString();
+    }
+
+    private static String escapeJson(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 4);
+        for (char c : s.toCharArray()) {
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> sb.append(c);
+            }
+        }
+        return sb.toString();
+    }
+
 
     private Path resolveWorkspacePath(Path workspaceDir, String relativePath) throws IOException {
         // Stage 1: normalize() resolves any ".." segments without touching the filesystem.
