@@ -159,7 +159,7 @@ public class AgentReviewService {
      * @param userQuestion  the user's follow-up question
      * @return {@code true} when a non-empty answer was produced and posted
      */
-    public boolean answerClarification(WebhookPayload payload, String userQuestion) {
+    public boolean answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -198,7 +198,7 @@ public class AgentReviewService {
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage,
-                    AgentReviewWorkflow.DEFAULT_MAX_TOOL_ROUNDS);
+                    maxToolRounds);
 
             String answer = outcome.payload() instanceof String s ? s : null;
             if (answer == null || answer.isBlank()) {

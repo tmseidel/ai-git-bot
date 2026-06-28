@@ -123,8 +123,13 @@ public class AgentReviewWorkflow implements PrWorkflow {
         Bot bot = context.bot();
         context.requireActive("before running agentic clarification");
 
+        Map<String, Object> params = bot.getWorkflowConfiguration() == null
+                ? Map.of()
+                : selectionService.resolveParams(bot.getWorkflowConfiguration().getId(), KEY);
+        int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
+
         boolean answered = serviceFactory.create(bot)
-                .answerClarification(context.payload(), userQuestion);
+                .answerClarification(context.payload(), userQuestion, maxToolRounds);
 
         context.appendStep("agentic-clarification",
                 answered ? "Posted clarification response" : "Failed to produce clarification");

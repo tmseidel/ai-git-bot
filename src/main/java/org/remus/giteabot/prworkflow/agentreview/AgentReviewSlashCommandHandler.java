@@ -75,6 +75,9 @@ public class AgentReviewSlashCommandHandler {
         String question;
         if (matcher.find()) {
             question = matcher.group(1) == null ? "" : matcher.group(1).trim();
+            if (question.isBlank()) {
+                return false; // blank clarify — let other handlers or fallback proceed
+            }
         } else {
             // Fallback: any @bot <text> not caught by other handlers
             matcher = ANY_MENTION_PATTERN.matcher(body);

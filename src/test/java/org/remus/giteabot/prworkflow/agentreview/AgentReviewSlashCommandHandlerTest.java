@@ -20,7 +20,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -87,18 +86,15 @@ class AgentReviewSlashCommandHandlerTest {
     }
 
     @Test
-    void dispatchesOnClarifyNoTrailingText() {
-        // @bot clarify with nothing after (question is empty string)
+    void doesNotDispatchOnClarifyNoTrailingText() {
+        // @bot clarify with nothing after (question is blank) — rejected
+        // so other handlers or the normal fallback path can proceed.
         WebhookPayload payload = payloadWithComment("@ai-bot clarify");
 
         boolean handled = handler.tryHandle(bot, payload);
 
-        assertThat(handled).isTrue();
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
-        verify(orchestrator).run(eq(bot), eq(payload), eq(AgentReviewWorkflow.KEY), hints.capture());
-        assertThat(hints.getValue())
-                .containsEntry(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION, "");
+        assertThat(handled).isFalse();
+        verify(orchestrator, never()).run(any(), any(), any(), any());
     }
 
     @Test
