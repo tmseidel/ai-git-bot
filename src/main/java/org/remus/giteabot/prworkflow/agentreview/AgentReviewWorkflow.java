@@ -94,6 +94,12 @@ public class AgentReviewWorkflow implements PrWorkflow {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
 
+        // Conversational clarification: user posted @bot clarify <question>
+        String clarification = context.hint(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION);
+        if (clarification != null && !clarification.isBlank()) {
+            return doClarification(context, clarification);
+        }
+
         Map<String, Object> params = bot.getWorkflowConfiguration() == null
                 ? Map.of()
                 : selectionService.resolveParams(bot.getWorkflowConfiguration().getId(), KEY);
@@ -111,6 +117,26 @@ public class AgentReviewWorkflow implements PrWorkflow {
         return reviewed
                 ? WorkflowResult.success("Agentic review posted")
                 : WorkflowResult.skipped("No diff or no review produced");
+    }
+
+    private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion) {
+        Bot bot = context.bot();
+        context.requireActive("before running agentic clarification");
+
+        Map<String, Object> params = bot.getWorkflowConfiguration() == null
+                ? Map.of()
+                : selectionService.resolveParams(bot.getWorkflowConfiguration().getId(), KEY);
+        int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
+
+        boolean answered = serviceFactory.create(bot)
+                .answerClarification(context.payload(), userQuestion, maxToolRounds);
+
+        context.appendStep("agentic-clarification",
+                answered ? "Posted clarification response" : "Failed to produce clarification");
+
+        return answered
+                ? WorkflowResult.success("Clarification posted")
+                : WorkflowResult.skipped("No clarification produced");
     }
 
     private int intParam(Map<String, Object> params, AgentReviewParam name, int fallback) {

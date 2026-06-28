@@ -13,11 +13,14 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow;
 import org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler;
 import org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler;
+import org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler;
+import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
@@ -54,6 +57,7 @@ public class BotWebhookService {
     private final E2eTestPrCloseHandler e2eTestPrCloseHandler;
     private final E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     private final UnitTestSlashCommandHandler unitTestSlashCommandHandler;
+    private final AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final AgentServiceFactory agentServiceFactory;
 
@@ -73,6 +77,7 @@ public class BotWebhookService {
                              E2eTestPrCloseHandler e2eTestPrCloseHandler,
                              E2eTestSlashCommandHandler e2eTestSlashCommandHandler,
                              UnitTestSlashCommandHandler unitTestSlashCommandHandler,
+                             AgentReviewSlashCommandHandler agentReviewSlashCommandHandler,
                              WorkflowSelectionService workflowSelectionService) {
         this.giteaClientFactory = giteaClientFactory;
         this.agentSessionService = agentSessionService;
@@ -81,6 +86,7 @@ public class BotWebhookService {
         this.e2eTestPrCloseHandler = e2eTestPrCloseHandler;
         this.e2eTestSlashCommandHandler = e2eTestSlashCommandHandler;
         this.unitTestSlashCommandHandler = unitTestSlashCommandHandler;
+        this.agentReviewSlashCommandHandler = agentReviewSlashCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
         this.agentServiceFactory = new AgentServiceFactory(aiClientFactory, giteaClientFactory,
                 promptService, agentConfig, agentSessionService, toolExecutionService, toolCatalog,
@@ -147,6 +153,9 @@ public class BotWebhookService {
             if (unitTestSlashCommandHandler.tryHandle(bot, payload)) {
                 return;
             }
+            if (agentReviewSlashCommandHandler.tryHandle(bot, payload)) {
+                return;
+            }
             if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
                 // Route through the PrWorkflow orchestrator for uniform lifecycle management.
                 var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND);
@@ -210,6 +219,9 @@ public class BotWebhookService {
                 if (unitTestSlashCommandHandler.tryHandle(bot, payload)) {
                     return;
                 }
+                if (agentReviewSlashCommandHandler.tryHandle(bot, payload)) {
+                    return;
+                }
                 if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
                     // Route through the PrWorkflow orchestrator for uniform lifecycle management.
                     var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND);
@@ -244,11 +256,20 @@ public class BotWebhookService {
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
-        if (!isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
-            log.debug("[Bot '{}'] Review workflow not enabled — ignoring inline review comment", bot.getName());
+        boolean agenticEnabled = isWorkflowEnabled(bot, AgentReviewWorkflow.KEY);
+        boolean reviewEnabled  = isWorkflowEnabled(bot, ReviewWorkflow.KEY);
+        if (!agenticEnabled && !reviewEnabled) {
+            log.debug("[Bot '{}'] Neither review nor agentic-review enabled — ignoring inline review comment", bot.getName());
             return;
         }
         try {
+            if (agenticEnabled) {
+                String question = extractInlineCommentBody(payload);
+                var hints = Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
+                        question != null ? question : "");
+                prWorkflowOrchestrator.run(bot, payload, AgentReviewWorkflow.KEY, hints);
+                return;
+            }
             var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_INLINE_COMMENT);
             prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
         } catch (Exception e) {
@@ -271,11 +292,20 @@ public class BotWebhookService {
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
-        if (!isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
-            log.debug("[Bot '{}'] Review workflow not enabled — ignoring submitted review", bot.getName());
+        boolean agenticEnabled = isWorkflowEnabled(bot, AgentReviewWorkflow.KEY);
+        boolean reviewEnabled  = isWorkflowEnabled(bot, ReviewWorkflow.KEY);
+        if (!agenticEnabled && !reviewEnabled) {
+            log.debug("[Bot '{}'] Neither review nor agentic-review enabled — ignoring submitted review", bot.getName());
             return;
         }
         try {
+            if (agenticEnabled) {
+                String question = extractReviewBody(payload);
+                var hints = Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
+                        question != null ? question : "");
+                prWorkflowOrchestrator.run(bot, payload, AgentReviewWorkflow.KEY, hints);
+                return;
+            }
             var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_REVIEW_SUBMITTED);
             prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
         } catch (Exception e) {
@@ -662,6 +692,41 @@ public class BotWebhookService {
         String normalized = body.toLowerCase();
         return normalized.contains("review")
                 && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
+    }
+
+    /**
+     * Extracts the body text from an inline review comment to use as a
+     * clarification question for the agentic-review workflow.
+     */
+    private String extractInlineCommentBody(WebhookPayload payload) {
+        if (payload == null || payload.getComment() == null) {
+            return null;
+        }
+        String body = payload.getComment().getBody();
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        // Include the file path for context when available.
+        String path = payload.getComment().getPath();
+        if (path != null && !path.isBlank()) {
+            return "Regarding `" + path + "`: " + body;
+        }
+        return body;
+    }
+
+    /**
+     * Extracts the review body text to use as a clarification question for the
+     * agentic-review workflow.
+     */
+    private String extractReviewBody(WebhookPayload payload) {
+        if (payload == null || payload.getReview() == null) {
+            return null;
+        }
+        String content = payload.getReview().getContent();
+        if (content == null || content.isBlank()) {
+            return null;
+        }
+        return content;
     }
 
     private IssueImplementationService createIssueImplementationService(Bot bot) {
