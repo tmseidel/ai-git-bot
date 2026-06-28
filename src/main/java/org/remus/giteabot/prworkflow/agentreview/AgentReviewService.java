@@ -139,12 +139,163 @@ public class AgentReviewService {
             return outcome.success();
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
+            postErrorComment(owner, repo, prNumber, "Agentic Review",
+                    "The review could not be completed because of an error. "
+                            + "This is usually a transient issue with the AI provider. "
+                            + "Please try again later.", e);
             return false;
         } finally {
             if (workspaceDir != null) {
                 workspaceService.cleanupWorkspace(workspaceDir);
             }
         }
+    }
+
+    /**
+     * Answers a clarification question about a previously-reviewed PR by running
+     * a conversational agent loop.
+     *
+     * @param payload       the webhook payload (for PR identity)
+     * @param userQuestion  the user's follow-up question
+     * @return {@code true} when a non-empty answer was produced and posted
+     */
+    public boolean answerClarification(WebhookPayload payload, String userQuestion) {
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long prNumber = payload.getPullRequest().getNumber();
+        String prTitle = payload.getPullRequest().getTitle();
+        String prBody = payload.getPullRequest().getBody();
+
+        log.info("Answering clarification for PR #{} '{}' in {}/{}: {}", prNumber, prTitle, owner, repo,
+                userQuestion.length() > 120 ? userQuestion.substring(0, 117) + "..." : userQuestion);
+
+        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+        if (diff == null || diff.isBlank()) {
+            log.warn("No diff found for PR #{} in {}/{} — cannot answer clarification", prNumber, owner, repo);
+            return false;
+        }
+
+        String headBranch = resolveHeadBranch(payload, owner, repo);
+
+        Path workspaceDir = null;
+        try {
+            WorkspaceResult wsResult = workspaceService.prepareWorkspace(
+                    owner, repo, headBranch,
+                    repositoryClient.getCloneUrl(), repositoryClient.getToken());
+            if (!wsResult.success()) {
+                log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
+                        prNumber, wsResult.error());
+                repositoryClient.postPullRequestComment(owner, repo, prNumber,
+                        "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
+                return false;
+            }
+            workspaceDir = wsResult.workspacePath();
+
+            String systemPrompt = resolveSystemPrompt();
+            String userMessage = buildClarificationMessage(prTitle, prBody, diff, userQuestion);
+
+            AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
+
+            LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
+                    workspaceDir, headBranch, systemPrompt, userMessage,
+                    AgentReviewWorkflow.DEFAULT_MAX_TOOL_ROUNDS);
+
+            String answer = outcome.payload() instanceof String s ? s : null;
+            if (answer == null || answer.isBlank()) {
+                log.warn("Clarification for PR #{} produced no answer", prNumber);
+                return false;
+            }
+
+            repositoryClient.postPullRequestComment(owner, repo, prNumber, formatClarification(answer));
+            log.info("Clarification answered for PR #{} in {}/{}", prNumber, owner, repo);
+            return outcome.success();
+        } catch (Exception e) {
+            log.error("Clarification failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
+            postErrorComment(owner, repo, prNumber, "Clarification",
+                    "The clarification could not be completed because of an error. "
+                            + "This is usually a transient issue with the AI provider. "
+                            + "Please try again later.", e);
+            return false;
+        } finally {
+            if (workspaceDir != null) {
+                workspaceService.cleanupWorkspace(workspaceDir);
+            }
+        }
+    }
+
+    private String buildClarificationMessage(String prTitle, String prBody, String diff, String userQuestion) {
+        String truncatedDiff = diff.length() > MAX_DIFF_CHARS_FOR_CONTEXT
+                ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(diff truncated)"
+                : diff;
+        return """
+                The user has a follow-up question about the pull request you reviewed earlier.
+
+                PR Title: %s
+                PR Description:
+                %s
+
+                The question is:
+
+                %s
+
+                The repository is checked out in your read-only workspace. Use your available \
+                read-only tools to inspect the relevant code and answer the question \
+                concisely. You cannot modify the repository.
+
+                Unified diff:
+                ```diff
+                %s
+                ```
+
+                When you have gathered enough context, reply with your answer as plain \
+                Markdown (no tool calls). Focus on answering the specific question asked.
+                """.formatted(
+                        prTitle == null ? "(none)" : prTitle,
+                        prBody == null || prBody.isBlank() ? "(none)" : prBody,
+                        userQuestion,
+                        truncatedDiff);
+    }
+
+    private String formatClarification(String answer) {
+        return "## 🤖 Follow-up\n\n" + answer
+                + "\n\n---\n*Read-only agentic review follow-up by AI Git Bot*";
+    }
+
+    /**
+     * Best-effort error comment posted to the PR when an LLM-tier exception
+     * (e.g. 503, timeout) prevents the review or clarification from completing.
+     * Failures posting the comment itself are swallowed — a missing notice
+     * must never mask the original error.
+     */
+    private void postErrorComment(String owner, String repo, Long prNumber,
+                                  String stage, String userMessage, Throwable error) {
+        if (owner == null || repo == null || prNumber == null) {
+            return;
+        }
+        String reason = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+        String body = String.format("""
+                ⚠️ **AI Agent (%s)**: %s
+
+                Error details:
+                ```
+                %s
+                ```
+
+                _Check the bot logs for the full stack trace._
+                """, stage, userMessage, abbreviate(reason, 1500));
+        try {
+            repositoryClient.postPullRequestComment(owner, repo, prNumber, body);
+        } catch (RuntimeException postError) {
+            log.warn("Failed to post error comment on PR #{} in {}/{}: {}",
+                    prNumber, owner, repo, postError.getMessage());
+        }
+    }
+
+    private static String abbreviate(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
     private LoopOutcome runReviewLoop(AgentSession session, String owner, String repo, Long prNumber,
@@ -193,9 +344,8 @@ public class AgentReviewService {
         }
         sb.append("""
                 
-                The repository is checked out in your read-only workspace. Use the available \
-                tools (cat, rg, find, tree, git-log, git-blame, get-issue, search-issues and any \
-                configured MCP tools) to inspect the surrounding code before judging the change. \
+                The repository is checked out in your read-only workspace. Use your available \
+                read-only tools to inspect the surrounding code before judging the change. \
                 You cannot modify the repository.
                 
                 """);

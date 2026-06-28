@@ -97,7 +97,9 @@ public class ToolCatalog {
                     "Find files by glob pattern. Args: [\"*.yml\"] or [\"*.java\", \"src\"].",
                     varargsSchema()),
             entry("cat", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
-                    "Read part of a file with 1-based line numbers.",
+                    "Read specific line ranges of a file with 1-based line numbers. "
+                            + "Use this for precision reads after understanding structure via "
+                            + "`ctags-signatures` — not for first-time file exploration.",
                     objectSchema(
                             prop("path",      "string",  "Repository-relative path."),
                             prop("startLine", "integer", "First line to include (inclusive, 1-based). Optional — omit to start at 1."),
@@ -114,8 +116,11 @@ public class ToolCatalog {
                     varargsSchema()),
             entry("ctags-signatures", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
                     "Extract function, class, method, and interface signatures from a source file. "
-                            + "Use this to understand a file's architecture without consuming full "
-                            + "content. Args: [\"path/to/file\"] or [\"path/to/file\", \"limit\"] (default: 100).",
+                            + "PREFER this over `cat` for first-time file exploration — it reveals the "
+                            + "file's architecture (classes, methods, interfaces, functions) at a "
+                            + "fraction of the tokens so you know what the file contains before "
+                            + "reading specific lines. Args: [\"path/to/file\"] or [\"path/to/file\", "
+                            + "\"limit\"] (default: 100).",
                     objectSchema(
                             prop("path",  "string",  "Repository-relative path to the file."),
                             prop("limit", "integer", "Max signatures to return (default: 100)."),
