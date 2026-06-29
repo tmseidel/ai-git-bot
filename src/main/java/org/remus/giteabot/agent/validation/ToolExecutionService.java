@@ -1170,17 +1170,17 @@ public class ToolExecutionService {
             return new ToolResult(false, 1, "", "File not found: " + relativePath);
         }
 
-        // Use --kinds-all to restrict ctags to dependency-related kinds only
-        // (i = import/include, n = namespace, p = package).
-        // The single-letter codes are language-specific but are the standard ctags
-        // convention across the main supported languages. Java-side post-filtering
-        // in formatCtagsDependencies() provides a second safety layer.
+        // --extras=+r includes reference tags (imports, includes), which are
+        // essential for dependency extraction. Without it, ctags omits import/
+        // include statements entirely.
+        // Java-side post-filtering in formatCtagsDependencies() selects the
+        // tags we care about by examining the "extras" and "kind" fields.
         String[] command = {"ctags", "--output-format=json",
-                "--kinds-all=-*", "--kinds-all=+i+n+p",
-                "--fields=+k",
+                "--extras=+r", "--fields=+k",
                 filePath.toAbsolutePath().toString()};
         ToolResult raw = executeCommand(workspaceDir, command);
         if (!raw.success()) {
+            log.warn("Error executing ctags-deps tool: {}", raw.output());
             return raw;
         }
 
@@ -1204,7 +1204,13 @@ public class ToolExecutionService {
                 String kind = extractCtagsField(line, "kind");
                 if (name == null || kind == null) continue;
                 String kindLower = kind.toLowerCase();
-                if ("import".equals(kindLower) || "include".equals(kindLower)) {
+                // ctags tags imports/includes with extras=reference.
+                // This is the reliable cross-language signal — the kind
+                // letter alone is ambiguous (e.g. Java emits kind=package
+                // for both "package com.foo" and "import com.foo.Bar").
+                String extras = extractCtagsField(line, "extras");
+                boolean isReference = extras != null && extras.contains("reference");
+                if (isReference) {
                     deps.add(name);
                 } else if ("namespace".equals(kindLower) || "package".equals(kindLower)
                         || "module".equals(kindLower)) {
