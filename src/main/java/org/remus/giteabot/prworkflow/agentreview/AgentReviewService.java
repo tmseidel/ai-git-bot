@@ -181,7 +181,7 @@ public class AgentReviewService {
         try {
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     owner, repo, headBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken());
+                    repositoryClient.getCloneUrl(), repositoryClient.getToken(),prNumber);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
                         prNumber, wsResult.error());
