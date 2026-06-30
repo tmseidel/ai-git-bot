@@ -33,17 +33,12 @@ public class WorkspaceService {
 
 
     /**
-     * Prepares a workspace by cloning the repository.
-     *
-     * @param owner        Repository owner
-     * @param repo         Repository name
-     * @param branch       The branch to clone
-     * @param cloneBaseUrl The Git server base URL (e.g. {@code http://localhost:3000})
-     * @param token        The API / clone token
-     * @return {@link WorkspaceResult} containing the workspace path or error details
+     * Clones a repository workspace. When a branch-based shallow clone fails and
+     * {@code prNumber} is non-null, falls back to cloning the default branch then
+     * fetching {@code refs/pull/<prNumber>/head} (GitHub/Gitea fork-safe ref).
      */
     public WorkspaceResult prepareWorkspace(String owner, String repo, String branch,
-                                            String cloneBaseUrl, String token) {
+                                            String cloneBaseUrl, String token, Long prNumber) {
         try {
             Path tempDir = Files.createTempDirectory("agent-workspace-");
             log.info("Cloning repository to {} for workspace", tempDir);
@@ -54,13 +49,64 @@ public class WorkspaceService {
                             cloneUrl, tempDir.getFileName().toString()},
                     60);
 
-            if (!cloneResult.success()) {
-                log.error("Failed to clone repository: {}", cloneResult.output());
-                deleteDirectory(tempDir);
-                return WorkspaceResult.failure("Failed to clone repository: " + cloneResult.output());
+            if (cloneResult.success()) {
+                return WorkspaceResult.success(tempDir);
             }
 
-            return WorkspaceResult.success(tempDir);
+            // Fork PR fallback: clone default branch → fetch PR head ref
+            if (prNumber != null) {
+                log.info("Branch clone failed, falling back to PR head ref for PR #{}: {}",
+                        prNumber, cloneResult.output());
+                deleteDirectory(tempDir);
+                tempDir = Files.createTempDirectory("agent-workspace-");
+
+                CommandResult defaultCloneResult = runCommand(tempDir.getParent().toFile(),
+                        new String[]{"git", "clone", "--depth", "1",
+                                cloneUrl, tempDir.getFileName().toString()},
+                        60);
+
+                if (!defaultCloneResult.success()) {
+                    log.error("Fallback clone (default branch) also failed: {}",
+                            defaultCloneResult.output());
+                    deleteDirectory(tempDir);
+                    return WorkspaceResult.failure(
+                            "Failed to clone repository (branch: " + cloneResult.output()
+                                    + "; default branch: " + defaultCloneResult.output() + ")");
+                }
+
+                CommandResult fetchResult = runCommand(tempDir.toFile(),
+                        new String[]{"git", "fetch", "origin",
+                                "refs/pull/" + prNumber + "/head"},
+                        60);
+
+                if (!fetchResult.success()) {
+                    log.error("Failed to fetch PR head ref for PR #{}: {}", prNumber,
+                            fetchResult.output());
+                    deleteDirectory(tempDir);
+                    return WorkspaceResult.failure(
+                            "Failed to fetch PR head ref for PR #" + prNumber + ": "
+                                    + fetchResult.output());
+                }
+
+                CommandResult checkoutResult = runCommand(tempDir.toFile(),
+                        new String[]{"git", "checkout", "-B", branch, "FETCH_HEAD"}, 15);
+
+                if (!checkoutResult.success()) {
+                    log.error("Failed to checkout FETCH_HEAD for PR #{}: {}", prNumber,
+                            checkoutResult.output());
+                    deleteDirectory(tempDir);
+                    return WorkspaceResult.failure(
+                            "Failed to checkout FETCH_HEAD for PR #" + prNumber + ": "
+                                    + checkoutResult.output());
+                }
+
+                return WorkspaceResult.success(tempDir);
+            }
+
+            // No fallback — report the original clone error
+            log.error("Failed to clone repository: {}", cloneResult.output());
+            deleteDirectory(tempDir);
+            return WorkspaceResult.failure("Failed to clone repository: " + cloneResult.output());
 
         } catch (IOException e) {
             log.error("Failed to prepare workspace: {}", e.getMessage());
@@ -230,6 +276,11 @@ public class WorkspaceService {
     // ---- internal helpers ------------------------------------------------
 
     String buildCloneUrl(String owner, String repo, String cloneBaseUrl, String token) {
+        // For local filesystem paths (used in tests and local development),
+        // pass through as-is — git handles bare directory paths natively.
+        if (cloneBaseUrl.startsWith("file://") || cloneBaseUrl.startsWith("/")) {
+            return cloneBaseUrl;
+        }
         String protocol = cloneBaseUrl.startsWith("https://") ? "https" : "http";
         String baseUrl = cloneBaseUrl.replaceFirst("https?://", "");
 

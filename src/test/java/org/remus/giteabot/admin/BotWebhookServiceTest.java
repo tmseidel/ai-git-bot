@@ -285,7 +285,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -317,7 +317,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -356,7 +356,7 @@ class BotWebhookServiceTest {
 
         botWebhookService.handleIssueAssigned(bot, payload);
 
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
     }
 
@@ -383,7 +383,7 @@ class BotWebhookServiceTest {
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -404,7 +404,7 @@ class BotWebhookServiceTest {
 
         botWebhookService.handleIssueComment(bot, payload);
 
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
     }
 
@@ -424,7 +424,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -485,7 +485,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -518,7 +518,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -547,7 +547,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -582,7 +582,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -622,7 +622,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -660,7 +660,7 @@ class BotWebhookServiceTest {
         // same session so subsequent state reads are preserved.
         when(agentSessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096)))
@@ -720,7 +720,7 @@ class BotWebhookServiceTest {
 
         /** For tests where the agent path is taken, stub workspace to fail quickly. */
         private void stubAgentPath(AgentSession session) {
-            lenient().when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any()))
+            lenient().when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any(), any()))
                     .thenReturn(org.remus.giteabot.agent.validation.WorkspaceResult.failure("routing test"));
         }
 
