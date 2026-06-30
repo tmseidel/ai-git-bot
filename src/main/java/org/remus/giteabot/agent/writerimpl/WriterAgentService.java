@@ -135,7 +135,7 @@ public class WriterAgentService {
                     "🤖 **AI Technical Writer**: I've been assigned and will review this issue for completeness.");
 
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken());
+                    owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken(), null);
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -212,7 +212,7 @@ public class WriterAgentService {
         try {
             String baseBranch = resolveBaseBranch(owner, repo, payload, session);
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken());
+                    owner, repo, baseBranch, repositoryClient.getCloneUrl(), repositoryClient.getToken(), null);
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,

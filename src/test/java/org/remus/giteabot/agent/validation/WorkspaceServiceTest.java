@@ -27,6 +27,40 @@ class WorkspaceServiceTest {
         workspaceService.cleanupWorkspace(null);
         // no exception expected
     }
+
+    @Test
+    void prepareWorkspace_fallsBackToPrHeadRef_whenBranchCloneFails() throws Exception {
+        // Create a local bare repo with a main branch and a refs/pull/42/head ref
+        Path remoteDir = tempDir.resolve("remote");
+        Files.createDirectories(remoteDir);
+        runGit(remoteDir, "init", "--bare");
+
+        Path localRepo = tempDir.resolve("local");
+        Files.createDirectories(localRepo);
+        runGit(localRepo, "init");
+        runGit(localRepo, "branch", "-M", "main");
+        runGit(localRepo, "remote", "add", "origin", remoteDir.toAbsolutePath().toString());
+        Files.writeString(localRepo.resolve("README.md"), "pr content");
+        runGit(localRepo, "add", "README.md");
+        runGit(localRepo, "commit", "-m", "pr commit");
+        runGit(localRepo, "push", "-u", "origin", "main");
+        // Push the same commit as a simulated PR head ref
+        runGit(localRepo, "push", "origin", "main:refs/pull/42/head");
+
+        // Now clone with a branch that does NOT exist in the remote, but prNumber=42
+        // The --branch clone will fail, triggering the PR ref fallback
+        WorkspaceResult result = workspaceService.prepareWorkspace(
+                "any", "any", "nonexistent-branch",
+                remoteDir.toAbsolutePath().toString(), "dummy-token", 42L);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.workspacePath()).isNotNull();
+
+        String content = Files.readString(result.workspacePath().resolve("README.md"));
+        assertThat(content).isEqualTo("pr content");
+
+        workspaceService.cleanupWorkspace(result.workspacePath());
+    }
     @Test
     void buildCloneUrl_http() {
         String url = workspaceService.buildCloneUrl("owner", "repo",
