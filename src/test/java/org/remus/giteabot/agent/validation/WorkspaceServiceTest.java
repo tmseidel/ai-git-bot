@@ -38,6 +38,8 @@ class WorkspaceServiceTest {
         Path localRepo = tempDir.resolve("local");
         Files.createDirectories(localRepo);
         runGit(localRepo, "init");
+        runGit(localRepo, "config", "user.email", "test@test.com");
+        runGit(localRepo, "config", "user.name", "Test");
         runGit(localRepo, "branch", "-M", "main");
         runGit(localRepo, "remote", "add", "origin", remoteDir.toAbsolutePath().toString());
         Files.writeString(localRepo.resolve("README.md"), "pr content");
