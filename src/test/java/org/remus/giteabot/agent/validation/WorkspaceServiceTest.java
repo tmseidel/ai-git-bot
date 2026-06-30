@@ -58,6 +58,10 @@ class WorkspaceServiceTest {
         assertThat(result.success()).isTrue();
         assertThat(result.workspacePath()).isNotNull();
 
+        // Verify the fallback created a real local branch, not detached HEAD
+        assertThat(runGitCapture(result.workspacePath(), "rev-parse", "--abbrev-ref", "HEAD"))
+                .isEqualTo("nonexistent-branch");
+
         String content = Files.readString(result.workspacePath().resolve("README.md"));
         assertThat(content).isEqualTo("pr content");
 
@@ -100,6 +104,19 @@ class WorkspaceServiceTest {
         Files.writeString(dir.resolve("README.md"), "initial");
         runGit(dir, "add", "README.md");
         runGit(dir, "commit", "-m", "initial");
+    }
+
+    private String runGitCapture(Path dir, String... args) throws IOException, InterruptedException {
+        String[] command = new String[args.length + 1];
+        command[0] = "git";
+        System.arraycopy(args, 0, command, 1, args.length);
+        Process process = new ProcessBuilder(command)
+                .directory(dir.toFile())
+                .redirectErrorStream(true)
+                .start();
+        String output = new String(process.getInputStream().readAllBytes());
+        process.waitFor();
+        return output.trim();
     }
 
     private void runGit(Path dir, String... args) throws IOException, InterruptedException {

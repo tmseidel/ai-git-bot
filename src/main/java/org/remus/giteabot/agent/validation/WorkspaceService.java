@@ -89,7 +89,7 @@ public class WorkspaceService {
                 }
 
                 CommandResult checkoutResult = runCommand(tempDir.toFile(),
-                        new String[]{"git", "checkout", "FETCH_HEAD"}, 15);
+                        new String[]{"git", "checkout", "-B", branch, "FETCH_HEAD"}, 15);
 
                 if (!checkoutResult.success()) {
                     log.error("Failed to checkout FETCH_HEAD for PR #{}: {}", prNumber,
