@@ -184,12 +184,8 @@
                     allowMultipleOpen: true
                 });
 
-                // Conditional field disable: when "Enable formal review decision" is
-                // unchecked, the "Approval decision prompt" textarea is disabled and
-                // greyed out. Scoped to the specific field names so other workflows
-                // containing a checkbox + textarea are unaffected. Iterates over all
-                // matching instances so the form remains robust if ever rendered more
-                // than once (e.g. reused in a modal/partial).
+                // Disable the "Approval decision prompt" textarea while its
+                // "Enable formal review decision" checkbox is unchecked.
                 var decisionCheckboxes = document.querySelectorAll(
                         'input[type="checkbox"][name="params.agentic-review.enableFormalReviewDecision"]');
                 decisionCheckboxes.forEach(function (decisionCheckbox) {

@@ -114,8 +114,9 @@ public class AgentReviewService {
      * the resulting review as a PR comment. When {@code enableFormalDecision}
      * is {@code true}, the system prompt is extended with the operator-
      * configured criteria and a fixed format instruction; the model's output
-     * is parsed for a formal decision (APPROVE / REQUEST_CHANGES / NONE),
-     * which is forwarded to {@link RepositoryApiClient#postReviewAction}.
+     * is parsed for a formal decision (APPROVE / REQUEST_CHANGES / NONE), which
+     * is submitted together with the review body via
+     * {@link RepositoryApiClient#postReview}.
      *
      * @param maxToolRounds       operator-tunable cap on the number of
      *                            explore/answer rounds (clamped to a sane range)
@@ -171,28 +172,30 @@ public class AgentReviewService {
                 return false;
             }
 
-            // Parse and strip formal decision before posting the comment.
             ParseResult parsed = enableFormalDecision
                     ? parseDecision(review) : ParseResult.noDecision(review);
 
-            repositoryClient.postReviewComment(owner, repo, prNumber,
-                    formatReview(parsed.reviewText()));
-
-            // Post formal review action when the model returned a decision.
-            if (parsed.action() != null && parsed.action() != PostReviewAction.NONE) {
-                try {
-                    repositoryClient.postReviewAction(owner, repo, prNumber, parsed.action());
+            PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
+            String reviewBody = formatReview(parsed.reviewText());
+            try {
+                repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
+                if (action != PostReviewAction.NONE) {
                     log.info("Agentic review posted formal decision {} for PR #{} in {}/{}",
-                            parsed.action(), prNumber, owner, repo);
-                } catch (Exception e) {
-                    log.warn("Failed to post review action {} for PR #{} in {}/{}: {}",
-                            parsed.action(), prNumber, owner, repo, e.getMessage());
-                    // Swallow — the review comment was already posted.
+                            action, prNumber, owner, repo);
                 }
+            } catch (Exception e) {
+                if (action == PostReviewAction.NONE) {
+                    throw e;
+                }
+                // Fall back to a plain comment so the findings survive a failed formal submission.
+                log.warn("Failed to post formal review {} for PR #{} in {}/{}: {} — "
+                        + "falling back to a plain review comment",
+                        action, prNumber, owner, repo, e.getMessage());
+                repositoryClient.postReviewComment(owner, repo, prNumber, reviewBody);
             }
 
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
-                    prNumber, owner, repo, parsed.action() != null ? parsed.action() : "NONE");
+                    prNumber, owner, repo, action);
             return outcome.success();
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);

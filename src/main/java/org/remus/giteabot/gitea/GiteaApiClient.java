@@ -77,12 +77,7 @@ public class GiteaApiClient implements RepositoryApiClient {
         if (action == null || action == PostReviewAction.NONE) {
             return;
         }
-        String event = switch (action) {
-            case APPROVE -> "APPROVE";
-            case REQUEST_CHANGES -> "REQUEST_CHANGES";
-            default -> null;
-        };
-        if (event == null) return;
+        String event = reviewEvent(action);
         String body = action == PostReviewAction.APPROVE
                 ? "Approved by AI Git Bot (agentic review)"
                 : "Changes requested by AI Git Bot (agentic review)";
@@ -92,6 +87,29 @@ public class GiteaApiClient implements RepositoryApiClient {
                 .body(new ReviewRequest(body, event))
                 .retrieve()
                 .toBodilessEntity();
+    }
+
+    @Override
+    public void postReview(String owner, String repo, Long pullNumber, String body, PostReviewAction action) {
+        String event = reviewEvent(action);
+        log.info("Posting {} review on PR #{} in {}/{}", event, pullNumber, owner, repo);
+        giteaRestClient.post()
+                .uri("/api/v1/repos/{owner}/{repo}/pulls/{index}/reviews", owner, repo, pullNumber)
+                .body(new ReviewRequest(body, event))
+                .retrieve()
+                .toBodilessEntity();
+        log.info("Review posted successfully");
+    }
+
+    private static String reviewEvent(PostReviewAction action) {
+        if (action == null) {
+            return "COMMENT";
+        }
+        return switch (action) {
+            case APPROVE -> "APPROVE";
+            case REQUEST_CHANGES -> "REQUEST_CHANGES";
+            case NONE -> "COMMENT";
+        };
     }
 
     @Override

@@ -1,6 +1,7 @@
 package org.remus.giteabot.github;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -74,5 +76,39 @@ class GitHubApiClientTest {
         assertEquals(1, comments.size());
         assertEquals(101, ((Number) comments.getFirst().get("id")).intValue());
         assertEquals("First comment", comments.getFirst().get("body"));
+    }
+
+    @Test
+    void postReview_requestChanges_submitsSingleReviewWithBodyAndEvent() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/7/reviews"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.body").value("The findings"))
+                .andExpect(jsonPath("$.event").value("REQUEST_CHANGES"))
+                .andRespond(withSuccess());
+
+        client.postReview("owner", "repo", 7L, "The findings", PostReviewAction.REQUEST_CHANGES);
+
+        server.verify();
+    }
+
+    @Test
+    void postReview_none_submitsSingleCommentReview() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/7/reviews"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.body").value("Just a comment"))
+                .andExpect(jsonPath("$.event").value("COMMENT"))
+                .andRespond(withSuccess());
+
+        client.postReview("owner", "repo", 7L, "Just a comment", PostReviewAction.NONE);
+
+        server.verify();
     }
 }
