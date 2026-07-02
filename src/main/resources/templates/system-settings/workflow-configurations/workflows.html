@@ -184,8 +184,10 @@
                     allowMultipleOpen: true
                 });
 
-                // Disable the "Approval decision prompt" textarea while its
-                // "Enable formal review decision" checkbox is unchecked.
+                // Make the "Approval decision prompt" textarea read-only (not
+                // disabled) while its "Enable formal review decision" checkbox is
+                // unchecked. Disabled controls are not submitted, which would drop a
+                // persisted custom prompt on save; read-only ones still round-trip.
                 var decisionCheckboxes = document.querySelectorAll(
                         'input[type="checkbox"][name="params.agentic-review.enableFormalReviewDecision"]');
                 decisionCheckboxes.forEach(function (decisionCheckbox) {
@@ -196,7 +198,7 @@
                         return;
                     }
                     function syncDecision() {
-                        decisionTextarea.disabled = !decisionCheckbox.checked;
+                        decisionTextarea.readOnly = !decisionCheckbox.checked;
                         decisionTextarea.closest('.mb-3').style.opacity =
                                 decisionCheckbox.checked ? '1' : '0.5';
                     }
