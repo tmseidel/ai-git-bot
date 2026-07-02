@@ -3,6 +3,7 @@ package org.remus.giteabot.github;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.github.model.GitHubReview;
 import org.remus.giteabot.github.model.GitHubReviewComment;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
@@ -65,6 +66,28 @@ public class GitHubApiClient implements RepositoryApiClient {
                 .retrieve()
                 .toBodilessEntity();
         log.info("Review comment posted successfully");
+    }
+
+    @Override
+    public void postReviewAction(String owner, String repo, Long pullNumber, PostReviewAction action) {
+        if (action == null || action == PostReviewAction.NONE) {
+            return;
+        }
+        String event = switch (action) {
+            case APPROVE -> "APPROVE";
+            case REQUEST_CHANGES -> "REQUEST_CHANGES";
+            default -> null;
+        };
+        if (event == null) return;
+        String body = action == PostReviewAction.APPROVE
+                ? "Approved by AI Git Bot (agentic review)"
+                : "Changes requested by AI Git Bot (agentic review)";
+        log.info("Posting review action {} on PR #{} in {}/{}", event, pullNumber, owner, repo);
+        restClient.post()
+                .uri("/repos/{owner}/{repo}/pulls/{pull_number}/reviews", owner, repo, pullNumber)
+                .body(new ReviewRequest(body, event))
+                .retrieve()
+                .toBodilessEntity();
     }
 
     @Override

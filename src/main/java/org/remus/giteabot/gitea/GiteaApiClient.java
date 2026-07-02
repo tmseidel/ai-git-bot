@@ -5,6 +5,7 @@ import org.remus.giteabot.gitea.model.GiteaReview;
 import org.remus.giteabot.gitea.model.GiteaReviewComment;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
@@ -69,6 +70,28 @@ public class GiteaApiClient implements RepositoryApiClient {
                 .retrieve()
                 .toBodilessEntity();
         log.info("Review comment posted successfully");
+    }
+
+    @Override
+    public void postReviewAction(String owner, String repo, Long pullNumber, PostReviewAction action) {
+        if (action == null || action == PostReviewAction.NONE) {
+            return;
+        }
+        String event = switch (action) {
+            case APPROVE -> "APPROVE";
+            case REQUEST_CHANGES -> "REQUEST_CHANGES";
+            default -> null;
+        };
+        if (event == null) return;
+        String body = action == PostReviewAction.APPROVE
+                ? "Approved by AI Git Bot (agentic review)"
+                : "Changes requested by AI Git Bot (agentic review)";
+        log.info("Posting review action {} on PR #{} in {}/{}", event, pullNumber, owner, repo);
+        giteaRestClient.post()
+                .uri("/api/v1/repos/{owner}/{repo}/pulls/{index}/reviews", owner, repo, pullNumber)
+                .body(new ReviewRequest(body, event))
+                .retrieve()
+                .toBodilessEntity();
     }
 
     @Override

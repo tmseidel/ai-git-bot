@@ -70,6 +70,10 @@ public class AiIntegration {
         return !useLegacyToolCalling;
     }
 
+    public void setEnableNativeToolCalling(boolean enableNativeToolCalling) {
+        this.useLegacyToolCalling = !enableNativeToolCalling;
+    }
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 

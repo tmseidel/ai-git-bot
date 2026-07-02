@@ -104,10 +104,6 @@
                                       th:text="${currentValue}"></textarea>
 
                             <!-- BOOLEAN -->
-                            <input th:if="${field.type.name() == 'BOOLEAN'}"
-                                   type="hidden"
-                                   th:name="|params.${row.workflowKey}.${field.name}|"
-                                   value="false"/>
                             <div th:if="${field.type.name() == 'BOOLEAN'}" class="form-check">
                                 <input class="form-check-input" type="checkbox" value="true"
                                        th:id="'param-' + ${row.workflowKey} + '-' + ${field.name}"
@@ -119,6 +115,10 @@
                                     <span th:if="${field.required}" class="text-danger">*</span>
                                 </label>
                             </div>
+                            <input th:if="${field.type.name() == 'BOOLEAN'}"
+                                   type="hidden"
+                                   th:name="|params.${row.workflowKey}.${field.name}|"
+                                   value="false"/>
 
                             <!-- INTEGER -->
                             <input th:if="${field.type.name() == 'INTEGER'}"
