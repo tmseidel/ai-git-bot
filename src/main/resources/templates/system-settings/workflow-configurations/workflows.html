@@ -185,20 +185,22 @@
                 });
 
                 // Conditional field disable: when "Enable formal review decision" is
-                // unchecked, the multiline "Approval decision prompt" textarea is
-                // disabled and greyed out.
-                document.querySelectorAll('[id^="wf-collapse-"]').forEach(function (collapse) {
-                    var boolCheckbox = collapse.querySelector('input[type="checkbox"]');
-                    var textarea = collapse.querySelector('textarea');
-                    if (!boolCheckbox || !textarea) return;
-
-                    function sync() {
-                        textarea.disabled = !boolCheckbox.checked;
-                        textarea.closest('.mb-3').style.opacity = boolCheckbox.checked ? '1' : '0.5';
+                // unchecked, the "Approval decision prompt" textarea is disabled and
+                // greyed out. Scoped to the specific field names so other workflows
+                // containing a checkbox + textarea are unaffected.
+                var decisionCheckbox = document.querySelector(
+                        'input[type="checkbox"][name="params.agentic-review.enableFormalReviewDecision"]');
+                var decisionTextarea = document.querySelector(
+                        'textarea[name="params.agentic-review.formalReviewDecisionPrompt"]');
+                if (decisionCheckbox && decisionTextarea) {
+                    function syncDecision() {
+                        decisionTextarea.disabled = !decisionCheckbox.checked;
+                        decisionTextarea.closest('.mb-3').style.opacity =
+                                decisionCheckbox.checked ? '1' : '0.5';
                     }
-                    boolCheckbox.addEventListener('change', sync);
-                    sync();
-                });
+                    decisionCheckbox.addEventListener('change', syncDecision);
+                    syncDecision();
+                }
             });
         </script>
 
