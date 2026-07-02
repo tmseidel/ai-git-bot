@@ -20,10 +20,13 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Core business logic of the agentic PR-review workflow. Not a Spring
@@ -33,14 +36,46 @@ import java.util.List;
  * <p>The flow mirrors {@link org.remus.giteabot.agent.IssueImplementationService}
  * but is strictly read-only: it clones a workspace, lets the LLM explore the
  * repository through {@link ToolCatalog.Role#WRITER} (read-only) tools and MCP,
- * then posts a single review comment. No commit, push, branch creation or
- * formal review action (approve / request-changes) is ever performed.</p>
+ * then posts a single review comment. When the operator enables the optional
+ * formal review decision, the bot may additionally approve or request changes.</p>
  */
 @Slf4j
 public class AgentReviewService {
 
     /** Hard ceiling on the diff size embedded in the kickoff prompt. */
     static final int MAX_DIFF_CHARS_FOR_CONTEXT = 60000;
+
+    /**
+     * Fixed instruction appended to the system prompt when formal review decisions
+     * are enabled. Defines the exact structured return format.
+     */
+    static final String DECISION_FORMAT_INSTRUCTION = """
+
+
+            ## Formal Review Decision Output Format
+
+            You MUST append a JSON decision block on the last line of your response:
+
+            ```json
+            {"decision": "APPROVE|REQUEST_CHANGES|NONE"}
+            ```
+
+            - Use "APPROVE" to approve the PR.
+            - Use "REQUEST_CHANGES" to request changes before merging.
+            - Use "NONE" to leave the review state unchanged.
+
+            Place the JSON block on a separate line at the very end. Do not include
+            the decision JSON anywhere else in your review.""";
+
+    /** Matches the decision JSON block at the very end of the model output. */
+    private static final Pattern DECISION_JSON_PATTERN = Pattern.compile(
+            "```json\\s*\\n?\\s*(\\{[^}]*\"decision\"[^}]*\\})\\s*\\n?\\s*```\\s*\\z",
+            Pattern.DOTALL);
+
+    /** Fallback: bare JSON object at end. */
+    private static final Pattern DECISION_BARE_PATTERN = Pattern.compile(
+            "\\{[^}]*\"decision\"\\s*:\\s*\"(APPROVE|REQUEST_CHANGES|NONE)\"[^}]*\\}\\s*\\z",
+            Pattern.MULTILINE);
 
     private final AgentReviewContext context;
     private final AgentSessionService sessionService;
@@ -76,22 +111,29 @@ public class AgentReviewService {
 
     /**
      * Runs an agentic review for the PR described by {@code payload} and posts
-     * the resulting review as a PR comment.
+     * the resulting review as a PR comment. When {@code enableFormalDecision}
+     * is {@code true}, the system prompt is extended with the operator-
+     * configured criteria and a fixed format instruction; the model's output
+     * is parsed for a formal decision (APPROVE / REQUEST_CHANGES / NONE),
+     * which is forwarded to {@link RepositoryApiClient#postReviewAction}.
      *
-     * @param maxToolRounds operator-tunable cap on the number of explore/answer
-     *                      rounds (clamped to a sane range)
+     * @param maxToolRounds       operator-tunable cap on the number of
+     *                            explore/answer rounds (clamped to a sane range)
+     * @param enableFormalDecision when true, the model may return a formal review decision
+     * @param decisionPrompt       operator-provided criteria for the decision
      * @return {@code true} when a non-empty review was produced and posted;
-     *         {@code false} when there was nothing to review or the agent
-     *         failed to produce a review
+     *         {@code false} when there was nothing to review or the agent failed
      */
-    public boolean reviewPullRequest(WebhookPayload payload, int maxToolRounds) {
+    public boolean reviewPullRequest(WebhookPayload payload, int maxToolRounds,
+                                     boolean enableFormalDecision, String decisionPrompt) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
         String prTitle = payload.getPullRequest().getTitle();
         String prBody = payload.getPullRequest().getBody();
 
-        log.info("Starting agentic review for PR #{} '{}' in {}/{}", prNumber, prTitle, owner, repo);
+        log.info("Starting agentic review for PR #{} '{}' in {}/{} (formalDecision={})",
+                prNumber, prTitle, owner, repo, enableFormalDecision);
 
         String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
         if (diff == null || diff.isBlank()) {
@@ -115,14 +157,9 @@ public class AgentReviewService {
             }
             workspaceDir = wsResult.workspacePath();
 
-            String systemPrompt = resolveSystemPrompt();
+            String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
             String userMessage = buildKickoffMessage(prTitle, prBody, diff);
 
-            // The review agent is strictly read-only: the session is only a
-            // conversation-history carrier through the loop. Use a transient
-            // (unpersisted, id == null) session so no agent_sessions row is
-            // created and no transaction spans the clone + AI calls. The loop
-            // skips persistence for id-less sessions (see AgentLoop#flushRound).
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
@@ -134,8 +171,28 @@ public class AgentReviewService {
                 return false;
             }
 
-            repositoryClient.postReviewComment(owner, repo, prNumber, formatReview(review));
-            log.info("Agentic review completed for PR #{} in {}/{}", prNumber, owner, repo);
+            // Parse and strip formal decision before posting the comment.
+            ParseResult parsed = enableFormalDecision
+                    ? parseDecision(review) : ParseResult.noDecision(review);
+
+            repositoryClient.postReviewComment(owner, repo, prNumber,
+                    formatReview(parsed.reviewText()));
+
+            // Post formal review action when the model returned a decision.
+            if (parsed.action() != null && parsed.action() != PostReviewAction.NONE) {
+                try {
+                    repositoryClient.postReviewAction(owner, repo, prNumber, parsed.action());
+                    log.info("Agentic review posted formal decision {} for PR #{} in {}/{}",
+                            parsed.action(), prNumber, owner, repo);
+                } catch (Exception e) {
+                    log.warn("Failed to post review action {} for PR #{} in {}/{}: {}",
+                            parsed.action(), prNumber, owner, repo, e.getMessage());
+                    // Swallow — the review comment was already posted.
+                }
+            }
+
+            log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
+                    prNumber, owner, repo, parsed.action() != null ? parsed.action() : "NONE");
             return outcome.success();
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
@@ -153,11 +210,7 @@ public class AgentReviewService {
 
     /**
      * Answers a clarification question about a previously-reviewed PR by running
-     * a conversational agent loop.
-     *
-     * @param payload       the webhook payload (for PR identity)
-     * @param userQuestion  the user's follow-up question
-     * @return {@code true} when a non-empty answer was produced and posted
+     * a conversational agent loop. Formal review decisions are not applicable here.
      */
     public boolean answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds) {
         String owner = payload.getRepository().getOwner().getLogin();
@@ -191,7 +244,7 @@ public class AgentReviewService {
             }
             workspaceDir = wsResult.workspacePath();
 
-            String systemPrompt = resolveSystemPrompt();
+            String systemPrompt = resolveSystemPrompt(false, null);
             String userMessage = buildClarificationMessage(prTitle, prBody, diff, userQuestion);
 
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
@@ -220,6 +273,68 @@ public class AgentReviewService {
             if (workspaceDir != null) {
                 workspaceService.cleanupWorkspace(workspaceDir);
             }
+        }
+    }
+
+    /**
+     * Parses a formal review decision from the model output and strips it
+     * so the review comment is clean. Returns {@link PostReviewAction#NONE}
+     * when parsing fails or no decision is found.
+     */
+    static ParseResult parseDecision(String review) {
+        if (review == null || review.isBlank()) {
+            return ParseResult.noDecision(review);
+        }
+
+        // 1. Try fenced JSON block at the end
+        Matcher fenced = DECISION_JSON_PATTERN.matcher(review);
+        if (fenced.find()) {
+            String json = fenced.group(1);
+            PostReviewAction action = extractAction(json);
+            if (action == null) {
+                return ParseResult.noDecision(review);
+            }
+            String cleaned = review.substring(0, fenced.start()).stripTrailing();
+            return new ParseResult(cleaned, action);
+        }
+
+        // 2. Try bare JSON object on the last line
+        Matcher bare = DECISION_BARE_PATTERN.matcher(review);
+        if (bare.find()) {
+            String decision = bare.group(1);
+            String cleaned = review.substring(0, bare.start()).stripTrailing();
+            return new ParseResult(cleaned, fromString(decision));
+        }
+
+        return ParseResult.noDecision(review);
+    }
+
+    private static PostReviewAction extractAction(String json) {
+        // Minimal JSON extraction — avoids a full parser dependency for this one field.
+        Matcher m = Pattern.compile("\"decision\"\\s*:\\s*\"(APPROVE|REQUEST_CHANGES|NONE)\"")
+                .matcher(json);
+        return m.find() ? fromString(m.group(1)) : null;
+    }
+
+    private static PostReviewAction fromString(String s) {
+        if (s == null) return null;
+        return switch (s.trim().toUpperCase()) {
+            case "APPROVE" -> PostReviewAction.APPROVE;
+            case "REQUEST_CHANGES" -> PostReviewAction.REQUEST_CHANGES;
+            case "NONE" -> PostReviewAction.NONE;
+            default -> null;
+        };
+    }
+
+    /**
+     * Parsed result of extracting a formal review decision from model output.
+     *
+     * @param reviewText the review text with the decision JSON stripped
+     * @param action     the parsed decision, or {@code null} when unparseable
+     */
+    public record ParseResult(String reviewText, PostReviewAction action) {
+        static ParseResult noDecision(String reviewText) {
+            return new ParseResult(reviewText, null);
         }
     }
 
@@ -261,12 +376,6 @@ public class AgentReviewService {
                 + "\n\n---\n*Read-only agentic review follow-up by AI Git Bot*";
     }
 
-    /**
-     * Best-effort error comment posted to the PR when an LLM-tier exception
-     * (e.g. 503, timeout) prevents the review or clarification from completing.
-     * Failures posting the comment itself are swallowed — a missing notice
-     * must never mask the original error.
-     */
     private void postErrorComment(String owner, String repo, Long prNumber,
                                   String stage, String userMessage, Throwable error) {
         if (owner == null || repo == null || prNumber == null) {
@@ -309,8 +418,6 @@ public class AgentReviewService {
 
         AgentConfigProperties.BudgetConfig budgetCfg = agentConfig.getBudget();
         int rounds = clamp(maxToolRounds, 1, 30);
-        // Each explore round is followed by an answer round; add slack so the
-        // model can always produce a final review turn after its last tool call.
         int hardCap = Math.max(budgetCfg.getMaxRounds(), rounds + 2);
         AgentBudget budget = new AgentBudget(hardCap, budgetCfg.getMaxContextRounds(),
                 budgetCfg.getMaxValidationRetries(), budgetCfg.getMaxTokensPerCall(),
@@ -322,14 +429,20 @@ public class AgentReviewService {
         return loop.run(ctx, userMessage, strategy);
     }
 
-    private String resolveSystemPrompt() {
+    private String resolveSystemPrompt(boolean enableFormalDecision, String decisionPrompt) {
         ToolingMode mode = (aiClient != null && aiClient.supportsNativeTools())
                 ? ToolingMode.NATIVE : ToolingMode.LEGACY;
-        // The review agent uses the read-only WRITER tool surface, so the
-        // WRITER_AGENT protocol guidance is the right fit.
-        return systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
+        String base = systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
                 context.allowedBuiltinTools(), context.mcpToolCatalog(), mode,
                 SystemPromptAssembler.PromptKind.WRITER_AGENT);
+
+        if (!enableFormalDecision) {
+            return base;
+        }
+
+        String prompt = decisionPrompt != null && !decisionPrompt.isBlank()
+                ? decisionPrompt : AgentReviewWorkflow.DEFAULT_FORMAL_REVIEW_DECISION_PROMPT;
+        return base + "\n\n" + prompt + DECISION_FORMAT_INSTRUCTION;
     }
 
     private String buildKickoffMessage(String prTitle, String prBody, String diff) {
@@ -373,12 +486,6 @@ public class AgentReviewService {
         }
     }
 
-    /**
-     * Fetches the contents of the files the model requested via the legacy
-     * {@code requestFiles} protocol. Read-only — uses the repository API at the
-     * currently selected ref. Mirrors
-     * {@code IssueImplementationService.fetchSpecificFiles}.
-     */
     private String fetchFiles(String owner, String repo, String ref, List<String> filePaths) {
         if (filePaths == null || filePaths.isEmpty()) {
             return "";
@@ -408,9 +515,3 @@ public class AgentReviewService {
         return Math.max(min, Math.min(max, value));
     }
 }
-
-
-
-
-
-

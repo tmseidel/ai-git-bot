@@ -53,7 +53,7 @@ Cloud providers (Anthropic, OpenAI, Google AI / Gemini) only need an API key —
 | [Agentic PR Workflows (concept)](agentic-workflows/README.md) | Feature overview and persona-driven user stories for the workflow subsystem |
 | [Unit-Test Author Workflow](PR_WORKFLOWS_UNIT_TEST.md) | AI unit-test generation for PR diffs, supported runners, write-safety guards |
 | [Full-stack QA / E2E Workflow](PR_WORKFLOWS_E2E.md) | Per-PR preview environments, generated Playwright suites, teardown lifecycle |
-| [Agentic Review Workflow](PR_WORKFLOWS_AGENTIC_REVIEW.md) | Read-only agentic PR review with repository and MCP tool access |
+| [Agentic Review Workflow](PR_WORKFLOWS_AGENTIC_REVIEW.md) | Read-only agentic PR review with repository and MCP tool access; optional formal review action (approve/request-changes) |
 | [CI Action Recipes](PR_WORKFLOWS_CI_ACTIONS.md) | `CI_ACTION` deployment recipes per Git provider |
 | [Webhook Recipes](PR_WORKFLOWS_WEBHOOK_RECIPES.md) | `WEBHOOK` deployment recipes (Jenkins, scripts, …) |
 | [MCP Server Handling](MCP_SERVER_HANDLING.md) | Attaching remote MCP servers, tool whitelist selection, call transparency |
