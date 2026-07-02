@@ -195,7 +195,10 @@ public class WorkflowConfigurationController {
                 // hidden "false" + checkbox "true" = ["false","true"]),
                 // "true" always wins regardless of order.
                 List<String> values = entry.getValue();
-                String effective = values != null && values.contains("true") ? "true" : values.get(0);
+                if (values == null || values.isEmpty()) {
+                    continue;
+                }
+                String effective = values.contains("true") ? "true" : values.get(0);
                 grouped.computeIfAbsent(workflowKey, k -> new LinkedHashMap<>())
                         .put(fieldName, effective);
             }
