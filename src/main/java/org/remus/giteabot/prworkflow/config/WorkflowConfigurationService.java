@@ -52,28 +52,32 @@ public class WorkflowConfigurationService {
         if (configuration.getName() == null || configuration.getName().isBlank()) {
             throw new IllegalArgumentException("Name is required");
         }
-        configuration.setName(configuration.getName().trim());
+        String trimmedName = configuration.getName().trim();
 
         if (configuration.getId() != null) {
+            // Existing: update only name on the managed entity. The detached
+            // entity from form binding has an empty selectedWorkflows list —
+            // saving it directly would cascade-delete all persisted selections.
             WorkflowConfiguration existing = configurationRepository.findById(configuration.getId())
                     .orElseThrow(() -> new IllegalArgumentException("Workflow configuration not found"));
             if (existing.isDefaultEntry()) {
-                if (!existing.getName().equals(configuration.getName())) {
+                if (!existing.getName().equals(trimmedName)) {
                     throw new IllegalArgumentException("The default workflow configuration cannot be renamed");
                 }
-                configuration.setDefaultEntry(true);
             }
-        } else {
-            // New configurations are never default; the default is bootstrapped once.
-            configuration.setDefaultEntry(false);
+            if (configurationRepository.existsByNameAndIdNot(trimmedName, configuration.getId())) {
+                throw new IllegalArgumentException("A workflow configuration with this name already exists");
+            }
+            existing.setName(trimmedName);
+            return existing;
         }
 
-        boolean duplicateName = configuration.getId() == null
-                ? configurationRepository.existsByName(configuration.getName())
-                : configurationRepository.existsByNameAndIdNot(configuration.getName(), configuration.getId());
-        if (duplicateName) {
+        // New configurations are never default; the default is bootstrapped once.
+        if (configurationRepository.existsByName(trimmedName)) {
             throw new IllegalArgumentException("A workflow configuration with this name already exists");
         }
+        configuration.setName(trimmedName);
+        configuration.setDefaultEntry(false);
         return configurationRepository.save(configuration);
     }
 

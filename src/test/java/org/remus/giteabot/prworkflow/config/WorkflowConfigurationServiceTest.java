@@ -94,8 +94,6 @@ class WorkflowConfigurationServiceTest {
         update.setDefaultEntry(false);
         when(configurationRepository.findById(1L)).thenReturn(Optional.of(persisted));
         when(configurationRepository.existsByNameAndIdNot("Default", 1L)).thenReturn(false);
-        when(configurationRepository.save(any(WorkflowConfiguration.class)))
-                .thenAnswer(inv -> inv.getArgument(0));
 
         WorkflowConfiguration saved = service.save(update);
         assertTrue(saved.isDefaultEntry());
