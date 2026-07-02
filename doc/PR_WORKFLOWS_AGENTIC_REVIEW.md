@@ -56,7 +56,8 @@ flowchart LR
    calls; the first assistant turn **without** tool calls is the final review.
 5. Post the review as a PR comment (when enabled) and clean up the workspace.
 6. When formal review decisions are enabled: parse the model's structured
-   decision payload, then call `postReviewAction` (approve / request-changes).
+   decision and submit it with the review body via `postReview` (approve /
+   request-changes / comment) as a single review.
 
 ## Parameters
 
@@ -75,17 +76,17 @@ When `enableFormalReviewDecision` is `true`:
 
 1. The operator-configured decision prompt and a fixed format instruction are
    appended to the system prompt.
-2. The model must append a JSON decision block at the end of its review:
-   ```json
-   {"decision": "APPROVE"}
-   ```
+2. The model must end its review with a single bare JSON object on the last
+   line (a fenced ```json block is also accepted as a tolerant fallback):
+
+       {"decision": "APPROVE"}
+
 3. Valid decision values: `APPROVE`, `REQUEST_CHANGES`, `NONE`.
-4. After posting the markdown review comment, the workflow forwards the
-   parsed decision to `RepositoryApiClient.postReviewAction(...)`.
-5. On unparseable output, the review comment is still posted but no formal
-   review action is taken (fail-open).
-6. Providers that do not support `postReviewAction` (default no-op) degrade
-   gracefully — the review comment is always posted.
+4. The parsed decision and the review body are submitted together via
+   `RepositoryApiClient.postReview(...)` as a single review.
+5. On unparseable output the review is still posted with no formal decision
+   (fail-open); if the formal submission fails it falls back to a plain
+   review comment so the findings are not lost.
 
 This works identically in native tool-calling mode and legacy JSON/chat mode:
 the structured decision is parsed from the final assistant output regardless

@@ -54,18 +54,15 @@ public class AgentReviewService {
 
             ## Formal Review Decision Output Format
 
-            You MUST append a JSON decision block on the last line of your response:
+            The last line of your response MUST be exactly one JSON object and nothing else:
 
-            ```json
-            {"decision": "APPROVE|REQUEST_CHANGES|NONE"}
-            ```
+            {"decision": "APPROVE"}
 
-            - Use "APPROVE" to approve the PR.
-            - Use "REQUEST_CHANGES" to request changes before merging.
-            - Use "NONE" to leave the review state unchanged.
+            - "APPROVE" — approve the PR.
+            - "REQUEST_CHANGES" — request changes before merging.
+            - "NONE" — leave the review state unchanged.
 
-            Place the JSON block on a separate line at the very end. Do not include
-            the decision JSON anywhere else in your review.""";
+            Do not wrap it in a code fence and do not write anything after it.""";
 
     /** Matches the decision JSON block at the very end of the model output. */
     private static final Pattern DECISION_JSON_PATTERN = Pattern.compile(
@@ -289,7 +286,15 @@ public class AgentReviewService {
             return ParseResult.noDecision(review);
         }
 
-        // 1. Try fenced JSON block at the end
+        // Canonical form: a bare JSON object on the last line.
+        Matcher bare = DECISION_BARE_PATTERN.matcher(review);
+        if (bare.find()) {
+            String decision = bare.group(1);
+            String cleaned = review.substring(0, bare.start()).stripTrailing();
+            return new ParseResult(cleaned, fromString(decision));
+        }
+
+        // Tolerant fallback: a fenced ```json block at the end.
         Matcher fenced = DECISION_JSON_PATTERN.matcher(review);
         if (fenced.find()) {
             String json = fenced.group(1);
@@ -299,14 +304,6 @@ public class AgentReviewService {
             }
             String cleaned = review.substring(0, fenced.start()).stripTrailing();
             return new ParseResult(cleaned, action);
-        }
-
-        // 2. Try bare JSON object on the last line
-        Matcher bare = DECISION_BARE_PATTERN.matcher(review);
-        if (bare.find()) {
-            String decision = bare.group(1);
-            String cleaned = review.substring(0, bare.start()).stripTrailing();
-            return new ParseResult(cleaned, fromString(decision));
         }
 
         return ParseResult.noDecision(review);
