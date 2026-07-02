@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -103,7 +104,7 @@ public class WorkflowConfigurationController {
     public String saveWorkflowSelection(@PathVariable Long id,
                                         @RequestParam(name = "selectedWorkflowKeys", required = false)
                                         List<String> selectedWorkflowKeys,
-                                        @RequestParam Map<String, String> allParams,
+                                        @RequestParam MultiValueMap<String, String> allParams,
                                         RedirectAttributes redirectAttributes) {
         try {
             Map<String, Map<String, String>> workflowParams =
@@ -173,11 +174,11 @@ public class WorkflowConfigurationController {
      * which silently mangled the field names so the controller never
      * received them.</p>
      */
-    private Map<String, Map<String, String>> extractWorkflowParams(Map<String, String> allParams,
+    private Map<String, Map<String, String>> extractWorkflowParams(MultiValueMap<String, String> allParams,
                                                                    List<String> selectedKeys) {
         Map<String, Map<String, String>> grouped = new LinkedHashMap<>();
         if (allParams != null) {
-            for (Map.Entry<String, String> entry : allParams.entrySet()) {
+            for (Map.Entry<String, List<String>> entry : allParams.entrySet()) {
                 String key = entry.getKey();
                 if (!key.startsWith("params.")) {
                     continue;
@@ -189,8 +190,14 @@ public class WorkflowConfigurationController {
                 }
                 String workflowKey = rest.substring(0, sep);
                 String fieldName = rest.substring(sep + 1);
+                // For duplicate parameter names (unchecked checkbox: hidden
+                // "false" + no checkbox value = ["false"]; checked:
+                // hidden "false" + checkbox "true" = ["false","true"]),
+                // "true" always wins regardless of order.
+                List<String> values = entry.getValue();
+                String effective = values != null && values.contains("true") ? "true" : values.get(0);
                 grouped.computeIfAbsent(workflowKey, k -> new LinkedHashMap<>())
-                        .put(fieldName, entry.getValue());
+                        .put(fieldName, effective);
             }
         }
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
