@@ -78,7 +78,7 @@ class AgentReviewServiceTest {
     }
 
     @Test
-    void parseDecision_malformedFencedBlock_fallsBackToNone() {
+    void parseDecision_malformedFencedBlock_strippedWithNoAction() {
         String review = """
                 ## Review
                 Some text.
@@ -89,6 +89,16 @@ class AgentReviewServiceTest {
 
         var result = AgentReviewService.parseDecision(review);
         assertThat(result.action()).isNull();
+        assertThat(result.reviewText()).doesNotContain("decision", "INVALID_VALUE", "```");
+    }
+
+    @Test
+    void parseDecision_malformedBareBlock_strippedWithNoAction() {
+        String review = "Here is my review text.\n\n{\"decision\":\"REQUEST-CHANGES\"}";
+
+        var result = AgentReviewService.parseDecision(review);
+        assertThat(result.action()).isNull();
+        assertThat(result.reviewText()).isEqualTo("Here is my review text.");
     }
 
     @Test

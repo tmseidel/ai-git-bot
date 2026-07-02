@@ -64,14 +64,17 @@ public class AgentReviewService {
 
             Do not wrap it in a code fence and do not write anything after it.""";
 
-    /** Matches the decision JSON block at the very end of the model output. */
+    /**
+     * Matches a trailing decision JSON block, bare or fenced, regardless of
+     * whether its value is a valid enum — an invalid value is still detected and
+     * stripped so it never leaks into the posted review.
+     */
     private static final Pattern DECISION_JSON_PATTERN = Pattern.compile(
             "```json\\s*\\n?\\s*(\\{[^}]*\"decision\"[^}]*})\\s*\\n?\\s*```\\s*\\z",
             Pattern.DOTALL);
 
-    /** Fallback: bare JSON object at end. */
     private static final Pattern DECISION_BARE_PATTERN = Pattern.compile(
-            "\\{[^}]*\"decision\"\\s*:\\s*\"(APPROVE|REQUEST_CHANGES|NONE)\"[^}]*}\\s*\\z",
+            "\\{[^}]*\"decision\"\\s*:\\s*\"([^\"]*)\"[^}]*}\\s*\\z",
             Pattern.MULTILINE);
 
     private final AgentReviewContext context;
@@ -277,9 +280,10 @@ public class AgentReviewService {
     }
 
     /**
-     * Parses a formal review decision from the model output and strips it
-     * so the review comment is clean. Returns {@link PostReviewAction#NONE}
-     * when parsing fails or no decision is found.
+     * Parses a formal review decision from the model output and strips the
+     * trailing decision block so the review comment is clean. A detected block
+     * is stripped regardless of validity; an unparseable value yields a
+     * {@code null} action (fail-open) but still-cleaned text.
      */
     static ParseResult parseDecision(String review) {
         if (review == null || review.isBlank()) {
@@ -289,21 +293,15 @@ public class AgentReviewService {
         // Canonical form: a bare JSON object on the last line.
         Matcher bare = DECISION_BARE_PATTERN.matcher(review);
         if (bare.find()) {
-            String decision = bare.group(1);
             String cleaned = review.substring(0, bare.start()).stripTrailing();
-            return new ParseResult(cleaned, fromString(decision));
+            return new ParseResult(cleaned, fromString(bare.group(1)));
         }
 
         // Tolerant fallback: a fenced ```json block at the end.
         Matcher fenced = DECISION_JSON_PATTERN.matcher(review);
         if (fenced.find()) {
-            String json = fenced.group(1);
-            PostReviewAction action = extractAction(json);
-            if (action == null) {
-                return ParseResult.noDecision(review);
-            }
             String cleaned = review.substring(0, fenced.start()).stripTrailing();
-            return new ParseResult(cleaned, action);
+            return new ParseResult(cleaned, extractAction(fenced.group(1)));
         }
 
         return ParseResult.noDecision(review);
