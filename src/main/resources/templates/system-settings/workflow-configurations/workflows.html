@@ -115,10 +115,6 @@
                                     <span th:if="${field.required}" class="text-danger">*</span>
                                 </label>
                             </div>
-                            <input th:if="${field.type.name() == 'BOOLEAN'}"
-                                   type="hidden"
-                                   th:name="|params.${row.workflowKey}.${field.name}|"
-                                   value="false"/>
 
                             <!-- INTEGER -->
                             <input th:if="${field.type.name() == 'INTEGER'}"
