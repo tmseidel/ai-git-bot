@@ -26,6 +26,8 @@ CROSS JOIN (VALUES
     ('git-log',         'CONTEXT'),
     ('git-blame',       'CONTEXT'),
     ('tree',            'CONTEXT'),
+    ('ctags-signatures','CONTEXT'),
+    ('ctags-deps',      'CONTEXT'),
     ('ripgrep',         'CONTEXT'),
     ('grep',            'CONTEXT'),
     ('get-issue',       'REPOSITORY'),

@@ -96,6 +96,10 @@ public class CodeReviewService {
                         prNumber, review.length(),
                         review.substring(0, Math.min(review.length(), 500)));
 
+                if (review == null || review.strip().isEmpty()) {
+                    review = "⚠️ *The review feedback was empty or could not be generated.*";
+                }
+
                 // Store a summary user message and the review in the session
                 String userSummary = buildPrSummaryMessage(prTitle, prBody);
                 sessionService.addMessage(session, "user", userSummary);
@@ -113,9 +117,15 @@ public class CodeReviewService {
                         prNumber, review != null ? review.length() : 0,
                         review != null ? review.substring(0, Math.min(review.length(), 500)) : "null");
 
+                if (review == null || review.strip().isEmpty()) {
+                    review = "⚠️ *The review feedback was empty or could not be generated.*";
+                }
+
                 sessionService.addMessage(session, "user", updateMessage);
                 sessionService.addMessage(session, "assistant", review);
             }
+
+
 
             String commentBody = formatReviewComment(review);
             repositoryClient.postReviewComment(owner, repo, prNumber, commentBody);
@@ -173,6 +183,10 @@ public class CodeReviewService {
             log.debug("LLM response [chat/botCommand] for PR #{}: length={}, preview='{}'",
                     prNumber, response != null ? response.length() : 0,
                     response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
+
+            if (response == null || response.strip().isEmpty()) {
+                response = "⚠️ *The response was empty or could not be generated.*";
+            }
 
             // Store messages in session
             sessionService.addMessage(session, "user", commentBody);
@@ -310,6 +324,10 @@ public class CodeReviewService {
         log.debug("LLM response [chat/inline] for file '{}': length={}, preview='{}'",
                 filePath, response != null ? response.length() : 0,
                 response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
+
+        if (response == null || response.strip().isEmpty()) {
+            response = "⚠️ *The response was empty or could not be generated.*";
+        }
 
         // Store in session
         sessionService.addMessage(session, "user", contextMessage);

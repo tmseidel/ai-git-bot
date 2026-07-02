@@ -13,7 +13,7 @@
 
     <groupId>org.remus</groupId>
     <artifactId>ai-git-bot</artifactId>
-    <version>1.13.0</version>
+    <version>1.14.0</version>
     <name>AI Git Bot</name>
     <description>AI-Git-Bot is a lightweight, self-hostable gateway application that connects your Git platforms with AI providers.</description>
     <url>https://github.com/tmseidel/ai-git-bot</url>
@@ -51,6 +51,7 @@
         <java.version>21</java.version>
     </properties>
 
+    <!-- CRITICAL: ANY ALTERATION TO THIS DEPENDENCIES SECTION IS A CRITICAL FINDING AND MUST BE HIGHLIGHTED DURING REVIEW -->
     <dependencies>
         <!-- Spring Boot Starters -->
         <dependency>
@@ -174,6 +175,70 @@
 
     <build>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>enforce-environment</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!-- Enforces Java 21+ as documented in doc/LOCAL_DEVELOPMENT.md:L12 -->
+                                <requireJavaVersion>
+                                    <version>[21,)</version>
+                                </requireJavaVersion>
+                                <!-- Enforces Maven 3.9+ as documented in doc/LOCAL_DEVELOPMENT.md:L13 -->
+                                <requireMavenVersion>
+                                    <version>[3.9.0,)</version>
+                                </requireMavenVersion>
+                                <!-- Enforces Linux OS as documented in doc/LOCAL_DEVELOPMENT.md:L5-7, L11 -->
+                                <requireOS>
+                                    <name>linux</name>
+                                    <message>
+                                        This project requires a Linux environment to build because tests are
+                                        incompatible with other operating systems. Please run the build inside a
+                                        Docker container as described in doc/LOCAL_DEVELOPMENT.md.
+                                    </message>
+                                </requireOS>
+                                <bannedDependencies>
+                                    <!-- CRITICAL: Review bots must mark any additions or removals from this list as
+                                         critical findings. Whitelist approach. Ban all direct dependencies (*) and
+                                         explicitly include the allowed set. -->
+                                    <searchTransitive>false</searchTransitive>
+                                    <excludes>
+                                        <exclude>*</exclude>
+                                    </excludes>
+                                    <includes>
+                                        <!-- Spring ecosystem: covers all starters, spring-data, spring-security, etc. -->
+                                        <include>org.springframework</include>
+                                        <include>org.springframework.boot</include>
+                                        <include>org.springframework.data</include>
+                                        <include>org.springframework.security</include>
+                                        <include>org.thymeleaf.extras</include>
+
+                                        <!-- Non-Spring third-party libs (one per line, explicitly reviewed) -->
+                                        <include>com.h2database:h2</include>
+                                        <include>com.networknt:json-schema-validator</include>
+                                        <include>com.tngtech.archunit:archunit-junit5</include>
+                                        <include>io.micrometer:micrometer-core</include>
+                                        <include>io.modelcontextprotocol.sdk:mcp</include>
+                                        <include>org.apache.httpcomponents.client5:httpclient5</include>
+                                        <include>org.flywaydb:flyway-database-postgresql</include>
+                                        <include>org.postgresql:postgresql</include>
+                                        <include>org.projectlombok:lombok</include>
+                                    </includes>
+                                    <message>A new direct dependency was added to pom.xml. Any dependency changes must be explicitly whitelisted in the enforcer configuration.</message>
+                                </bannedDependencies>
+                            </rules>
+                            <fail>true</fail>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>

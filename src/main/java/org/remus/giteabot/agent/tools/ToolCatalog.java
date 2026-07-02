@@ -97,7 +97,9 @@ public class ToolCatalog {
                     "Find files by glob pattern. Args: [\"*.yml\"] or [\"*.java\", \"src\"].",
                     varargsSchema()),
             entry("cat", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
-                    "Read part of a file with 1-based line numbers.",
+                    "Read specific line ranges of a file with 1-based line numbers. "
+                            + "Use this for precision reads after understanding structure via "
+                            + "`ctags-signatures` — not for first-time file exploration.",
                     objectSchema(
                             prop("path",      "string",  "Repository-relative path."),
                             prop("startLine", "integer", "First line to include (inclusive, 1-based). Optional — omit to start at 1."),
@@ -112,6 +114,25 @@ public class ToolCatalog {
             entry("tree", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
                     "List a directory recursively. Args: [\"src\"] or [\"src\", \"3\"] (depth).",
                     varargsSchema()),
+            entry("ctags-signatures", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
+                    "Extract function, class, method, and interface signatures from a source file. "
+                            + "PREFER this over `cat` for first-time file exploration — it reveals the "
+                            + "file's architecture (classes, methods, interfaces, functions) at a "
+                            + "fraction of the tokens so you know what the file contains before "
+                            + "reading specific lines. Args: [\"path/to/file\"] or [\"path/to/file\", "
+                            + "\"limit\"] (default: 100).",
+                    objectSchema(
+                            prop("path",  "string",  "Repository-relative path to the file."),
+                            prop("limit", "integer", "Max signatures to return (default: 100)."),
+                            required("path"))),
+            entry("ctags-deps", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
+                    "Extract imports, includes, and namespace/package declarations from a source file. "
+                            + "Returns JSON with the declared namespace and all "
+                            + "external dependencies. Use this to understand which modules a file depends on. "
+                            + "Args: [\"path/to/file\"].",
+                    objectSchema(
+                            prop("path", "string", "Repository-relative path to the file."),
+                            required("path"))),
 
             // Additional context aliases (silent at runtime — never advertised to the LLM
             // to avoid duplicate descriptors with conflicting docs).

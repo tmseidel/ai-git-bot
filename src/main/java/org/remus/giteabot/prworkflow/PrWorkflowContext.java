@@ -61,6 +61,15 @@ public record PrWorkflowContext(
      */
     public static final String HINT_RERUN_ONLY = "e2e.rerun-only";
 
+    /**
+     * Threaded by
+     * {@link org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler}
+     * when the user posts {@code @bot clarify <question>} on a PR that was
+     * reviewed by the agentic review workflow. The value is the user's
+     * free-text follow-up question.
+     */
+    public static final String HINT_AGENTIC_REVIEW_CLARIFICATION = "agentic-review.clarification";
+
     public PrWorkflowContext {
         Objects.requireNonNull(bot, "bot");
         Objects.requireNonNull(payload, "payload");

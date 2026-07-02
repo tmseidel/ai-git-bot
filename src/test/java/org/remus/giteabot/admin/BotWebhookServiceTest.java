@@ -28,9 +28,16 @@ import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.mockito.ArgumentCaptor;
+import org.remus.giteabot.prworkflow.PrWorkflowContext;
+import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
+import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -68,6 +75,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler e2eTestPrCloseHandler;
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler unitTestSlashCommandHandler;
+    @Mock private org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
     @Mock private ReviewChunkingProperties chunkingProperties;
 
@@ -83,7 +91,8 @@ class BotWebhookServiceTest {
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService, botService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
                 prWorkflowOrchestrator, e2eTestPrCloseHandler,
-                e2eTestSlashCommandHandler, unitTestSlashCommandHandler, workflowSelectionService);
+                e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
+                agentReviewSlashCommandHandler, workflowSelectionService);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
@@ -131,6 +140,7 @@ class BotWebhookServiceTest {
         budget.setMaxTokensPerCall(4096);
         lenient().when(agentConfig.getBudget()).thenReturn(budget);
         lenient().when(agentConfig.getCritic()).thenReturn(new AgentConfigProperties.CriticConfig());
+        lenient().when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
     }
 
     // ---- isBotUser tests ----
@@ -275,7 +285,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -307,7 +317,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -346,7 +356,7 @@ class BotWebhookServiceTest {
 
         botWebhookService.handleIssueAssigned(bot, payload);
 
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
     }
 
@@ -373,7 +383,7 @@ class BotWebhookServiceTest {
 
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.UPDATING);
         verify(agentSessionService).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -394,7 +404,7 @@ class BotWebhookServiceTest {
 
         botWebhookService.handleIssueComment(bot, payload);
 
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
         verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
     }
 
@@ -414,7 +424,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -475,7 +485,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -508,7 +518,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -537,7 +547,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -572,7 +582,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -612,7 +622,7 @@ class BotWebhookServiceTest {
         when(agentSessionService.createSession("Test", "my-repo", 12L, "Vague issue",
                 AgentSession.AgentSessionType.WRITER, "tom")).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
@@ -650,7 +660,7 @@ class BotWebhookServiceTest {
         // same session so subsequent state reads are preserved.
         when(agentSessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
-        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any()))
+        when(workspaceService.prepareWorkspace(eq("Test"), eq("my-repo"), eq("main"), any(), any(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096)))
@@ -710,7 +720,7 @@ class BotWebhookServiceTest {
 
         /** For tests where the agent path is taken, stub workspace to fail quickly. */
         private void stubAgentPath(AgentSession session) {
-            lenient().when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any()))
+            lenient().when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any(), any()))
                     .thenReturn(org.remus.giteabot.agent.validation.WorkspaceResult.failure("routing test"));
         }
 
@@ -963,6 +973,199 @@ class BotWebhookServiceTest {
         }
     }
 
+    // ---------------------------------------------------------------
+    // handleInlineComment — agentic-review routing
+    // ---------------------------------------------------------------
+
+    @Test
+    void inlineComment_agenticReviewEnabled_dispatchesClarification() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Why did you change this line?");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload), key.capture(), hints.capture());
+        assertThat(key.getValue()).isEqualTo(AgentReviewWorkflow.KEY);
+        assertThat(hints.getValue())
+                .containsKey(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION);
+    }
+
+    @Test
+    void inlineComment_agenticReviewEnabled_includesPathInClarification() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Is this correct?");
+        payload.getComment().setPath("src/main/java/Foo.java");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(AgentReviewWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue())
+                .containsEntry(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
+                        "Regarding `src/main/java/Foo.java`: Is this correct?");
+    }
+
+    @Test
+    void inlineComment_reviewEnabledOnly_dispatchesReviewWorkflow() {
+        Bot bot = createBotWithWorkflows("review-bot", "claude_bot", true,
+                java.util.List.of("review"));
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Why is this here?");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(ReviewWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue())
+                .containsEntry(ReviewWorkflow.HINT_REVIEW_ACTION,
+                        ReviewWorkflow.ACTION_INLINE_COMMENT);
+    }
+
+    @Test
+    void inlineComment_bothEnabled_prefersAgenticReview() {
+        Bot bot = createBotWithWorkflows("both-bot", "claude_bot", true,
+                java.util.List.of("review", "agentic-review"));
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Please explain this change");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(AgentReviewWorkflow.KEY), any());
+        verify(prWorkflowOrchestrator, never()).run(eq(bot), eq(payload),
+                eq(ReviewWorkflow.KEY), any());
+    }
+
+    @Test
+    void inlineComment_neitherEnabled_ignored() {
+        Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot", true,
+                java.util.List.of("e2e-test"));
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Why?");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
+    }
+
+    @Test
+    void inlineComment_noWorkflowConfiguration_fallsBackToLegacyReviewOnly() {
+        Bot bot = createBot("legacy-bot", "claude_bot", true);
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Why?");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(ReviewWorkflow.KEY), any());
+        verify(prWorkflowOrchestrator, never()).run(eq(bot), eq(payload),
+                eq(AgentReviewWorkflow.KEY), any());
+    }
+
+    @Test
+    void inlineComment_nonAuthorComment_ignored() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildInlineCommentPayload("Test", "my-repo", 140L,
+                1055L, "Why?");
+        payload.getComment().getUser().setLogin("stranger");
+        payload.getSender().setLogin("stranger");
+
+        botWebhookService.handleInlineComment(bot, payload);
+
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
+    }
+
+    // ---------------------------------------------------------------
+    // handleReviewSubmitted — agentic-review routing
+    // ---------------------------------------------------------------
+
+    @Test
+    void reviewSubmitted_agenticReviewEnabled_dispatchesClarification() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
+                "I reviewed your changes. Can you explain the error handling strategy?");
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        ArgumentCaptor<String> key = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload), key.capture(), hints.capture());
+        assertThat(key.getValue()).isEqualTo(AgentReviewWorkflow.KEY);
+        assertThat(hints.getValue())
+                .containsEntry(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
+                        "I reviewed your changes. Can you explain the error handling strategy?");
+    }
+
+    @Test
+    void reviewSubmitted_reviewEnabledOnly_dispatchesReviewWorkflow() {
+        Bot bot = createBotWithWorkflows("review-bot", "claude_bot", true,
+                java.util.List.of("review"));
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
+                "Looks good overall.");
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, String>> hints = ArgumentCaptor.forClass(Map.class);
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(ReviewWorkflow.KEY), hints.capture());
+        assertThat(hints.getValue())
+                .containsEntry(ReviewWorkflow.HINT_REVIEW_ACTION,
+                        ReviewWorkflow.ACTION_REVIEW_SUBMITTED);
+    }
+
+    @Test
+    void reviewSubmitted_neitherEnabled_ignored() {
+        Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot", true,
+                java.util.List.of("e2e-test"));
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
+                "Feedback here.");
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
+    }
+
+    @Test
+    void reviewSubmitted_noReviewBody_agenticReviewStillDispatches() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L, null);
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(AgentReviewWorkflow.KEY), any());
+    }
+
+    @Test
+    void reviewSubmitted_noWorkflowConfiguration_fallsBackToLegacyReviewOnly() {
+        Bot bot = createBot("legacy-bot", "claude_bot", true);
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
+                "Feedback here.");
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
+                eq(ReviewWorkflow.KEY), any());
+        verify(prWorkflowOrchestrator, never()).run(eq(bot), eq(payload),
+                eq(AgentReviewWorkflow.KEY), any());
+    }
+
     // ---- helpers ----
 
     private Bot createBot(String name, String username, boolean agentEnabled) {
@@ -1109,6 +1312,87 @@ class BotWebhookServiceTest {
         commentUser.setLogin(commenter);
         comment.setUser(commentUser);
         payload.setComment(comment);
+        return payload;
+    }
+
+    /**
+     * Builds a {@link WebhookPayload} that simulates an inline review comment
+     * (a comment on a specific diff line). The commenter is the PR author.
+     */
+    private WebhookPayload buildInlineCommentPayload(String owner, String repo,
+                                                      long prNumber, long commentId,
+                                                      String commentBody) {
+        WebhookPayload payload = new WebhookPayload();
+        payload.setAction("created");
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("tom");
+        payload.setSender(sender);
+        WebhookPayload.Repository repository = new WebhookPayload.Repository();
+        repository.setName(repo);
+        repository.setFullName(owner + "/" + repo);
+        WebhookPayload.Owner repoOwner = new WebhookPayload.Owner();
+        repoOwner.setLogin(owner);
+        repository.setOwner(repoOwner);
+        payload.setRepository(repository);
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setNumber(prNumber);
+        pr.setId(80L);
+        pr.setState("open");
+        pr.setUser(owner("tom"));
+        WebhookPayload.Head head = new WebhookPayload.Head();
+        head.setRef("feature/branch");
+        pr.setHead(head);
+        WebhookPayload.Head base = new WebhookPayload.Head();
+        base.setRef("main");
+        pr.setBase(base);
+        payload.setPullRequest(pr);
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setId(commentId);
+        comment.setBody(commentBody);
+        WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
+        commentUser.setLogin("tom");
+        comment.setUser(commentUser);
+        payload.setComment(comment);
+        return payload;
+    }
+
+    /**
+     * Builds a {@link WebhookPayload} that simulates a review submission.
+     */
+    private WebhookPayload buildReviewSubmittedPayload(String owner, String repo,
+                                                        long prNumber,
+                                                        String reviewContent) {
+        WebhookPayload payload = new WebhookPayload();
+        payload.setAction("submitted");
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("reviewer");
+        payload.setSender(sender);
+        WebhookPayload.Repository repository = new WebhookPayload.Repository();
+        repository.setName(repo);
+        repository.setFullName(owner + "/" + repo);
+        WebhookPayload.Owner repoOwner = new WebhookPayload.Owner();
+        repoOwner.setLogin(owner);
+        repository.setOwner(repoOwner);
+        payload.setRepository(repository);
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setNumber(prNumber);
+        pr.setId(81L);
+        pr.setState("open");
+        pr.setUser(owner("tom"));
+        WebhookPayload.Head head = new WebhookPayload.Head();
+        head.setRef("feature/branch");
+        pr.setHead(head);
+        WebhookPayload.Head base = new WebhookPayload.Head();
+        base.setRef("main");
+        pr.setBase(base);
+        payload.setPullRequest(pr);
+        WebhookPayload.Review review = new WebhookPayload.Review();
+        review.setId(200L);
+        review.setType("commented");
+        if (reviewContent != null) {
+            review.setContent(reviewContent);
+        }
+        payload.setReview(review);
         return payload;
     }
 }

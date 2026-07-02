@@ -22,9 +22,9 @@ import java.util.Map;
  * {@link AgentReviewService}) before producing its review.
  *
  * <p>The bot may <strong>only read</strong> the repository — no file-mutation,
- * build/validation or git-write tools are exposed, and the workflow never
- * commits, pushes, opens branches or posts a formal review action. The result
- * is a single Markdown PR comment.</p>
+ * build/validation or git-write tools are exposed. The result is a Markdown PR
+ * comment. When operators enable the optional formal review decision, the bot
+ * may additionally approve or request changes based on the review findings.</p>
  *
  * <p>Category {@link PrWorkflowCategory#REVIEW}; the workflow is opt-in per bot
  * via the workflow-selection UI (the orchestrator only runs workflows an
@@ -38,6 +38,26 @@ public class AgentReviewWorkflow implements PrWorkflow {
     public static final String KEY = "agentic-review";
 
     static final int DEFAULT_MAX_TOOL_ROUNDS = 12;
+
+    static final String DEFAULT_FORMAL_REVIEW_DECISION_PROMPT = """
+            # Formal Review Decision
+
+            Based on your review findings, decide whether to approve, request changes,
+            or leave the PR review state unchanged. Use the following guidelines:
+
+            - **APPROVE** — The PR is correct, follows best practices, and has no
+            significant issues that should block merging. Minor style nits or
+            optional suggestions do not warrant blocking.
+
+            - **REQUEST_CHANGES** — The PR has non-trivial bugs, security concerns,
+            missing error handling, broken tests, or significant code quality issues
+            that must be fixed before merging. Regression risk alone is not enough —
+            there must be an identifiable problem.
+
+            - **NONE** — There are minor issues or suggestions, but nothing blocking.
+            Also use NONE when you lack sufficient information to make a confident
+            decision, or when the change is too large to assess reliably from the
+            diff alone.""";
 
     private final AgentReviewServiceFactory serviceFactory;
     private final WorkflowSelectionService selectionService;
@@ -68,8 +88,8 @@ public class AgentReviewWorkflow implements PrWorkflow {
     public String description() {
         return "Reviews the pull request with an LLM that can iteratively call read-only "
                 + "repository and MCP tools to gather context before writing its findings as a "
-                + "Markdown comment. Read-only — it never commits, pushes or posts a formal "
-                + "review action.";
+                + "Markdown comment. When enabled, may optionally post a formal review decision "
+                + "(approve / request changes) based on the operator-configured criteria.";
     }
 
     @Override
@@ -86,7 +106,20 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         String.valueOf(DEFAULT_MAX_TOOL_ROUNDS),
                         "Upper bound on how many explore/answer rounds the agent may take while "
                                 + "reading the repository (1-30). Higher values allow deeper analysis "
-                                + "at higher token cost."));
+                                + "at higher token cost."),
+                new WorkflowParamField(AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION,
+                        "Enable formal review decision",
+                        WorkflowParamField.ParamType.BOOLEAN, false,
+                        "false",
+                        "When enabled, the bot may post a formal PR review decision (approve "
+                                + "or request changes) based on the criteria configured below."),
+                new WorkflowParamField(AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
+                        "Approval decision prompt",
+                        WorkflowParamField.ParamType.TEXT, false,
+                        DEFAULT_FORMAL_REVIEW_DECISION_PROMPT,
+                        "Criteria for when the bot should approve, request changes, or leave "
+                                + "the PR review state unchanged. Only applies when the "
+                                + "\"Enable formal review decision\" checkbox is ticked."));
     }
 
     @Override
@@ -94,16 +127,21 @@ public class AgentReviewWorkflow implements PrWorkflow {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
 
-        Map<String, Object> params = bot.getWorkflowConfiguration() == null
-                ? Map.of()
-                : selectionService.resolveParams(bot.getWorkflowConfiguration().getId(), KEY);
-        int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
+        String clarification = context.hint(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION);
+        if (clarification != null && !clarification.isBlank()) {
+            return doClarification(context, clarification);
+        }
 
-        // Cooperative cancellation guard before the (potentially expensive) LLM run.
+        Map<String, Object> params = resolveParams(bot);
+        int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
+        boolean enableFormalDecision = boolParam(params, AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION, false);
+        String decisionPrompt = strParam(params, AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
+                DEFAULT_FORMAL_REVIEW_DECISION_PROMPT);
+
         context.requireActive("before running agentic review");
 
         boolean reviewed = serviceFactory.create(bot)
-                .reviewPullRequest(payload, maxToolRounds);
+                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt);
 
         context.appendStep("agentic-review",
                 reviewed ? "Posted agentic review for PR" : "Skipped — no diff or no review produced");
@@ -111,6 +149,31 @@ public class AgentReviewWorkflow implements PrWorkflow {
         return reviewed
                 ? WorkflowResult.success("Agentic review posted")
                 : WorkflowResult.skipped("No diff or no review produced");
+    }
+
+    private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion) {
+        Bot bot = context.bot();
+        context.requireActive("before running agentic clarification");
+
+        Map<String, Object> params = resolveParams(bot);
+        int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
+
+        boolean answered = serviceFactory.create(bot)
+                .answerClarification(context.payload(), userQuestion, maxToolRounds);
+
+        context.appendStep("agentic-clarification",
+                answered ? "Posted clarification response" : "Failed to produce clarification");
+
+        return answered
+                ? WorkflowResult.success("Clarification posted")
+                : WorkflowResult.skipped("No clarification produced");
+    }
+
+    private Map<String, Object> resolveParams(Bot bot) {
+        if (bot.getWorkflowConfiguration() == null) {
+            return Map.of();
+        }
+        return selectionService.resolveParams(bot.getWorkflowConfiguration().getId(), KEY);
     }
 
     private int intParam(Map<String, Object> params, AgentReviewParam name, int fallback) {
@@ -127,7 +190,24 @@ public class AgentReviewWorkflow implements PrWorkflow {
             return fallback;
         }
     }
+
+    private boolean boolParam(Map<String, Object> params, AgentReviewParam name, boolean fallback) {
+        Object raw = params.get(name.key());
+        if (raw instanceof Boolean b) {
+            return b;
+        }
+        if (raw == null) {
+            return fallback;
+        }
+        String s = raw.toString().trim();
+        return "true".equalsIgnoreCase(s) || "1".equals(s);
+    }
+
+    private String strParam(Map<String, Object> params, AgentReviewParam name, String fallback) {
+        Object raw = params.get(name.key());
+        if (raw instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return fallback;
+    }
 }
-
-
-

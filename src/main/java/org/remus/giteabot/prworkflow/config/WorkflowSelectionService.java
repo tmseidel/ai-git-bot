@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.remus.giteabot.prworkflow.PrWorkflow;
 import org.remus.giteabot.prworkflow.PrWorkflowRegistry;
+import org.remus.giteabot.prworkflow.WorkflowParamField;
 import org.remus.giteabot.prworkflow.WorkflowParamsSchema;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -220,6 +221,19 @@ public class WorkflowSelectionService {
      */
     public Map<String, Object> describeParams(String workflowKey, Map<String, String> raw) {
         return paramsValidator.describeParams(raw, schemaFor(workflowKey));
+    }
+
+    /**
+     * Whether {@code fieldName} of the given workflow is a
+     * {@link WorkflowParamField.ParamType#BOOLEAN} field. Used by the save
+     * controller to apply checkbox ("true"-wins) semantics only to the
+     * hidden+checkbox pattern and not to other multi-valued params.
+     */
+    public boolean isBooleanField(String workflowKey, String fieldName) {
+        WorkflowParamsSchema schema = schemaFor(workflowKey);
+        return schema != null && schema.fields().stream()
+                .anyMatch(f -> f.name().equals(fieldName)
+                        && f.type() == WorkflowParamField.ParamType.BOOLEAN);
     }
 
     private WorkflowParamsSchema schemaFor(String workflowKey) {

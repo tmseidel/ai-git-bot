@@ -59,7 +59,7 @@ class SuitePromotionServiceTest {
         when(repoClient.getToken()).thenReturn("tok");
         when(repoClient.getDefaultBranch(anyString(), anyString())).thenReturn("main");
         when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(),
-                anyString(), anyString()))
+                anyString(), anyString(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean()))
@@ -79,7 +79,7 @@ class SuitePromotionServiceTest {
                 "acme", "web", "feature/login");
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.SKIPPED);
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -180,7 +180,7 @@ class SuitePromotionServiceTest {
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.ALREADY_PROMOTED);
         assertThat(out.followUpPrNumber()).isEqualTo(123L);
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
     }
 
@@ -223,7 +223,7 @@ class SuitePromotionServiceTest {
 
     @Test
     void workspaceFailure_surfacesAsOutcomeFailure() {
-        when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any()))
+        when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any(), any()))
                 .thenReturn(WorkspaceResult.failure("network down"));
 
         PrTestSuite suite = suite(SuiteLifecycleMode.OFFER_AS_PR, 7L,
