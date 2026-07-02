@@ -59,6 +59,17 @@ public interface RepositoryApiClient {
     }
 
     /**
+     * Submits the review {@code body} and the final {@code action} as a single
+     * review. GitHub and Gitea override this to land both in one review entry;
+     * the default splits them for providers (e.g. GitLab) where the state change
+     * is a distinct operation.
+     */
+    default void postReview(String owner, String repo, Long pullNumber, String body, PostReviewAction action) {
+        postReviewComment(owner, repo, pullNumber, body);
+        postReviewAction(owner, repo, pullNumber, action);
+    }
+
+    /**
      * Posts a regular top-level comment on a pull/merge request conversation.
      * <p>
      * Providers like GitHub and Gitea can often reuse the same underlying endpoint as issue comments,

@@ -9,7 +9,7 @@ PR workflows are administrator-configured actions that run from pull-request web
 | Key | UI name | Default? | What it does |
 |---|---|---|---|
 | `review` | PR Review | Enabled on the seeded `Default` configuration | Posts a one-shot AI code review comment and applies the bot's configured post-review action. See [`PR_WORKFLOWS_REVIEW.md`](PR_WORKFLOWS_REVIEW.md). |
-| `agentic-review` | Agentic PR Review | Opt-in | Lets the model read repository/MCP context before posting a Markdown review comment. Read-only. See [`PR_WORKFLOWS_AGENTIC_REVIEW.md`](PR_WORKFLOWS_AGENTIC_REVIEW.md). |
+| `agentic-review` | Agentic PR Review | Opt-in | Lets the model read repository/MCP context before posting a Markdown review comment. Optionally posts formal review actions (approve/request-changes). See [`PR_WORKFLOWS_AGENTIC_REVIEW.md`](PR_WORKFLOWS_AGENTIC_REVIEW.md). |
 | `unit-test-author` | AI Unit Tests | Opt-in | Generates and runs unit tests for the PR diff; can commit passing tests to the PR branch. See [`PR_WORKFLOWS_UNIT_TEST.md`](PR_WORKFLOWS_UNIT_TEST.md). |
 | `e2e-test` | E2E Tests | Opt-in | Deploys or locates a PR preview, generates/runs E2E tests, and posts a summary. Requires a deployment target. See [`PR_WORKFLOWS_E2E.md`](PR_WORKFLOWS_E2E.md). |
 
