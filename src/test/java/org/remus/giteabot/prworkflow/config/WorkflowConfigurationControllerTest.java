@@ -1,11 +1,11 @@
 package org.remus.giteabot.prworkflow.config;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.servlet.mvc.support.RedirectAttributesModelMap;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -83,6 +83,55 @@ class WorkflowConfigurationControllerTest {
 
         assertEquals("redirect:/system-settings", view);
         verify(selectionService).saveSelection(eq(3L), eq(List.of("tests")), any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveWorkflowSelection_trueWinsForBooleanOnly_othersTakeLastValue() {
+        WorkflowSelectionService selectionService = mock(WorkflowSelectionService.class);
+        when(selectionService.isBooleanField("agentic-review", "enableFormalReviewDecision"))
+                .thenReturn(true);
+        // Any other field defaults to non-boolean (mock returns false).
+        WorkflowConfigurationController controller = newController(
+                mock(WorkflowConfigurationService.class), selectionService);
+
+        MultiValueMap<String, String> allParams = new LinkedMultiValueMap<>();
+        // Checked boolean: hidden "false" + checkbox "true".
+        allParams.add("params.agentic-review.enableFormalReviewDecision", "false");
+        allParams.add("params.agentic-review.enableFormalReviewDecision", "true");
+        // Non-boolean field submitting duplicate values — last one wins.
+        allParams.add("params.agentic-review.mode", "first");
+        allParams.add("params.agentic-review.mode", "second");
+
+        controller.saveWorkflowSelection(7L, List.of("agentic-review"), allParams,
+                new RedirectAttributesModelMap());
+
+        ArgumentCaptor<Map<String, Map<String, String>>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(selectionService).saveSelection(eq(7L), eq(List.of("agentic-review")), captor.capture());
+        Map<String, String> params = captor.getValue().get("agentic-review");
+        assertEquals("true", params.get("enableFormalReviewDecision"));
+        assertEquals("second", params.get("mode"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void saveWorkflowSelection_uncheckedBooleanPersistsFalse() {
+        WorkflowSelectionService selectionService = mock(WorkflowSelectionService.class);
+        when(selectionService.isBooleanField("agentic-review", "enableFormalReviewDecision"))
+                .thenReturn(true);
+        WorkflowConfigurationController controller = newController(
+                mock(WorkflowConfigurationService.class), selectionService);
+
+        MultiValueMap<String, String> allParams = new LinkedMultiValueMap<>();
+        // Unchecked boolean: only the hidden "false" is submitted.
+        allParams.add("params.agentic-review.enableFormalReviewDecision", "false");
+
+        controller.saveWorkflowSelection(8L, List.of("agentic-review"), allParams,
+                new RedirectAttributesModelMap());
+
+        ArgumentCaptor<Map<String, Map<String, String>>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(selectionService).saveSelection(eq(8L), eq(List.of("agentic-review")), captor.capture());
+        assertEquals("false", captor.getValue().get("agentic-review").get("enableFormalReviewDecision"));
     }
 
     @Test

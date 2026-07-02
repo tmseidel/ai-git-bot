@@ -190,15 +190,17 @@ public class WorkflowConfigurationController {
                 }
                 String workflowKey = rest.substring(0, sep);
                 String fieldName = rest.substring(sep + 1);
-                // For duplicate parameter names (unchecked checkbox: hidden
-                // "false" + no checkbox value = ["false"]; checked:
-                // hidden "false" + checkbox "true" = ["false","true"]),
-                // "true" always wins regardless of order.
                 List<String> values = entry.getValue();
                 if (values == null || values.isEmpty()) {
                     continue;
                 }
-                String effective = values.contains("true") ? "true" : values.get(0);
+                // A BOOLEAN field submits the hidden+checkbox pair — ["false"]
+                // when unchecked, ["false","true"] when checked — so "true"
+                // wins regardless of order. Any other field takes the last
+                // submitted value; the "true"-wins rule must not leak to them.
+                String effective = selectionService.isBooleanField(workflowKey, fieldName)
+                        ? (values.contains("true") ? "true" : "false")
+                        : values.get(values.size() - 1);
                 grouped.computeIfAbsent(workflowKey, k -> new LinkedHashMap<>())
                         .put(fieldName, effective);
             }
