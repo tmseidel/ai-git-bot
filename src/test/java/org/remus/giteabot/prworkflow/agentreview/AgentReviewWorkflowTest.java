@@ -118,7 +118,6 @@ class AgentReviewWorkflowTest {
 
     @Test
     void boolParam_defaultsToFalse_whenMissing() {
-        AgentReviewWorkflow wf = workflow();
         when(selectionService.resolveParams(7L, "agentic-review")).thenReturn(Map.of());
 
         Bot bot = new Bot();

@@ -484,7 +484,7 @@ public class GiteaApiClient implements RepositoryApiClient {
         Long bestId = null;
         for (Map<String, Object> run : listRecentRuns(owner, repo, workflow, branch)) {
             Object idObj = run.get("id");
-            Long id;
+            long id;
             if (idObj instanceof Number n) {
                 id = n.longValue();
             } else if (idObj == null) {

@@ -69,12 +69,12 @@ public class AgentReviewService {
 
     /** Matches the decision JSON block at the very end of the model output. */
     private static final Pattern DECISION_JSON_PATTERN = Pattern.compile(
-            "```json\\s*\\n?\\s*(\\{[^}]*\"decision\"[^}]*\\})\\s*\\n?\\s*```\\s*\\z",
+            "```json\\s*\\n?\\s*(\\{[^}]*\"decision\"[^}]*})\\s*\\n?\\s*```\\s*\\z",
             Pattern.DOTALL);
 
     /** Fallback: bare JSON object at end. */
     private static final Pattern DECISION_BARE_PATTERN = Pattern.compile(
-            "\\{[^}]*\"decision\"\\s*:\\s*\"(APPROVE|REQUEST_CHANGES|NONE)\"[^}]*\\}\\s*\\z",
+            "\\{[^}]*\"decision\"\\s*:\\s*\"(APPROVE|REQUEST_CHANGES|NONE)\"[^}]*}\\s*\\z",
             Pattern.MULTILINE);
 
     private final AgentReviewContext context;
