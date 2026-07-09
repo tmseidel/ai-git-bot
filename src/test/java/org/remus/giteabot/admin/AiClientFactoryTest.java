@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import jakarta.annotation.Nonnull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +20,8 @@ import org.remus.giteabot.ai.ollama.OllamaProviderMetadata;
 import org.remus.giteabot.ai.openai.OpenAiClient;
 import org.remus.giteabot.ai.openai.OpenAiProviderMetadata;
 import org.remus.giteabot.aiusage.AiUsageService;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.web.client.RestClient;
 
 import java.time.Instant;
 import java.util.List;
@@ -41,13 +44,23 @@ class AiClientFactoryTest {
     void setUp() {
         // Create real provider registry with all providers
         AiProviderRegistry providerRegistry = new AiProviderRegistry(List.of(
-                new AnthropicProviderMetadata(),
-                new OpenAiProviderMetadata(),
-                new GoogleAiProviderMetadata(),
-                new OllamaProviderMetadata(),
-                new LlamaCppProviderMetadata()
+                new AnthropicProviderMetadata(builderProvider()),
+                new OpenAiProviderMetadata(builderProvider()),
+                new GoogleAiProviderMetadata(builderProvider()),
+                new OllamaProviderMetadata(builderProvider()),
+                new LlamaCppProviderMetadata(builderProvider())
         ));
         aiClientFactory = new AiClientFactory(aiIntegrationService, providerRegistry, aiUsageService);
+    }
+
+    private static ObjectProvider<RestClient.Builder> builderProvider() {
+        return new ObjectProvider<>() {
+            @Override
+            @Nonnull
+            public RestClient.Builder getObject() {
+                return RestClient.builder();
+            }
+        };
     }
 
     @Test

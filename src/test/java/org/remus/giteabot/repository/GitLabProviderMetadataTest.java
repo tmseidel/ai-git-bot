@@ -1,8 +1,11 @@
 package org.remus.giteabot.repository;
 
+import lombok.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.web.client.RestClient;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -12,7 +15,16 @@ class GitLabProviderMetadataTest {
 
     @BeforeEach
     void setUp() {
-        metadata = new GitLabProviderMetadata();
+        metadata = new GitLabProviderMetadata(builderProvider());
+    }
+
+    private static ObjectProvider<RestClient.Builder> builderProvider() {
+        return new ObjectProvider<>() {
+            @Override
+            public @NonNull RestClient.Builder getObject() {
+                return RestClient.builder();
+            }
+        };
     }
 
     @Test

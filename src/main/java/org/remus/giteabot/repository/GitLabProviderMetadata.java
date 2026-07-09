@@ -1,9 +1,11 @@
 package org.remus.giteabot.repository;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.gitlab.GitLabApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -16,9 +18,12 @@ import org.springframework.web.client.RestClient;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GitLabProviderMetadata implements RepositoryProviderMetadata {
 
     private static final String DEFAULT_WEB_URL = "https://gitlab.com";
+
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public RepositoryType getProviderType() {
@@ -55,7 +60,7 @@ public class GitLabProviderMetadata implements RepositoryProviderMetadata {
 
         log.debug("Building GitLab RestClient: apiUrl={}", apiUrl);
 
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(apiUrl)
                 .defaultHeader("PRIVATE-TOKEN", decryptedToken)
                 .defaultHeader("Accept", "application/json")
