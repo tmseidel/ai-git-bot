@@ -1,10 +1,10 @@
 package org.remus.giteabot.ai.openai;
 
-import org.apache.hc.client5.http.impl.classic.HttpClients;
+import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
-import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -14,6 +14,7 @@ import java.util.List;
  * Metadata and factory for OpenAI API integration.
  */
 @Component
+@RequiredArgsConstructor
 public class OpenAiProviderMetadata implements AiProviderMetadata {
 
     public static final String PROVIDER_TYPE = "openai";
@@ -24,6 +25,8 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
             "gpt-5.4-mini",
             "gpt-5.3-codex"
     );
+
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public String getProviderType() {
@@ -50,12 +53,8 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
         if (decryptedApiKey == null || decryptedApiKey.isBlank()) {
             throw new IllegalStateException("OpenAI integration requires an API key");
         }
-        var httpClient = HttpClients.createDefault();
-        HttpComponentsClientHttpRequestFactory factory =
-                new HttpComponentsClientHttpRequestFactory(httpClient);
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(integration.getApiUrl())
-                .requestFactory(factory)
                 .defaultHeader("Authorization", "Bearer " + decryptedApiKey)
                 .defaultHeader("Content-Type", "application/json")
                 .build();
@@ -71,4 +70,3 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
         );
     }
 }
-

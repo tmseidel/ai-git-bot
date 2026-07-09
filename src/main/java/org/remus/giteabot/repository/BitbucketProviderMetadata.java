@@ -1,9 +1,11 @@
 package org.remus.giteabot.repository;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -25,10 +27,13 @@ import java.util.Base64;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
 
     private static final String DEFAULT_WEB_URL = "https://bitbucket.org";
     private static final String DEFAULT_API_URL = "https://api.bitbucket.org/2.0";
+
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public RepositoryType getProviderType() {
@@ -139,7 +144,7 @@ public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
 
         log.debug("Building Bitbucket RestClient: apiUrl={}", apiUrl);
 
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(apiUrl)
                 .defaultHeader("Authorization", authHeader)
                 .defaultHeader("Accept", "application/json")

@@ -1,8 +1,10 @@
 package org.remus.giteabot.ai.ollama;
 
+import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -12,6 +14,7 @@ import java.util.List;
  * Metadata and factory for Ollama (local LLM inference) integration.
  */
 @Component
+@RequiredArgsConstructor
 public class OllamaProviderMetadata implements AiProviderMetadata {
 
     public static final String PROVIDER_TYPE = "ollama";
@@ -22,6 +25,8 @@ public class OllamaProviderMetadata implements AiProviderMetadata {
      * Users should specify the model they have pulled/installed locally.
      */
     public static final List<String> SUGGESTED_MODELS = List.of();
+
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public String getProviderType() {
@@ -45,7 +50,7 @@ public class OllamaProviderMetadata implements AiProviderMetadata {
 
     @Override
     public RestClient buildRestClient(AiIntegration integration, String decryptedApiKey) {
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(integration.getApiUrl())
                 .defaultHeader("Content-Type", "application/json")
                 .build();
@@ -61,4 +66,3 @@ public class OllamaProviderMetadata implements AiProviderMetadata {
         );
     }
 }
-

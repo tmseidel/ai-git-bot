@@ -1,9 +1,11 @@
 package org.remus.giteabot.repository;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.gitea.GiteaApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -13,9 +15,12 @@ import org.springframework.web.client.RestClient;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GiteaProviderMetadata implements RepositoryProviderMetadata {
 
     private static final String DEFAULT_WEB_URL = "https://gitea.example.com";
+
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public RepositoryType getProviderType() {
@@ -54,7 +59,7 @@ public class GiteaProviderMetadata implements RepositoryProviderMetadata {
 
         log.debug("Building Gitea RestClient: apiUrl={}", apiUrl);
 
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(apiUrl)
                 .defaultHeader("Authorization", authHeader)
                 .defaultHeader("Accept", "application/json")

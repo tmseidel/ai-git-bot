@@ -1,8 +1,10 @@
 package org.remus.giteabot.ai.google;
 
+import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -12,6 +14,7 @@ import java.util.List;
  * Metadata and factory for Google AI Gemini API integration.
  */
 @Component
+@RequiredArgsConstructor
 public class GoogleAiProviderMetadata implements AiProviderMetadata {
 
     public static final String PROVIDER_TYPE = "google";
@@ -21,6 +24,7 @@ public class GoogleAiProviderMetadata implements AiProviderMetadata {
             "gemini-3.5-flash",
             "gemini-3.1-flash-lite"
     );
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public String getProviderType() {
@@ -52,7 +56,7 @@ public class GoogleAiProviderMetadata implements AiProviderMetadata {
         if (decryptedApiKey == null || decryptedApiKey.isBlank()) {
             throw new IllegalStateException("Google AI integration requires an API key");
         }
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(integration.getApiUrl())
                 .defaultHeader("x-goog-api-key", decryptedApiKey)
                 .defaultHeader("Content-Type", "application/json")
