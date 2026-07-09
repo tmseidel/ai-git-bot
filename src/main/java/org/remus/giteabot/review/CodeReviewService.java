@@ -37,11 +37,13 @@ public class CodeReviewService {
     private final int maxDiffCharsPerChunk;
     private final int maxDiffChunks;
     private final int retryTruncatedChunkChars;
+    private final List<String> excludedFilePatterns;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
                              SessionService sessionService, String botUsername, ReviewConfigProperties reviewConfig,
                              String sessionPromptKey, String reviewSystemPrompt,
-                             int maxDiffCharsPerChunk, int maxDiffChunks, int retryTruncatedChunkChars) {
+                             int maxDiffCharsPerChunk, int maxDiffChunks, int retryTruncatedChunkChars,
+                             String excludedFilePatterns) {
         if (sessionPromptKey == null || sessionPromptKey.isBlank()) {
             throw new IllegalArgumentException("Session prompt key is required");
         }
@@ -58,6 +60,16 @@ public class CodeReviewService {
         this.maxDiffCharsPerChunk = maxDiffCharsPerChunk;
         this.maxDiffChunks = maxDiffChunks;
         this.retryTruncatedChunkChars = retryTruncatedChunkChars;
+        this.excludedFilePatterns = DiffFileFilter.parsePatterns(excludedFilePatterns);
+    }
+
+    /**
+     * Fetches the PR diff and strips any file sections matching the configured
+     * exclude patterns before it reaches chunking, enrichment, or the AI.
+     */
+    private String fetchFilteredDiff(String owner, String repo, Long prNumber) {
+        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+        return DiffFileFilter.filter(diff, excludedFilePatterns);
     }
 
     public boolean reviewPullRequest(WebhookPayload payload, String promptName) {
@@ -70,7 +82,7 @@ public class CodeReviewService {
         log.info("Starting code review for PR #{} '{}' in {}/{}, prompt={}", prNumber, prTitle, owner, repo, promptName);
 
         try {
-            String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+            String diff = fetchFilteredDiff(owner, repo, prNumber);
             if (diff == null || diff.isBlank()) {
                 log.warn("No diff found for PR #{} in {}/{}", prNumber, owner, repo);
                 return false;
@@ -165,7 +177,7 @@ public class CodeReviewService {
 
             // If session is empty, add context from the PR
             if (session.getMessages().isEmpty()) {
-                String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+                String diff = fetchFilteredDiff(owner, repo, prNumber);
                 var prContext = buildPrContextString(payload, diff, owner, repo, prNumber);
                 sessionService.addMessage(session, "user", prContext);
                 sessionService.addMessage(session, "assistant",
@@ -257,7 +269,7 @@ public class CodeReviewService {
 
             // If session is empty, add PR context
             if (session.getMessages().isEmpty()) {
-                String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+                String diff = fetchFilteredDiff(owner, repo, prNumber);
                 String prTitle = payload.getIssue() != null ? payload.getIssue().getTitle() : "";
                 String prBody = payload.getIssue() != null ? payload.getIssue().getBody() : null;
                 String prContext = "This is a pull request in " + owner + "/" + repo + ".";
@@ -396,7 +408,7 @@ public class CodeReviewService {
 
             // If session is empty, add PR context
             if (session.getMessages().isEmpty()) {
-                String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+                String diff = fetchFilteredDiff(owner, repo, prNumber);
                 String prTitle = payload.getPullRequest().getTitle();
                 String prBody = payload.getPullRequest().getBody();
                 String prContext = "This is a pull request in " + owner + "/" + repo + ".";

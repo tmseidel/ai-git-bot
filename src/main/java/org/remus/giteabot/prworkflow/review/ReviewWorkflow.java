@@ -110,7 +110,15 @@ public class ReviewWorkflow implements PrWorkflow {
                         String.valueOf(chunkingProperties.getRetryTruncatedChunkChars()),
                         "When a chunk is too large for the model's context window (prompt-too-long "
                                 + "error), the chunk is truncated to this many characters and retried "
-                                + "once."));
+                                + "once."),
+                new WorkflowParamField(ReviewParam.EXCLUDED_FILE_PATTERNS,
+                        "Excluded file patterns",
+                        WorkflowParamField.ParamType.TEXT, false,
+                        "",
+                        "Comma-separated glob or filename patterns for files to exclude from the "
+                                + "review diff (e.g. *.lock, *.min.js, package-lock.json, **/generated/**). "
+                                + "Matching file sections are stripped before the diff is sent to the AI, "
+                                + "reducing token usage and noise. Leave blank to review all files."));
     }
 
     @Override
@@ -135,18 +143,19 @@ public class ReviewWorkflow implements PrWorkflow {
                 chunkingProperties.getMaxDiffChunks());
         int retryTruncatedChunkChars = intParam(params, ReviewParam.RETRY_TRUNCATED_CHUNK_CHARS,
                 chunkingProperties.getRetryTruncatedChunkChars());
+        String excludedFilePatterns = strParam(params, ReviewParam.EXCLUDED_FILE_PATTERNS, "");
 
         return switch (action) {
             case ACTION_REVIEW -> doReview(context, maxDiffCharsPerChunk, maxDiffChunks,
-                    retryTruncatedChunkChars);
+                    retryTruncatedChunkChars, excludedFilePatterns);
             case ACTION_BOT_COMMAND -> doBotCommand(context, maxDiffCharsPerChunk, maxDiffChunks,
-                    retryTruncatedChunkChars);
+                    retryTruncatedChunkChars, excludedFilePatterns);
             case ACTION_INLINE_COMMENT -> doInlineComment(context, maxDiffCharsPerChunk, maxDiffChunks,
-                    retryTruncatedChunkChars);
+                    retryTruncatedChunkChars, excludedFilePatterns);
             case ACTION_REVIEW_SUBMITTED -> doReviewSubmitted(context, maxDiffCharsPerChunk, maxDiffChunks,
-                    retryTruncatedChunkChars);
+                    retryTruncatedChunkChars, excludedFilePatterns);
             case ACTION_PR_CLOSED -> doPrClosed(context, maxDiffCharsPerChunk, maxDiffChunks,
-                    retryTruncatedChunkChars);
+                    retryTruncatedChunkChars, excludedFilePatterns);
             default -> WorkflowResult.skipped("Unknown review action: " + action);
         };
     }
@@ -161,7 +170,7 @@ public class ReviewWorkflow implements PrWorkflow {
     /** Automated PR diff review on open/update. */
     private WorkflowResult doReview(PrWorkflowContext context,
                                     int maxDiffCharsPerChunk, int maxDiffChunks,
-                                    int retryTruncatedChunkChars) {
+                                    int retryTruncatedChunkChars, String excludedFilePatterns) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
         RepositoryApiClient repositoryClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
@@ -169,7 +178,7 @@ public class ReviewWorkflow implements PrWorkflow {
         context.requireActive("before invoking CodeReviewService.reviewPullRequest");
 
         boolean reviewed = codeReviewServiceFactory.create(bot, repositoryClient,
-                        maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars)
+                        maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns)
                 .reviewPullRequest(payload, null);
 
         context.appendStep("review",
@@ -195,10 +204,10 @@ public class ReviewWorkflow implements PrWorkflow {
     /** Conversational bot command (@-mention in PR comment). */
     private WorkflowResult doBotCommand(PrWorkflowContext context,
                                         int maxDiffCharsPerChunk, int maxDiffChunks,
-                                        int retryTruncatedChunkChars) {
+                                        int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
                 giteaClientFactory.getApiClient(context.bot().getGitIntegration()),
-                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handleBotCommand(context.payload(), null);
         return WorkflowResult.success("Bot command handled");
     }
@@ -206,10 +215,10 @@ public class ReviewWorkflow implements PrWorkflow {
     /** Inline review comment response. */
     private WorkflowResult doInlineComment(PrWorkflowContext context,
                                            int maxDiffCharsPerChunk, int maxDiffChunks,
-                                           int retryTruncatedChunkChars) {
+                                           int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
                 giteaClientFactory.getApiClient(context.bot().getGitIntegration()),
-                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handleInlineComment(context.payload(), null);
         return WorkflowResult.success("Inline comment handled");
     }
@@ -217,10 +226,10 @@ public class ReviewWorkflow implements PrWorkflow {
     /** Review submitted event — processes pending review comments mentioning the bot. */
     private WorkflowResult doReviewSubmitted(PrWorkflowContext context,
                                              int maxDiffCharsPerChunk, int maxDiffChunks,
-                                             int retryTruncatedChunkChars) {
+                                             int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
                 giteaClientFactory.getApiClient(context.bot().getGitIntegration()),
-                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handleReviewSubmitted(context.payload(), null);
         return WorkflowResult.success("Review submitted handled");
     }
@@ -228,10 +237,10 @@ public class ReviewWorkflow implements PrWorkflow {
     /** PR closed — cleans up the review session. */
     private WorkflowResult doPrClosed(PrWorkflowContext context,
                                       int maxDiffCharsPerChunk, int maxDiffChunks,
-                                      int retryTruncatedChunkChars) {
+                                      int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
                 giteaClientFactory.getApiClient(context.bot().getGitIntegration()),
-                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handlePrClosed(context.payload());
         return WorkflowResult.success("PR closed handled");
     }
@@ -249,5 +258,13 @@ public class ReviewWorkflow implements PrWorkflow {
         } catch (NumberFormatException e) {
             return fallback;
         }
+    }
+
+    private static String strParam(Map<String, Object> params, ReviewParam name, String fallback) {
+        Object raw = params.get(name.key());
+        if (raw instanceof String s && !s.isBlank()) {
+            return s;
+        }
+        return fallback;
     }
 }
