@@ -15,14 +15,11 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
-import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -60,19 +57,9 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public String getPullRequestDiff(String owner, String repo, Long pullNumber) {
         log.info("Fetching diff for PR #{} in {}/{} from baseUrl={}", pullNumber, owner, repo, credentials.baseUrl());
         try {
-            // Bitbucket Cloud diff endpoint returns a 302 redirect to the actual diff content.
-            // We need an HttpClient that follows redirects and accepts text/plain.
-            HttpClient httpClient = HttpClient.newBuilder()
-                    .followRedirects(HttpClient.Redirect.NORMAL)
-                    .build();
-
-            String authHeader = buildAuthorizationHeader();
-            String diff = RestClient.builder()
-                    .baseUrl(credentials.baseUrl())
-                    .requestFactory(new JdkClientHttpRequestFactory(httpClient))
-                    .defaultHeader("Authorization", authHeader)
-                    .build()
-                    .get()
+            // Bitbucket Cloud's diff endpoint returns a 302 redirect to the actual diff
+            // content; the auto-configured HttpComponents client follows redirects by default.
+            String diff = restClient.get()
                     .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}/diff",
                             owner, repo, pullNumber)
                     .header("Accept", "text/plain")
@@ -86,29 +73,6 @@ public class BitbucketApiClient implements RepositoryApiClient {
         }
     }
 
-    /**
-     * Build the Authorization header from the credentials.
-     * Uses Basic auth with username:token for App Passwords, or Bearer for API tokens.
-     */
-    String buildAuthorizationHeader() {
-        String token = credentials.token();
-        if (token == null || token.isBlank()) {
-            return "";
-        }
-
-        // App Password with separate username
-        if (credentials.hasUsername()) {
-            String combined = credentials.username() + ":" + token;
-            return "Basic " + Base64.getEncoder().encodeToString(combined.getBytes(StandardCharsets.UTF_8));
-        }
-
-        // Token already contains username:password
-        if (token.contains(":")) {
-            return "Basic " + Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8));
-        }
-
-        return "Bearer " + token;
-    }
 
     @Override
     public void postReviewComment(String owner, String repo, Long pullNumber, String body) {
