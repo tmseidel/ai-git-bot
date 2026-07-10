@@ -124,7 +124,7 @@ class BotWebhookServiceTest {
         // the existing handlePrComment / handleBotCommand routing tests
         // keep observing the same downstream side-effects on `sessionService`.
         lenient().when(codeReviewServiceFactory.create(any(Bot.class),
-                        any(RepositoryApiClient.class), eq(120000), eq(8), eq(60000)))
+                        any(RepositoryApiClient.class), eq(120000), eq(8), eq(60000), any()))
                 .thenAnswer(invocation -> {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
@@ -132,7 +132,7 @@ class BotWebhookServiceTest {
                             b.getUsername(), new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
-                            120000, 8, 60000);
+                            120000, 8, 60000, "");
                 });
         // Step 7.2 — provide a real BudgetConfig so production code that reads
         // agentConfig.getBudget().getMaxTokensPerCall() does not NPE on the mock.

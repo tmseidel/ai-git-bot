@@ -39,7 +39,7 @@ public class CodeReviewServiceFactory {
      */
     public CodeReviewService create(Bot bot, RepositoryApiClient repoClient,
                                     int maxDiffCharsPerChunk, int maxDiffChunks,
-                                    int retryTruncatedChunkChars) {
+                                    int retryTruncatedChunkChars, String excludedFilePatterns) {
         if (bot.getSystemPrompt() == null) {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
@@ -50,6 +50,6 @@ public class CodeReviewServiceFactory {
         String sessionPromptKey = "system-prompt:" + bot.getSystemPrompt().getId();
         return new CodeReviewService(repoClient, aiClient, sessionService, bot.getUsername(),
                 reviewConfig, sessionPromptKey, bot.getSystemPrompt().getReviewSystemPrompt(),
-                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars);
+                maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
     }
 }

@@ -3,6 +3,7 @@ package org.remus.giteabot.review;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.ai.AiClient;
@@ -54,7 +55,7 @@ class CodeReviewServiceTest {
     void setUp() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
                 sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
-                120000, 8, 60000);
+                120000, 8, 60000, "");
     }
 
     @Test
@@ -75,6 +76,38 @@ class CodeReviewServiceTest {
                 eq("testowner"), eq("testrepo"), eq(1L), contains("Looks good!"));
         verify(sessionService).getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY);
         verify(sessionService, times(2)).addMessage(any(), anyString(), anyString());
+    }
+
+    @Test
+    void reviewPullRequest_excludedFilePatterns_stripsMatchingFilesFromDiff() {
+        codeReviewService = new CodeReviewService(repositoryClient, aiClient,
+                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                120000, 8, 60000, "package-lock.json, *.min.js");
+        WebhookPayload payload = createTestPayload();
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY)).thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn("""
+                        diff --git a/package-lock.json b/package-lock.json
+                        +noise
+                        diff --git a/src/Foo.java b/src/Foo.java
+                        +int x = 1;
+                        diff --git a/web/app.min.js b/web/app.min.js
+                        +minified
+                        """);
+        when(aiClient.submitReviewPrompt(eq(TEST_PROMPT), isNull(), anyString()))
+                .thenReturn("Looks good!");
+
+        codeReviewService.reviewPullRequest(payload, null);
+
+        ArgumentCaptor<String> userMessage = ArgumentCaptor.forClass(String.class);
+        verify(aiClient).submitReviewPrompt(eq(TEST_PROMPT), isNull(), userMessage.capture());
+        String sentToAi = userMessage.getValue();
+        assertTrue(sentToAi.contains("src/Foo.java"), "kept file should reach the AI");
+        assertFalse(sentToAi.contains("package-lock.json"), "excluded exact filename should be stripped");
+        assertFalse(sentToAi.contains("app.min.js"), "excluded glob match should be stripped");
     }
 
     @Test
@@ -112,7 +145,7 @@ class CodeReviewServiceTest {
     void reviewPullRequest_withConfiguredSystemPrompt_usesBotPrompt() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
                 sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt",
-                120000, 8, 60000);
+                120000, 8, 60000, "");
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
 

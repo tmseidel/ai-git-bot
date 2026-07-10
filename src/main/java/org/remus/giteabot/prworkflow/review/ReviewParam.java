@@ -14,7 +14,10 @@ public enum ReviewParam implements WorkflowParamName {
     MAX_DIFF_CHUNKS("maxDiffChunks"),
 
     /** Characters to truncate a chunk to on retry after a prompt-too-long error. */
-    RETRY_TRUNCATED_CHUNK_CHARS("retryTruncatedChunkChars");
+    RETRY_TRUNCATED_CHUNK_CHARS("retryTruncatedChunkChars"),
+
+    /** Comma-separated glob/filename patterns whose diff sections are stripped before review. */
+    EXCLUDED_FILE_PATTERNS("excludedFilePatterns");
 
     private final String key;
 
