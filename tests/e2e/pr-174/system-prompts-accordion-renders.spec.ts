@@ -7,7 +7,7 @@ test('System-Prompts edit page renders accordion with all 6 sections', async ({ 
   await expect(accordion).toBeVisible();
 
   const items = accordion.locator('.accordion-item');
-  await expect(items).toHaveCount(6);
+  await expect(items).toHaveCount(8);
 
   // Verify the expected prompt headers are present
   const expectedHeaders = [

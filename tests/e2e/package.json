@@ -1,0 +1,12 @@
+{
+  "name": "ai-git-bot-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Local runner for the generated Playwright E2E specs under tests/e2e/.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60"
+  }
+}
