@@ -1,7 +1,7 @@
 package org.remus.giteabot.ai.google;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
@@ -417,10 +417,9 @@ public class GoogleAiClient extends AbstractAiClient {
         }
         try {
             JsonNode message = OBJECT_MAPPER.readTree(responseBody).path("error").path("message");
-            return message.isTextual() ? message.asText() : null;
+            return message.isString() ? message.asString() : null;
         } catch (Exception ignored) {
             return null;
         }
     }
 }
-

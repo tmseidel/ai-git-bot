@@ -2,8 +2,8 @@ package org.remus.giteabot.systemsettings;
 
 import lombok.RequiredArgsConstructor;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.springframework.stereotype.Service;
@@ -83,8 +83,8 @@ public class McpConfigurationService {
         if (node.isObject()) {
             for (var field : node.properties()) {
                 if (("transport".equalsIgnoreCase(field.getKey()) || "type".equalsIgnoreCase(field.getKey()))
-                        && field.getValue().isTextual()
-                        && "stdio".equalsIgnoreCase(field.getValue().asText())) {
+                        && field.getValue().isString()
+                        && "stdio".equalsIgnoreCase(field.getValue().asString())) {
                     return true;
                 }
                 if ("command".equalsIgnoreCase(field.getKey())) {
@@ -108,8 +108,8 @@ public class McpConfigurationService {
         if (node == null) {
             return false;
         }
-        if (node.isTextual()) {
-            String value = node.asText().toLowerCase();
+        if (node.isString()) {
+            String value = node.asString().toLowerCase();
             return value.startsWith("http://")
                     || value.startsWith("https://")
                     || value.startsWith("ws://")

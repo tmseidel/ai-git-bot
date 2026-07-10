@@ -1,8 +1,8 @@
 package org.remus.giteabot.prworkflow.deployment;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
@@ -242,7 +242,7 @@ public class CiActionTriggerStrategy implements DeploymentStrategy {
         Map<String, String> out = new LinkedHashMap<>();
         inputsNode.properties().forEach(entry -> {
             String value = entry.getValue() == null || entry.getValue().isNull()
-                    ? "" : entry.getValue().asText();
+                    ? "" : entry.getValue().asString();
             out.put(entry.getKey(), applyPlaceholders(value, request));
         });
         return out;
@@ -270,7 +270,7 @@ public class CiActionTriggerStrategy implements DeploymentStrategy {
     private static String textOrNull(JsonNode node, String field) {
         if (node == null) return null;
         JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+        return (v == null || v.isNull()) ? null : v.asString();
     }
 
     private static String textOr(JsonNode node, String field, String fallback) {

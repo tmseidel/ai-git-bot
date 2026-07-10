@@ -81,7 +81,7 @@
                             <select class="form-select" id="postReviewAction" th:field="*{postReviewAction}">
                                 <option th:each="action : ${postReviewActions}"
                                         th:value="${action}"
-                                        th:text="${action == T(org.remus.giteabot.repository.PostReviewAction).NONE ? 'None' : (action == T(org.remus.giteabot.repository.PostReviewAction).APPROVE ? 'Approve merge request' : 'Request changes')}">
+                                        th:text="${action.name() == 'NONE' ? 'None' : (action.name() == 'APPROVE' ? 'Approve merge request' : 'Request changes')}">
                                 </option>
                             </select>
                             <div class="form-text">

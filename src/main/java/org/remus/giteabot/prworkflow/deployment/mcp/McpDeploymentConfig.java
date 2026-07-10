@@ -1,8 +1,8 @@
 package org.remus.giteabot.prworkflow.deployment.mcp;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -138,6 +138,6 @@ public record McpDeploymentConfig(
 
     private static String textOrNull(JsonNode node, String field) {
         JsonNode v = node.get(field);
-        return (v == null || v.isNull()) ? null : v.asText();
+        return (v == null || v.isNull()) ? null : v.asString();
     }
 }
