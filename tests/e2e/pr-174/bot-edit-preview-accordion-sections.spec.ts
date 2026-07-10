@@ -19,12 +19,14 @@ test('Bot-Edit System-Prompt preview modal shows all 8 accordion sections', asyn
   await expect(previewAccordion).toBeVisible({ timeout: 8000 });
 
   const items = previewAccordion.locator('.accordion-item');
-  await expect(items).toHaveCount(6);
+  await expect(items).toHaveCount(8);
 
   const headersText = (await previewAccordion.locator('.accordion-button').allTextContents()).join(' | ');
+  expect(headersText).toContain('Review-Agent System-Prompt');
   expect(headersText).toContain('E2E Planner');
   expect(headersText).toContain('E2E Author');
   expect(headersText).toContain('E2E Runner System-Prompt');
+  expect(headersText).toContain('Unit-Test Author System-Prompt');
 
   // Close any open modal so the page state stays clean
   await page.keyboard.press('Escape').catch(() => {});
