@@ -1096,7 +1096,7 @@ class BotWebhookServiceTest {
         Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
                 java.util.List.of("agentic-review"));
         WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
-                "I reviewed your changes. Can you explain the error handling strategy?");
+                "@claude_bot I reviewed your changes. Can you explain the error handling strategy?");
 
         botWebhookService.handleReviewSubmitted(bot, payload);
 
@@ -1107,7 +1107,7 @@ class BotWebhookServiceTest {
         assertThat(key.getValue()).isEqualTo(AgentReviewWorkflow.KEY);
         assertThat(hints.getValue())
                 .containsEntry(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
-                        "I reviewed your changes. Can you explain the error handling strategy?");
+                        "@claude_bot I reviewed your changes. Can you explain the error handling strategy?");
     }
 
     @Test
@@ -1141,15 +1141,26 @@ class BotWebhookServiceTest {
     }
 
     @Test
-    void reviewSubmitted_noReviewBody_agenticReviewStillDispatches() {
+    void reviewSubmitted_noReviewBody_agenticReviewIgnored() {
         Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
                 java.util.List.of("agentic-review"));
         WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L, null);
 
         botWebhookService.handleReviewSubmitted(bot, payload);
 
-        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
-                eq(AgentReviewWorkflow.KEY), any());
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
+    }
+
+    @Test
+    void reviewSubmitted_bodyWithoutBotMention_agenticReviewIgnored() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
+                "LGTM, approving this from another reviewer.");
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
     }
 
     @Test
