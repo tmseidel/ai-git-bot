@@ -76,7 +76,7 @@ SELECT DISTINCT btc.id, 'pr-diff', 'CONTEXT'
 FROM bot_tool_configurations btc
 INNER JOIN bots b ON b.bot_tool_configuration_id = btc.id
 INNER JOIN workflow_configurations wc ON wc.id = b.workflow_configuration_id
-INNER JOIN workflow_selections ws ON ws.configuration_id = wc.id
+INNER JOIN workflow_selections ws ON ws.workflow_configuration_id = wc.id
 WHERE ws.workflow_key = 'agentic-review'
   AND NOT EXISTS (
       SELECT 1 FROM bot_tool_selections s
@@ -108,7 +108,7 @@ SELECT btc.name AS tool_config,
 FROM bot_tool_configurations btc
 INNER JOIN bots b ON b.bot_tool_configuration_id = btc.id
 INNER JOIN workflow_configurations wc ON wc.id = b.workflow_configuration_id
-INNER JOIN workflow_selections ws ON ws.configuration_id = wc.id
+INNER JOIN workflow_selections ws ON ws.workflow_configuration_id = wc.id
 LEFT JOIN bot_tool_selections s ON s.configuration_id = btc.id AND s.tool_name = 'pr-diff'
 WHERE ws.workflow_key = 'agentic-review'
 GROUP BY btc.id, btc.name
@@ -123,7 +123,7 @@ SELECT btc.name AS tool_config,
 FROM bot_tool_configurations btc
 INNER JOIN bots b ON b.bot_tool_configuration_id = btc.id
 INNER JOIN workflow_configurations wc ON wc.id = b.workflow_configuration_id
-INNER JOIN workflow_selections ws ON ws.configuration_id = wc.id
+INNER JOIN workflow_selections ws ON ws.workflow_configuration_id = wc.id
 LEFT JOIN bot_tool_selections s ON s.configuration_id = btc.id AND s.tool_name = 'pr-diff'
 WHERE ws.workflow_key = 'agentic-review'
 GROUP BY btc.id, btc.name
@@ -163,7 +163,7 @@ SELECT DISTINCT btc.name AS tool_config
 FROM bot_tool_configurations btc
 INNER JOIN bots b ON b.bot_tool_configuration_id = btc.id
 INNER JOIN workflow_configurations wc ON wc.id = b.workflow_configuration_id
-INNER JOIN workflow_selections ws ON ws.configuration_id = wc.id
+INNER JOIN workflow_selections ws ON ws.workflow_configuration_id = wc.id
 WHERE ws.workflow_key = 'agentic-review'
   AND NOT EXISTS (
       SELECT 1 FROM bot_tool_selections s
