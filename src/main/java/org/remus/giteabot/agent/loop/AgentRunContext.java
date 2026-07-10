@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.loop;
 
 import lombok.Setter;
 import org.remus.giteabot.agent.session.AgentSession;
+import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 
 import java.nio.file.Path;
 
@@ -32,6 +33,14 @@ public final class AgentRunContext {
     @Setter
     private ToolingMode toolingMode;
 
+    /**
+     * Optional parsed diff summary for PR review workflows. When set, the
+     * {@code pr-diff} tool can use it to extract per-file hunks without
+     * re-fetching or re-parsing the full diff.
+     */
+    @Setter
+    private DiffSummary diffSummary;
+
     public AgentRunContext(AgentSession session, String owner, String repo,
                            Long issueNumber, Path workspaceDir, String baseBranch) {
         this.session = session;
@@ -49,5 +58,6 @@ public final class AgentRunContext {
     public Path workspaceDir() { return workspaceDir; }
     public String baseBranch() { return baseBranch; }
     public ToolingMode toolingMode() { return toolingMode; }
+    public DiffSummary diffSummary() { return diffSummary; }
 }
 

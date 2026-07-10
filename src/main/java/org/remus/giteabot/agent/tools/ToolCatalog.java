@@ -133,6 +133,14 @@ public class ToolCatalog {
                     objectSchema(
                             prop("path", "string", "Repository-relative path to the file."),
                             required("path"))),
+            entry("pr-diff", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
+                    "Return the diff hunks for a specific changed file in the current pull request. "
+                            + "Use this after inspecting the changed-file summary to see what exactly "
+                            + "was added, removed, or modified in a file. "
+                            + "Args: [\"path/to/file\"].",
+                    objectSchema(
+                            prop("path", "string", "Repository-relative path of the changed file."),
+                            required("path"))),
 
             // Additional context aliases (silent at runtime — never advertised to the LLM
             // to avoid duplicate descriptors with conflicting docs).

@@ -13,7 +13,7 @@
 
     <groupId>org.remus</groupId>
     <artifactId>ai-git-bot</artifactId>
-    <version>1.14.0</version>
+    <version>1.15.0</version>
     <name>AI Git Bot</name>
     <description>AI-Git-Bot is a lightweight, self-hostable gateway application that connects your Git platforms with AI providers.</description>
     <url>https://github.com/tmseidel/ai-git-bot</url>
@@ -57,6 +57,10 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-restclient</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

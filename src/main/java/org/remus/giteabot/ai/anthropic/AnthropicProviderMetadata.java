@@ -1,8 +1,10 @@
 package org.remus.giteabot.ai.anthropic;
 
+import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
@@ -12,6 +14,7 @@ import java.util.List;
  * Metadata and factory for Anthropic Claude AI integration.
  */
 @Component
+@RequiredArgsConstructor
 public class AnthropicProviderMetadata implements AiProviderMetadata {
 
     public static final String PROVIDER_TYPE = "anthropic";
@@ -22,6 +25,8 @@ public class AnthropicProviderMetadata implements AiProviderMetadata {
             "claude-sonnet-4-6",
             "claude-haiku-4-5-20251001"
     );
+
+    private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public String getProviderType() {
@@ -54,7 +59,7 @@ public class AnthropicProviderMetadata implements AiProviderMetadata {
             apiVersion = DEFAULT_API_VERSION;
         }
 
-        return RestClient.builder()
+        return restClientBuilder.getObject()
                 .baseUrl(integration.getApiUrl())
                 .defaultHeader("x-api-key", decryptedApiKey)
                 .defaultHeader("anthropic-version", apiVersion)
@@ -73,4 +78,3 @@ public class AnthropicProviderMetadata implements AiProviderMetadata {
         );
     }
 }
-

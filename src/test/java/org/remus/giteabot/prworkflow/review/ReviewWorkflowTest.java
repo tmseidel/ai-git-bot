@@ -60,7 +60,7 @@ class ReviewWorkflowTest {
         workflow = new ReviewWorkflow(factory, giteaClientFactory, selectionService, chunkingProperties);
         lenient().when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
         lenient().when(factory.create(any(Bot.class), eq(repoClient),
-                anyInt(), anyInt(), anyInt())).thenReturn(codeReviewService);
+                anyInt(), anyInt(), anyInt(), any())).thenReturn(codeReviewService);
         lenient().when(selectionService.resolveParams(any(), any())).thenReturn(Map.of());
     }
 

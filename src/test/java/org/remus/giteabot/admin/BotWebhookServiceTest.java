@@ -124,7 +124,7 @@ class BotWebhookServiceTest {
         // the existing handlePrComment / handleBotCommand routing tests
         // keep observing the same downstream side-effects on `sessionService`.
         lenient().when(codeReviewServiceFactory.create(any(Bot.class),
-                        any(RepositoryApiClient.class), eq(120000), eq(8), eq(60000)))
+                        any(RepositoryApiClient.class), eq(120000), eq(8), eq(60000), any()))
                 .thenAnswer(invocation -> {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
@@ -132,7 +132,7 @@ class BotWebhookServiceTest {
                             b.getUsername(), new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
-                            120000, 8, 60000);
+                            120000, 8, 60000, "");
                 });
         // Step 7.2 — provide a real BudgetConfig so production code that reads
         // agentConfig.getBudget().getMaxTokensPerCall() does not NPE on the mock.
@@ -1096,7 +1096,7 @@ class BotWebhookServiceTest {
         Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
                 java.util.List.of("agentic-review"));
         WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
-                "I reviewed your changes. Can you explain the error handling strategy?");
+                "@claude_bot I reviewed your changes. Can you explain the error handling strategy?");
 
         botWebhookService.handleReviewSubmitted(bot, payload);
 
@@ -1107,7 +1107,7 @@ class BotWebhookServiceTest {
         assertThat(key.getValue()).isEqualTo(AgentReviewWorkflow.KEY);
         assertThat(hints.getValue())
                 .containsEntry(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
-                        "I reviewed your changes. Can you explain the error handling strategy?");
+                        "@claude_bot I reviewed your changes. Can you explain the error handling strategy?");
     }
 
     @Test
@@ -1141,15 +1141,26 @@ class BotWebhookServiceTest {
     }
 
     @Test
-    void reviewSubmitted_noReviewBody_agenticReviewStillDispatches() {
+    void reviewSubmitted_noReviewBody_agenticReviewIgnored() {
         Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
                 java.util.List.of("agentic-review"));
         WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L, null);
 
         botWebhookService.handleReviewSubmitted(bot, payload);
 
-        verify(prWorkflowOrchestrator).run(eq(bot), eq(payload),
-                eq(AgentReviewWorkflow.KEY), any());
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
+    }
+
+    @Test
+    void reviewSubmitted_bodyWithoutBotMention_agenticReviewIgnored() {
+        Bot bot = createBotWithWorkflows("agentic-bot", "claude_bot", true,
+                java.util.List.of("agentic-review"));
+        WebhookPayload payload = buildReviewSubmittedPayload("Test", "my-repo", 140L,
+                "LGTM, approving this from another reviewer.");
+
+        botWebhookService.handleReviewSubmitted(bot, payload);
+
+        verify(prWorkflowOrchestrator, never()).run(any(), any(), any(), any());
     }
 
     @Test

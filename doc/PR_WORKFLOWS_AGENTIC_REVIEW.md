@@ -21,8 +21,8 @@ enforcing this:
 
 1. **Tool surface** — the agent advertises only the
    `ToolCatalog.Role.WRITER` descriptors: repository-exploration tools
-   (`cat`, `rg`, `find`, `tree`, `git-log`, `git-blame`, `branch-switcher`),
-   the read-only issue helpers (`get-issue`, `search-issues`) and any
+   (`cat`, `rg`, `find`, `tree`, `git-log`, `git-blame`, `branch-switcher`, `ctags-signatures`,
+   `ctags-deps`, `pr-diff`), the read-only issue helpers (`get-issue`, `search-issues`) and any
    configured MCP tools. No file-mutation (`write-file`, `patch-file`,
    `delete-file`, `mkdir`) or build/validation tool is ever offered.
 2. **Execution routing** — tools are executed through
@@ -32,6 +32,43 @@ enforcing this:
    branches. The primary externally visible effect is a single Markdown PR
    comment. When operators enable formal review decisions, the bot may
    additionally approve or request changes based on the review findings.
+
+## Compact diff handling
+
+To avoid overwhelming the AI context window with large pull requests, the workflow
+uses a **compact diff strategy** instead of embedding the full diff:
+
+1. **Initial overview**: The full diff is parsed into a compact file table showing:
+   - List of changed files
+   - Insertion and deletion counts per file
+   - Total file count and line changes
+
+2. **On-demand inspection**: The agent uses the `pr-diff <path>` tool to fetch the
+   actual diff hunks for specific files it wants to examine. This allows it to:
+   - Focus on the most important changes first
+   - Avoid loading unnecessary context
+   - Handle large PRs with hundreds of files
+
+3. **Token efficiency**: This approach reduces initial context usage from ~60K
+   characters to ~350-3500 characters (depending on PR size), leaving more room for
+   the agent's reasoning and tool responses.
+
+**Example initial message:**
+```
+Changed files (12 files, 345 insertions, 89 deletions):
+
+| File | Changes |
+|------|---------|
+| src/main/java/com/example/UserService.java | +45 / -12 |
+| src/test/java/com/example/UserServiceTest.java | +120 / -0 |
+| ... | ... |
+
+Use `pr-diff <path>` to see the diff for a specific file.
+Use `cat <path>` to read the full file content.
+```
+
+The agent then decides which files to inspect based on the change magnitude, file
+names, and its understanding of the codebase structure.
 
 ## Flow
 

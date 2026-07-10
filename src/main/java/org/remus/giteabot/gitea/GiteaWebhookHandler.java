@@ -65,6 +65,28 @@ public class GiteaWebhookHandler {
         return payload;
     }
 
+    /**
+     * Promotes a nested {@code issue.pull_request} marker to a minimal top-level
+     * {@link WebhookPayload.PullRequest} so PR-comment handling (which reads
+     * {@code payload.getPullRequest()}) works on Gitea's {@code issue_comment}
+     * payloads, where a PR is only signalled inside the issue. No-op when a
+     * top-level PR is already present or there is no issue. For PRs in Gitea the
+     * issue number equals the PR number and the issue title/body/author mirror
+     * the PR's.
+     */
+    private void promoteIssueToPullRequest(WebhookPayload payload) {
+        if (payload.getPullRequest() != null || payload.getIssue() == null) {
+            return;
+        }
+        WebhookPayload.Issue issue = payload.getIssue();
+        WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+        pr.setNumber(issue.getNumber());
+        pr.setTitle(issue.getTitle());
+        pr.setBody(issue.getBody());
+        pr.setUser(issue.getUser());
+        payload.setPullRequest(pr);
+    }
+
     // ---- Extraction helpers ----
 
     private WebhookPayload.Owner extractOwner(Map<String, Object> owner) {
@@ -222,7 +244,16 @@ public class GiteaWebhookHandler {
                         payload.getComment().getId(), botAlias);
                 return ResponseEntity.ok("ignored");
             }
-            if (payload.getPullRequest() != null) {
+            // A PR conversation comment arrives as an issue_comment event: Gitea marks it via
+            // issue.pull_request (nested), not a top-level pull_request. Treat either signal as
+            // "this comment is on a PR" so mentions reach handlePrComment (review / slash
+            // commands) instead of the agent-gated handleIssueComment.
+            boolean isPrComment = payload.getPullRequest() != null
+                    || (payload.getIssue() != null && payload.getIssue().getPullRequest() != null);
+            if (isPrComment) {
+                // handlePrComment dereferences payload.getPullRequest().getNumber(); when only the
+                // nested issue.pull_request was present, promote a minimal top-level PR first.
+                promoteIssueToPullRequest(payload);
                 // Comment on a PR discussion thread — let BotWebhookService decide whether to
                 // route to the agent (session exists) or the code-review handler (no session).
                 botWebhookService.handlePrComment(bot, payload);
