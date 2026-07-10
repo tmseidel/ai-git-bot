@@ -10,7 +10,7 @@ test('Expand all button opens every prompt section', async ({ page }) => {
 
   const collapses = page.locator('#systemPromptsAccordion .accordion-collapse');
   const count = await collapses.count();
-  expect(count).toBe(6);
+  expect(count).toBe(8);
 
   for (let i = 0; i < count; i++) {
     await expect(collapses.nth(i)).toHaveClass(/\bshow\b/, { timeout: 5000 });

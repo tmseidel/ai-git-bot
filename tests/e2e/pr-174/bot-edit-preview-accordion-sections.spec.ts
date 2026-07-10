@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('Bot-Edit System-Prompt preview modal shows all 6 accordion sections', async ({ page }) => {
+test('Bot-Edit System-Prompt preview modal shows all 8 accordion sections', async ({ page }) => {
   await page.goto('/bots');
 
   // Open the edit modal for the first bot listed
@@ -12,9 +12,7 @@ test('Bot-Edit System-Prompt preview modal shows all 6 accordion sections', asyn
 
   // Trigger the System-Prompt preview action
   const previewBtn = page
-    .locator('button, a')
-    .filter({ hasText: /Preview.*System-?Prompt|System-?Prompt.*Preview/i })
-    .first();
+    .locator('#previewSystemPrompt')
   await previewBtn.click();
 
   const previewAccordion = page.locator('#systemPromptPreviewAccordion');
