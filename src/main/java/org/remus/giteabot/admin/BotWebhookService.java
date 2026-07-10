@@ -301,8 +301,12 @@ public class BotWebhookService {
         try {
             if (agenticEnabled) {
                 String question = extractReviewBody(payload);
-                var hints = Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION,
-                        question != null ? question : "");
+                if (!mentionsBot(bot, question)) {
+                    log.debug("[Bot '{}'] Submitted review does not mention the bot — ignoring (agentic-review only responds when addressed)",
+                            bot.getName());
+                    return;
+                }
+                var hints = Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION, question);
                 prWorkflowOrchestrator.run(bot, payload, AgentReviewWorkflow.KEY, hints);
                 return;
             }
@@ -657,6 +661,19 @@ public class BotWebhookService {
             return "";
         }
         return "@" + username;
+    }
+
+    /**
+     * Returns {@code true} when {@code text} @-mentions the bot. Used to gate
+     * agentic responses so the bot only reacts when it is explicitly addressed,
+     * never on unrelated activity (e.g. another reviewer's approval or comment).
+     */
+    private boolean mentionsBot(Bot bot, String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String alias = getBotAlias(bot);
+        return !alias.isEmpty() && text.contains(alias);
     }
 
     public boolean isPullRequestAuthor(WebhookPayload payload) {
