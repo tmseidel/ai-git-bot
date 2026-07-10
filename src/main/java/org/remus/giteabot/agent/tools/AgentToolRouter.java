@@ -139,18 +139,23 @@ public class AgentToolRouter {
         String lower = original.strip().toLowerCase();
         List<String> args = ctx.args();
         log.debug("Executing tool: {} {}", original, String.join(" ", args));
-        if ("get-issue".equals(lower)) {
-            Long issue = parseIssueNumber(args, ctx.issueNumber());
-            return new ToolResult(true, 0,
-                    toJson(curateIssue(repositoryClient.getIssueDetails(ctx.owner(), ctx.repo(), issue))), "");
-        }
-        if ("search-issues".equals(lower)) {
-            String query = args.isEmpty() ? "" : args.getFirst();
-            return new ToolResult(true, 0,
-                    toJson(repositoryClient.searchIssues(ctx.owner(), ctx.repo(), query).stream()
-                            .limit(10)
-                            .map(this::curateIssue)
-                            .toList()), "");
+        switch (lower) {
+            case "get-issue" -> {
+                Long issue = parseIssueNumber(args, ctx.issueNumber());
+                return new ToolResult(true, 0,
+                        toJson(curateIssue(repositoryClient.getIssueDetails(ctx.owner(), ctx.repo(), issue))), "");
+            }
+            case "search-issues" -> {
+                String query = args.isEmpty() ? "" : args.getFirst();
+                return new ToolResult(true, 0,
+                        toJson(repositoryClient.searchIssues(ctx.owner(), ctx.repo(), query).stream()
+                                .limit(10)
+                                .map(this::curateIssue)
+                                .toList()), "");
+            }
+            case "pr-diff" -> {
+                return executePrDiffTool(ctx);
+            }
         }
         if (isMcpTool(original)) {
             return mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog, original, args);
@@ -208,6 +213,32 @@ public class AgentToolRouter {
             }
         }
         return null;
+    }
+
+    /**
+     * Executes the pr-diff tool by extracting per-file hunks from the
+     * DiffSummary stored in the ToolCallContext.
+     */
+    private ToolResult executePrDiffTool(ToolCallContext ctx) {
+        List<String> args = ctx.args();
+        if (args.isEmpty() || args.getFirst() == null || args.getFirst().isBlank()) {
+            return new ToolResult(false, -1, "", "pr-diff requires a file path argument");
+        }
+        String filePath = args.getFirst();
+
+        if (ctx.diffSummary() == null) {
+            return new ToolResult(false, -1, "", "No PR diff available in this context");
+        }
+
+        String hunk = ctx.diffSummary().fileDiff(filePath);
+        if (hunk == null || hunk.isBlank()) {
+            List<String> changedFiles = ctx.diffSummary().changedFiles();
+            String fileList = String.join(", ", changedFiles);
+            return new ToolResult(true, 0,
+                    "No diff hunks found for: " + filePath
+                            + "\nChanged files: " + fileList, "");
+        }
+        return new ToolResult(true, 0, hunk, "");
     }
 
     private String toJson(Object value) {

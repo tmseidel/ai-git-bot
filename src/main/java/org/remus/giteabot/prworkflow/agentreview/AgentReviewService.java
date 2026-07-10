@@ -42,9 +42,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class AgentReviewService {
 
-    /** Hard ceiling on the diff size embedded in the kickoff prompt. */
-    static final int MAX_DIFF_CHARS_FOR_CONTEXT = 60000;
-
     /**
      * Fixed instruction appended to the system prompt when formal review decisions
      * are enabled. Defines the exact structured return format.
@@ -142,6 +139,9 @@ public class AgentReviewService {
             return false;
         }
 
+        DiffSummary diffSummary = DiffSummary.parse(diff);
+        log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
+
         String headBranch = resolveHeadBranch(payload, owner, repo);
 
         Path workspaceDir = null;
@@ -159,12 +159,12 @@ public class AgentReviewService {
             workspaceDir = wsResult.workspacePath();
 
             String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
-            String userMessage = buildKickoffMessage(prTitle, prBody, diff);
+            String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
 
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds);
+                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary);
 
             String review = outcome.payload() instanceof String s ? s : null;
             if (review == null || review.isBlank()) {
@@ -231,6 +231,9 @@ public class AgentReviewService {
             return false;
         }
 
+        DiffSummary diffSummary = DiffSummary.parse(diff);
+        log.info("Parsed diff summary for clarification on PR #{}: {}", prNumber, diffSummary.statLine());
+
         String headBranch = resolveHeadBranch(payload, owner, repo);
 
         Path workspaceDir = null;
@@ -248,13 +251,14 @@ public class AgentReviewService {
             workspaceDir = wsResult.workspacePath();
 
             String systemPrompt = resolveSystemPrompt(false, null);
-            String userMessage = buildClarificationMessage(prTitle, prBody, diff, userQuestion);
+            String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary, userQuestion);
+
 
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage,
-                    maxToolRounds);
+                    maxToolRounds, diffSummary);
 
             String answer = outcome.payload() instanceof String s ? s : null;
             if (answer == null || answer.isBlank()) {
@@ -336,10 +340,7 @@ public class AgentReviewService {
         }
     }
 
-    private String buildClarificationMessage(String prTitle, String prBody, String diff, String userQuestion) {
-        String truncatedDiff = diff.length() > MAX_DIFF_CHARS_FOR_CONTEXT
-                ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(diff truncated)"
-                : diff;
+    private String buildClarificationMessage(String prTitle, String prBody, DiffSummary diffSummary, String userQuestion) {
         return """
                 The user has a follow-up question about the pull request you reviewed earlier.
 
@@ -355,10 +356,13 @@ public class AgentReviewService {
                 read-only tools to inspect the relevant code and answer the question \
                 concisely. You cannot modify the repository.
 
-                Unified diff:
-                ```diff
+                Changed files (%s):
+
                 %s
-                ```
+
+                To see the diff hunks for a specific file, call the `pr-diff` tool with the \
+                file path. To read the full current content of a file, use `cat`. To understand \
+                a file's structure before reading it, use `ctags-signatures`.
 
                 When you have gathered enough context, reply with your answer as plain \
                 Markdown (no tool calls). Focus on answering the specific question asked.
@@ -366,7 +370,8 @@ public class AgentReviewService {
                         prTitle == null ? "(none)" : prTitle,
                         prBody == null || prBody.isBlank() ? "(none)" : prBody,
                         userQuestion,
-                        truncatedDiff);
+                        diffSummary.statLine(),
+                        diffSummary.fileTable());
     }
 
     private String formatClarification(String answer) {
@@ -407,7 +412,8 @@ public class AgentReviewService {
 
     private LoopOutcome runReviewLoop(AgentSession session, String owner, String repo, Long prNumber,
                                       Path workspaceDir, String headBranch,
-                                      String systemPrompt, String userMessage, int maxToolRounds) {
+                                      String systemPrompt, String userMessage, int maxToolRounds,
+                                      DiffSummary diffSummary) {
         ReviewAgentStrategy strategy = new ReviewAgentStrategy(
                 systemPrompt, toolRouter, toolCatalog,
                 context.mcpToolCatalog(), context.allowedBuiltinTools(),
@@ -424,6 +430,7 @@ public class AgentReviewService {
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);
+        ctx.setDiffSummary(diffSummary);
         return loop.run(ctx, userMessage, strategy);
     }
 
@@ -443,10 +450,7 @@ public class AgentReviewService {
         return base + "\n\n" + prompt + DECISION_FORMAT_INSTRUCTION;
     }
 
-    private String buildKickoffMessage(String prTitle, String prBody, String diff) {
-        String truncatedDiff = diff.length() > MAX_DIFF_CHARS_FOR_CONTEXT
-                ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(diff truncated)"
-                : diff;
+    private String buildKickoffMessage(String prTitle, String prBody, DiffSummary diffSummary) {
         StringBuilder sb = new StringBuilder();
         sb.append("Please review the following pull request.\n\n");
         sb.append("Title: ").append(prTitle == null ? "(none)" : prTitle).append('\n');
@@ -460,9 +464,15 @@ public class AgentReviewService {
                 You cannot modify the repository.
                 
                 """);
-        sb.append("Unified diff:\n```diff\n").append(truncatedDiff).append("\n```\n\n");
-        sb.append("When you have gathered enough context, reply with your final review as plain "
-                + "Markdown (no tool calls). Summarise correctness, risks, and concrete suggestions.");
+        sb.append("Changed files (").append(diffSummary.statLine()).append("):\n\n");
+        sb.append(diffSummary.fileTable()).append("\n");
+        sb.append("""
+                To see the diff hunks for a specific file, call the `pr-diff` tool with the \
+                file path. To read the full current content of a file, use `cat`. To understand \
+                a file's structure before reading it, use `ctags-signatures`.
+                
+                When you have gathered enough context, reply with your final review as plain \
+                Markdown (no tool calls). Summarise correctness, risks, and concrete suggestions.""");
         return sb.toString();
     }
 
