@@ -1,7 +1,37 @@
  import { test, expect, Page } from '@playwright/test';
 
- const WORKFLOWS_URL = '/system-settings/workflow-configurations/1/workflows';
+ const SETTINGS_URL = '/system-settings';
  const PATTERN_VALUE = '*.yaml';
+
+ /**
+  * Resolve the workflows URL without hardcoding a configuration id: open the
+  * system-settings page and read the "Workflows" link from the table inside
+  * #section-workflow-configurations. Prefers the row flagged as "Default",
+  * falling back to the first configuration.
+  */
+ async function resolveWorkflowsUrl(page: Page): Promise<string> {
+       await page.goto(SETTINGS_URL);
+       await page.waitForLoadState('networkidle');
+
+       const section = page.locator('#section-workflow-configurations');
+       await section.waitFor({ state: 'attached', timeout: 5000 });
+
+       const workflowsLinks = section.locator('a[href*="/workflows"]');
+       await workflowsLinks.first().waitFor({ state: 'attached', timeout: 5000 });
+
+       // Prefer the row marked as Default (uniquely identified by the primary
+       // badge), falling back to the first configuration.
+       const defaultRow = section.locator('tr', { has: section.locator('span.badge.bg-primary') });
+       const preferred = (await defaultRow.count()) > 0
+             ? defaultRow.first().locator('a[href*="/workflows"]').first()
+             : workflowsLinks.first();
+
+       const href = await preferred.getAttribute('href');
+       if (!href) {
+             throw new Error('Could not resolve a workflows URL from #section-workflow-configurations.');
+           }
+       return href;
+     }
 
  async function expandReviewSection(page: Page): Promise<void> {
        // Try to find a header/button/row that references the 'review' workflow.
@@ -57,10 +87,14 @@
  test.describe('Review workflow excluded file patterns persistence', () => {
        test("excludedFilePatterns value persists after saving and reloading", async ({ page }) => {
              let originalValue = '';
+             let workflowsUrl = '';
         
              try {
+                   // 0. Resolve the workflows URL from the settings page (no hardcoded id).
+                   workflowsUrl = await resolveWorkflowsUrl(page);
+            
                    // 1. Navigate to workflows configuration page.
-                   await page.goto(WORKFLOWS_URL);
+                   await page.goto(workflowsUrl);
                    await page.waitForLoadState('networkidle');
             
                    // 2. Expand the 'review' workflow section.
@@ -88,7 +122,7 @@
                    await page.waitForTimeout(500);
             
                    // 7. Reload by navigating again.
-                   await page.goto(WORKFLOWS_URL);
+                   await page.goto(workflowsUrl);
                    await page.waitForLoadState('networkidle');
             
                    // 8. Re-expand the review section.
@@ -100,7 +134,7 @@
                  } finally {
                    // Cleanup: restore the original value so this test is idempotent.
                    try {
-                         await page.goto(WORKFLOWS_URL);
+                         await page.goto(workflowsUrl || await resolveWorkflowsUrl(page));
                          await page.waitForLoadState('networkidle');
                          await expandReviewSection(page);
                          const input = await getExcludedFilePatternsInput(page);
