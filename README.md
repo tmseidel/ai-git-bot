@@ -464,10 +464,10 @@ Bug reports are always welcome.
 - 🌍 Self-hostable end-to-end
 ---
 ## Community
-⭐ >100 GitHub stars4
-🚀 >15 releases6
-🐳 Docker image available8
-🌍 Users across GitHub, Gitea, GitLab and Bitbucket
+* ⭐ >100 GitHub stars
+* 🚀 >15 releases
+* 🐳 Docker image available
+* 🌍 Users across GitHub, Gitea, GitLab and Bitbucket
 
 ## Get started
 

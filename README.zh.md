@@ -25,13 +25,13 @@
 
 ## 🔌 任意 AI 提供商与任意 Git 平台的组合
 
-|| AI 提供商 | Git 平台 |
-||---|---|
-|| **Anthropic**（Claude） | **Gitea**（自托管） |
-|| **OpenAI**（+ OpenAI 兼容 API） | **GitHub** / **GitHub Enterprise** |
-|| **Google AI / Gemini** | **GitLab**（gitlab.com 与自管理） |
-|| **Ollama**（本地 LLM） | **Bitbucket Cloud** |
-|| **llama.cpp**（本地 GGUF 模型） | |
+| AI 提供商 | Git 平台 |
+|---|---|
+| **Anthropic**（Claude） | **Gitea**（自托管） |
+| **OpenAI**（+ OpenAI 兼容 API） | **GitHub** / **GitHub Enterprise** |
+| **Google AI / Gemini** | **GitLab**（gitlab.com 与自管理） |
+| **Ollama**（本地 LLM） | **Bitbucket Cloud** |
+| **llama.cpp**（本地 GGUF 模型） | |
 
 与大多数 AI 编码工具不同，AI-Git-Bot 不绑定于特定的 Git 平台或 AI 提供商。
 
@@ -85,8 +85,6 @@ AI-Git-Bot 将以下内容直接带到 Gitea：
 - AI 编码工作流
 - 交互式 PR 讨论
 
-直接带到 Gitea。
-
 使用 OpenAI、Claude、Gemini 或本地 Ollama 模型，无需更改开发者的现有工作流。
 
 👉 思考：**「Gitea 的 Copilot 风格工作流自动化。」**
@@ -132,7 +130,7 @@ AI-Git-Bot 将这些活动转化为你团队已经在产生的事件触发的工
 
 ---
 
-## 在操作中看看
+## 实际效果演示
 
 AI-Git-Bot 存在于你的开发者已经工作的地方：
 
@@ -224,16 +222,16 @@ Bot 直接在线程中回答，并保持对话上下文。
 
 ## ✨ 它能做什么？
 
-|| 工作流 | 触发 | 结果 |
-||-----------|----------|------|
-|| **PR 审查** | PR 打开或审查重新请求 | 审查评论和发现 |
-|| **交互式问答** | PR 评论中的 `@bot` 提及 | 上下文感知对话 |
-|| **Issue → 代码** | Issue 分配给编码 bot | 拉取请求 |
-|| **Issue → 改进** | Issue 分配给写作 bot | 带验收标准的结构化 issue |
-|| **单元测试生成** | PR 打开或命令触发 | 提交到分支的生成测试 |
-|| **全栈 QA** | PR 打开 | 在预览环境中执行的 Playwright 套件 |
-|| **PR 重新审查** | 强制推送或审查请求 | 更新的分析 |
-|| **工作流自动化** | Git 事件 | 工程杂务自动化 |
+| 工作流 | 触发 | 结果 |
+|-----------|----------|------|
+| **PR 审查** | PR 打开或审查重新请求 | 审查评论和发现 |
+| **交互式问答** | PR 评论中的 `@bot` 提及 | 上下文感知对话 |
+| **Issue → 代码** | Issue 分配给编码 bot | 拉取请求 |
+| **Issue → 改进** | Issue 分配给写作 bot | 带验收标准的结构化 issue |
+| **单元测试生成** | PR 打开或命令触发 | 提交到分支的生成测试 |
+| **全栈 QA** | PR 打开 | 在预览环境中执行的 Playwright 套件 |
+| **PR 重新审查** | 强制推送或审查请求 | 更新的分析 |
+| **工作流自动化** | Git 事件 | 工程杂务自动化 |
 
 ---
 
@@ -334,7 +332,7 @@ Bot 将粗略的需求转化为结构化的工程工作项：
 
 ### 🧪 单元测试生成
 
-基于拉取请求变更自动生成功能单元测试。
+基于拉取请求变更自动生成白盒单元测试。
 
 测试在提交前可以使用项目自身的工具进行验证。
 
@@ -425,12 +423,12 @@ docker compose up --build -d
 
 文档在 **[Documentation Hub](doc/README.md)** 中按受众组织：
 
-|| 您是… | 从这里开始 |
-||---|---|
-|| 👤 **用户** — bot 已配置好，只需使用 Git 平台 | [使用 Bot](doc/USING_THE_BOT.md) |
-|| 🛠️ **管理员** — 负责配置软件、bot 和工作流 | [部署](doc/DEPLOYMENT.md) · [管理指南](doc/USER_GUIDE.md) |
-|| 🧪 **测试者** — 想安全地试用功能 | [测试指南](doc/TESTING_GUIDE.md) |
-|| 💻 **开发者** — 处理代码 | [本地开发](doc/LOCAL_DEVELOPMENT.md) · [架构](doc/ARCHITECTURE.md) |
+| 您是… | 从这里开始 |
+|---|---|
+| 👤 **用户** — bot 已配置好，只需使用 Git 平台 | [使用 Bot](doc/USING_THE_BOT.md) |
+| 🛠️ **管理员** — 负责配置软件、bot 和工作流 | [部署](doc/DEPLOYMENT.md) · [管理指南](doc/USER_GUIDE.md) |
+| 🧪 **测试者** — 想安全地试用功能 | [测试指南](doc/TESTING_GUIDE.md) |
+| 💻 **开发者** — 处理代码 | [本地开发](doc/LOCAL_DEVELOPMENT.md) · [架构](doc/ARCHITECTURE.md) |
 
 ---
 
@@ -472,10 +470,10 @@ Bug 报告始终欢迎。
 
 ## 社区
 
-⭐ >100 GitHub stars
-🚀 >15 releases
-🐳 Docker image available
-🌍 Users across GitHub, Gitea, GitLab and Bitbucket
+* ⭐ 超过 100 个 GitHub stars
+* 🚀 超过 15 个版本发布
+* 🐳 Docker 镜像可用
+* 🌍 用户遍布 GitHub、Gitea、GitLab 和 Bitbucket
 
 ## 开始
 
