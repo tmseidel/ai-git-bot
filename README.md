@@ -9,7 +9,7 @@
 
 🌐 Languages: **English** · [中文](README.zh.md) · [한국어](README.ko.md) · [日本語](README.ja.md)
 
-Automate the necessary-but-uncomfortable parts of software development directly inside the Git tools your team already uses.
+> **The self-hosted AI workflow automation platform for Git repositories.**
 
 - 🔍 Review pull requests
 - 🧪 Generate tests
@@ -18,9 +18,20 @@ Automate the necessary-but-uncomfortable parts of software development directly 
 - 🎬 Create and run E2E tests
 - 💬 Answer questions inside code reviews
 
-| Works-with                                                   | Works in |
-|--------------------------------------------------------------|---|
-| ✅ Claude<br>✅ OpenAI<br>✅ Gemini<br>✅ Ollama<br>✅ llama.cpp | ✅ GitHub<br>✅ GitHub Enterprise<br>✅ Gitea<br>✅ GitLab<br>✅ Bitbucket Cloud |
+💡 Already using GitHub Copilot?
+> **Great.**<br>
+> Copilot helps developers write code faster. AI-Git-Bot helps teams automate reviews, tests, issues and pull-request workflows.<br>
+> Many teams use both.
+
+## 🔌 Mix any AI provider with any Git platform
+| AI providers | Git platforms |
+|---|---|
+| **Anthropic** (Claude) | **Gitea** (self-hosted) |
+| **OpenAI** (+ OpenAI-compatible APIs) | **GitHub** / **GitHub Enterprise** |
+| **Google AI / Gemini** | **GitLab** (gitlab.com & self-managed) |
+| **Ollama** (local LLMs) | **Bitbucket Cloud** |
+| **llama.cpp** (local GGUF models) | |
+Unlike most AI coding tools, AI-Git-Bot is not tied to a specific Git platform or AI provider.
 
 **Fully self-hostable. Your code can stay inside your infrastructure.**
 
@@ -40,11 +51,11 @@ Every engineering team has a list of things they know should happen:
 - Preview environments should be cleaned up
 - Small maintenance tickets should eventually get implemented
 
-Nobody disagrees with any of those ideas.
-* The problem is that they're uncomfortable.
-* They're repetitive.
-* They rarely make it onto the roadmap.
-* And they're often the first things that disappear when deadlines get tight.
+Nobody disagrees with any of those ideas. The problem is that these tasks are:
+* Uncomfortable
+* Repetitive
+* Difficult to prioritize
+* Easy to postpone when deadlines get tight
 
 AI-Git-Bot exists to turn these engineering chores into repeatable workflows that happen automatically inside your Git platform.
 
@@ -278,26 +289,6 @@ These goals complement each other.
 
 ---
 
-## 🔌 Mix any AI provider with any Git platform
-
-AI-Git-Bot acts as a gateway between Git platforms and AI providers.
-
-Configure an AI provider once.
-
-Reuse it across multiple bots and repositories.
-
-| AI providers | Git platforms |
-|---|---|
-| **Anthropic** (Claude) | **Gitea** (self-hosted) |
-| **OpenAI** (+ OpenAI-compatible APIs) | **GitHub** / **GitHub Enterprise** |
-| **Google AI / Gemini** | **GitLab** (gitlab.com & self-managed) |
-| **Ollama** (local LLMs) | **Bitbucket Cloud** |
-| **llama.cpp** (local GGUF models) | |
-
-Choose the combination that works best for your organization.
-
----
-
 ## Current Workflows
 
 ### 🔍 Pull Request Reviews
@@ -443,18 +434,13 @@ The documentation is organized by audience in the **[Documentation Hub](doc/READ
 ## Project Maturity
 
 ### Production-ready
+* GitHub
+* GitHub Enterprise
+* Gitea
 
-✅ GitHub
-
-✅ GitHub Enterprise
-
-✅ Gitea
-
-### Experimental
-
-⚠️ GitLab
-
-⚠️ Bitbucket Cloud
+### 🧪 Community feedback welcome- 
+* GitLab
+* Bitbucket Cloud
 
 ### Experimental Workflows
 
@@ -476,8 +462,12 @@ Bug reports are always welcome.
 - 🧪 System-tested workflows
 - 🐳 Docker-first deployment
 - 🌍 Self-hostable end-to-end
-
 ---
+## Community
+⭐ >100 GitHub stars4
+🚀 >15 releases6
+🐳 Docker image available8
+🌍 Users across GitHub, Gitea, GitLab and Bitbucket
 
 ## Get started
 

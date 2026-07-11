@@ -6,9 +6,9 @@
 [![GitHub stars](https://img.shields.io/github/stars/tmseidel/ai-git-bot)](https://github.com/tmseidel/ai-git-bot/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/tmseidel/ai-git-bot)](https://github.com/tmseidel/ai-git-bot/issues)
 
-🌐 语言版本：**English** · [한국어](README.ko.md) · [日本語](README.ja.md) · **中文**
+🌐 语言版本：**English** · **中文** · [한국어](README.ko.md) · [日本語](README.ja.md)
 
-直接在您的团队已经在使用的 Git 工具中，自动化软件开发中那些必要但不舒适的部分。
+> **面向 Git 仓库的自托管 AI 工作流自动化平台。**
 
 - 🔍 审查拉取请求
 - 🧪 生成测试
@@ -17,9 +17,23 @@
 - 🎬 创建和运行 E2E 测试
 - 💬 在代码审查中回答问题
 
-| AI 提供商 | Git 平台 |
-|--------------------------------------------------------------|---|
-| ✅ Claude<br>✅ OpenAI<br>✅ Gemini<br>✅ Ollama<br>✅ llama.cpp | ✅ GitHub<br>✅ GitHub Enterprise<br>✅ Gitea<br>✅ GitLab<br>✅ Bitbucket Cloud |
+💡 已经在使用 GitHub Copilot？
+
+> **太好了。**<br>
+> Copilot 帮助开发者更快编写代码。AI-Git-Bot 帮助团队自动化审查、测试、issue 和拉取请求工作流。<br>
+> 许多团队会同时使用这两个工具。
+
+## 🔌 任意 AI 提供商与任意 Git 平台的组合
+
+|| AI 提供商 | Git 平台 |
+||---|---|
+|| **Anthropic**（Claude） | **Gitea**（自托管） |
+|| **OpenAI**（+ OpenAI 兼容 API） | **GitHub** / **GitHub Enterprise** |
+|| **Google AI / Gemini** | **GitLab**（gitlab.com 与自管理） |
+|| **Ollama**（本地 LLM） | **Bitbucket Cloud** |
+|| **llama.cpp**（本地 GGUF 模型） | |
+
+与大多数 AI 编码工具不同，AI-Git-Bot 不绑定于特定的 Git 平台或 AI 提供商。
 
 **完全支持自托管。您的代码可以保留在基础设施内。**
 
@@ -39,12 +53,11 @@
 - 预览环境应该被清理
 - 小的维护工单最终应该被实现
 
-没有人不同意这些想法。
-
-* 问题在于它们不够舒适。
-* 它们是重复性的。
-* 它们很少进入路线图。
-* 当截止日期临近时，它们往往是最先被砍掉的。
+没有人不同意这些想法。问题是这些任务：
+* 不舒服。
+* 重复性劳动。
+* 难以确定优先级。
+* 当截止日期临近时容易被推迟。
 
 AI-Git-Bot 的存在是为了将这些工程杂务转化为在你的 Git 平台内自动执行的、可重复的工作流。
 
@@ -71,6 +84,8 @@ AI-Git-Bot 将以下内容直接带到 Gitea：
 - AI Issue 编写
 - AI 编码工作流
 - 交互式 PR 讨论
+
+直接带到 Gitea。
 
 使用 OpenAI、Claude、Gemini 或本地 Ollama 模型，无需更改开发者的现有工作流。
 
@@ -106,7 +121,7 @@ AI-Git-Bot 支持：
 - 验收标准
 - 后续修复
 
-AI-Git-Bot 将这些活动转化为由你团队已经在产生的事件触发的工作流：
+AI-Git-Bot 将这些活动转化为你团队已经在产生的事件触发的工作流：
 
 - 拉取请求打开
 - 请求审查者
@@ -209,16 +224,16 @@ Bot 直接在线程中回答，并保持对话上下文。
 
 ## ✨ 它能做什么？
 
-| 工作流 | 触发 | 结果 |
-|-----------|----------|------|
-| **PR 审查** | PR 打开或审查重新请求 | 审查评论和发现 |
-| **交互式问答** | PR 评论中的 `@bot` 提及 | 上下文感知对话 |
-| **Issue → 代码** | Issue 分配给编码 bot | 拉取请求 |
-| **Issue → 改进** | Issue 分配给写作 bot | 带验收标准的结构化 issue |
-| **单元测试生成** | PR 打开或命令触发 | 提交到分支的生成测试 |
-| **全栈 QA** | PR 打开 | 在预览环境中执行的 Playwright 套件 |
-| **PR 重新审查** | 强制推送或审查请求 | 更新的分析 |
-| **工作流自动化** | Git 事件 | 工程杂务自动化 |
+|| 工作流 | 触发 | 结果 |
+||-----------|----------|------|
+|| **PR 审查** | PR 打开或审查重新请求 | 审查评论和发现 |
+|| **交互式问答** | PR 评论中的 `@bot` 提及 | 上下文感知对话 |
+|| **Issue → 代码** | Issue 分配给编码 bot | 拉取请求 |
+|| **Issue → 改进** | Issue 分配给写作 bot | 带验收标准的结构化 issue |
+|| **单元测试生成** | PR 打开或命令触发 | 提交到分支的生成测试 |
+|| **全栈 QA** | PR 打开 | 在预览环境中执行的 Playwright 套件 |
+|| **PR 重新审查** | 强制推送或审查请求 | 更新的分析 |
+|| **工作流自动化** | Git 事件 | 工程杂务自动化 |
 
 ---
 
@@ -274,26 +289,6 @@ Copilot 帮助开发者更快编写代码。
 AI-Git-Bot 帮助团队自动化代码周围的工作。
 
 这些目标互补。
-
----
-
-## 🔌 任意 AI 提供商与任意 Git 平台的组合
-
-AI-Git-Bot 充当 Git 平台和 AI 提供商之间的网关。
-
-一次配置 AI 提供商。
-
-在多个 bot 和仓库中重复使用。
-
-| AI 提供商 | Git 平台 |
-|---|---|
-| **Anthropic**（Claude） | **Gitea**（自托管） |
-| **OpenAI**（+ OpenAI 兼容 API） | **GitHub** / **GitHub Enterprise** |
-| **Google AI / Gemini** | **GitLab**（gitlab.com 与自管理） |
-| **Ollama**（本地 LLM） | **Bitbucket Cloud** |
-| **llama.cpp**（本地 GGUF 模型） | |
-
-选择最适合你组织的组合。
 
 ---
 
@@ -412,8 +407,8 @@ docker compose up --build -d
 
 从这里开始：
 
-- 用户指南
-- 工作流文档
+- **[用户指南](doc/USER_GUIDE.md)**
+- **[工作流文档](doc/PR_WORKFLOWS.md)**
 
 ---
 
@@ -421,8 +416,8 @@ docker compose up --build -d
 
 从这里开始：
 
-- 本地开发指南
-- 架构文档
+- **[本地开发指南](doc/LOCAL_DEVELOPMENT.md)**
+- **[架构文档](doc/ARCHITECTURE.md)**
 
 ---
 
@@ -430,12 +425,12 @@ docker compose up --build -d
 
 文档在 **[Documentation Hub](doc/README.md)** 中按受众组织：
 
-| 您是… | 从这里开始 |
-|---|---|
-| 👤 **用户** — bot 已配置好，只需使用 Git 平台 | [使用 Bot](doc/USING_THE_BOT.md) |
-| 🛠️ **管理员** — 负责配置软件、bot 和工作流 | [部署](doc/DEPLOYMENT.md) · [管理指南](doc/USER_GUIDE.md) |
-| 🧪 **测试者** — 想安全地试用功能 | [测试指南](doc/TESTING_GUIDE.md) |
-| 💻 **开发者** — 处理代码 | [本地开发](doc/LOCAL_DEVELOPMENT.md) · [架构](doc/ARCHITECTURE.md) |
+|| 您是… | 从这里开始 |
+||---|---|
+|| 👤 **用户** — bot 已配置好，只需使用 Git 平台 | [使用 Bot](doc/USING_THE_BOT.md) |
+|| 🛠️ **管理员** — 负责配置软件、bot 和工作流 | [部署](doc/DEPLOYMENT.md) · [管理指南](doc/USER_GUIDE.md) |
+|| 🧪 **测试者** — 想安全地试用功能 | [测试指南](doc/TESTING_GUIDE.md) |
+|| 💻 **开发者** — 处理代码 | [本地开发](doc/LOCAL_DEVELOPMENT.md) · [架构](doc/ARCHITECTURE.md) |
 
 ---
 
@@ -443,17 +438,14 @@ docker compose up --build -d
 
 ### 生产就绪
 
-✅ GitHub
+* GitHub
+* GitHub Enterprise
+* Gitea
 
-✅ GitHub Enterprise
+### 🧪 欢迎社区反馈
 
-✅ Gitea
-
-### 实验性
-
-⚠️ GitLab
-
-⚠️ Bitbucket Cloud
+* GitLab
+* Bitbucket Cloud
 
 ### 实验性工作流
 
@@ -478,12 +470,18 @@ Bug 报告始终欢迎。
 
 ---
 
+## 社区
+
+⭐ >100 GitHub stars
+🚀 >15 releases
+🐳 Docker image available
+🌍 Users across GitHub, Gitea, GitLab and Bitbucket
+
 ## 开始
 
 ```bash
 docker pull tmseidel/ai-git-bot:latest
 ```
-
 
 ---
 

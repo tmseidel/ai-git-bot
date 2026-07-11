@@ -1,8 +1,8 @@
 name: Guard main branch
 
-# Ensures that only release branches with a non-SNAPSHOT version in the
-# Maven POM can be merged into `main`. Runs on every pull request that
-# targets `main` and fails fast if either guard is violated.
+# Ensures that only release/* or hotfix/* branches with a non-SNAPSHOT
+# version in the Maven POM can be merged into `main`. Runs on every pull
+# request that targets `main` and fails fast if either guard is violated.
 #
 # Required check: configure this workflow as a required status check on
 # the `main` branch in the repository's branch protection rules so a PR
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   guard:
-    name: Only release/* with non-SNAPSHOT version may target main
+    name: Only release/* or hotfix/* with non-SNAPSHOT version may target main
     runs-on: ubuntu-latest
     steps:
       - name: Check source branch name
@@ -28,12 +28,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "Source branch: '${HEAD_REF}'"
-          if [[ ! "${HEAD_REF}" =~ ^release/ ]]; then
-            echo "::error::Only branches starting with 'release/' may be merged into 'main'."
+          if [[ ! "${HEAD_REF}" =~ ^(release|hotfix)/ ]]; then
+            echo "::error::Only branches starting with 'release/' or 'hotfix/' may be merged into 'main'."
             echo "::error::Got '${HEAD_REF}'. Rename your branch or target a different base."
             exit 1
           fi
-          echo "OK: branch name starts with 'release/'."
+          echo "OK: branch name starts with 'release/' or 'hotfix/'."
 
       - name: Checkout PR head
         uses: actions/checkout@v4
