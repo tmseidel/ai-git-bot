@@ -66,8 +66,11 @@ public final class ReadmeSyncSummaryRenderer {
         appendSection(sb, "Deleted", ctx.deleted());
 
         if (!committed) {
-            sb.append("\n> ⚠️ The changes were prepared but could not be committed/pushed — "
-                    + "see the run log for details.\n");
+            sb.append("""
+                    
+                    > ⚠️ The changes were prepared but could not be committed/pushed — \
+                    see the run log for details.
+                    """);
         }
         return sb.toString();
     }

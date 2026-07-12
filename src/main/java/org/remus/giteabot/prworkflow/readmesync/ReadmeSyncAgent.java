@@ -50,9 +50,6 @@ public class ReadmeSyncAgent {
      * @param budgetExhausted  whether the agent ran out of rounds
      */
     public record Result(int changesApplied, String finalAssistantText, boolean budgetExhausted) {
-        public boolean changedAnything() {
-            return changesApplied > 0;
-        }
     }
 
     /**

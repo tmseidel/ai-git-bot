@@ -243,7 +243,7 @@ public final class LegacyToolProtocolRenderer {
     }
 
     private static void appendComma(StringBuilder sb, String name) {
-        if (sb.length() > 0) {
+        if (!sb.isEmpty()) {
             sb.append(", ");
         }
         sb.append(name);
@@ -252,7 +252,7 @@ public final class LegacyToolProtocolRenderer {
     private static String joinBackticked(List<String> names) {
         StringBuilder sb = new StringBuilder();
         for (String n : names) {
-            if (sb.length() > 0) {
+            if (!sb.isEmpty()) {
                 sb.append(", ");
             }
             sb.append('`').append(n).append('`');

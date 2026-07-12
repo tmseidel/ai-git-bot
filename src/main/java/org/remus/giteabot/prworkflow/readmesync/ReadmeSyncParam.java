@@ -1,6 +1,7 @@
 package org.remus.giteabot.prworkflow.readmesync;
 
 import org.remus.giteabot.prworkflow.WorkflowParamName;
+import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 
 /**
  * Compile-time-safe identifiers for the {@link ReadmeSyncWorkflow} parameter

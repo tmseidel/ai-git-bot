@@ -232,8 +232,11 @@ public class ReadmeSyncService {
                 ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(diff truncated)"
                 : diff;
         StringBuilder sb = new StringBuilder(8192);
-        sb.append("Review the following pull request for documentation drift and update the "
-                + "in-scope Markdown documentation if the code changes made it inaccurate.\n\n");
+        sb.append("""
+                Review the following pull request for documentation drift and update the \
+                in-scope Markdown documentation if the code changes made it inaccurate.
+                
+                """);
         sb.append("Title: ").append(prTitle == null ? "(none)" : prTitle).append('\n');
         if (prBody != null && !prBody.isBlank()) {
             sb.append("Description:\n").append(prBody).append('\n');

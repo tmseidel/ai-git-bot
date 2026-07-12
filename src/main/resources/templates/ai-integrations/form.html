@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
-      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+>
 <body>
 <div th:replace="~{layout :: layout(${integration.id != null ? 'Edit AI Integration' : 'New AI Integration'}, ~{::pageContent})}">
     <div th:fragment="pageContent">
