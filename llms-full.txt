@@ -76,10 +76,12 @@ Supported AI/provider styles include:
 
 - `README.md`: main project overview, feature list, diagrams, screenshots, quick start, and documentation index.  
 - `doc/USER_GUIDE.md`: web UI guide for creating AI integrations, Git integrations, bots, prompts, and operating workflows.
-- `doc/PR_WORKFLOWS.md`: workflow configurations, PR-workflow orchestration, deployment targets, and lifecycle details.
-- `doc/PR_WORKFLOWS_UNIT_TEST.md`: AI unit-test workflow, supported runners, slash commands, and write-safety model.
-- `doc/PR_WORKFLOWS_E2E.md`: Full-stack QA workflow and preview-environment lifecycle.
-- `doc/PR_WORKFLOWS_AGENTIC_REVIEW.md`: read-only agentic PR review workflow.
+- `doc/PR_WORKFLOWS.md`: what each PR workflow solves and the shared setup (workflow configurations, triggers, running workflows).
+- `doc/PR_WORKFLOWS_REVIEW.md`: the default always-on AI code review workflow.
+- `doc/PR_WORKFLOWS_UNIT_TEST.md`: AI unit-test workflow, supported toolchains, slash commands, and write-safety model.
+- `doc/PR_WORKFLOWS_E2E.md`: Full-stack QA workflow (generated Playwright tests against a per-PR preview).
+- `doc/PR_WORKFLOWS_AGENTIC_REVIEW.md`: deeper agentic PR review workflow.
+- `doc/PR_WORKFLOWS_README_SYNC.md`: keeps README and Markdown docs in sync with code changes.
 - `doc/DEPLOYMENT.md`: Docker Compose deployment, configuration, environment variables, and production notes.     
 - `doc/LOCAL_DEVELOPMENT.md`: local build/test instructions and project structure.
 - `CHANGELOG.md`: release and unreleased change notes.

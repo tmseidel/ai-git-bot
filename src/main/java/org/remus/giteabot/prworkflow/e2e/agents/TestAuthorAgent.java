@@ -56,7 +56,7 @@ public class TestAuthorAgent {
         }
         Set<String> allowed = Set.of("pr-test-write");
         List<ToolDescriptor> descriptors = toolCatalog.nativeDescriptors(
-                ToolCatalog.Role.E2E, null, allowed);
+                ToolCatalog.Role.PR_WORKFLOW, null, allowed);
 
         // Build the system prompt the same way the issue / writer agents do:
         // role description (from E2ePromptLibrary or the operator-edited

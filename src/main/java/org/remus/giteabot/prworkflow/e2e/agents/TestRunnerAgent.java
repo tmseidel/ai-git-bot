@@ -65,7 +65,7 @@ public class TestRunnerAgent {
             return new Result(0, 0, "AI client unavailable", true);
         }
         List<ToolDescriptor> descriptors = toolCatalog.nativeDescriptors(
-                ToolCatalog.Role.E2E, null, ALLOWED_TOOLS);
+                ToolCatalog.Role.PR_WORKFLOW, null, ALLOWED_TOOLS);
 
         // System prompt = role description (E2ePromptLibrary or the
         // operator-edited SystemPrompt) + tool protocol section rendered

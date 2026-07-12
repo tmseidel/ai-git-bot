@@ -99,6 +99,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2eAuthorSystemPrompt("author");
         systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
+        systemPrompt.setReadmeSyncSystemPrompt("readme-sync");
         when(systemPromptRepository.existsByName("Custom")).thenReturn(true);
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
@@ -123,6 +124,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2eAuthorSystemPrompt("author");
         systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
+        systemPrompt.setReadmeSyncSystemPrompt("readme-sync");
         systemPrompt.setDefaultEntry(true);
         when(systemPromptRepository.existsByNameAndIdNot("Custom", 2L)).thenReturn(false);
         when(systemPromptRepository.findByDefaultEntryTrue()).thenReturn(Optional.of(existingDefault));
@@ -170,6 +172,18 @@ class SystemPromptServiceTest {
         verify(systemPromptRepository, never()).save(any());
     }
 
+    @Test
+    void save_requiresReadmeSyncPrompt() {
+        SystemPrompt systemPrompt = baseValidSystemPrompt();
+        systemPrompt.setReadmeSyncSystemPrompt(null);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("README Sync System-Prompt is required", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
     private static SystemPrompt baseValidSystemPrompt() {
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setName("Custom");
@@ -181,6 +195,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2eAuthorSystemPrompt("author");
         systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
+        systemPrompt.setReadmeSyncSystemPrompt("readme-sync");
         return systemPrompt;
     }
 }

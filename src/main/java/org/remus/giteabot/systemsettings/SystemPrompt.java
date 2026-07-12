@@ -43,6 +43,9 @@ public class SystemPrompt {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String unitTestAuthorSystemPrompt;
 
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String readmeSyncSystemPrompt;
+
     @Column(nullable = false)
     private boolean defaultEntry = false;
 

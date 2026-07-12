@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
-      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
+>
 <body>
 <div th:replace="~{layout :: layout(${mcpConfiguration.id != null ? 'Edit MCP Configuration' : 'New MCP Configuration'}, ~{::pageContent})}">
     <div th:fragment="pageContent">

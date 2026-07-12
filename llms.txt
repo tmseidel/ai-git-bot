@@ -32,8 +32,12 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 - [Using the Bot](doc/USING_THE_BOT.md): end-user guide for interacting with bots from the Git platform — reviews, @mentions, slash commands, issue assignment.
 - [Testing Guide](doc/TESTING_GUIDE.md): self-contained docker-compose system-test stacks and bug-reporting guidance.
 - [Admin Guide](doc/USER_GUIDE.md): web UI usage, bot creation, AI integrations, Git integrations, and operating workflows.
-- [PR Workflows](doc/PR_WORKFLOWS.md): workflow configurations, deployment targets, orchestration, and lifecycle.
-- [Unit-Test Author Workflow](doc/PR_WORKFLOWS_UNIT_TEST.md): AI unit-test generation, supported runners, slash commands, and write-safety model.
+- [PR Workflows](doc/PR_WORKFLOWS.md): what each PR workflow solves and how to set up and run them.
+- [PR Review](doc/PR_WORKFLOWS_REVIEW.md): the default always-on AI code review.
+- [Agentic PR Review](doc/PR_WORKFLOWS_AGENTIC_REVIEW.md): deeper review after the bot explores the codebase; optional approve/request-changes.
+- [Unit Tests](doc/PR_WORKFLOWS_UNIT_TEST.md): AI unit-test generation for the PR diff, run with the project's own toolchain.
+- [Full-Stack QA](doc/PR_WORKFLOWS_E2E.md): generated Playwright tests run against a per-PR preview.
+- [README Sync](doc/PR_WORKFLOWS_README_SYNC.md): keeps README and Markdown docs in sync with code changes.
 - [Architecture](doc/ARCHITECTURE.md): components, request flows, persistence, webhook routing, and system diagrams.
 - [Agent Documentation](doc/AGENT.md): coding-agent and writer-agent workflows, tools, prompts, validation, and behavior.
 - [MCP Server Handling](doc/MCP_SERVER_HANDLING.md): MCP JSON setup, tool whitelist selection, transparency, and bot details.

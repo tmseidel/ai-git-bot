@@ -88,7 +88,19 @@ public class UnitTestService {
             return Result.skipped("No diff");
         }
 
-        String headBranch = resolveHeadBranch(payload, owner, repo);
+        String headBranch = resolveHeadBranch(payload, owner, repo, prNumber);
+        if (headBranch == null) {
+            // Never fall back to the default branch: this workflow clones the head
+            // branch and (in commit-to-pr mode) pushes generated tests to it.
+            // Cloning/committing the wrong branch would push tests to the default
+            // branch. Skip instead.
+            log.warn("unit-test: could not resolve PR head branch for PR #{} in {}/{} — skipping",
+                    prNumber, owner, repo);
+            postComment(owner, repo, prNumber, UnitTestSummaryRenderer.renderSkipped(prNumber,
+                    "could not determine the pull request's head branch, so the workflow was skipped "
+                            + "to avoid committing tests to the wrong branch."));
+            return Result.skipped("Unresolved PR head branch");
+        }
         String headRef = headSha(payload) != null ? headSha(payload) : headBranch;
 
         Path workspace = null;
@@ -304,17 +316,41 @@ public class UnitTestService {
         return files;
     }
 
-    private String resolveHeadBranch(WebhookPayload payload, String owner, String repo) {
+    /**
+     * Resolves the PR head branch to clone/commit against. Prefers the webhook
+     * payload; when the head ref is missing (notably {@code issue_comment}-style
+     * events with no {@code pull_request.head} block) it authoritatively
+     * re-fetches it from the provider API. Returns {@code null} when it cannot be
+     * determined — callers MUST skip rather than substitute the repository default
+     * branch, because this workflow commits and pushes to the resolved branch.
+     */
+    private String resolveHeadBranch(WebhookPayload payload, String owner, String repo, long prNumber) {
         if (payload.getPullRequest() != null && payload.getPullRequest().getHead() != null
-                && payload.getPullRequest().getHead().getRef() != null) {
+                && payload.getPullRequest().getHead().getRef() != null
+                && !payload.getPullRequest().getHead().getRef().isBlank()) {
             return org.remus.giteabot.agent.shared.BranchRefs.normalize(
                     payload.getPullRequest().getHead().getRef());
         }
-        try {
-            return repositoryClient.getDefaultBranch(owner, repo);
-        } catch (RuntimeException e) {
-            return "main";
+        return fetchHeadBranchFromApi(owner, repo, prNumber);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String fetchHeadBranchFromApi(String owner, String repo, long prNumber) {
+        if (prNumber <= 0) {
+            return null;
         }
+        try {
+            java.util.Map<String, Object> pr = repositoryClient.getPullRequestDetails(owner, repo, prNumber);
+            if (pr != null && pr.get("head") instanceof java.util.Map<?, ?> head
+                    && ((java.util.Map<String, Object>) head).get("ref") instanceof String ref
+                    && !ref.isBlank()) {
+                return org.remus.giteabot.agent.shared.BranchRefs.normalize(ref);
+            }
+        } catch (RuntimeException e) {
+            log.debug("unit-test: getPullRequestDetails failed for {}/{}#{}: {}",
+                    owner, repo, prNumber, e.getMessage());
+        }
+        return null;
     }
 
     private String headSha(WebhookPayload payload) {

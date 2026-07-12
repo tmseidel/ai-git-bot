@@ -1,6 +1,7 @@
 package org.remus.giteabot.ai.openai;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
 import org.remus.giteabot.ai.AiClientDelegateSupport;
 import org.remus.giteabot.ai.AiMessage;
@@ -9,7 +10,6 @@ import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.ai.ToolNameSanitizer;
-import org.remus.giteabot.agent.shared.AgentJackson;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
