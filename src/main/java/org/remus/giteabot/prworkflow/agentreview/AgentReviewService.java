@@ -142,7 +142,12 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = resolveHeadBranch(payload, owner, repo);
+        String headBranch = resolveHeadBranch(payload, owner, repo, prNumber);
+        if (headBranch == null) {
+            log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
+                    + "(refusing to review the default branch)", prNumber, owner, repo);
+            return false;
+        }
 
         Path workspaceDir = null;
         try {
@@ -234,7 +239,12 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for clarification on PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = resolveHeadBranch(payload, owner, repo);
+        String headBranch = resolveHeadBranch(payload, owner, repo, prNumber);
+        if (headBranch == null) {
+            log.warn("Could not resolve PR head branch for PR #{} in {}/{} — cannot answer clarification "
+                    + "(refusing to review the default branch)", prNumber, owner, repo);
+            return false;
+        }
 
         Path workspaceDir = null;
         try {
@@ -481,17 +491,40 @@ public class AgentReviewService {
                 + "\n\n---\n*Read-only agentic review by AI Git Bot*";
     }
 
-    private String resolveHeadBranch(WebhookPayload payload, String owner, String repo) {
+    /**
+     * Resolves the PR head branch to clone for review. Prefers the webhook
+     * payload; when the head ref is missing (notably {@code issue_comment}-style
+     * events with no {@code pull_request.head} block) it authoritatively
+     * re-fetches it from the provider API. Returns {@code null} when it cannot be
+     * determined — callers MUST skip rather than substitute the repository default
+     * branch, so the bot never reviews the wrong branch.
+     */
+    private String resolveHeadBranch(WebhookPayload payload, String owner, String repo, long prNumber) {
         if (payload.getPullRequest() != null && payload.getPullRequest().getHead() != null
-                && payload.getPullRequest().getHead().getRef() != null) {
+                && payload.getPullRequest().getHead().getRef() != null
+                && !payload.getPullRequest().getHead().getRef().isBlank()) {
             return BranchRefs.normalize(payload.getPullRequest().getHead().getRef());
         }
-        try {
-            return repositoryClient.getDefaultBranch(owner, repo);
-        } catch (Exception e) {
-            log.debug("Could not resolve PR head branch, falling back to 'main': {}", e.getMessage());
-            return "main";
+        return fetchHeadBranchFromApi(owner, repo, prNumber);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String fetchHeadBranchFromApi(String owner, String repo, long prNumber) {
+        if (prNumber <= 0) {
+            return null;
         }
+        try {
+            java.util.Map<String, Object> pr = repositoryClient.getPullRequestDetails(owner, repo, prNumber);
+            if (pr != null && pr.get("head") instanceof java.util.Map<?, ?> head
+                    && ((java.util.Map<String, Object>) head).get("ref") instanceof String ref
+                    && !ref.isBlank()) {
+                return BranchRefs.normalize(ref);
+            }
+        } catch (Exception e) {
+            log.debug("agentic-review: getPullRequestDetails failed for {}/{}#{}: {}",
+                    owner, repo, prNumber, e.getMessage());
+        }
+        return null;
     }
 
     private String fetchFiles(String owner, String repo, String ref, List<String> filePaths) {
