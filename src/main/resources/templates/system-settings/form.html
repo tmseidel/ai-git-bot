@@ -198,6 +198,24 @@
                                     </div>
                                 </div>
 
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header">
+                                        <button class="accordion-button collapsed" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#collapseReadmeSyncPrompt"
+                                                aria-expanded="false" aria-controls="collapseReadmeSyncPrompt">
+                                            README Sync System-Prompt
+                                        </button>
+                                    </h2>
+                                    <div id="collapseReadmeSyncPrompt" class="accordion-collapse collapse"
+                                         data-bs-parent="#systemPromptsAccordion">
+                                        <div class="accordion-body">
+                                            <label for="readmeSyncSystemPrompt" class="form-label visually-hidden">README Sync System-Prompt</label>
+                                            <textarea class="form-control" id="readmeSyncSystemPrompt" th:field="*{readmeSyncSystemPrompt}"
+                                                      rows="14" required></textarea>
+                                        </div>
+                                    </div>
+                                </div>
+
                             </div>
                         </div>
                     </div>

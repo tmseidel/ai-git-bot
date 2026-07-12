@@ -161,6 +161,7 @@ public class SystemSettingsController {
                     clone.setE2eAuthorSystemPrompt(source.getE2eAuthorSystemPrompt());
                     clone.setE2eRunnerSystemPrompt(source.getE2eRunnerSystemPrompt());
                     clone.setUnitTestAuthorSystemPrompt(source.getUnitTestAuthorSystemPrompt());
+                    clone.setReadmeSyncSystemPrompt(source.getReadmeSyncSystemPrompt());
                     model.addAttribute("systemPrompt", clone);
                     model.addAttribute("activeNav", "system-settings");
                     return "system-settings/form";
@@ -204,7 +205,8 @@ public class SystemSettingsController {
                         "e2ePlannerSystemPrompt", systemPrompt.getE2ePlannerSystemPrompt(),
                         "e2eAuthorSystemPrompt", systemPrompt.getE2eAuthorSystemPrompt(),
                         "e2eRunnerSystemPrompt", systemPrompt.getE2eRunnerSystemPrompt(),
-                        "unitTestAuthorSystemPrompt", systemPrompt.getUnitTestAuthorSystemPrompt())))
+                        "unitTestAuthorSystemPrompt", systemPrompt.getUnitTestAuthorSystemPrompt(),
+                        "readmeSyncSystemPrompt", systemPrompt.getReadmeSyncSystemPrompt())))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 

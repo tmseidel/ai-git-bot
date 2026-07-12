@@ -62,6 +62,15 @@ public record PrWorkflowContext(
     public static final String HINT_RERUN_ONLY = "e2e.rerun-only";
 
     /**
+     * Free-text instruction threaded by
+     * {@link org.remus.giteabot.prworkflow.readmesync.ReadmeSyncSlashCommandHandler}
+     * from {@code @bot regenerate-readme <instruction>} so
+     * {@link org.remus.giteabot.prworkflow.readmesync.ReadmeSyncWorkflow} can
+     * pass it to the agent as additional user guidance.
+     */
+    public static final String HINT_README_SYNC_GUIDANCE = "readme-sync.guidance";
+
+    /**
      * Threaded by
      * {@link org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler}
      * when the user posts {@code @bot clarify <question>} on a PR that was

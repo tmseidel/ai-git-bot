@@ -63,6 +63,9 @@ public class SystemPromptService {
         if (systemPrompt.getUnitTestAuthorSystemPrompt() == null || systemPrompt.getUnitTestAuthorSystemPrompt().isBlank()) {
             throw new IllegalArgumentException("Unit-Test Author System-Prompt is required");
         }
+        if (systemPrompt.getReadmeSyncSystemPrompt() == null || systemPrompt.getReadmeSyncSystemPrompt().isBlank()) {
+            throw new IllegalArgumentException("README Sync System-Prompt is required");
+        }
         boolean duplicateName = systemPrompt.getId() == null
                 ? systemPromptRepository.existsByName(systemPrompt.getName())
                 : systemPromptRepository.existsByNameAndIdNot(systemPrompt.getName(), systemPrompt.getId());

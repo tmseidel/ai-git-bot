@@ -73,7 +73,7 @@ public class UnitTestAuthorAgent {
             return new Result(0, "AI client unavailable", true);
         }
         List<ToolDescriptor> descriptors = toolCatalog.nativeDescriptors(
-                ToolCatalog.Role.E2E, null, ALLOWED_TOOLS);
+                ToolCatalog.Role.PR_WORKFLOW, null, ALLOWED_TOOLS);
 
         ToolingMode mode = ToolingMode.resolve(ToolingMode.NATIVE,
                 aiClient.supportsNativeTools(), !descriptors.isEmpty());
