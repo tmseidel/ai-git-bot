@@ -49,16 +49,15 @@ Cloud providers (Anthropic, OpenAI, Google AI / Gemini) only need an API key —
 | Document | What it covers |
 |---|---|
 | [Agents](AGENT.md) | Coding agent and technical-writer agent — setup, configuration, security, limitations |
-| [PR Workflows](PR_WORKFLOWS.md) | Workflow configurations, trigger conditions, deployment targets |
-| [Agentic PR Workflows (concept)](agentic-workflows/README.md) | Feature overview and persona-driven user stories for the workflow subsystem |
-| [Unit-Test Author Workflow](PR_WORKFLOWS_UNIT_TEST.md) | AI unit-test generation for PR diffs, supported runners, write-safety guards |
-| [Full-stack QA / E2E Workflow](PR_WORKFLOWS_E2E.md) | Per-PR preview environments, generated Playwright suites, teardown lifecycle |
-| [Agentic Review Workflow](PR_WORKFLOWS_AGENTIC_REVIEW.md) | Read-only agentic PR review with repository and MCP tool access; optional formal review action (approve/request-changes) |
-| [CI Action Recipes](PR_WORKFLOWS_CI_ACTIONS.md) | `CI_ACTION` deployment recipes per Git provider |
-| [Webhook Recipes](PR_WORKFLOWS_WEBHOOK_RECIPES.md) | `WEBHOOK` deployment recipes (Jenkins, scripts, …) |
-| [MCP Server Handling](MCP_SERVER_HANDLING.md) | Attaching remote MCP servers, tool whitelist selection, call transparency |
-| [Bot Tool Configurations](BOT_TOOL_CONFIGURATIONS.md) | Per-bot whitelist of built-in agent tools |
-| [Tool-Calling Troubleshooting](TOOL_CALLING.md) | What to do when a model misbehaves with tools, incl. the legacy tool-calling switch |
+| [PR Workflows](PR_WORKFLOWS.md) | **Start here.** What each workflow solves and the shared setup: workflow configurations, triggers, running workflows |
+| [PR Review](PR_WORKFLOWS_REVIEW.md) | The default, always-on AI code review |
+| [Agentic PR Review](PR_WORKFLOWS_AGENTIC_REVIEW.md) | A deeper review where the bot explores the codebase first; optional approve / request-changes |
+| [Unit Tests](PR_WORKFLOWS_UNIT_TEST.md) | Auto-generated unit tests for the PR diff, run with your project's own toolchain |
+| [Full-Stack QA](PR_WORKFLOWS_E2E.md) | Generated Playwright tests run against a per-PR preview |
+| [README Sync](PR_WORKFLOWS_README_SYNC.md) | Keeps README and Markdown docs in sync with code changes |
+
+> Preview/execution environments, MCP servers, and tool-calling are being
+> reworked and are intentionally not covered in the workflow guides above.
 
 ---
 

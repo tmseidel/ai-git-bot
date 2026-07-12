@@ -16,30 +16,9 @@
 - ✏️ Improve issues
 - 🤖 Turn issues into pull requests
 - 🎬 Create and run E2E tests
+- 📝 Keep documentation in sync with the code
 - 💬 Answer questions inside code reviews
 
-💡 Already using GitHub Copilot?
-> **Great.**<br>
-> Copilot helps developers write code faster. AI-Git-Bot helps teams automate reviews, tests, issues and pull-request workflows.<br>
-> Many teams use both.
-
-## 🔌 Mix any AI provider with any Git platform
-| AI providers | Git platforms |
-|---|---|
-| **Anthropic** (Claude) | **Gitea** (self-hosted) |
-| **OpenAI** (+ OpenAI-compatible APIs) | **GitHub** / **GitHub Enterprise** |
-| **Google AI / Gemini** | **GitLab** (gitlab.com & self-managed) |
-| **Ollama** (local LLMs) | **Bitbucket Cloud** |
-| **llama.cpp** (local GGUF models) | |
-Unlike most AI coding tools, AI-Git-Bot is not tied to a specific Git platform or AI provider.
-
-**Fully self-hostable. Your code can stay inside your infrastructure.**
-
-<p align="center">
-  <img src="doc/images/dashboard_ai_git_bot.PNG" alt="AI-Git-Bot Dashboard" width="800"/>
-</p>
-
----
 
 ## Why does this project exist?
 
@@ -48,6 +27,7 @@ Every engineering team has a list of things they know should happen:
 - Pull requests should be reviewed carefully
 - Bugs should get regression tests
 - Issues should have acceptance criteria
+- Documentation should stay up to date with the code
 - Preview environments should be cleaned up
 - Small maintenance tickets should eventually get implemented
 
@@ -81,6 +61,7 @@ AI-Git-Bot brings:
 - AI-generated tests
 - AI issue authoring
 - AI coding workflows
+- AI documentation upkeep
 - Interactive PR discussions
 
 directly into Gitea.
@@ -129,6 +110,31 @@ AI-Git-Bot turns those activities into repeatable workflows triggered by events 
 👉 Think: **"The AI teammate that never forgets the boring but important work."**
 
 ---
+
+💡 Already using GitHub Copilot?
+> **Great.**<br>
+> Copilot helps developers write code faster. AI-Git-Bot helps teams automate reviews, tests, issues and pull-request workflows.<br>
+> Many teams use both.
+
+## 🔌 Mix any AI provider with any Git platform
+| AI providers | Git platforms |
+|---|---|
+| **Anthropic** (Claude) | **Gitea** (self-hosted) |
+| **OpenAI** (+ OpenAI-compatible APIs) | **GitHub** / **GitHub Enterprise** |
+| **Google AI / Gemini** | **GitLab** (gitlab.com & self-managed) |
+| **Ollama** (local LLMs) | **Bitbucket Cloud** |
+| **llama.cpp** (local GGUF models) | |
+
+Unlike most AI coding tools, AI-Git-Bot is not tied to a specific Git platform or AI provider.
+
+**Fully self-hostable. Your code can stay inside your infrastructure.**
+
+<p align="center">
+  <img src="doc/images/dashboard_ai_git_bot.PNG" alt="AI-Git-Bot Dashboard" width="800"/>
+</p>
+
+---
+
 
 ## See it in action
 
@@ -229,6 +235,7 @@ Assign an issue to a coding bot and it can create an implementation pull request
 | **Issue → Better Issue** | Issue assigned to writer bot | Structured issue with acceptance criteria |
 | **Unit Test Generation** | PR opened or command triggered | Generated tests committed to branch |
 | **Full-Stack QA** | PR opened | Playwright suite executed against preview environment |
+| **README Sync** | PR opened or command triggered | Documentation updated to match code changes |
 | **PR Re-Review** | Force-push or review request | Updated analysis |
 | **Workflow Automation** | Git events | Automated engineering chores |
 
@@ -253,6 +260,7 @@ Examples include:
 - Reviewing every pull request
 - Adding regression tests
 - Maintaining E2E coverage
+- Keeping documentation in sync with the code
 - Improving issue quality
 - Validating preview deployments
 - Automating recurring engineering tasks
@@ -275,6 +283,8 @@ Developer writes code with Copilot
    AI-Git-Bot reviews it
            ↓
    AI-Git-Bot generates tests
+           ↓
+ AI-Git-Bot updates the docs
            ↓
  AI-Git-Bot validates deployment
            ↓
@@ -299,20 +309,6 @@ Automatically review pull requests and provide:
 - Inline comments
 - Suggested improvements
 - Follow-up discussions
-
----
-
-### 🤖 Issue → Pull Request
-
-Assign a coding bot to an issue.
-
-The bot:
-
-1. Reads the issue
-2. Clones the repository
-3. Implements the change
-4. Runs project validation
-5. Opens a pull request
 
 ---
 
@@ -349,6 +345,30 @@ The Full-Stack QA workflow can:
 
 ---
 
+### 📝 README Sync
+
+Keep project documentation in step with the code a pull request changes.
+
+The workflow detects when a PR makes the README or other Markdown docs
+inaccurate or outdated, then updates, adds, or removes the affected
+documentation files within a configured scope and posts a short summary.
+Markdown-only; every changed file stays inside the documentation patterns
+you configure. Runs on PR open or on `@bot regenerate-readme <instruction>`.
+
+---
+### 🤖 Issue → Pull Request
+
+Assign a coding bot to an issue.
+
+The bot:
+
+1. Reads the issue
+2. Clones the repository
+3. Implements the change
+4. Runs project validation
+5. Opens a pull request
+
+---
 ## Quick Start
 
 Run AI-Git-Bot locally using Docker Compose.
