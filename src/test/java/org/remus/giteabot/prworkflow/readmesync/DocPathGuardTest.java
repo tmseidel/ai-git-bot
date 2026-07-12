@@ -31,6 +31,16 @@ class DocPathGuardTest {
     }
 
     @Test
+    void doubleStarMatchesZeroSegments() {
+        // doc/**/*.md must match a file directly under doc/ (zero intermediate segments),
+        // matching the Javadoc/config claim that ** matches "any number of path segments".
+        assertTrue(DocPathGuard.isAllowedDocPath(PATTERNS, "doc/README.md"));
+        assertTrue(DocPathGuard.isAllowedDocPath(List.of("docs/**/*.md"), "docs/intro.md"));
+        // and still matches nested files under the same pattern
+        assertTrue(DocPathGuard.isAllowedDocPath(List.of("docs/**/*.md"), "docs/guide/setup.md"));
+    }
+
+    @Test
     void rejectsNonMarkdownEvenWhenPathMatchesShape() {
         assertFalse(DocPathGuard.isAllowedDocPath(List.of("doc/**/*"), "doc/setup/install.txt"));
         assertFalse(DocPathGuard.isAllowedDocPath(PATTERNS, "README.md.bak"));

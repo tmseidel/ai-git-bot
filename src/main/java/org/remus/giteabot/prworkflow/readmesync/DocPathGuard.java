@@ -102,6 +102,12 @@ public final class DocPathGuard {
     /**
      * Compiles a glob into a regex. {@code **} matches across path separators;
      * {@code *} and {@code ?} stay within a single segment.
+     *
+     * <p>The {@code **}{@code /} construct matches <em>zero or more</em> whole
+     * path segments, so {@code doc/**}{@code /*.md} matches both
+     * {@code doc/README.md} (zero intermediate segments) and
+     * {@code doc/sub/install.md}. A bare {@code **} not followed by {@code /}
+     * matches any run of characters including {@code /}.</p>
      */
     static Pattern globToPattern(String glob) {
         StringBuilder sb = new StringBuilder("(?i)");
@@ -111,8 +117,14 @@ public final class DocPathGuard {
             switch (c) {
                 case '*' -> {
                     if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
-                        sb.append(".*");
                         i++; // consume the second '*'
+                        if (i + 1 < glob.length() && glob.charAt(i + 1) == '/') {
+                            // "**/" matches zero or more whole path segments
+                            sb.append("(?:.*/)?");
+                            i++; // consume the trailing '/'
+                        } else {
+                            sb.append(".*");
+                        }
                     } else {
                         sb.append("[^/]*");
                     }
