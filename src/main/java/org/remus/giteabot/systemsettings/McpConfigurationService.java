@@ -1,9 +1,8 @@
 package org.remus.giteabot.systemsettings;
 
-import lombok.RequiredArgsConstructor;
-
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.springframework.stereotype.Service;

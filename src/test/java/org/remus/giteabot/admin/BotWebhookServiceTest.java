@@ -76,6 +76,8 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler e2eTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler unitTestSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
+    @Mock private org.remus.giteabot.prworkflow.readmesync.ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
+    @Mock private org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
     @Mock private ReviewChunkingProperties chunkingProperties;
 
@@ -92,7 +94,8 @@ class BotWebhookServiceTest {
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
                 prWorkflowOrchestrator, e2eTestPrCloseHandler,
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
-                agentReviewSlashCommandHandler, workflowSelectionService);
+                agentReviewSlashCommandHandler, readmeSyncSlashCommandHandler,
+                i18nCoverageSlashCommandHandler, workflowSelectionService);
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));

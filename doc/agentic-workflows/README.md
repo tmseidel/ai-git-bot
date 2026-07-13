@@ -1,5 +1,13 @@
 # Agentic PR Workflows
 
+> ⚠️ **This folder is advanced / developer-oriented material and is being
+> reworked.** It documents the workflow *execution environment* — preview
+> deployment strategies (`STATIC` / `WEBHOOK` / `MCP` / `CI_ACTION`), MCP
+> integration, and internal architecture. That layer is being redesigned and
+> will be re-documented separately. **If you just want to use the PR
+> workflows, start at [`../PR_WORKFLOWS.md`](../PR_WORKFLOWS.md)** — it explains
+> what each workflow solves and how to set it up, without these internals.
+
 AI-Git-Bot turns a pull request into a small, configurable pipeline of
 **agentic workflows**: every PR event flows through a central
 `PrWorkflowOrchestrator` that picks one or more `PrWorkflow`

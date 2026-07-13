@@ -304,6 +304,8 @@ class WebhookIntegrationTest {
             systemPrompt.setE2eAuthorSystemPrompt("Author test prompt");
             systemPrompt.setE2eRunnerSystemPrompt("Runner test prompt");
             systemPrompt.setUnitTestAuthorSystemPrompt("Unit-test-author test prompt");
+            systemPrompt.setReadmeSyncSystemPrompt("README-sync test prompt");
+            systemPrompt.setI18nCoverageSystemPrompt("i18n-coverage test prompt");
             systemPrompt.setDefaultEntry(true);
             return systemPromptService.save(systemPrompt);
         });

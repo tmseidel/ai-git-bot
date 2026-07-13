@@ -155,7 +155,7 @@ public final class LegacyToolProtocolRenderer {
     /**
      * Renders the E2E-agent legacy protocol. Used by the PR-workflow agents
      * (planner/author/runner) that operate on the sandboxed PR test
-     * workspace and dispatch {@link ToolCatalog.Role#E2E} tools only.
+     * workspace and dispatch {@link ToolCatalog.Role#PR_WORKFLOW} tools only.
      *
      * <p>Unlike the coding/writer agents there is no validation/file/context
      * split — every E2E tool is of kind {@code PR_WORKFLOW}. The whitelist
@@ -187,7 +187,7 @@ public final class LegacyToolProtocolRenderer {
         if (!tools.isEmpty()) {
             sb.append("## Available Tools\n")
               .append("Use these in `runTools`:\n");
-            appendBullets(sb, catalog, ToolCatalog.Role.E2E, tools);
+            appendBullets(sb, catalog, ToolCatalog.Role.PR_WORKFLOW, tools);
             sb.append("\n");
         }
 
@@ -243,7 +243,7 @@ public final class LegacyToolProtocolRenderer {
     }
 
     private static void appendComma(StringBuilder sb, String name) {
-        if (sb.length() > 0) {
+        if (!sb.isEmpty()) {
             sb.append(", ");
         }
         sb.append(name);
@@ -252,7 +252,7 @@ public final class LegacyToolProtocolRenderer {
     private static String joinBackticked(List<String> names) {
         StringBuilder sb = new StringBuilder();
         for (String n : names) {
-            if (sb.length() > 0) {
+            if (!sb.isEmpty()) {
                 sb.append(", ");
             }
             sb.append('`').append(n).append('`');

@@ -42,8 +42,15 @@ import java.util.Set;
 @Component
 public class ToolCatalog {
 
-    /** Which agent role(s) may invoke a tool. */
-    public enum Role { CODING, WRITER, E2E }
+    /**
+     * Which agent role(s) may invoke a tool.
+     *
+     * <p>{@code PR_WORKFLOW} covers the agentic PR-workflow agents (E2E test,
+     * unit-test author, readme-sync). Tools tagged with this role are of kind
+     * {@link ToolKind#PR_WORKFLOW} and trigger a workflow-internal call inside
+     * the bot rather than being general-purpose repository tools.</p>
+     */
+    public enum Role { CODING, WRITER, PR_WORKFLOW }
 
     /** Internal record per built-in (non-validation) tool. */
     private record Entry(String name, ToolKind kind, Set<Role> roles,
@@ -155,8 +162,8 @@ public class ToolCatalog {
                     "Search issues by free-text query (args: query string).",
                     varargsSchema()),
 
-            // ---- PR-workflow E2E tools (E2E role only) ----
-            entry("pr-test-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+            // ---- PR-workflow test tools (PR_WORKFLOW role only) ----
+            entry("pr-test-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
                     "Write a generated test file into the sandboxed PR test workspace and persist "
                             + "(or update) the matching PrTestCase row. Path is workspace-relative; "
                             + "absolute paths or `..` traversal are rejected.",
@@ -165,7 +172,7 @@ public class ToolCatalog {
                             prop("content", "string", "Full UTF-8 file content."),
                             prop("title",   "string", "Optional human-readable test-case title; used in the PR comment summary."),
                             required("path", "content"))),
-            entry("pr-test-run", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+            entry("pr-test-run", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
                     "Execute the chosen test framework inside the PR test workspace. For Playwright "
                             + "this runs `npx playwright test` with the JSON reporter and parses per-test "
                             + "results back into PrTestCase rows. Returns a textual summary plus the raw "
@@ -174,16 +181,16 @@ public class ToolCatalog {
                             prop("framework", "string", "playwright (well-tested, recommended); pytest, k6, cypress are experimental."),
                             arrayProp("args", "Additional CLI arguments forwarded verbatim to the runner."),
                             required("framework", "args"))),
-            entry("preview-url", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+            entry("preview-url", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
                     "Return the reachable preview URL the deployment strategy produced for the current PR.",
                     objectSchema()),
-            entry("preview-status", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+            entry("preview-status", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
                     "HTTP-probe the preview deployment. Returns status code, latency and a short body "
                             + "excerpt. Use this to verify the preview is responsive before running tests.",
                     objectSchema(
                             prop("path",           "string",  "Optional URL path appended to the preview URL (defaults to \"/\")."),
                             prop("expectedStatus", "integer", "Optional expected HTTP status (defaults to 200). Probe is reported as failed when it differs."))),
-            entry("attach-artifact", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+            entry("attach-artifact", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
                     "Attach a workspace-relative file as a Markdown comment on the current PR. "
                             + "Images are inlined as a data URI; other files are inlined as a fenced "
                             + "code block (truncated at 64 KiB). The path must resolve inside the PR "
@@ -193,8 +200,8 @@ public class ToolCatalog {
                             prop("title", "string", "Optional comment header; defaults to the file name."),
                             required("path"))),
 
-            // ---- unit-test-author tool (E2E role; operates on the real checkout) ----
-            entry("unit-test-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.E2E),
+            // ---- unit-test-author tool (PR_WORKFLOW role; operates on the real checkout) ----
+            entry("unit-test-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
                     "Write a generated unit-test file into the repository checkout and persist "
                             + "(or update) the matching UnitTestCase row. The path is checkout-relative "
                             + "and must live under the project's conventional test source set "
@@ -204,7 +211,47 @@ public class ToolCatalog {
                             prop("path",    "string", "Checkout-relative path of the test file (e.g. \"src/test/java/com/acme/FooTest.java\")."),
                             prop("content", "string", "Full UTF-8 file content."),
                             prop("title",   "string", "Optional human-readable test-case title; used in the PR comment summary."),
-                            required("path", "content")))
+                            required("path", "content"))),
+
+            // ---- readme-sync tools (PR_WORKFLOW role; operate on the real checkout, Markdown docs only) ----
+            entry("doc-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
+                    "Create or update a Markdown documentation file in the repository checkout. "
+                            + "The path is checkout-relative and must be a Markdown file (*.md / *.markdown) "
+                            + "that matches the workflow's configured documentation include patterns — any "
+                            + "other file is rejected. Writing an existing path overwrites it. Absolute paths "
+                            + "or `..` traversal are rejected.",
+                    objectSchema(
+                            prop("path",    "string", "Checkout-relative path of the Markdown file (e.g. \"README.md\", \"doc/setup/install.md\")."),
+                            prop("content", "string", "Full UTF-8 Markdown content of the file."),
+                            required("path", "content"))),
+            entry("doc-delete", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
+                    "Delete an obsolete Markdown documentation file from the repository checkout. "
+                            + "The path must be a Markdown file matching the workflow's configured include "
+                            + "patterns and must already exist. Absolute paths or `..` traversal are rejected.",
+                    objectSchema(
+                            prop("path", "string", "Checkout-relative path of the Markdown file to delete."),
+                            required("path"))),
+
+            // ---- i18n-coverage tools (PR_WORKFLOW role; operate on the real checkout, locale files only) ----
+            entry("i18n-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
+                    "Create or update an i18n locale file (*.properties / *.json) in the repository "
+                            + "checkout with drafted translations. The path is checkout-relative and must "
+                            + "match the workflow's configured i18n include patterns — any other file is "
+                            + "rejected. `content` must be the COMPLETE file content (all existing keys plus "
+                            + "the new/updated translations), because writing overwrites the file. Absolute "
+                            + "paths or `..` traversal are rejected.",
+                    objectSchema(
+                            prop("path",    "string", "Checkout-relative path of the locale file (e.g. \"i18n/messages_de.properties\", \"i18n/fr.json\")."),
+                            prop("content", "string", "Full UTF-8 content of the locale file after applying the drafted translations."),
+                            required("path", "content"))),
+            entry("i18n-delete", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
+                    "Delete an obsolete i18n locale file from the repository checkout. The path must be "
+                            + "a locale file (*.properties / *.json) matching the workflow's configured "
+                            + "include patterns and must already exist. Absolute paths or `..` traversal are "
+                            + "rejected.",
+                    objectSchema(
+                            prop("path", "string", "Checkout-relative path of the locale file to delete."),
+                            required("path")))
     );
 
     /**
