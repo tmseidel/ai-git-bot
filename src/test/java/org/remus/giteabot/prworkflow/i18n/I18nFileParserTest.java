@@ -10,15 +10,152 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class I18nFileParserTest {
 
+    // ── .properties parsing (Java Properties-compatible semantics) ──────────
+
     @Test
     void parsesPropertiesPreservingKeys() {
-        String content = "# comment\ngreeting = Hello\nfarewell:Bye\n\n! bang comment\nempty=";
+        // No whitespace around separators — Properties uses the first
+        // unescaped =, :, or whitespace as the separator.
+        String content = "# comment\ngreeting=Hello\nfarewell:Bye\n\n! bang comment\nempty=";
         Map<String, String> entries = I18nFileParser.parseProperties(content);
         assertThat(entries).containsEntry("greeting", "Hello")
                 .containsEntry("farewell", "Bye")
                 .containsEntry("empty", "");
         assertThat(entries).hasSize(3);
     }
+
+    @Test
+    void whitespaceSeparator() {
+        // Java Properties supports whitespace as key/value separator.
+        Map<String, String> entries = I18nFileParser.parseProperties("greeting Hello\nkey:value");
+        assertThat(entries).containsEntry("greeting", "Hello")
+                .containsEntry("key", "value");
+    }
+
+    @Test
+    void whitespaceSeparatorSkipsTrailingSpace() {
+        Map<String, String> entries = I18nFileParser.parseProperties("greeting   Hello World");
+        assertThat(entries).containsEntry("greeting", "Hello World");
+    }
+
+    @Test
+    void lineContinuation() {
+        String content = "greeting Hello,\\\n World!\nfruit Apple";
+        Map<String, String> entries = I18nFileParser.parseProperties(content);
+        assertThat(entries).containsEntry("greeting", "Hello, World!")
+                .containsEntry("fruit", "Apple");
+    }
+
+    @Test
+    void lineContinuationMultipleLines() {
+        String content = "key This is a \\\n very \\\n long value";
+        Map<String, String> entries = I18nFileParser.parseProperties(content);
+        assertThat(entries).containsEntry("key", "This is a  very  long value");
+    }
+
+    @Test
+    void escapedEqualsInKey() {
+        // key\\=with\\=equals=value — no space before =, so = is the separator.
+        Map<String, String> entries = I18nFileParser.parseProperties("key\\=with\\=equals=value");
+        assertThat(entries).containsEntry("key=with=equals", "value");
+    }
+
+    @Test
+    void escapedColonInKey() {
+        Map<String, String> entries = I18nFileParser.parseProperties("key\\:with\\:colons=value");
+        assertThat(entries).containsEntry("key:with:colons", "value");
+    }
+
+    @Test
+    void escapedSpaceInKey() {
+        Map<String, String> entries = I18nFileParser.parseProperties("key\\ with\\ spaces=value");
+        assertThat(entries).containsEntry("key with spaces", "value");
+    }
+
+    @Test
+    void noSeparatorMeansKeyWithEmptyValue() {
+        Map<String, String> entries = I18nFileParser.parseProperties("standalone_key");
+        assertThat(entries).containsEntry("standalone_key", "");
+    }
+
+    @Test
+    void controlCharEscapesInKey() {
+        Map<String, String> entries = I18nFileParser.parseProperties(
+                "tab\\tkey=x\nnewline\\nkey=y\ncarriage\\rreturn=z");
+        assertThat(entries).containsEntry("tab\tkey", "x")
+                .containsEntry("newline\nkey", "y")
+                .containsEntry("carriage\rreturn", "z");
+    }
+
+    @Test
+    void unicodeEscapeInKey() {
+        Map<String, String> entries = I18nFileParser.parseProperties("gr\\u00FC\\u00DFe=hello");
+        assertThat(entries).containsEntry("grüße", "hello");
+    }
+
+    @Test
+    void preservesKeyOrder() {
+        String content = "z=last\na=first\nm=middle";
+        Map<String, String> entries = I18nFileParser.parseProperties(content);
+        assertThat(entries.keySet()).containsExactly("z", "a", "m");
+    }
+
+    @Test
+    void whitespaceBeforeEqualsMeansSpaceIsSeparator() {
+        // Properties semantics: first unescaped whitespace is the separator.
+        // "greeting =Hello" → key=greeting, value==Hello
+        Map<String, String> entries = I18nFileParser.parseProperties("greeting =Hello");
+        assertThat(entries).containsEntry("greeting", "=Hello");
+    }
+
+    // ── loadConvert ─────────────────────────────────────────────────────────
+
+    @Test
+    void loadConvertPlainKey() {
+        assertThat(I18nFileParser.loadConvert("key")).isEqualTo("key");
+    }
+
+    @Test
+    void loadConvertEscapedEquals() {
+        assertThat(I18nFileParser.loadConvert("key\\=escaped")).isEqualTo("key=escaped");
+    }
+
+    @Test
+    void loadConvertEscapedColon() {
+        assertThat(I18nFileParser.loadConvert("key\\:colon")).isEqualTo("key:colon");
+    }
+
+    @Test
+    void loadConvertEscapedSpace() {
+        assertThat(I18nFileParser.loadConvert("key\\ space")).isEqualTo("key space");
+    }
+
+    @Test
+    void loadConvertTab() {
+        assertThat(I18nFileParser.loadConvert("tab\\tkey")).isEqualTo("tab\tkey");
+    }
+
+    @Test
+    void loadConvertNewline() {
+        assertThat(I18nFileParser.loadConvert("nl\\nkey")).isEqualTo("nl\nkey");
+    }
+
+    @Test
+    void loadConvertCarriageReturn() {
+        assertThat(I18nFileParser.loadConvert("cr\\rkey")).isEqualTo("cr\rkey");
+    }
+
+    @Test
+    void loadConvertFormFeed() {
+        assertThat(I18nFileParser.loadConvert("ff\\fkey")).isEqualTo("ff\fkey");
+    }
+
+    @Test
+    void loadConvertBackslash() {
+        assertThat(I18nFileParser.loadConvert("bs\\\\key")).isEqualTo("bs\\key");
+    }
+
+    // ── JSON parsing ────────────────────────────────────────────────────────
 
     @Test
     void parsesFlatJson() {
@@ -34,7 +171,33 @@ class I18nFileParserTest {
                 .containsEntry("menu.file.close", "Close");
     }
 
-    // ── locale / family extraction (happy paths) ───────────────────────────
+    @Test
+    void isNestedJsonDetectsNestedObject() {
+        assertThat(I18nFileParser.isNestedJson("{\"a\":{\"b\":1}}")).isTrue();
+    }
+
+    @Test
+    void isNestedJsonDetectsNestedArray() {
+        assertThat(I18nFileParser.isNestedJson("{\"a\":[1,2,3]}")).isTrue();
+    }
+
+    @Test
+    void isNestedJsonDetectsArrayRoot() {
+        assertThat(I18nFileParser.isNestedJson("[{\"a\":1}]")).isTrue();
+    }
+
+    @Test
+    void isNestedJsonReturnsFalseForFlatObject() {
+        assertThat(I18nFileParser.isNestedJson("{\"a\":\"A\",\"b\":3,\"c\":true}")).isFalse();
+    }
+
+    @Test
+    void isNestedJsonReturnsFalseForEmpty() {
+        assertThat(I18nFileParser.isNestedJson("")).isFalse();
+        assertThat(I18nFileParser.isNestedJson(null)).isFalse();
+    }
+
+    // ── locale / family extraction ──────────────────────────────────────────
 
     @Test
     void extractsLocaleAndFamilyFromPropertiesSuffix() {
@@ -45,7 +208,6 @@ class I18nFileParserTest {
         assertThat(en.locale()).isEqualTo("en");
         assertThat(de.locale()).isEqualTo("de_DE");
         assertThat(def.locale()).isEmpty();
-        // All three share the same family.
         assertThat(en.familyId()).isEqualTo(de.familyId()).isEqualTo(def.familyId());
     }
 
@@ -73,8 +235,6 @@ class I18nFileParserTest {
         assertThat(lf.locale()).isEqualTo(expectedLocale);
     }
 
-    // ── non-locale suffixes must NOT be mistaken for locale tokens ─────────
-
     @ParameterizedTest
     @CsvSource(textBlock = """
             i18n/messages_release-notes.properties
@@ -94,8 +254,6 @@ class I18nFileParserTest {
 
     @Test
     void nonLocaleSuffixDoesNotFragmentFamily() {
-        // messages_release-notes and messages_extra should each be their own
-        // single-file family — not grouped with messages.properties.
         I18nFileParser.LocaleFile base = I18nFileParser.parse("i18n/messages.properties", "a=1");
         I18nFileParser.LocaleFile relNotes = I18nFileParser.parse("i18n/messages_release-notes.properties", "a=1");
         I18nFileParser.LocaleFile extra = I18nFileParser.parse("i18n/messages_extra.properties", "a=1");
@@ -103,8 +261,6 @@ class I18nFileParserTest {
         assertThat(relNotes.familyId()).isNotEqualTo(base.familyId());
         assertThat(extra.familyId()).isNotEqualTo(base.familyId());
         assertThat(relNotes.familyId()).isNotEqualTo(extra.familyId());
-
-        // Each has locale "" (implicit default) since none is a real locale.
         assertThat(relNotes.locale()).isEmpty();
         assertThat(extra.locale()).isEmpty();
     }

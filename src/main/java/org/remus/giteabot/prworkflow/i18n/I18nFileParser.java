@@ -118,22 +118,70 @@ public final class I18nFileParser {
         return sb.toString();
     }
 
+    /**
+     * Parses a Java {@code .properties} file into an ordered {@code key → value}
+     * map, following {@link java.util.Properties#load} semantics:
+     *
+     * <ul>
+     *   <li>Line continuation: a physical line ending with an odd number of
+     *       {@code \\} characters merges with the next physical line (the
+     *       trailing {@code \\} is dropped on the merged line).</li>
+     *   <li>Comments: blank lines and lines whose first non-whitespace character
+     *       is {@code #} or {@code !} are ignored.</li>
+     *   <li>Separator: the first unescaped {@code =}, {@code :}, or whitespace
+     *       character ends the key. Whitespace after the separator is skipped to
+     *       find the value start.</li>
+     *   <li>Key unescaping: {@code \\t}, {@code \\n}, {@code \\r}, {@code \\f},
+     *       {@code \\\\}, and {@code \\uXXXX} sequences in keys are resolved.
+     *       Escaped separators ({@code \\=}, {@code \\:}, {@code \\ }) become
+     *       literal characters in the key.</li>
+     *   <li>Values are stored raw (no unescaping), matching the
+     *       {@code Properties} contract — only leading whitespace after the
+     *       separator is stripped.</li>
+     * </ul>
+     */
+    // Visible for testing
     static Map<String, String> parseProperties(String content) {
         Map<String, String> out = new LinkedHashMap<>();
         if (content == null || content.isBlank()) {
             return out;
         }
-        for (String rawLine : content.split("\r\n|\r|\n")) {
-            String line = rawLine.strip();
-            if (line.isEmpty() || line.startsWith("#") || line.startsWith("!")) {
-                continue;
+        String[] physicalLines = content.split("\\r\\n|\\r|\\n");
+        int i = 0;
+        while (i < physicalLines.length) {
+            String logical = assembleLogicalLine(physicalLines, i);
+            i += countPhysicalLinesConsumed(physicalLines, i);
+
+            // Strip leading whitespace from the logical line.
+            int firstChar = 0;
+            int len = logical.length();
+            while (firstChar < len && isWhitespace(logical.charAt(firstChar))) {
+                firstChar++;
             }
-            int sep = firstSeparator(line);
+            if (firstChar >= len) {
+                continue; // blank line
+            }
+            char c0 = logical.charAt(firstChar);
+            if (c0 == '#' || c0 == '!') {
+                continue; // comment
+            }
+
+            int sep = findSeparator(logical, firstChar);
+            String key;
+            String value;
             if (sep < 0) {
-                continue;
+                // No separator — entire logical line is the key, value is empty.
+                key = loadConvert(logical.substring(firstChar));
+                value = "";
+            } else {
+                key = loadConvert(logical.substring(firstChar, sep));
+                // Skip whitespace right after the separator.
+                int valStart = sep + 1;
+                while (valStart < len && isWhitespace(logical.charAt(valStart))) {
+                    valStart++;
+                }
+                value = valStart < len ? logical.substring(valStart) : "";
             }
-            String key = line.substring(0, sep).strip();
-            String value = line.substring(sep + 1).strip();
             if (!key.isEmpty()) {
                 out.put(key, value);
             }
@@ -141,18 +189,151 @@ public final class I18nFileParser {
         return out;
     }
 
-    private static int firstSeparator(String line) {
-        for (int i = 0; i < line.length(); i++) {
-            char c = line.charAt(i);
+    /**
+     * Assembles one logical line from one or more physical lines joined by
+     * the line-continuation convention: when a physical line ends with an odd
+     * number of {@code \\}, the trailing {@code \\} is dropped and the next
+     * physical line is appended.
+     */
+    private static String assembleLogicalLine(String[] physicalLines, int startIdx) {
+        StringBuilder sb = new StringBuilder(physicalLines[startIdx]);
+        int idx = startIdx;
+        while (idx < physicalLines.length && endsWithOddBackslashes(sb.toString())) {
+            sb.setLength(sb.length() - 1); // drop the trailing continuation backslash
+            idx++;
+            if (idx < physicalLines.length) {
+                sb.append(physicalLines[idx]);
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Returns the number of physical lines consumed to form one logical line. */
+    private static int countPhysicalLinesConsumed(String[] physicalLines, int startIdx) {
+        int count = 1;
+        int idx = startIdx;
+        String current = physicalLines[startIdx];
+        while (idx < physicalLines.length && endsWithOddBackslashes(current)) {
+            count++;
+            idx++;
+            if (idx < physicalLines.length) {
+                current = physicalLines[idx];
+            }
+        }
+        return count;
+    }
+
+    private static boolean endsWithOddBackslashes(String s) {
+        int count = 0;
+        for (int i = s.length() - 1; i >= 0 && s.charAt(i) == '\\'; i--) {
+            count++;
+        }
+        return (count & 1) == 1;
+    }
+
+    /**
+     * Finds the index of the first unescaped {@code =}, {@code :}, or
+     * whitespace character in {@code logical}, starting from {@code offset}.
+     * Returns {@code -1} if no separator is found.
+     */
+    private static int findSeparator(String logical, int offset) {
+        for (int i = offset; i < logical.length(); i++) {
+            char c = logical.charAt(i);
             if (c == '\\') {
                 i++; // skip the escaped character
+                if (i >= logical.length()) {
+                    break;
+                }
                 continue;
             }
-            if (c == '=' || c == ':') {
+            if (c == '=' || c == ':' || isWhitespace(c)) {
                 return i;
             }
         }
         return -1;
+    }
+
+    private static boolean isWhitespace(char c) {
+        return c == ' ' || c == '\t' || c == '\f';
+    }
+
+    /**
+     * Replicates {@link java.util.Properties#loadConvert} unescaping for keys:
+     * {@code \\t} → tab, {@code \\n} → newline, {@code \\r} → CR, {@code \\f}
+     * → form-feed, {@code \\uXXXX} → Unicode code-point, {@code \\} followed by
+     * any other character → that character (literal {@code =}, {@code :}, etc.).
+     */
+    // Visible for testing
+    static String loadConvert(String key) {
+        int len = key.length();
+        StringBuilder out = new StringBuilder(len);
+        for (int i = 0; i < len; i++) {
+            char c = key.charAt(i);
+            if (c == '\\' && i + 1 < len) {
+                char next = key.charAt(i + 1);
+                switch (next) {
+                    case 't' -> { out.append('\t'); i++; }
+                    case 'n' -> { out.append('\n'); i++; }
+                    case 'r' -> { out.append('\r'); i++; }
+                    case 'f' -> { out.append('\f'); i++; }
+                    case 'u'  -> {
+                        // backslash-uXXXX — up to 4 hex digits
+                        int codePoint = 0;
+                        int j;
+                        for (j = i + 2; j < i + 6 && j < len; j++) {
+                            char hc = key.charAt(j);
+                            int digit = Character.digit(hc, 16);
+                            if (digit < 0) {
+                                break;
+                            }
+                            codePoint = (codePoint << 4) | digit;
+                        }
+                        if (j > i + 2) {
+                            out.appendCodePoint(codePoint);
+                            i = j - 1;
+                        } else {
+                            out.append('u'); // malformed backslash-u, emit literally
+                            i++;
+                        }
+                    }
+                    default -> {
+                        out.append(next);
+                        i++;
+                    }
+                }
+            } else {
+                out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Returns {@code true} when the JSON content has at least one non-scalar
+     * value at the root level — i.e. the root object contains nested objects
+     * or arrays. Only flat {@code {"key": "value"}} shapes are safe for the
+     * agent to round-trip (the write path has no structured JSON emitter).
+     */
+    // Visible for testing
+    static boolean isNestedJson(String content) {
+        if (content == null || content.isBlank()) {
+            return false;
+        }
+        try {
+            JsonNode root = JSON.readTree(content);
+            if (!root.isObject()) {
+                return true; // array root is inherently nested for i18n purposes
+            }
+            for (JsonNode child : root) {
+                if (child.isObject() || child.isArray()) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (RuntimeException e) {
+            log.debug("i18n-coverage: could not parse JSON to check nesting: {}", e.getMessage());
+            return false; // unparseable — let detection fail downstream
+        }
     }
 
     static Map<String, String> parseJson(String content) {

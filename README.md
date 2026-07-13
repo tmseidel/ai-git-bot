@@ -48,7 +48,9 @@ Just better engineering hygiene through automation.
 
 ---
 
-## Who is AI-Git-Bot for (3 random target-groups)?
+## Who is AI-Git-Bot for?
+
+You may not fit neatly into a single category — many teams overlap across these concerns. Here are three illustrative examples:
 
 ### 🏢 Running Gitea and missing modern AI tooling?
 

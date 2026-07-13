@@ -92,4 +92,26 @@ class I18nCoverageDetectorTest {
         I18nCoverageDetector.Report report = I18nCoverageDetector.detect(ws, patterns, "en");
         assertThat(report.hasGaps()).isFalse();
     }
+
+    @Test
+    void nestedJsonIsSkippedDuringDetection(@TempDir Path ws) throws IOException {
+        // Flat baseline + nested locale file — the nested file should be skipped,
+        // leaving only the baseline, so no family (single-file → skipped).
+        write(ws, "i18n/en.json", "{\"a\":\"A\",\"b\":\"B\"}");
+        write(ws, "i18n/fr.json", "{\"a\":\"A-fr\",\"nested\":{\"inner\":\"value\"}}");
+
+        I18nCoverageDetector.Report report = I18nCoverageDetector.detect(ws, patterns, "en");
+        // The nested fr.json is skipped → only en.json remains → single-file family → no gaps.
+        assertThat(report.hasGaps()).isFalse();
+    }
+
+    @Test
+    void flatJsonStillDetected(@TempDir Path ws) throws IOException {
+        write(ws, "i18n/en.json", "{\"a\":\"A\",\"b\":\"B\"}");
+        write(ws, "i18n/fr.json", "{\"a\":\"A-fr\"}");
+
+        I18nCoverageDetector.Report report = I18nCoverageDetector.detect(ws, patterns, "en");
+        assertThat(report.hasGaps()).isTrue();
+        assertThat(report.totalMissingKeys()).isEqualTo(1);
+    }
 }

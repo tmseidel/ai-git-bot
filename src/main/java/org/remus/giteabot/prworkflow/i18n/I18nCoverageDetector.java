@@ -112,6 +112,13 @@ public final class I18nCoverageDetector {
         for (String rel : files) {
             try {
                 String content = Files.readString(workspace.resolve(rel), StandardCharsets.UTF_8);
+                if (I18nPathGuard.isJson(rel) && I18nFileParser.isNestedJson(content)) {
+                    log.warn("i18n-coverage: skipping nested JSON file `{}` — only flat " +
+                            "{\"key\":\"value\"} shapes are currently supported; nested objects " +
+                            "and arrays cannot be safely round-tripped by the agent write path",
+                            rel);
+                    continue;
+                }
                 I18nFileParser.LocaleFile lf = I18nFileParser.parse(rel, content);
                 byFamily.computeIfAbsent(lf.familyId(), k -> new ArrayList<>()).add(lf);
             } catch (IOException e) {
