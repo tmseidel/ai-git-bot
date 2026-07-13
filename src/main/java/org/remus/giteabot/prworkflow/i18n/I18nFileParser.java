@@ -46,16 +46,21 @@ public final class I18nFileParser {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /**
-     * Trailing locale token: a 2-letter language, optionally followed by a
-     * {@code _}/{@code -} region (2 letters) and/or a variant. Anchored at the
-     * end of the file stem.
+     * Trailing locale token: a 2-letter language, optionally followed by
+     * {@code _}/{@code -} segments for region (2-3 uppercase letters, or 3
+     * digits), script (4 letters, title-case), or variant (alphanumeric
+     * starting with uppercase or digit). Anchored at the end of the file stem.
+     *
+     * <p>Segments after the language MUST start with uppercase or digit so that
+     * non-locale suffixes ({@code release-notes}, {@code extra}, {@code backup})
+     * are never misclassified as locale tokens.</p>
      */
     private static final Pattern LOCALE_SUFFIX = Pattern.compile(
-            "^(?<base>.*?)(?<sep>[._-])(?<locale>[a-z]{2}(?:[_-][A-Za-z]{2,})*)$");
+            "^(?<base>.*?)(?<sep>[._-])(?<locale>[a-z]{2}(?:[_-][A-Z0-9][A-Za-z0-9]*)*)$");
 
     /** A stem that is itself just a locale token (e.g. {@code en}, {@code fr-FR}). */
     private static final Pattern BARE_LOCALE = Pattern.compile(
-            "^[a-z]{2}(?:[_-][A-Za-z]{2,})*$");
+            "^[a-z]{2}(?:[_-][A-Z0-9][A-Za-z0-9]*)*$");
 
     private I18nFileParser() {
     }
