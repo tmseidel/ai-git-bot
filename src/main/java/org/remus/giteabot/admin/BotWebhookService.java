@@ -21,6 +21,7 @@ import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.e2e.E2ETestWorkflow;
 import org.remus.giteabot.prworkflow.e2e.E2eTestPrCloseHandler;
 import org.remus.giteabot.prworkflow.e2e.E2eTestSlashCommandHandler;
+import org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler;
 import org.remus.giteabot.prworkflow.readmesync.ReadmeSyncSlashCommandHandler;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
@@ -60,6 +61,7 @@ public class BotWebhookService {
     private final UnitTestSlashCommandHandler unitTestSlashCommandHandler;
     private final AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
     private final ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
+    private final I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final AgentServiceFactory agentServiceFactory;
 
@@ -81,6 +83,7 @@ public class BotWebhookService {
                              UnitTestSlashCommandHandler unitTestSlashCommandHandler,
                              AgentReviewSlashCommandHandler agentReviewSlashCommandHandler,
                              ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler,
+                             I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
                              WorkflowSelectionService workflowSelectionService) {
         this.giteaClientFactory = giteaClientFactory;
         this.agentSessionService = agentSessionService;
@@ -91,6 +94,7 @@ public class BotWebhookService {
         this.unitTestSlashCommandHandler = unitTestSlashCommandHandler;
         this.agentReviewSlashCommandHandler = agentReviewSlashCommandHandler;
         this.readmeSyncSlashCommandHandler = readmeSyncSlashCommandHandler;
+        this.i18nCoverageSlashCommandHandler = i18nCoverageSlashCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
         this.agentServiceFactory = new AgentServiceFactory(aiClientFactory, giteaClientFactory,
                 promptService, agentConfig, agentSessionService, toolExecutionService, toolCatalog,
@@ -163,6 +167,9 @@ public class BotWebhookService {
             if (readmeSyncSlashCommandHandler.tryHandle(bot, payload)) {
                 return;
             }
+            if (i18nCoverageSlashCommandHandler.tryHandle(bot, payload)) {
+                return;
+            }
             if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
                 // Route through the PrWorkflow orchestrator for uniform lifecycle management.
                 var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND);
@@ -230,6 +237,9 @@ public class BotWebhookService {
                     return;
                 }
                 if (readmeSyncSlashCommandHandler.tryHandle(bot, payload)) {
+                    return;
+                }
+                if (i18nCoverageSlashCommandHandler.tryHandle(bot, payload)) {
                     return;
                 }
                 if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {

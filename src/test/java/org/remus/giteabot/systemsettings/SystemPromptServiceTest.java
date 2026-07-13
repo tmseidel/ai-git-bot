@@ -100,6 +100,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
         systemPrompt.setReadmeSyncSystemPrompt("readme-sync");
+        systemPrompt.setI18nCoverageSystemPrompt("i18n-coverage");
         when(systemPromptRepository.existsByName("Custom")).thenReturn(true);
 
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
@@ -125,6 +126,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
         systemPrompt.setReadmeSyncSystemPrompt("readme-sync");
+        systemPrompt.setI18nCoverageSystemPrompt("i18n-coverage");
         systemPrompt.setDefaultEntry(true);
         when(systemPromptRepository.existsByNameAndIdNot("Custom", 2L)).thenReturn(false);
         when(systemPromptRepository.findByDefaultEntryTrue()).thenReturn(Optional.of(existingDefault));
@@ -184,6 +186,18 @@ class SystemPromptServiceTest {
         verify(systemPromptRepository, never()).save(any());
     }
 
+    @Test
+    void save_requiresI18nCoveragePrompt() {
+        SystemPrompt systemPrompt = baseValidSystemPrompt();
+        systemPrompt.setI18nCoverageSystemPrompt(null);
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> systemPromptService.save(systemPrompt));
+
+        assertEquals("i18n Coverage System-Prompt is required", exception.getMessage());
+        verify(systemPromptRepository, never()).save(any());
+    }
+
     private static SystemPrompt baseValidSystemPrompt() {
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setName("Custom");
@@ -196,6 +210,7 @@ class SystemPromptServiceTest {
         systemPrompt.setE2eRunnerSystemPrompt("runner");
         systemPrompt.setUnitTestAuthorSystemPrompt("unit-test-author");
         systemPrompt.setReadmeSyncSystemPrompt("readme-sync");
+        systemPrompt.setI18nCoverageSystemPrompt("i18n-coverage");
         return systemPrompt;
     }
 }
