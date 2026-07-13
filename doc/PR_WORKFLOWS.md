@@ -20,6 +20,7 @@ need to understand the bot's internals to use any of them.
 | Automatically add unit tests for the changed code | **[Unit Tests](PR_WORKFLOWS_UNIT_TEST.md)** | `unit-test-author` | Opt-in |
 | Generate and run end-to-end browser tests against a live preview | **[Full-Stack QA](PR_WORKFLOWS_E2E.md)** | `e2e-test` | Opt-in |
 | Keep the README and docs in sync with the code | **[README Sync](PR_WORKFLOWS_README_SYNC.md)** | `readme-sync` | Opt-in |
+| Keep translations in sync across locale files | **[i18n Coverage](PR_WORKFLOWS_I18N_COVERAGE.md)** | `i18n-coverage` | Opt-in |
 
 Every workflow posts its result as a comment on the pull request. Only
 **PR Review** is on by default; the rest are opt-in per bot.
@@ -76,6 +77,7 @@ Some workflows also respond to a comment command on the PR:
 | `@bot generate-tests` / `@bot rerun-unit-tests` | Unit Tests |
 | `@bot regenerate-tests [feedback]` / `@bot rerun-tests` | Full-Stack QA |
 | `@bot regenerate-readme [instruction]` | README Sync |
+| `@bot regenerate-i18n [instruction]` | i18n Coverage |
 
 The exact commands are documented on each workflow's own page.
 

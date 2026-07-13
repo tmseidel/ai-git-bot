@@ -71,6 +71,15 @@ public record PrWorkflowContext(
     public static final String HINT_README_SYNC_GUIDANCE = "readme-sync.guidance";
 
     /**
+     * Free-text instruction threaded by
+     * {@link org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler}
+     * from {@code @bot regenerate-i18n <instruction>} so
+     * {@link org.remus.giteabot.prworkflow.i18n.I18nCoverageWorkflow} can pass
+     * it to the agent as additional translation guidance.
+     */
+    public static final String HINT_I18N_COVERAGE_GUIDANCE = "i18n-coverage.guidance";
+
+    /**
      * Threaded by
      * {@link org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler}
      * when the user posts {@code @bot clarify <question>} on a PR that was

@@ -162,6 +162,7 @@ public class SystemSettingsController {
                     clone.setE2eRunnerSystemPrompt(source.getE2eRunnerSystemPrompt());
                     clone.setUnitTestAuthorSystemPrompt(source.getUnitTestAuthorSystemPrompt());
                     clone.setReadmeSyncSystemPrompt(source.getReadmeSyncSystemPrompt());
+                    clone.setI18nCoverageSystemPrompt(source.getI18nCoverageSystemPrompt());
                     model.addAttribute("systemPrompt", clone);
                     model.addAttribute("activeNav", "system-settings");
                     return "system-settings/form";
@@ -196,17 +197,18 @@ public class SystemSettingsController {
     @ResponseBody
     public ResponseEntity<Map<String, String>> preview(@PathVariable Long id) {
         return systemPromptService.findById(id)
-                .map(systemPrompt -> ResponseEntity.ok(Map.of(
-                        "name", systemPrompt.getName(),
-                        "reviewSystemPrompt", systemPrompt.getReviewSystemPrompt(),
-                        "reviewAgentSystemPrompt", systemPrompt.getReviewAgentSystemPrompt(),
-                        "issueAgentSystemPrompt", systemPrompt.getIssueAgentSystemPrompt(),
-                        "writerAgentSystemPrompt", systemPrompt.getWriterAgentSystemPrompt(),
-                        "e2ePlannerSystemPrompt", systemPrompt.getE2ePlannerSystemPrompt(),
-                        "e2eAuthorSystemPrompt", systemPrompt.getE2eAuthorSystemPrompt(),
-                        "e2eRunnerSystemPrompt", systemPrompt.getE2eRunnerSystemPrompt(),
-                        "unitTestAuthorSystemPrompt", systemPrompt.getUnitTestAuthorSystemPrompt(),
-                        "readmeSyncSystemPrompt", systemPrompt.getReadmeSyncSystemPrompt())))
+                .map(systemPrompt -> ResponseEntity.ok(Map.ofEntries(
+                        Map.entry("name", systemPrompt.getName()),
+                        Map.entry("reviewSystemPrompt", systemPrompt.getReviewSystemPrompt()),
+                        Map.entry("reviewAgentSystemPrompt", systemPrompt.getReviewAgentSystemPrompt()),
+                        Map.entry("issueAgentSystemPrompt", systemPrompt.getIssueAgentSystemPrompt()),
+                        Map.entry("writerAgentSystemPrompt", systemPrompt.getWriterAgentSystemPrompt()),
+                        Map.entry("e2ePlannerSystemPrompt", systemPrompt.getE2ePlannerSystemPrompt()),
+                        Map.entry("e2eAuthorSystemPrompt", systemPrompt.getE2eAuthorSystemPrompt()),
+                        Map.entry("e2eRunnerSystemPrompt", systemPrompt.getE2eRunnerSystemPrompt()),
+                        Map.entry("unitTestAuthorSystemPrompt", systemPrompt.getUnitTestAuthorSystemPrompt()),
+                        Map.entry("readmeSyncSystemPrompt", systemPrompt.getReadmeSyncSystemPrompt()),
+                        Map.entry("i18nCoverageSystemPrompt", systemPrompt.getI18nCoverageSystemPrompt()))))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 

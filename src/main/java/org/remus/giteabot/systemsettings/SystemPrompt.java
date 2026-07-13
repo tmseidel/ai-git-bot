@@ -46,6 +46,9 @@ public class SystemPrompt {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String readmeSyncSystemPrompt;
 
+    @Column(nullable = false, columnDefinition = "TEXT")
+    private String i18nCoverageSystemPrompt;
+
     @Column(nullable = false)
     private boolean defaultEntry = false;
 

@@ -230,6 +230,27 @@ public class ToolCatalog {
                             + "patterns and must already exist. Absolute paths or `..` traversal are rejected.",
                     objectSchema(
                             prop("path", "string", "Checkout-relative path of the Markdown file to delete."),
+                            required("path"))),
+
+            // ---- i18n-coverage tools (PR_WORKFLOW role; operate on the real checkout, locale files only) ----
+            entry("i18n-write", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
+                    "Create or update an i18n locale file (*.properties / *.json) in the repository "
+                            + "checkout with drafted translations. The path is checkout-relative and must "
+                            + "match the workflow's configured i18n include patterns — any other file is "
+                            + "rejected. `content` must be the COMPLETE file content (all existing keys plus "
+                            + "the new/updated translations), because writing overwrites the file. Absolute "
+                            + "paths or `..` traversal are rejected.",
+                    objectSchema(
+                            prop("path",    "string", "Checkout-relative path of the locale file (e.g. \"i18n/messages_de.properties\", \"i18n/fr.json\")."),
+                            prop("content", "string", "Full UTF-8 content of the locale file after applying the drafted translations."),
+                            required("path", "content"))),
+            entry("i18n-delete", ToolKind.PR_WORKFLOW, EnumSet.of(Role.PR_WORKFLOW),
+                    "Delete an obsolete i18n locale file from the repository checkout. The path must be "
+                            + "a locale file (*.properties / *.json) matching the workflow's configured "
+                            + "include patterns and must already exist. Absolute paths or `..` traversal are "
+                            + "rejected.",
+                    objectSchema(
+                            prop("path", "string", "Checkout-relative path of the locale file to delete."),
                             required("path")))
     );
 

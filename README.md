@@ -17,6 +17,7 @@
 - 🤖 Turn issues into pull requests
 - 🎬 Create and run E2E tests
 - 📝 Keep documentation in sync with the code
+- 🌍 Keep translations in sync across locale files
 - 💬 Answer questions inside code reviews
 
 
@@ -236,6 +237,7 @@ Assign an issue to a coding bot and it can create an implementation pull request
 | **Unit Test Generation** | PR opened or command triggered | Generated tests committed to branch |
 | **Full-Stack QA** | PR opened | Playwright suite executed against preview environment |
 | **README Sync** | PR opened or command triggered | Documentation updated to match code changes |
+| **i18n Coverage** | PR opened or command triggered | Missing translations drafted across locale files |
 | **PR Re-Review** | Force-push or review request | Updated analysis |
 | **Workflow Automation** | Git events | Automated engineering chores |
 
@@ -261,6 +263,7 @@ Examples include:
 - Adding regression tests
 - Maintaining E2E coverage
 - Keeping documentation in sync with the code
+- Keeping translations in sync across locale files
 - Improving issue quality
 - Validating preview deployments
 - Automating recurring engineering tasks
@@ -354,6 +357,21 @@ inaccurate or outdated, then updates, adds, or removes the affected
 documentation files within a configured scope and posts a short summary.
 Markdown-only; every changed file stays inside the documentation patterns
 you configure. Runs on PR open or on `@bot regenerate-readme <instruction>`.
+
+---
+
+### 🌍 i18n Coverage
+
+Keep translations in sync across locale files when a pull request changes
+user-facing strings.
+
+The workflow compares every locale file against a configurable baseline locale
+and, when a translation is missing keys the baseline defines (added or changed
+strings) or still carries keys the baseline deleted, drafts the missing
+translations per locale and removes the stale keys. Supports both
+`messages_*.properties` and `i18n/*.json` files; every changed file stays inside
+the patterns you configure. Runs on PR open or on
+`@bot regenerate-i18n <instruction>`.
 
 ---
 ### 🤖 Issue → Pull Request
