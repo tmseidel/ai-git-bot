@@ -6,7 +6,7 @@
 
 Documentation drifts. A pull request renames a flag, changes a setup step, or
 removes a feature — and the README, quick-start, or docs still describe the old
-behaviour. Nobody notices until a new user follows stale instructions.
+behavior. Nobody notices until a new user follows stale instructions.
 **README Sync** watches each pull request for exactly this drift and updates the
 affected Markdown documentation so it stays consistent with the code, on the
 same PR that caused the change.

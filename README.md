@@ -48,7 +48,7 @@ Just better engineering hygiene through automation.
 
 ---
 
-## Who is AI-Git-Bot for?
+## Who is AI-Git-Bot for (3 random target-groups)?
 
 ### 🏢 Running Gitea and missing modern AI tooling?
 
@@ -157,7 +157,9 @@ No browser extension.
 
 No Slack bot to babysit.
 
-> 🎥 **Watch the PR workflows in action:** [AI-Git-Bot — PR workflow walkthrough on YouTube](https://www.youtube.com/watch?v=MjFmZHGIO-w)
+> 🎥 **Watch the PR workflows in action:** 
+> * [E2E-Testing PR-workflow walkthrough on YouTube](https://www.youtube.com/watch?v=MjFmZHGIO-w)
+> * [i18n-Sync PR-workflow walkthrough on YouTube](https://youtu.be/sIpqbOqy1Ek)
 
 ---
 
@@ -230,16 +232,16 @@ Assign an issue to a coding bot and it can create an implementation pull request
 
 | Workflow | Trigger | Result |
 |-----------|----------|---------|
-| **PR Review** | PR opened or review re-requested | Review comments and findings |
-| **Interactive Q&A** | `@bot` mention in PR comments | Context-aware conversation |
-| **Issue → Code** | Issue assigned to coding bot | Pull request |
-| **Issue → Better Issue** | Issue assigned to writer bot | Structured issue with acceptance criteria |
-| **Unit Test Generation** | PR opened or command triggered | Generated tests committed to branch |
-| **Full-Stack QA** | PR opened | Playwright suite executed against preview environment |
-| **README Sync** | PR opened or command triggered | Documentation updated to match code changes |
-| **i18n Coverage** | PR opened or command triggered | Missing translations drafted across locale files |
-| **PR Re-Review** | Force-push or review request | Updated analysis |
-| **Workflow Automation** | Git events | Automated engineering chores |
+| **[PR Review](doc/PR_WORKFLOWS_REVIEW.md)** | PR opened or review re-requested | Review comments and findings |
+| **[Interactive Q&A](doc/PR_WORKFLOWS_REVIEW.md)** | `@bot` mention in PR comments | Context-aware conversation |
+| **[Issue → Code](doc/CODING_AGENT.md)** | Issue assigned to coding bot | Pull request |
+| **[Issue → Better Issue](doc/WRITER_AGENT.md)** | Issue assigned to writer bot | Structured issue with acceptance criteria |
+| **[Unit Test Generation](doc/PR_WORKFLOWS_UNIT_TEST.md)** | PR opened or command triggered | Generated tests committed to branch |
+| **[Full-Stack QA](doc/PR_WORKFLOWS_E2E.md)** | PR opened | Playwright suite executed against preview environment |
+| **[README Sync](doc/PR_WORKFLOWS_README_SYNC.md)** | PR opened or command triggered | Documentation updated to match code changes |
+| **[i18n Coverage](doc/PR_WORKFLOWS_I18N_COVERAGE.md)** | PR opened or command triggered | Missing translations drafted across locale files |
+| **[PR Re-Review](doc/PR_WORKFLOWS_REVIEW.md)** | Force-push or review request | Updated analysis |
+| **[Workflow Automation](doc/PR_WORKFLOWS.md)** | Git events | Automated engineering chores |
 
 ---
 
