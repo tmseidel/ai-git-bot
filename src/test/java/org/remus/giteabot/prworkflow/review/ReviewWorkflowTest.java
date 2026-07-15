@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -93,6 +94,26 @@ class ReviewWorkflowTest {
 
         assertEquals(WorkflowResultStatus.SKIPPED, result.status());
         verify(repoClient, never()).postReviewAction(any(), any(), anyLong(), any());
+    }
+
+    @Test
+    void botCommandFailureIsExposedInsteadOfReturningSuccess() {
+        Bot bot = botWith(PostReviewAction.NONE);
+        WebhookPayload payload = payloadFor("acme", "web", 10L);
+        IllegalStateException writeFailure = new IllegalStateException("comment write failed");
+        doThrow(writeFailure).when(codeReviewService).handleBotCommand(payload, null);
+        PrWorkflowContext context = new PrWorkflowContext(
+                bot,
+                payload,
+                1L,
+                (name, log) -> { },
+                () -> false,
+                Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND));
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> workflow.run(context));
+
+        assertEquals(writeFailure, thrown);
     }
 
     private static PrWorkflowContext ctx(Bot bot, WebhookPayload payload) {

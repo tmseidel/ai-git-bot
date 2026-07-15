@@ -20,6 +20,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -29,6 +30,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -206,6 +208,33 @@ class CodeReviewServiceTest {
 
         verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
         verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
+    }
+
+    @Test
+    void handleBotCommand_commentWriteFailurePropagates() {
+        WebhookPayload payload = createCommentPayload("@ai_bot explain this");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+        IllegalStateException writeFailure = new IllegalStateException("comment write failed");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(aiClient.chat(anyList(), eq("@ai_bot explain this"), eq(TEST_PROMPT), isNull()))
+                .thenReturn("Generated response");
+        doThrow(writeFailure).when(repositoryClient)
+                .postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), anyString());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> codeReviewService.handleBotCommand(payload, null));
+
+        assertEquals(writeFailure, thrown);
+        verify(sessionService, never()).compactContextWindow(session);
     }
 
     @Test
