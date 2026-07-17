@@ -174,10 +174,15 @@ public class CodeReviewService {
 
             // Get or create session
             ReviewSession session = sessionService.getOrCreateSession(owner, repo, prNumber, sessionPromptKey);
+            boolean newSession = session.getMessages().isEmpty();
+            String diff = fetchFilteredDiff(owner, repo, prNumber);
+            if (diff == null) {
+                log.warn("Failed to fetch diff for PR #{} in {}/{}", prNumber, owner, repo);
+                return;
+            }
 
             // If session is empty, add context from the PR
-            if (session.getMessages().isEmpty()) {
-                String diff = fetchFilteredDiff(owner, repo, prNumber);
+            if (newSession) {
                 var prContext = buildPrContextString(payload, diff, owner, repo, prNumber);
                 sessionService.addMessage(session, "user", prContext);
                 sessionService.addMessage(session, "assistant",
@@ -186,12 +191,15 @@ public class CodeReviewService {
 
             // Send the comment as a new message in the conversation
             List<AiMessage> history = sessionService.toAiMessages(session);
+            String messageForAi = newSession
+                    ? commentBody
+                    : buildBotCommandFollowUpMessage(commentBody, diff);
             log.debug("LLM request [chat/botCommand] for PR #{}: history size={}, commentBody length={}, systemPrompt length={}",
                     prNumber, history.size(), commentBody.length(),
                     systemPrompt != null ? systemPrompt.length() : 0);
             log.debug("LLM request [chat/botCommand] user message: '{}'",
                     commentBody.substring(0, Math.min(commentBody.length(), 500)));
-            String response = aiClient.chat(history, commentBody, systemPrompt, null);
+            String response = aiClient.chat(history, messageForAi, systemPrompt, null);
             log.debug("LLM response [chat/botCommand] for PR #{}: length={}, preview='{}'",
                     prNumber, response != null ? response.length() : 0,
                     response != null ? response.substring(0, Math.min(response.length(), 500)) : "null");
@@ -246,6 +254,17 @@ public class CodeReviewService {
         }
 
         return prContext;
+    }
+
+    private String buildBotCommandFollowUpMessage(String commentBody, String diff) {
+        if (diff == null || diff.isBlank()) {
+            return commentBody;
+        }
+        String truncatedDiff = diff.length() > MAX_DIFF_CHARS_FOR_CONTEXT
+                ? diff.substring(0, MAX_DIFF_CHARS_FOR_CONTEXT) + "\n...(truncated)"
+                : diff;
+        return commentBody + "\n\nCurrent pull request diff:\n```diff\n"
+                + truncatedDiff + "\n```";
     }
 
     public void handleInlineComment(WebhookPayload payload, String promptName) {
