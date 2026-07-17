@@ -162,6 +162,7 @@ No Slack bot to babysit.
 > 🎥 **Watch the PR workflows in action:** 
 > * [E2E-Testing PR-workflow walkthrough on YouTube](https://www.youtube.com/watch?v=MjFmZHGIO-w)
 > * [i18n-Sync PR-workflow walkthrough on YouTube](https://youtu.be/sIpqbOqy1Ek)
+> * [Documentation-Sync PR-workflow walkthrough on YouTube](https://youtu.be/JZEhrmVJrqo)
 
 ---
 
