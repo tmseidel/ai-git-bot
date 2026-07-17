@@ -63,7 +63,8 @@ request:
 | Setting | Default | Effect |
 |---|---|---|
 | Bot is requested as reviewer | Always on | Runs when a developer requests the bot as a reviewer on the PR. |
-| **Run workflow when PR is opened** | Off | Runs on every new PR, no reviewer request needed. |
+| **Run workflow when PR is opened** | Off | Runs on every new or reopened PR, no reviewer request needed. |
+| **Run workflow when PR head is updated** | Off | Runs configured workflows on every `synchronized` event (new commits pushed to the PR branch). GitHub and Gitea only. |
 
 Turn on **Run workflow when PR is opened** if you want a workflow to run for
 every PR unconditionally.

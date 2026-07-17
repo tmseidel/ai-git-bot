@@ -80,6 +80,9 @@ public class Bot {
     @Column(nullable = false)
     private boolean runOnPrCreation = false;
 
+    @Column(nullable = false)
+    private boolean runOnPrUpdate = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private BotType botType = BotType.CODING;

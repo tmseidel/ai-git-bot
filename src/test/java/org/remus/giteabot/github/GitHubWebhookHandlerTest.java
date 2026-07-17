@@ -119,8 +119,18 @@ class GitHubWebhookHandlerTest {
     }
 
     @Test
-    void pullRequestSynchronizedWithRunOnPrCreation_isStillIgnored() {
-        bot.setRunOnPrCreation(true);
+    void pullRequestSynchronizedWithRunOnPrUpdate_triggersReview() {
+        bot.setRunOnPrUpdate(true);
+        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("human")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void pullRequestSynchronizedWithoutRunOnPrUpdate_isIgnored() {
         Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("human")));
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
@@ -131,7 +141,52 @@ class GitHubWebhookHandlerTest {
 
     @Test
     void pullRequestSynchronize_isIgnoredEvenWhenBotReviewer() {
+        // Reviewer membership does NOT bypass the update gate — only runOnPrUpdate controls sync.
         Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("ai_bot")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void pullRequestSynchronizedWithRunOnPrUpdate_triggersReviewEvenWithoutBotReviewer() {
+        bot.setRunOnPrUpdate(true);
+        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("human")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    // ---- reopened ----
+
+    @Test
+    void pullRequestReopenedWithBotReviewer_triggersReview() {
+        Map<String, Object> payload = prPayload("reopened", List.of(ownerMap("ai_bot")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void pullRequestReopenedWithRunOnPrCreation_triggersReviewWithoutBotReviewer() {
+        bot.setRunOnPrCreation(true);
+        Map<String, Object> payload = prPayload("reopened", List.of(ownerMap("human")));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void pullRequestReopenedWithoutBotReviewerOrRunOnPrCreation_isIgnored() {
+        Map<String, Object> payload = prPayload("reopened", List.of(ownerMap("human")));
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
