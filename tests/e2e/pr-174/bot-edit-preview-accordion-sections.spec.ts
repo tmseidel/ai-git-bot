@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('Bot-Edit System-Prompt preview modal shows all 8 accordion sections', async ({ page }) => {
+test('Bot-Edit System-Prompt preview modal shows all 10 accordion sections', async ({ page }) => {
   await page.goto('/bots');
 
   // Open the edit modal for the first bot listed
@@ -19,7 +19,7 @@ test('Bot-Edit System-Prompt preview modal shows all 8 accordion sections', asyn
   await expect(previewAccordion).toBeVisible({ timeout: 8000 });
 
   const items = previewAccordion.locator('.accordion-item');
-  await expect(items).toHaveCount(8);
+  await expect(items).toHaveCount(10);
 
   const headersText = (await previewAccordion.locator('.accordion-button').allTextContents()).join(' | ');
   expect(headersText).toContain('Review-Agent System-Prompt');

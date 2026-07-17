@@ -223,6 +223,13 @@ public class CodeReviewService {
         } catch (Exception e) {
             log.error("Failed to handle bot command for comment #{} on PR #{} in {}/{}: {}",
                     commentId, prNumber, owner, repo, e.getMessage(), e);
+            if (e instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException(
+                    "Failed to handle bot command for comment #" + commentId
+                            + " on PR #" + prNumber,
+                    e);
         }
     }
 
