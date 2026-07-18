@@ -51,7 +51,7 @@ class DashboardControllerTest {
         mockMvc.perform(get("/dashboard").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(view().name("dashboard"))
-                .andExpect(content().string(containsString("/images/favicon.svg")))
+                .andExpect(content().string(containsString("/images/favicon.png")))
                 .andExpect(content().string(containsString("brand-icon")));
     }
 }

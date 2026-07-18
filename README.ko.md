@@ -1,4 +1,4 @@
-# AI-Git-Bot
+# <img src="doc/images/ai-git-bot-new-logo.png" alt="Logo" width="32" align="left" style="margin-right: 8px;"/> AI-Git-Bot
 
 [![License: MIT](https://img.shields.io/github/license/tmseidel/ai-git-bot)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tmseidel/ai-git-bot)](https://hub.docker.com/r/tmseidel/ai-git-bot)
@@ -126,6 +126,8 @@ AI-Git-Bot 은 다음을 지원합니다:
 AI-Git-Bot 은 팀이 이미 생성하고 있는 이벤트로 트리거되는 반복 가능한 워크플로우로 이러한 작업을 전환합니다:
 
 - 풀 리퀘스트 열림
+- 풀 리퀘스트 다시 열림
+- 새 커밋 푸시 (봇별 옵트인)
 - 리뷰어 요청
 - 이슈 할당
 - `@bot` 멘션

@@ -1,4 +1,4 @@
-# AI-Git-Bot
+# <img src="doc/images/ai-git-bot-new-logo.png" alt="Logo" width="32" align="left" style="margin-right: 8px;"/> AI-Git-Bot
 
 [![License: MIT](https://img.shields.io/github/license/tmseidel/ai-git-bot)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tmseidel/ai-git-bot)](https://hub.docker.com/r/tmseidel/ai-git-bot)
@@ -126,6 +126,8 @@ AI-Git-Bot 支持：
 AI-Git-Bot 将这些活动转化为你团队已经在产生的事件触发的工作流：
 
 - 拉取请求打开
+- 拉取请求重新打开
+- 新提交推送 (每个 bot 可选择启用)
 - 请求审查者
 - Issue 被分配
 - `@bot` 被提及

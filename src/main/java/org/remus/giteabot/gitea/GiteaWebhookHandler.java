@@ -296,6 +296,8 @@ public class GiteaWebhookHandler {
         }
 
         if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
+                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
+                || ("synchronized".equals(action) && bot.isRunOnPrUpdate())
                 || ("assigned".equals(action) && isBotAssignee(bot, payload))
                 || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
             botWebhookService.reviewPullRequest(bot, payload);

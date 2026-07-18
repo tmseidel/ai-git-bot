@@ -20,6 +20,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -29,6 +30,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -199,6 +201,8 @@ class CodeReviewServiceTest {
                 AiMessage.builder().role("user").content("Initial context").build(),
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn("");
         when(aiClient.chat(anyList(), eq("@ai_bot explain this"), eq(TEST_PROMPT), isNull()))
                 .thenReturn("Here's my explanation");
 
@@ -206,6 +210,153 @@ class CodeReviewServiceTest {
 
         verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
         verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
+    }
+
+    @Test
+    void handleBotCommand_commentWriteFailurePropagates() {
+        WebhookPayload payload = createCommentPayload("@ai_bot explain this");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+        IllegalStateException writeFailure = new IllegalStateException("comment write failed");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(repositoryClient.getPullRequestDiff(any(), any(), anyLong())).thenReturn("Some random diff");
+        when(aiClient.chat(anyList(), anyString(), eq(TEST_PROMPT), isNull()))
+                .thenReturn("Generated response");
+        doThrow(writeFailure).when(repositoryClient)
+                .postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), anyString());
+
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> codeReviewService.handleBotCommand(payload, null));
+
+        assertEquals(writeFailure, thrown);
+        verify(sessionService, never()).compactContextWindow(session);
+    }
+
+    @Test
+    void handleBotCommand_existingSessionIncludesLatestDiffButStoresOriginalComment() {
+        String comment = "@ai_bot explain the updated implementation";
+        String latestDiff = "diff --git a/Foo.java b/Foo.java\n+int current = 2;";
+        WebhookPayload payload = createCommentPayload(comment);
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+        session.addMessage("assistant", "Initial review");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build(),
+                AiMessage.builder().role("assistant").content("Initial review").build()
+        ));
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn(latestDiff);
+        when(aiClient.chat(anyList(), anyString(), eq(TEST_PROMPT), isNull()))
+                .thenReturn("Updated explanation");
+
+        codeReviewService.handleBotCommand(payload, null);
+
+        ArgumentCaptor<String> modelInput = ArgumentCaptor.forClass(String.class);
+        verify(aiClient).chat(anyList(), modelInput.capture(), eq(TEST_PROMPT), isNull());
+        assertTrue(modelInput.getValue().contains(comment));
+        assertTrue(modelInput.getValue().contains("Current pull request diff:"));
+        assertTrue(modelInput.getValue().contains(latestDiff));
+        verify(sessionService).addMessage(session, "user", comment);
+        verify(sessionService).addMessage(session, "assistant", "Updated explanation");
+    }
+
+    @Test
+    void handleBotCommand_newSessionKeepsDiffInInitialContextOnly() {
+        String comment = "@ai_bot explain this";
+        String latestDiff = "diff --git a/Foo.java b/Foo.java\n+int current = 2;";
+        WebhookPayload payload = createCommentPayload(comment);
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn(latestDiff);
+        when(aiClient.chat(anyList(), eq(comment), eq(TEST_PROMPT), isNull()))
+                .thenReturn("Explanation");
+
+        codeReviewService.handleBotCommand(payload, null);
+
+        verify(sessionService).addMessage(eq(session), eq("user"), contains(latestDiff));
+        verify(aiClient).chat(anyList(), eq(comment), eq(TEST_PROMPT), isNull());
+        verify(sessionService).addMessage(session, "user", comment);
+    }
+
+    @Test
+    void handleBotCommand_existingSessionTruncatesLatestDiff() {
+        String comment = "@ai_bot inspect the latest change";
+        String omittedTail = "OMITTED_TAIL";
+        String oversizedDiff = "x".repeat(CodeReviewService.MAX_DIFF_CHARS_FOR_CONTEXT) + omittedTail;
+        WebhookPayload payload = createCommentPayload(comment);
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        when(sessionService.toAiMessages(session)).thenReturn(List.of(
+                AiMessage.builder().role("user").content("Initial context").build()
+        ));
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn(oversizedDiff);
+        when(aiClient.chat(anyList(), anyString(), eq(TEST_PROMPT), isNull()))
+                .thenReturn("Result");
+
+        codeReviewService.handleBotCommand(payload, null);
+
+        ArgumentCaptor<String> modelInput = ArgumentCaptor.forClass(String.class);
+        verify(aiClient).chat(anyList(), modelInput.capture(), eq(TEST_PROMPT), isNull());
+        assertTrue(modelInput.getValue().contains("...(truncated)"));
+        assertFalse(modelInput.getValue().contains(omittedTail));
+    }
+
+    @Test
+    void handleBotCommand_existingSessionStopsWhenLatestDiffFetchFails() {
+        WebhookPayload payload = createCommentPayload("@ai_bot inspect the latest change");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenThrow(new IllegalStateException("diff fetch failed"));
+
+
+        assertThrows(IllegalStateException.class, () ->codeReviewService.handleBotCommand(payload, null));
+
+        verify(aiClient, never()).chat(anyList(), anyString(), anyString(), isNull());
+        verify(repositoryClient, never()).postPullRequestComment(
+                anyString(), anyString(), anyLong(), anyString());
+    }
+
+    @Test
+    void handleBotCommand_existingSessionStopsWhenLatestDiffIsNull() {
+        WebhookPayload payload = createCommentPayload("@ai_bot inspect the latest change");
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
+        session.addMessage("user", "Initial context");
+
+        when(sessionService.getOrCreateSession("testowner", "testrepo", 1L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn(null);
+
+        codeReviewService.handleBotCommand(payload, null);
+
+        verify(aiClient, never()).chat(anyList(), anyString(), anyString(), isNull());
+        verify(repositoryClient, never()).postPullRequestComment(
+                anyString(), anyString(), anyLong(), anyString());
     }
 
     @Test
@@ -570,6 +721,8 @@ class CodeReviewServiceTest {
                 AiMessage.builder().role("user").content("Initial context").build(),
                 AiMessage.builder().role("assistant").content("Initial review").build()
         ));
+        when(repositoryClient.getPullRequestDiff("testowner", "testrepo", 1L))
+                .thenReturn("");
         when(aiClient.chat(anyList(), eq("@ai_bot explain this"), eq(TEST_PROMPT), isNull()))
                 .thenReturn("");
 
