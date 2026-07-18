@@ -1,4 +1,4 @@
-# AI-Git-Bot
+# <img src="doc/images/ai-git-bot-new-logo.png" alt="Logo" width="32" align="left" style="margin-right: 8px;"/> AI-Git-Bot
 
 [![License: MIT](https://img.shields.io/github/license/tmseidel/ai-git-bot)](LICENSE)
 [![Docker Pulls](https://img.shields.io/docker/pulls/tmseidel/ai-git-bot)](https://hub.docker.com/r/tmseidel/ai-git-bot)
