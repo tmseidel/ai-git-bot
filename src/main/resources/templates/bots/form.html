@@ -164,6 +164,17 @@
                         </div>
 
                         <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="runOnPrUpdate"
+                                       th:field="*{runOnPrUpdate}"/>
+                                <label class="form-check-label" for="runOnPrUpdate">Run workflow when PR head is updated</label>
+                            </div>
+                            <div class="form-text">
+                                When enabled, the bot executes its configured PR workflow on every <code>synchronized</code> event (new commits pushed to the PR branch). Supported on GitHub and Gitea only. Existing installations default to off.
+                            </div>
+                        </div>
+
+                        <div class="col-12">
                             <label for="deploymentTargetId" class="form-label">Deployment Target <span class="text-secondary">(optional)</span></label>
                             <select class="form-select" id="deploymentTargetId" name="deploymentTargetId">
                                 <option value="">(none — preview-aware workflows will be skipped)</option>

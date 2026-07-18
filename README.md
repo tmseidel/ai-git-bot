@@ -106,6 +106,8 @@ Every repository accumulates engineering chores:
 AI-Git-Bot turns those activities into repeatable workflows triggered by events your team is already producing:
 
 - Pull request opened
+- Pull request reopened
+- New commits pushed (opt-in per bot)
 - Reviewer requested
 - Issue assigned
 - `@bot` mentioned

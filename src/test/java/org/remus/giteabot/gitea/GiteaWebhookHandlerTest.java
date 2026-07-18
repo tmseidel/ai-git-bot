@@ -185,12 +185,24 @@ class GiteaWebhookHandlerTest {
 
     @Test
     void prSynchronizedEvent_routesToReviewPullRequest() {
+        // runOnPrUpdate defaults to false — synchronized is ignored without the opt-in.
         Map<String, Object> payload = buildPrEventPayload("synchronized");
 
         ResponseEntity<String> response = handler.handleWebhook(bot, payload);
 
         assertEquals("ignored", response.getBody());
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void prSynchronizedEvent_withRunOnPrUpdate_triggersReview() {
+        bot.setRunOnPrUpdate(true);
+        Map<String, Object> payload = buildPrEventPayload("synchronized");
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
     }
 
     @Test
@@ -216,15 +228,40 @@ class GiteaWebhookHandlerTest {
         verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
     }
 
+    // ---- PR reopened routing ----
+
     @Test
-    void prSynchronizedEvent_withRunOnPrCreation_isStillIgnored() {
-        bot.setRunOnPrCreation(true);
-        Map<String, Object> payload = buildPrEventPayload("synchronized");
+    void prReopenedEvent_routesToReviewPullRequest() {
+        // Bot is reviewer by default in buildPrEventPayload — reopened triggers review.
+        Map<String, Object> payload = buildPrEventPayload("reopened");
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void prReopenedEvent_withoutBotReviewer_isIgnored() {
+        Map<String, Object> payload = buildPrEventPayload("reopened");
+        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
 
         ResponseEntity<String> response = handler.handleWebhook(bot, payload);
 
         assertEquals("ignored", response.getBody());
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    }
+
+    @Test
+    void prReopenedEvent_withRunOnPrCreation_triggersReviewWithoutBotReviewer() {
+        bot.setRunOnPrCreation(true);
+        Map<String, Object> payload = buildPrEventPayload("reopened");
+        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
     }
 
     @Test

@@ -77,6 +77,8 @@ public class GitHubWebhookHandler {
     private ResponseEntity<String> handlePullRequestEvent(Bot bot, WebhookPayload payload) {
         String action = payload.getAction();
         if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
+                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
+                || ("synchronized".equals(action) && bot.isRunOnPrUpdate())
                 || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
