@@ -45,7 +45,7 @@ class SetupControllerTest {
         mockMvc.perform(get("/setup"))
                 .andExpect(status().isOk())
                 .andExpect(view().name("setup"))
-                .andExpect(content().string(containsString("/images/favicon.svg")))
+                .andExpect(content().string(containsString("/images/favicon.png")))
                 .andExpect(content().string(containsString("brand-icon")));
     }
 
@@ -121,7 +121,7 @@ class SetupControllerTest {
         mockMvc.perform(get("/login"))
                 .andExpect(status().isOk())
                 .andExpect(view().name("login"))
-                .andExpect(content().string(containsString("/images/favicon.svg")))
+                .andExpect(content().string(containsString("/images/favicon.png")))
                 .andExpect(content().string(containsString("brand-icon")));
     }
 }
