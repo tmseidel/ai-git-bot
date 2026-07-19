@@ -5,14 +5,11 @@ import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 
 import java.nio.file.Path;
+import java.util.function.Consumer;
 
 /**
  * Mutable, per-run context shared between {@link AgentLoop} and
  * {@link AgentStrategy} implementations.
- *
- * <p>{@link #baseBranch()} is mutable because strategies may switch the
- * checked-out branch via {@code branch-switcher} mid-run; the resulting branch
- * is reported back to the orchestrating service through this object.</p>
  */
 public final class AgentRunContext {
 
@@ -23,23 +20,12 @@ public final class AgentRunContext {
     private final Path workspaceDir;
     @Setter
     private String baseBranch;
-    /**
-     * The tooling mode the {@link AgentLoop} actually resolved for this run
-     * (NATIVE function-calling vs LEGACY JSON). Set by the loop before the first
-     * round so strategies can interpret a no-tool-call turn correctly: in NATIVE
-     * mode a plain-language turn is a normal completion signal, whereas in LEGACY
-     * mode the model is expected to emit a JSON plan.
-     */
     @Setter
     private ToolingMode toolingMode;
-
-    /**
-     * Optional parsed diff summary for PR review workflows. When set, the
-     * {@code pr-diff} tool can use it to extract per-file hunks without
-     * re-fetching or re-parsing the full diff.
-     */
     @Setter
     private DiffSummary diffSummary;
+    @Setter
+    private Consumer<ToolCallRecord> auditToolCallConsumer;
 
     public AgentRunContext(AgentSession session, String owner, String repo,
                            Long issueNumber, Path workspaceDir, String baseBranch) {
@@ -59,5 +45,16 @@ public final class AgentRunContext {
     public String baseBranch() { return baseBranch; }
     public ToolingMode toolingMode() { return toolingMode; }
     public DiffSummary diffSummary() { return diffSummary; }
-}
+    public Consumer<ToolCallRecord> auditToolCallConsumer() { return auditToolCallConsumer; }
 
+    public record ToolCallRecord(
+            String toolName,
+            String arguments,
+            String resultExcerpt,
+            boolean success,
+            long durationMs,
+            Long inputTokens,
+            Long outputTokens,
+            int round
+    ) {}
+}

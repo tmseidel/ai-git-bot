@@ -20,11 +20,13 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -92,7 +94,8 @@ public class AgentReviewService {
                               ToolExecutionService toolExecutionService,
                               ToolCatalog toolCatalog,
                               WorkspaceService workspaceService,
-                              AgentConfigProperties agentConfig) {
+                              AgentConfigProperties agentConfig,
+                              McpOrchestrationService mcpOrchestrationService) {
         this.context = context;
         this.sessionService = sessionService;
         this.toolCatalog = toolCatalog;
@@ -102,7 +105,7 @@ public class AgentReviewService {
         this.aiClient = context.aiClient();
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog,
-                context.mcpOrchestrationService(), context.mcpConfiguration(),
+                mcpOrchestrationService, context.mcpConfiguration(),
                 context.mcpToolCatalog(), this.repositoryClient, context.allowedBuiltinTools());
     }
 
@@ -123,7 +126,9 @@ public class AgentReviewService {
      *         {@code false} when there was nothing to review or the agent failed
      */
     public boolean reviewPullRequest(WebhookPayload payload, int maxToolRounds,
-                                     boolean enableFormalDecision, String decisionPrompt) {
+                                     boolean enableFormalDecision, String decisionPrompt,
+                                     Long runId,
+                                     Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -169,7 +174,8 @@ public class AgentReviewService {
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary);
+                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
+                    runId, toolCallConsumer);
 
             String review = outcome.payload() instanceof String s ? s : null;
             if (review == null || review.isBlank()) {
@@ -268,7 +274,7 @@ public class AgentReviewService {
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage,
-                    maxToolRounds, diffSummary);
+                    maxToolRounds, diffSummary, null, null);
 
             String answer = outcome.payload() instanceof String s ? s : null;
             if (answer == null || answer.isBlank()) {
@@ -423,7 +429,8 @@ public class AgentReviewService {
     private LoopOutcome runReviewLoop(AgentSession session, String owner, String repo, Long prNumber,
                                       Path workspaceDir, String headBranch,
                                       String systemPrompt, String userMessage, int maxToolRounds,
-                                      DiffSummary diffSummary) {
+                                      DiffSummary diffSummary, Long runId,
+                                      Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
         ReviewAgentStrategy strategy = new ReviewAgentStrategy(
                 systemPrompt, toolRouter, toolCatalog,
                 context.mcpToolCatalog(), context.allowedBuiltinTools(),
@@ -441,6 +448,7 @@ public class AgentReviewService {
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);
         ctx.setDiffSummary(diffSummary);
+        ctx.setAuditToolCallConsumer(toolCallConsumer);
         return loop.run(ctx, userMessage, strategy);
     }
 

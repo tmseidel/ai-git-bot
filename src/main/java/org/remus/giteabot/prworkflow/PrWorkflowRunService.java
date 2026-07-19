@@ -10,17 +10,6 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 
-/**
- * Lifecycle service for {@link PrWorkflowRun} rows. The
- * {@link PrWorkflowOrchestrator} is the only intended caller; tests may also
- * use it directly. All write methods are transactional and idempotent for the
- * given run id.
- *
- * <p>Limits the maximum length of {@link PrWorkflowStep#getLogExcerpt()} so
- * one misbehaving workflow cannot fill the database with multi-megabyte
- * blobs. The limit is intentionally small (8&nbsp;KB) — long-form logs belong
- * in the application log, not in the per-run audit trail.</p>
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -28,7 +17,6 @@ public class PrWorkflowRunService {
 
     static final int MAX_LOG_EXCERPT_CHARS = 8 * 1024;
     static final int MAX_SUMMARY_CHARS = 2000;
-    /** 32 random bytes → 64 hex chars; well under the column's 128. */
     static final int CALLBACK_SECRET_BYTES = 32;
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
@@ -52,12 +40,6 @@ public class PrWorkflowRunService {
         return runRepository.save(run);
     }
 
-    /**
-     * Transitions every still-active run for the same (bot, repo, pr, workflow)
-     * tuple to {@link PrWorkflowRunStatus#CANCELLED}. Called from
-     * {@link #start} so a new PR-synchronize event automatically supersedes
-     * any earlier in-flight run.
-     */
     @Transactional
     public void cancelActiveRunsForPr(Long botId, String repoOwner, String repoName, Long prNumber,
                                       String workflowKey) {
@@ -117,15 +99,6 @@ public class PrWorkflowRunService {
                 () -> new IllegalArgumentException("Unknown PrWorkflowRun id=" + runId));
     }
 
-    /**
-     * Returns {@code true} if the given run is still in an active state
-     * ({@link PrWorkflowRunStatus#RUNNING} or
-     * {@link PrWorkflowRunStatus#WAITING_DEPLOY}). Used by
-     * {@link PrWorkflowContext#isCancelled()} so workflows can cooperatively
-     * abort before performing external side effects.
-     *
-     * <p>A missing run id is treated as cancelled (defensive).</p>
-     */
     @Transactional(readOnly = true)
     public boolean isActive(Long runId) {
         if (runId == null) {
@@ -147,11 +120,6 @@ public class PrWorkflowRunService {
         return value.substring(0, max - 3) + "...";
     }
 
-    /**
-     * Transitions the run into {@link PrWorkflowRunStatus#WAITING_DEPLOY} and
-     * persists the deployment handle JSON returned by the strategy. No-op if
-     * the run is already terminal.
-     */
     @Transactional
     public PrWorkflowRun markWaitingDeploy(Long runId, String deploymentHandleJson) {
         PrWorkflowRun run = runRepository.findById(runId).orElseThrow(
@@ -166,12 +134,6 @@ public class PrWorkflowRunService {
         return runRepository.save(run);
     }
 
-    /**
-     * Resumes a {@link PrWorkflowRunStatus#WAITING_DEPLOY} run back into
-     * {@link PrWorkflowRunStatus#RUNNING} once the deployment has reported
-     * readiness, optionally recording the preview URL. No-op if the run is
-     * already terminal or not waiting on a deployment.
-     */
     @Transactional
     public PrWorkflowRun resumeFromDeploy(Long runId, String previewUrl) {
         PrWorkflowRun run = runRepository.findById(runId).orElseThrow(
@@ -188,10 +150,6 @@ public class PrWorkflowRunService {
         return runRepository.save(run);
     }
 
-    /**
-     * Records a preview URL on the run without changing its status. Used by
-     * synchronous strategies that resolve the URL up-front.
-     */
     @Transactional
     public PrWorkflowRun setPreviewUrl(Long runId, String previewUrl) {
         PrWorkflowRun run = runRepository.findById(runId).orElseThrow(
@@ -209,4 +167,3 @@ public class PrWorkflowRunService {
         return HexFormat.of().formatHex(bytes);
     }
 }
-
