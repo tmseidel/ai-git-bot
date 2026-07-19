@@ -64,6 +64,8 @@ class PrAuditEventServiceTest {
 
         List<PrAuditEvent> events = auditService.findByBotAndRepoAndPr(1L, "chainer", "repo-b", 1L);
         assertThat(events).hasSize(2);
+        assertThat(events.get(0).getPreviousHash()).isNull();
+        assertThat(events.get(1).getPreviousHash()).isEqualTo(events.get(0).getHash());
     }
 
     @Test

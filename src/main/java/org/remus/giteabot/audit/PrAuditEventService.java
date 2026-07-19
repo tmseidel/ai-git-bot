@@ -43,7 +43,7 @@ public class PrAuditEventService {
     @Transactional
     public void record(PrAuditEvent event) {
         try {
-            String previousHash = resolvePreviousHash(event.getRunId());
+            String previousHash = resolvePreviousHash(event);
             String payloadJson = event.getEventPayloadJson();
             String eventTypeName = event.getEventType() != null ? event.getEventType().name() : "UNKNOWN";
             event.setPreviousHash(previousHash);
@@ -104,9 +104,14 @@ public class PrAuditEventService {
         return auditRepository.findByBotIdOrderByIdAsc(botId);
     }
 
-    private String resolvePreviousHash(Long runId) {
-        if (runId == null) return null;
-        PrAuditEvent previous = auditRepository.findTopByRunIdOrderByIdDesc(runId);
+    private String resolvePreviousHash(PrAuditEvent event) {
+        PrAuditEvent previous;
+        if (event.getRunId() != null) {
+            previous = auditRepository.findTopByRunIdOrderByIdDesc(event.getRunId());
+        } else {
+            previous = auditRepository.findTopByBotIdAndRepoOwnerAndRepoNameAndPrNumberOrderByIdDesc(
+                    event.getBotId(), event.getRepoOwner(), event.getRepoName(), event.getPrNumber());
+        }
         return previous != null ? previous.getHash() : null;
     }
 

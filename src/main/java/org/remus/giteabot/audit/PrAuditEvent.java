@@ -35,10 +35,10 @@ public class PrAuditEvent {
     @Builder.Default
     private Instant eventTimestamp = Instant.now();
 
-    @Column(nullable = false, length = 64, columnDefinition = "CHAR(64)")
+    @Column(nullable = false, length = 64)
     private String hash;
 
-    @Column(name = "previous_hash", length = 64, columnDefinition = "CHAR(64)")
+    @Column(name = "previous_hash", length = 64)
     private String previousHash;
 
     @Column(name = "bot_id", nullable = false)

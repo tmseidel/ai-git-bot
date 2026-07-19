@@ -23,6 +23,10 @@ public interface PrAuditEventRepository extends JpaRepository<PrAuditEvent, Long
     /** Returns the most recent event for a run (for previous-hash lookup). */
     PrAuditEvent findTopByRunIdOrderByIdDesc(Long runId);
 
+    /** Fallback: most recent event for a (bot, repo, PR) combination when runId is null. */
+    PrAuditEvent findTopByBotIdAndRepoOwnerAndRepoNameAndPrNumberOrderByIdDesc(
+            Long botId, String repoOwner, String repoName, Long prNumber);
+
     /** Deletes all audit events older than the given cutoff. Returns the count of deleted rows. */
     @Modifying
     @Transactional

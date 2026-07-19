@@ -70,6 +70,8 @@ class PrAuditEventToolCallTest {
 
         List<PrAuditEvent> events = auditService.findByBotAndRepoAndPr(1L, "o", "r", 3L);
         assertThat(events).hasSize(2);
+        assertThat(events.get(0).getPreviousHash()).isNull();
+        assertThat(events.get(1).getPreviousHash()).isEqualTo(events.get(0).getHash());
     }
 
     @Test
