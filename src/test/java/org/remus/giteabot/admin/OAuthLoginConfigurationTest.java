@@ -11,11 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OAuthLoginConfigurationTest {
 
+    private OAuthLoginProperties properties;
     private OAuthLoginConfiguration configuration;
 
     @BeforeEach
     void setUp() {
-        configuration = new OAuthLoginConfiguration();
+        properties = new OAuthLoginProperties();
+        configuration = new OAuthLoginConfiguration(properties);
         set("clientId", "client-id");
         set("clientSecret", "client-secret");
         set("authorizationUri", "https://login.example.test/authorize");
@@ -86,6 +88,6 @@ class OAuthLoginConfigurationTest {
     }
 
     private void set(String field, String value) {
-        ReflectionTestUtils.setField(configuration, field, value);
+        ReflectionTestUtils.setField(properties, field, value);
     }
 }

@@ -1,8 +1,8 @@
 package org.remus.giteabot.admin;
 
 import jakarta.annotation.PostConstruct;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
@@ -27,55 +27,33 @@ import java.util.stream.Stream;
  */
 @Configuration
 @ConditionalOnProperty(prefix = "giteabot.security", name = "login-method", havingValue = "oauth")
+@EnableConfigurationProperties(OAuthLoginProperties.class)
 public class OAuthLoginConfiguration {
 
     public static final String REGISTRATION_ID = "giteabot";
 
-    @Value("${giteabot.security.oauth.client-id:}")
-    private String clientId;
+    private final OAuthLoginProperties properties;
 
-    @Value("${giteabot.security.oauth.client-secret:}")
-    private String clientSecret;
-
-    @Value("${giteabot.security.oauth.issuer-uri:}")
-    private String issuerUri;
-
-    @Value("${giteabot.security.oauth.authorization-uri:}")
-    private String authorizationUri;
-
-    @Value("${giteabot.security.oauth.token-uri:}")
-    private String tokenUri;
-
-    @Value("${giteabot.security.oauth.user-info-uri:}")
-    private String userInfoUri;
-
-    @Value("${giteabot.security.oauth.jwk-set-uri:}")
-    private String jwkSetUri;
-
-    @Value("${giteabot.security.oauth.user-name-attribute:sub}")
-    private String userNameAttribute;
-
-    @Value("${giteabot.security.oauth.redirect-uri:{baseUrl}/login/oauth2/code/giteabot}")
-    private String redirectUri;
-
-    @Value("${giteabot.security.oauth.scope:openid,profile}")
-    private String scope;
+    public OAuthLoginConfiguration(OAuthLoginProperties properties) {
+        this.properties = properties;
+    }
 
     @PostConstruct
     void validateConfiguration() {
-        jwkSetUri = trim(jwkSetUri);
-        issuerUri = trim(issuerUri);
+        properties.setJwkSetUri(trim(properties.getJwkSetUri()));
+        properties.setIssuerUri(trim(properties.getIssuerUri()));
+
         List<String> missing = Stream.of(
-                required("giteabot.security.oauth.client-id", clientId),
-                required("giteabot.security.oauth.client-secret", clientSecret),
-                required("giteabot.security.oauth.user-name-attribute", userNameAttribute),
-                required("giteabot.security.oauth.redirect-uri", redirectUri)
+                required("giteabot.security.oauth.client-id", properties.getClientId()),
+                required("giteabot.security.oauth.client-secret", properties.getClientSecret()),
+                required("giteabot.security.oauth.user-name-attribute", properties.getUserNameAttribute()),
+                required("giteabot.security.oauth.redirect-uri", properties.getRedirectUri())
         ).filter(Objects::nonNull).toList();
         if (!issuerDiscoveryEnabled()) {
             missing = Stream.concat(missing.stream(), Stream.of(
-                    required("giteabot.security.oauth.authorization-uri", authorizationUri),
-                    required("giteabot.security.oauth.token-uri", tokenUri),
-                    required("giteabot.security.oauth.user-info-uri", userInfoUri)
+                    required("giteabot.security.oauth.authorization-uri", properties.getAuthorizationUri()),
+                    required("giteabot.security.oauth.token-uri", properties.getTokenUri()),
+                    required("giteabot.security.oauth.user-info-uri", properties.getUserInfoUri())
             ).filter(Objects::nonNull)).toList();
         }
 
@@ -83,7 +61,8 @@ public class OAuthLoginConfiguration {
             throw new IllegalStateException("OAuth login is selected, but required configuration is missing: "
                     + String.join(", ", missing));
         }
-        if (!issuerDiscoveryEnabled() && scopes().contains("openid") && (jwkSetUri == null || jwkSetUri.isBlank())) {
+        if (!issuerDiscoveryEnabled() && scopes().contains("openid")
+                && (properties.getJwkSetUri() == null || properties.getJwkSetUri().isBlank())) {
             throw new IllegalStateException("OAuth login requests the 'openid' scope, but required configuration is missing: "
                     + "giteabot.security.oauth.jwk-set-uri");
         }
@@ -99,40 +78,40 @@ public class OAuthLoginConfiguration {
 
     private ClientRegistration discoveredRegistration() {
         try {
-            return ClientRegistrations.fromIssuerLocation(issuerUri)
+            return ClientRegistrations.fromIssuerLocation(properties.getIssuerUri())
                     .registrationId(REGISTRATION_ID)
-                    .clientId(clientId)
-                    .clientSecret(clientSecret)
+                    .clientId(properties.getClientId())
+                    .clientSecret(properties.getClientSecret())
                     .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                     .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                    .redirectUri(redirectUri)
+                    .redirectUri(properties.getRedirectUri())
                     .scope(scopes())
-                    .userNameAttributeName(userNameAttribute)
+                    .userNameAttributeName(properties.getUserNameAttribute())
                     .clientName("AI Git Bot")
                     .build();
         } catch (RuntimeException ex) {
             throw new IllegalStateException("OAuth issuer discovery failed for giteabot.security.oauth.issuer-uri '"
-                    + issuerUri + "'", ex);
+                    + properties.getIssuerUri() + "'", ex);
         }
     }
 
     private ClientRegistration explicitRegistration() {
         ClientRegistration registration = ClientRegistration.withRegistrationId(REGISTRATION_ID)
-                .clientId(clientId)
-                .clientSecret(clientSecret)
+                .clientId(properties.getClientId())
+                .clientSecret(properties.getClientSecret())
                 .clientAuthenticationMethod(ClientAuthenticationMethod.CLIENT_SECRET_BASIC)
                 .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                .redirectUri(redirectUri)
+                .redirectUri(properties.getRedirectUri())
                 .scope(scopes())
-                .authorizationUri(authorizationUri)
-                .tokenUri(tokenUri)
-                .userInfoUri(userInfoUri)
-                .userNameAttributeName(userNameAttribute)
+                .authorizationUri(properties.getAuthorizationUri())
+                .tokenUri(properties.getTokenUri())
+                .userInfoUri(properties.getUserInfoUri())
+                .userNameAttributeName(properties.getUserNameAttribute())
                 .clientName("AI Git Bot")
                 .build();
-        if (jwkSetUri != null && !jwkSetUri.isBlank()) {
+        if (properties.getJwkSetUri() != null && !properties.getJwkSetUri().isBlank()) {
             registration = ClientRegistration.withClientRegistration(registration)
-                    .jwkSetUri(jwkSetUri)
+                    .jwkSetUri(properties.getJwkSetUri())
                     .build();
         }
         return registration;
@@ -140,21 +119,20 @@ public class OAuthLoginConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "giteabot.security.oauth.debug-logging", name = "enabled", havingValue = "true")
-    public OAuthDebugLoggingFilter oauthDebugLoggingFilter(
-            @Value("${giteabot.security.oauth.debug-logging.max-body-length:16384}") int maxBodyLength) {
-        return new OAuthDebugLoggingFilter(maxBodyLength);
+    public OAuthDebugLoggingFilter oauthDebugLoggingFilter() {
+        return new OAuthDebugLoggingFilter(properties.getDebugLogging().getMaxBodyLength());
     }
 
     private Set<String> scopes() {
         Set<String> scopes = new LinkedHashSet<>();
-        Arrays.stream(scope.split("[\\s,]+"))
+        Arrays.stream(properties.getScope().split("[\\s,]+"))
                 .filter(value -> !value.isBlank())
                 .forEach(scopes::add);
         return scopes;
     }
 
     private boolean issuerDiscoveryEnabled() {
-        return issuerUri != null && !issuerUri.isBlank();
+        return properties.getIssuerUri() != null && !properties.getIssuerUri().isBlank();
     }
 
     private static String required(String property, String value) {
