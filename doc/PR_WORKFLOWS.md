@@ -118,6 +118,92 @@ documentation workflows are opt-in. Bots with no explicit configuration inherit
 - [Full-Stack QA](PR_WORKFLOWS_E2E.md) — generate and run E2E browser tests.
 - [README Sync](PR_WORKFLOWS_README_SYNC.md) — keep documentation current.
 
+---
+
+## Audit trail
+
+Every workflow run produces a tamper-evident audit trail. The bot records
+lifecycle events, tool calls the AI agent makes, step-level progress, and
+review decisions in a hash-chained append-only log. You can use this to
+reconstruct exactly what happened during a workflow run, verify that no events
+were inserted or deleted, and correlate AI interactions with token usage.
+
+### What gets recorded
+
+| Event | Emitted when |
+|---|---|
+| `PR_WORKFLOW_RUN_STARTED` | A workflow starts for a pull request. |
+| `PR_WORKFLOW_STEP_APPENDED` | A workflow records a named step (e.g. `fetch-diff`). |
+| `TOOL_CALL_EXECUTED` | The AI agent calls a tool during an agentic workflow. Stores the tool name, arguments (truncated to 2 KB), result excerpt (1 KB), success flag, round number, duration, and token counts. |
+| `PR_WORKFLOW_RUN_COMPLETED` | A workflow finishes (SUCCESS, FAILED, or CANCELLED). |
+| `REVIEW_COMPLETED` | A review-category workflow posts its review to the PR. |
+
+Every event carries the bot ID, repository, PR number, run ID, and a UTC
+timestamp. Tool-call events also include `ai_session_id` and
+`ai_usage_session_id` for cross-referencing with the AI usage log and session
+tables.
+
+### Hash chain integrity
+
+Events are linked by a SHA-256 hash chain scoped to each workflow run.
+The first event in a run has `previous_hash = NULL`; every subsequent event's
+hash is computed from the previous event's hash, the event type, timestamp,
+and the canonical JSON payload:
+
+```
+hash = SHA-256(event_type | timestamp_ms | payload_json | previous_hash)
+```
+
+To verify integrity, recompute each event's hash from its predecessor.
+A break in the chain means an event was inserted, deleted, or altered.
+
+### Querying audit events
+
+Audit events are stored in the `pr_audit_events` table. From a SQL client:
+
+```sql
+-- All events for a specific workflow run
+SELECT * FROM pr_audit_events WHERE run_id = 42 ORDER BY id;
+
+-- All events for a bot/repo/PR combination
+SELECT * FROM pr_audit_events
+WHERE bot_id = 1 AND repo_owner = 'acme' AND repo_name = 'api' AND pr_number = 27
+ORDER BY id;
+
+-- All tool calls made during a run
+SELECT * FROM pr_audit_events
+WHERE run_id = 42 AND event_type = 'TOOL_CALL_EXECUTED'
+ORDER BY id;
+```
+
+The event's `event_payload_json` column contains type-specific details —
+arguments, status, summaries — as a flat JSON object.
+
+### Retention policy
+
+Audit events accumulate over time. A nightly garbage collector removes events
+older than the configured retention window. By default, events are kept for
+**90 days** and the collector runs at **04:23 UTC**.
+
+Configure these in `application.properties` or via environment variables:
+
+| Property | Env var | Default | Description |
+|---|---|---|---|
+| `audit.retention` | `AUDIT_RETENTION` | `P90D` | ISO-8601 duration to keep events (e.g. `P180D`, `P365D`). |
+| `audit.gc-cron` | `AUDIT_GC_CRON` | `0 23 4 * * *` | Cron expression for the retention cleanup job. |
+
+In Docker Compose, set them under the `app` service's `environment`:
+
+```yaml
+environment:
+  AUDIT_RETENTION: P180D
+  AUDIT_GC_CRON: "0 0 3 * * *"
+```
+
+To disable retention entirely (keep events forever), set `audit.retention` to
+a very large value such as `P36500D`. There is no off switch — the collector
+always runs but won't delete anything if the cutoff never passes.
+
 > **Advanced topics (being reworked).** Full-Stack QA needs a live preview
 > environment, and some workflows can call external tools. The setup for
 > preview/execution environments, MCP servers, and tool-calling is documented
