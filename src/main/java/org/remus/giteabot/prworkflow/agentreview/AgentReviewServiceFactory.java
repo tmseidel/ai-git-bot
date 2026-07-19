@@ -18,15 +18,6 @@ import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Component;
 
-/**
- * Factory for per-bot {@link AgentReviewService} instances.
- *
- * <p>Mirrors {@code BotWebhookService.createIssueImplementationService} /
- * {@code createWriterAgentService}: resolves the bot's AI client, repository
- * client, MCP catalog/config and built-in tool whitelist and wires them into a
- * read-only review service. Extracted as its own {@link Component} so the
- * {@link AgentReviewWorkflow} stays free of bean-wiring concerns.</p>
- */
 @Component
 @RequiredArgsConstructor
 public class AgentReviewServiceFactory {
@@ -42,10 +33,6 @@ public class AgentReviewServiceFactory {
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
 
-    /**
-     * Builds a read-only {@link AgentReviewService} for the given bot using its
-     * configured AI and Git integrations.
-     */
     public AgentReviewService create(Bot bot) {
         if (bot.getSystemPrompt() == null) {
             throw new IllegalStateException("Bot must have a system prompt assigned");
@@ -63,14 +50,12 @@ public class AgentReviewServiceFactory {
                 aiClient,
                 bot.getSystemPrompt().getReviewAgentSystemPrompt(),
                 bot.getUsername(),
-                mcpOrchestrationService,
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
                 contextWindowTokens);
 
         return new AgentReviewService(context, agentSessionService, toolExecutionService,
-                toolCatalog, workspaceService, agentConfig);
+                toolCatalog, workspaceService, agentConfig, mcpOrchestrationService);
     }
 }
-

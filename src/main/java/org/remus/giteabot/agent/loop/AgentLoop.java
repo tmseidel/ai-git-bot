@@ -158,6 +158,7 @@ public final class AgentLoop {
             }
 
             StepDecision decision;
+            long stepStartNanos = System.nanoTime();
             try {
                 decision = strategy.step(ctx, turn, round);
             } catch (RuntimeException e) {
@@ -165,6 +166,28 @@ public final class AgentLoop {
                         round, budget.maxRounds(), ctx.issueNumber(),
                         e.getClass().getSimpleName(), e.getMessage(), e);
                 throw e;
+            }
+            long stepDurationMs = (System.nanoTime() - stepStartNanos) / 1_000_000;
+            if (ctx.auditToolCallConsumer() != null
+                    && decision instanceof StepDecision.ContinueWithToolResults(
+                            List<StepDecision.ToolCallResult> results, String follow)) {
+                Long inTokens = turn.inputTokens() > 0 ? turn.inputTokens() : null;
+                Long outTokens = turn.outputTokens() > 0 ? turn.outputTokens() : null;
+                var toolCalls = turn.toolCalls();
+                for (int i = 0; i < Math.min(results.size(), toolCalls.size()); i++) {
+                    var tc = toolCalls.get(i);
+                    var r = results.get(i);
+                    String args = tc.args() != null ? tc.args().toString() : "{}";
+                    ctx.auditToolCallConsumer().accept(new AgentRunContext.ToolCallRecord(
+                            tc.name() != null ? tc.name() : "unknown",
+                            args,
+                            r.resultText() != null ? r.resultText() : "",
+                            true,
+                            stepDurationMs,
+                            inTokens,
+                            outTokens,
+                            round));
+                }
             }
             if (decision instanceof StepDecision.Finish(LoopOutcome outcome)) {
                 log.debug("AgentLoop round {}/{} for issue #{}: strategy decided FINISH",

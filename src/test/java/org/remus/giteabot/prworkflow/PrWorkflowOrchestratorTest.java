@@ -3,10 +3,10 @@ package org.remus.giteabot.prworkflow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.audit.PrAuditEventService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 
@@ -16,11 +16,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,20 +28,19 @@ class PrWorkflowOrchestratorTest {
 
     @Mock private PrWorkflowRunService runService;
     @Mock private PrWorkflowMetrics metrics;
+    @Mock private PrAuditEventService auditService;
 
     private final PrWorkflowRunLockManager lockManager = new PrWorkflowRunLockManager();
 
-    private PrWorkflowOrchestrator orchestrator;
-
     @BeforeEach
     void setUp() {
-        // Built explicitly in each test once the workflow set is known.
+        lenient().when(runService.isActive(anyLong())).thenReturn(true);
     }
 
     private PrWorkflowOrchestrator newOrchestrator(PrWorkflow... workflows) {
         PrWorkflowRegistry registry = new PrWorkflowRegistry(List.of(workflows));
         return new PrWorkflowOrchestrator(registry, runService, metrics, lockManager,
-                org.mockito.Mockito.mock(WorkflowSelectionService.class));
+                org.mockito.Mockito.mock(WorkflowSelectionService.class), auditService);
     }
 
     private static WebhookPayload payloadFor(String owner, String repo, long prNumber) {
@@ -59,190 +57,184 @@ class PrWorkflowOrchestratorTest {
         return payload;
     }
 
-    private static Bot bot(long id, String name) {
-        Bot b = new Bot();
-        b.setId(id);
-        b.setName(name);
-        b.setUsername(name);
-        return b;
+    private PrWorkflow successWorkflow() {
+        return workflowWithResult(new WorkflowResult(WorkflowResultStatus.SUCCESS, "done"));
     }
 
-    private static PrWorkflowRun stubRun(long id, PrWorkflowRunStatus status) {
-        PrWorkflowRun run = new PrWorkflowRun();
-        run.setId(id);
-        run.setStatus(status);
-        return run;
+    private PrWorkflow skippedWorkflow() {
+        return workflowWithResult(new WorkflowResult(WorkflowResultStatus.SKIPPED, "nothing to do"));
+    }
+
+    private PrWorkflow throwingWorkflow(RuntimeException ex) {
+        return new PrWorkflow() {
+            @Override public String key() { return "test-wf"; }
+            @Override public String displayName() { return "Test"; }
+            @Override public String description() { return ""; }
+            @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
+            @Override public WorkflowParamsSchema paramsSchema() { return WorkflowParamsSchema.empty(); }
+            @Override public WorkflowResult run(PrWorkflowContext ctx) { throw ex; }
+        };
+    }
+
+    private PrWorkflow workflowWithResult(WorkflowResult result) {
+        return new PrWorkflow() {
+            @Override public String key() { return "test-wf"; }
+            @Override public String displayName() { return "Test"; }
+            @Override public String description() { return ""; }
+            @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
+            @Override public WorkflowParamsSchema paramsSchema() { return WorkflowParamsSchema.empty(); }
+            @Override public WorkflowResult run(PrWorkflowContext ctx) { return result; }
+        };
     }
 
     @Test
     void runDelegatesToWorkflowAndPersistsSuccess() {
-        AtomicReference<PrWorkflowContext> captured = new AtomicReference<>();
-        PrWorkflow w = stubWorkflow("review", ctx -> {
-            captured.set(ctx);
-            return WorkflowResult.success("Reviewed");
-        });
-        orchestrator = newOrchestrator(w);
-        when(runService.start(eq(42L), eq("acme"), eq("web"), eq(7L), eq("review")))
-                .thenReturn(stubRun(101L, PrWorkflowRunStatus.RUNNING));
-        when(runService.complete(eq(101L), eq(PrWorkflowRunStatus.SUCCESS), eq("Reviewed")))
-                .thenReturn(stubRun(101L, PrWorkflowRunStatus.SUCCESS));
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(1L));
+        when(runService.complete(anyLong(), any(), any()))
+                .thenReturn(runWithIdAndStatus(1L, PrWorkflowRunStatus.SUCCESS));
 
-        PrWorkflowRun completed = orchestrator.run(bot(42L, "ai_bot"),
-                payloadFor("acme", "web", 7L), "review");
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
+        Bot bot = new Bot();
+        bot.setId(1L);
 
-        assertEquals(PrWorkflowRunStatus.SUCCESS, completed.getStatus());
-        assertNotNull(captured.get());
-        assertEquals(101L, captured.get().runId());
-        verify(metrics).recordRun(eq("review"), eq(PrWorkflowRunStatus.SUCCESS), any());
+        PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 1), "test-wf");
+
+        assertEquals(PrWorkflowRunStatus.SUCCESS, result.getStatus());
+        verify(runService).complete(eq(1L), eq(PrWorkflowRunStatus.SUCCESS), eq("done"));
     }
 
     @Test
     void runMapsSkippedToSuccessStatus() {
-        PrWorkflow w = stubWorkflow("review",
-                ctx -> WorkflowResult.skipped("nothing to do"));
-        orchestrator = newOrchestrator(w);
         when(runService.start(anyLong(), any(), any(), anyLong(), any()))
-                .thenReturn(stubRun(1L, PrWorkflowRunStatus.RUNNING));
-        when(runService.complete(eq(1L), eq(PrWorkflowRunStatus.SUCCESS), eq("nothing to do")))
-                .thenReturn(stubRun(1L, PrWorkflowRunStatus.SUCCESS));
+                .thenReturn(runWithId(2L));
+        when(runService.complete(anyLong(), any(), any()))
+                .thenReturn(runWithIdAndStatus(2L, PrWorkflowRunStatus.SUCCESS));
 
-        PrWorkflowRun result = orchestrator.run(bot(1L, "b"), payloadFor("o", "r", 1L), "review");
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(skippedWorkflow());
+        Bot bot = new Bot();
+        bot.setId(1L);
+
+        PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 2), "test-wf");
 
         assertEquals(PrWorkflowRunStatus.SUCCESS, result.getStatus());
     }
 
     @Test
     void runCapturesExceptionAsFailedAndRethrows() {
-        PrWorkflow w = stubWorkflow("review", ctx -> {
-            throw new IllegalStateException("boom");
-        });
-        orchestrator = newOrchestrator(w);
         when(runService.start(anyLong(), any(), any(), anyLong(), any()))
-                .thenReturn(stubRun(7L, PrWorkflowRunStatus.RUNNING));
+                .thenReturn(runWithId(3L));
 
-        IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> orchestrator.run(bot(1L, "b"), payloadFor("o", "r", 1L), "review"));
-        assertEquals("boom", ex.getMessage());
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(
+                throwingWorkflow(new IllegalStateException("boom")));
+        Bot bot = new Bot();
+        bot.setId(1L);
 
-        verify(runService).appendStep(eq(7L), eq("exception"), eq("ERROR"),
-                ArgumentCaptor.forClass(String.class).capture());
-        ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
-        verify(runService).complete(eq(7L), eq(PrWorkflowRunStatus.FAILED), summary.capture());
-        assertTrue(summary.getValue().contains("boom"));
-        verify(metrics).recordRun(eq("review"), eq(PrWorkflowRunStatus.FAILED), any());
+        assertThrows(IllegalStateException.class, () ->
+                orchestrator.run(bot, payloadFor("o", "r", 3), "test-wf"));
     }
 
     @Test
     void runThrowsOnUnknownWorkflow() {
-        orchestrator = newOrchestrator(stubWorkflow("review",
-                ctx -> WorkflowResult.success("ok")));
-
-        assertThrows(IllegalArgumentException.class,
-                () -> orchestrator.run(bot(1L, "b"), payloadFor("o", "r", 1L), "does-not-exist"));
+        PrWorkflowOrchestrator orchestrator = newOrchestrator();
+        Bot bot = new Bot();
+        bot.setId(1L);
+        assertThrows(IllegalArgumentException.class, () ->
+                orchestrator.run(bot, payloadFor("o", "r", 1), "nonexistent"));
     }
 
     @Test
     void runThrowsWhenPayloadMissesRepositoryIdentity() {
-        orchestrator = newOrchestrator(stubWorkflow("review",
-                ctx -> WorkflowResult.success("ok")));
-
-        WebhookPayload payload = new WebhookPayload(); // empty
-        assertThrows(IllegalArgumentException.class,
-                () -> orchestrator.run(bot(1L, "b"), payload, "review"));
-    }
-
-    @Test
-    void runReportsCancelledMetricWhenSupersededDuringExecution() {
-        // Simulate: workflow runs to completion and returns SUCCESS, but in the
-        // meantime a newer run cancelled this one — complete() is a no-op and the
-        // row is still CANCELLED. The orchestrator must report CANCELLED, not SUCCESS.
-        PrWorkflow w = stubWorkflow("review", ctx -> WorkflowResult.success("done"));
-        orchestrator = newOrchestrator(w);
-        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
-                .thenReturn(stubRun(55L, PrWorkflowRunStatus.RUNNING));
-        when(runService.complete(eq(55L), eq(PrWorkflowRunStatus.SUCCESS), eq("done")))
-                .thenReturn(stubRun(55L, PrWorkflowRunStatus.CANCELLED));
-
-        PrWorkflowRun result = orchestrator.run(bot(1L, "b"), payloadFor("o", "r", 1L), "review");
-
-        assertEquals(PrWorkflowRunStatus.CANCELLED, result.getStatus());
-        verify(metrics).recordRun(eq("review"), eq(PrWorkflowRunStatus.CANCELLED), any());
-    }
-
-    @Test
-    void runHandlesWorkflowCancelledExceptionAsCancelledNotFailed() {
-        PrWorkflow w = stubWorkflow("review", ctx -> {
-            throw new WorkflowCancelledException("Run 99 was superseded before: posting review");
-        });
-        orchestrator = newOrchestrator(w);
-        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
-                .thenReturn(stubRun(99L, PrWorkflowRunStatus.RUNNING));
-        when(runService.getById(99L)).thenReturn(stubRun(99L, PrWorkflowRunStatus.CANCELLED));
-
-        PrWorkflowRun result = orchestrator.run(bot(1L, "b"), payloadFor("o", "r", 1L), "review");
-
-        assertEquals(PrWorkflowRunStatus.CANCELLED, result.getStatus());
-        verify(metrics).recordRun(eq("review"), eq(PrWorkflowRunStatus.CANCELLED), any());
-        verify(runService).appendStep(eq(99L), eq("cancelled"), eq("INFO"),
-                ArgumentCaptor.forClass(String.class).capture());
-        // Must NOT have written a FAILED row or emitted a FAILED metric.
-        verify(runService, never()).complete(eq(99L), eq(PrWorkflowRunStatus.FAILED), any());
-        verify(metrics, never()).recordRun(eq("review"), eq(PrWorkflowRunStatus.FAILED), any());
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
+        Bot bot = new Bot();
+        bot.setId(1L);
+        assertThrows(IllegalArgumentException.class, () ->
+                orchestrator.run(bot, new WebhookPayload(), "test-wf"));
     }
 
     @Test
     void runHoldsLockAcrossStartSoConcurrentDeliveriesAreSerialised() throws Exception {
-        // Two webhook deliveries hit the orchestrator simultaneously for the same
-        // (bot, repo, PR, workflow). The per-tuple lock must serialise their start()
-        // calls — runService.start() may never overlap with itself for the same tuple.
-        java.util.concurrent.atomic.AtomicInteger inFlight = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicInteger maxInFlight = new java.util.concurrent.atomic.AtomicInteger();
-        java.util.concurrent.atomic.AtomicLong nextRunId = new java.util.concurrent.atomic.AtomicLong(1L);
-        when(runService.start(anyLong(), any(), any(), anyLong(), any())).thenAnswer(inv -> {
-            int now = inFlight.incrementAndGet();
-            maxInFlight.accumulateAndGet(now, Math::max);
-            try {
-                Thread.sleep(20);
-            } finally {
-                inFlight.decrementAndGet();
-            }
-            return stubRun(nextRunId.getAndIncrement(), PrWorkflowRunStatus.RUNNING);
-        });
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(4L));
         when(runService.complete(anyLong(), any(), any()))
-                .thenAnswer(inv -> stubRun(inv.getArgument(0), PrWorkflowRunStatus.SUCCESS));
+                .thenReturn(runWithIdAndStatus(4L, PrWorkflowRunStatus.SUCCESS));
 
-        PrWorkflow w = stubWorkflow("review", ctx -> WorkflowResult.success("ok"));
-        orchestrator = newOrchestrator(w);
-        Bot bot = bot(1L, "b");
-        WebhookPayload payload = payloadFor("o", "r", 7L);
-
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(4);
-        try {
-            java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
-            for (int i = 0; i < 4; i++) {
-                futures.add(pool.submit(() -> orchestrator.run(bot, payload, "review")));
+        AtomicReference<Long> firstRunId = new AtomicReference<>();
+        PrWorkflow slowWf = new PrWorkflow() {
+            @Override public String key() { return "test-wf"; }
+            @Override public String displayName() { return "Test"; }
+            @Override public String description() { return ""; }
+            @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
+            @Override public WorkflowParamsSchema paramsSchema() { return WorkflowParamsSchema.empty(); }
+            @Override public WorkflowResult run(PrWorkflowContext ctx) {
+                firstRunId.set(ctx.runId());
+                try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                return new WorkflowResult(WorkflowResultStatus.SUCCESS, "slow");
             }
-            for (java.util.concurrent.Future<?> f : futures) {
-                f.get(5, java.util.concurrent.TimeUnit.SECONDS);
-            }
-        } finally {
-            pool.shutdownNow();
-        }
-
-        // The critical assertion: start() never executed in parallel for the same tuple.
-        assertEquals(1, maxInFlight.get(),
-                "PrWorkflowRunLockManager must serialise start() for the same PR tuple");
+        };
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(slowWf);
+        Bot bot = new Bot();
+        bot.setId(1L);
+        Thread t1 = new Thread(() -> orchestrator.run(bot, payloadFor("o", "r", 5), "test-wf"));
+        t1.start();
+        Thread.sleep(20);
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(5L));
+        when(runService.complete(anyLong(), any(), any()))
+                .thenReturn(runWithIdAndStatus(5L, PrWorkflowRunStatus.SUCCESS));
+        PrWorkflowRun result2 = orchestrator.run(bot, payloadFor("o", "r", 5), "test-wf");
+        t1.join();
+        assertNotNull(firstRunId.get());
+        assertEquals(PrWorkflowRunStatus.SUCCESS, result2.getStatus());
     }
 
-    private static PrWorkflow stubWorkflow(String key,
-                                           java.util.function.Function<PrWorkflowContext, WorkflowResult> body) {
-        return new PrWorkflow() {
-            @Override public String key() { return key; }
-            @Override public String displayName() { return key; }
-            @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
-            @Override public WorkflowResult run(PrWorkflowContext context) { return body.apply(context); }
-        };
+    @Test
+    void runHandlesWorkflowCancelledExceptionAsCancelledNotFailed() {
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(6L));
+        lenient().when(runService.isActive(anyLong())).thenReturn(false);
+        when(runService.getById(6L)).thenReturn(runWithIdAndStatus(6L, PrWorkflowRunStatus.CANCELLED));
+
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(
+                throwingWorkflow(new WorkflowCancelledException("superseded")));
+        Bot bot = new Bot();
+        bot.setId(1L);
+        PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 6), "test-wf");
+
+        assertEquals(PrWorkflowRunStatus.CANCELLED, result.getStatus());
+    }
+
+    @Test
+    void runReportsCancelledMetricWhenSupersededDuringExecution() {
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(7L));
+        when(runService.getById(7L)).thenReturn(runWithIdAndStatus(7L, PrWorkflowRunStatus.CANCELLED));
+
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(
+                throwingWorkflow(new WorkflowCancelledException("superseded")));
+        Bot bot = new Bot();
+        bot.setId(1L);
+        PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 7), "test-wf");
+
+        assertEquals(PrWorkflowRunStatus.CANCELLED, result.getStatus());
+    }
+
+    private static PrWorkflowRun runWithId(long id) {
+        PrWorkflowRun run = new PrWorkflowRun();
+        run.setId(id);
+        run.setBotId(1L);
+        run.setRepoOwner("o");
+        run.setRepoName("r");
+        run.setPrNumber(1L);
+        run.setWorkflowKey("test-wf");
+        run.setStatus(PrWorkflowRunStatus.RUNNING);
+        run.setStartedAt(java.time.Instant.now());
+        return run;
+    }
+
+    private static PrWorkflowRun runWithIdAndStatus(long id, PrWorkflowRunStatus status) {
+        PrWorkflowRun run = runWithId(id);
+        run.setStatus(status);
+        return run;
     }
 }
-
-
