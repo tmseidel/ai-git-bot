@@ -625,7 +625,9 @@ Sensitive data (API keys, Git tokens) is encrypted at rest using AES-256-GCM enc
 
 ### Authentication
 
-The web UI is protected by Spring Security with form-based authentication. The API webhook endpoints (`/api/webhook/**`) remain unauthenticated to allow Git providers to send webhooks. Each bot has a unique, random webhook secret in its URL path that serves as authentication.
+The web UI is protected by Spring Security. By default it uses the database-backed username/password form (`native`). Set `giteabot.security.login-method=oauth` to use an OAuth 2.0 Authorization Code login instead. The two login methods are mutually exclusive: in OAuth mode, an unauthenticated visit to any protected UI route, including `/login`, is redirected directly to the provider; the native login form is not available. Every successfully authenticated OAuth user is an application administrator.
+
+The API webhook endpoints (`/api/webhook/**`) remain unauthenticated to allow Git providers to send webhooks. Each bot has a unique, random webhook secret in its URL path that serves as authentication.
 
 ### Per-Bot User Whitelist (token-spend guard)
 
@@ -647,6 +649,59 @@ The whitelist is the recommended defence for bots installed on **public reposito
 | `DATABASE_URL` | H2 in-memory | Database JDBC URL |
 | `DATABASE_USERNAME` | `sa` | Database username |
 | `DATABASE_PASSWORD` | *(empty)* | Database password |
+| `GITEABOT_SECURITY_LOGIN_METHOD` | `native` | Web UI authentication method: `native` (database username/password) or `oauth` (OAuth 2.0 Authorization Code). |
+
+#### OAuth login mode
+
+OAuth mode is enabled with `GITEABOT_SECURITY_LOGIN_METHOD=oauth`. For OpenID Connect providers, use the recommended issuer-discovery configuration below; Spring Security reads the authorization, token, user-info, and JWK endpoints from the provider's discovery document. The default scope is `openid,profile`; add any provider-required scopes as a comma- or space-separated list. Every successfully authenticated OAuth user is an application administrator, so no provider-specific `admin` scope is required.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GITEABOT_SECURITY_OAUTH_CLIENT_ID` | Yes | OAuth client/application ID. |
+| `GITEABOT_SECURITY_OAUTH_CLIENT_SECRET` | Yes | OAuth client secret. |
+| `GITEABOT_SECURITY_OAUTH_ISSUER_URI` | Recommended | OpenID Connect issuer URI. Enables discovery of all provider endpoints; for Entra ID use `https://login.microsoftonline.com/<tenant-id>/v2.0`. |
+| `GITEABOT_SECURITY_OAUTH_AUTHORIZATION_URI` | Explicit mode | Provider authorization endpoint; required only when `ISSUER_URI` is not set. |
+| `GITEABOT_SECURITY_OAUTH_TOKEN_URI` | Explicit mode | Provider token endpoint; required only when `ISSUER_URI` is not set. |
+| `GITEABOT_SECURITY_OAUTH_USER_INFO_URI` | Explicit mode | Provider user-info endpoint; required only when `ISSUER_URI` is not set. |
+| `GITEABOT_SECURITY_OAUTH_JWK_SET_URI` | Explicit OIDC mode | Provider JSON Web Key Set endpoint, required with `openid` only when `ISSUER_URI` is not set. |
+| `GITEABOT_SECURITY_OAUTH_USER_NAME_ATTRIBUTE` | No (`sub`) | User-info field used as the principal name. |
+| `GITEABOT_SECURITY_OAUTH_REDIRECT_URI` | No (`{baseUrl}/login/oauth2/code/giteabot`) | Spring Security callback template or an explicit callback URL. |
+| `GITEABOT_SECURITY_OAUTH_SCOPE` | No (`openid,profile`) | Requested OAuth scopes. |
+
+Register the resolved callback URL with the provider. For a public installation at `https://bot.example.com`, the default callback is `https://bot.example.com/login/oauth2/code/giteabot`. When running behind a reverse proxy, make sure forwarded host/proto headers are passed through so `{baseUrl}` resolves to the public URL.
+
+Microsoft Entra ID / Azure AD can use its tenant-specific issuer URI. Its OpenID Connect metadata document supplies the authorization, token, user-info, and JWK Set endpoints automatically. A typical scope is `openid,profile`.
+
+Keycloak is supported through the same issuer-discovery mode. Create a **confidential OpenID Connect client** in the target realm, enable its standard Authorization Code flow, and register the exact callback URL (for example, `https://bot.example.com/login/oauth2/code/giteabot`) as a valid redirect URI. Set the issuer to the realm URL, **not** the well-known URL:
+
+```yaml
+environment:
+  GITEABOT_SECURITY_LOGIN_METHOD: oauth
+  GITEABOT_SECURITY_OAUTH_CLIENT_ID: ai-git-bot
+  GITEABOT_SECURITY_OAUTH_CLIENT_SECRET: your-keycloak-client-secret
+  GITEABOT_SECURITY_OAUTH_ISSUER_URI: https://keycloak.example.com/realms/engineering
+  GITEABOT_SECURITY_OAUTH_SCOPE: openid,profile
+```
+
+Keycloak publishes its OpenID Connect discovery document below `/realms/<realm>/.well-known/openid-configuration`; the application obtains that metadata from the realm issuer automatically.
+
+The bundled `docker-compose.yml` intentionally includes only the issuer-discovery settings above. The callback template defaults to `{baseUrl}/login/oauth2/code/giteabot` and the scope defaults to `openid,profile`. Add an optional OAuth environment variable to the `app.environment` section only when you need to override a default or integrate a provider without OIDC discovery.
+
+Example Docker Compose environment configuration:
+
+```yaml
+environment:
+  GITEABOT_SECURITY_LOGIN_METHOD: oauth
+  GITEABOT_SECURITY_OAUTH_CLIENT_ID: your-client-id
+  GITEABOT_SECURITY_OAUTH_CLIENT_SECRET: your-client-secret
+  GITEABOT_SECURITY_OAUTH_ISSUER_URI: https://login.microsoftonline.com/<tenant-id>/v2.0
+```
+
+The existing preview/e2e auto-login option continues to take precedence in either mode: it bypasses both native and OAuth login and must never be enabled in production.
+
+#### OAuth diagnostics
+
+Set `GITEABOT_SECURITY_OAUTH_DEBUG_LOGGING_ENABLED=true` and configure the application logger for DEBUG to trace requests to the application-side OAuth endpoints (`/oauth2/**` and `/login/oauth2/**`). The trace includes request/response metadata and textual response bodies, truncated to 16,384 characters by default. OAuth authorization codes, tokens, cookies, client secrets, and redirect locations are redacted. Set `GITEABOT_SECURITY_OAUTH_DEBUG_LOGGING_MAX_BODY_LENGTH` to change the limit.
 
 #### Auto-login mode (preview / e2e environments only)
 
