@@ -13,7 +13,7 @@ services:
       # Encryption key for API keys stored in database (optional, but recommended for production)
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
-      # Web UI login: native (default) or OAuth/OIDC discovery.
+      # Web UI login: native (default) or oauth (OAuth/OIDC discovery).
       GITEABOT_SECURITY_LOGIN_METHOD: ${GITEABOT_SECURITY_LOGIN_METHOD:-native}
       GITEABOT_SECURITY_OAUTH_CLIENT_ID: ${GITEABOT_SECURITY_OAUTH_CLIENT_ID:-}
       GITEABOT_SECURITY_OAUTH_CLIENT_SECRET: ${GITEABOT_SECURITY_OAUTH_CLIENT_SECRET:-}
@@ -26,6 +26,7 @@ services:
       AGENT_BUDGET_MAX_CONTENT_ROUNDS: 20
       AGENT_BUDGET_MAX_ROUNDS: 20
       AGENT_BUDGET_MAX_CONTEXT_TOOL_REQUESTS_PER_ROUND: 20
+      PROMETHEUS_ENABLED: false
     depends_on:
       db:
         condition: service_healthy

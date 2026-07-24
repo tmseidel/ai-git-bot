@@ -179,11 +179,11 @@ The bot exposes a Prometheus-compatible metrics endpoint on the standard Spring 
 GET http://<bot-host>:8080/actuator/prometheus
 ```
 
-The endpoint is enabled by default. To disable it, set:
+The endpoint is **disabled by default** for operational security. To enable it, set:
 
 ```yaml
 environment:
-  PROMETHEUS_ENABLED: "false"
+  PROMETHEUS_ENABLED: "true"
 ```
 
 Included metrics:

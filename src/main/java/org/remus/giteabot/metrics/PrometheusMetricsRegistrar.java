@@ -9,6 +9,7 @@ import org.remus.giteabot.aiusage.AiErrorLogRepository;
 import org.remus.giteabot.aiusage.AiUsageLogRepository;
 import org.remus.giteabot.audit.AuditEventType;
 import org.remus.giteabot.audit.PrAuditEventRepository;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.Locale;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "management.endpoint.prometheus.enabled", havingValue = "true")
 public class PrometheusMetricsRegistrar {
 
     private static final String UNKNOWN_INTEGRATION = "unknown";

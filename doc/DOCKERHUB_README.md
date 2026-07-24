@@ -229,7 +229,7 @@ Built-in health check runs every 30s with a 30s start period.
 GET http://<host>:8080/actuator/prometheus
 ```
 
-Enabled by default. Disable with `PROMETHEUS_ENABLED=false`.
+Disabled by default. Enable with `PROMETHEUS_ENABLED=true`.
 
 Includes PR workflow, AI usage, agent tool-call, review/finding, and error metrics.
 Labels are low-cardinality; repository names, PR numbers, session IDs, branch names, and error messages are never used.
