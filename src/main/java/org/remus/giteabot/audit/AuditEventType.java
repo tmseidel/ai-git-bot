@@ -11,11 +11,13 @@ public enum AuditEventType {
     PR_WORKFLOW_STEP_APPENDED,
     PR_WORKFLOW_RUN_COMPLETED,
 
+
     /** Agent tool-call tracing — implemented. */
     TOOL_CALL_EXECUTED,
 
     /** Review — implemented. */
     REVIEW_COMPLETED,
+    REVIEW_FAILED,
 
     /** Finding posted as part of a review — implemented (v1: one event per posted review). */
     FINDING_POSTED,

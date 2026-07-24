@@ -130,7 +130,6 @@ public class PrWorkflowOrchestrator {
             PrWorkflowRun completed = runService.complete(run.getId(), desired, result.summary());
             PrWorkflowRunStatus effective = completed.getStatus() != null ? completed.getStatus() : desired;
             metrics.recordRun(workflow.key(), effective, Duration.between(startInstant, Instant.now()));
-
             auditService.record(PrAuditEvent.builder()
                     .eventType(AuditEventType.PR_WORKFLOW_RUN_COMPLETED)
                     .eventTimestamp(Instant.now())
@@ -145,7 +144,7 @@ public class PrWorkflowOrchestrator {
 
             if (workflow.category() == PrWorkflowCategory.REVIEW) {
                 auditService.record(PrAuditEvent.builder()
-                        .eventType(AuditEventType.REVIEW_COMPLETED)
+                        .eventType(effective == PrWorkflowRunStatus.SUCCESS ? AuditEventType.REVIEW_COMPLETED: AuditEventType.REVIEW_FAILED)
                         .eventTimestamp(Instant.now())
                         .botId(bot.getId()).repoOwner(owner).repoName(repoName).prNumber(prNumber)
                         .runId(run.getId())
@@ -153,16 +152,18 @@ public class PrWorkflowOrchestrator {
                         .eventPayloadJson(PrAuditEventService.toJson(Map.of("workflow_key", workflow.key())))
                         .build());
 
-                auditService.record(PrAuditEvent.builder()
-                        .eventType(AuditEventType.FINDING_POSTED)
-                        .eventTimestamp(Instant.now())
-                        .botId(bot.getId()).repoOwner(owner).repoName(repoName).prNumber(prNumber)
-                        .runId(run.getId())
-                        .actorType(ActorType.BOT.name()).actorId(bot.getName())
-                        .eventPayloadJson(PrAuditEventService.toJson(Map.of(
-                                "workflow_key", workflow.key(),
-                                "note", "v1 proxy: one event per posted review")))
-                        .build());
+                if(effective == PrWorkflowRunStatus.SUCCESS) {
+                    auditService.record(PrAuditEvent.builder()
+                            .eventType(AuditEventType.FINDING_POSTED)
+                            .eventTimestamp(Instant.now())
+                            .botId(bot.getId()).repoOwner(owner).repoName(repoName).prNumber(prNumber)
+                            .runId(run.getId())
+                            .actorType(ActorType.BOT.name()).actorId(bot.getName())
+                            .eventPayloadJson(PrAuditEventService.toJson(Map.of(
+                                    "workflow_key", workflow.key(),
+                                    "note", "v1 proxy: one event per posted review")))
+                            .build());
+                }
             }
 
             log.info("[Workflow '{}'] Finished run id={} status={}", workflow.key(), completed.getId(), effective);
