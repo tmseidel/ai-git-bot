@@ -1,5 +1,7 @@
 package org.remus.giteabot.prworkflow.agentreview;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentBudget;
@@ -39,7 +41,9 @@ import java.util.regex.Pattern;
  * but is strictly read-only: it clones a workspace, lets the LLM explore the
  * repository through {@link ToolCatalog.Role#WRITER} (read-only) tools and MCP,
  * then posts a single review comment. When the operator enables the optional
- * formal review decision, the bot may additionally approve or request changes.</p>
+ * formal review decision, the model classifies its findings by severity and the
+ * application computes the formal action (approve / request changes) from
+ * configured thresholds.</p>
  */
 @Slf4j
 public class AgentReviewService {
@@ -55,26 +59,38 @@ public class AgentReviewService {
 
             The last line of your response MUST be exactly one JSON object and nothing else:
 
-            {"decision": "APPROVE"}
+            {"blocker": 0, "medium": 1, "low": 2}
 
-            - "APPROVE" — approve the PR.
-            - "REQUEST_CHANGES" — request changes before merging.
-            - "NONE" — leave the review state unchanged.
-
+            The values are integer counts of findings for each severity class.
             Do not wrap it in a code fence and do not write anything after it.""";
 
     /**
-     * Matches a trailing decision JSON block, bare or fenced, regardless of
-     * whether its value is a valid enum — an invalid value is still detected and
-     * stripped so it never leaks into the posted review.
+     * Matches a trailing severity-classification JSON block, bare or fenced,
+     * regardless of whether its values are valid — an invalid block is still
+     * detected and stripped so it never leaks into the posted review.
      */
-    private static final Pattern DECISION_JSON_PATTERN = Pattern.compile(
-            "```json\\s*\\n?\\s*(\\{[^}]*\"decision\"[^}]*})\\s*\\n?\\s*```\\s*\\z",
+    private static final Pattern SEVERITY_JSON_PATTERN = Pattern.compile(
+            "```json\\s*\\n?\\s*(\\{[^}]*(?:\"blocker\"|\"medium\"|\"low\")[^}]*})\\s*\\n?\\s*```\\s*\\z",
             Pattern.DOTALL);
 
-    private static final Pattern DECISION_BARE_PATTERN = Pattern.compile(
-            "\\{[^}]*\"decision\"\\s*:\\s*\"([^\"]*)\"[^}]*}\\s*\\z",
+    private static final Pattern SEVERITY_BARE_PATTERN = Pattern.compile(
+            "\\{[^}]*(?:\"blocker\"|\"medium\"|\"low\")[^}]*}\\s*\\z",
             Pattern.MULTILINE);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    /**
+     * Operator-configured severity thresholds for deterministic formal review
+     * decisions. A {@code null} value means that severity is ignored.
+     */
+    public record SeverityThresholds(Integer blocker, Integer medium, Integer low) {
+    }
+
+    /**
+     * Severity classification returned by the model, with integer counts per class.
+     */
+    public record SeverityClassification(int blocker, int medium, int low) {
+    }
 
     private final AgentReviewContext context;
     private final AgentSessionService sessionService;
@@ -114,19 +130,26 @@ public class AgentReviewService {
      * the resulting review as a PR comment. When {@code enableFormalDecision}
      * is {@code true}, the system prompt is extended with the operator-
      * configured criteria and a fixed format instruction; the model's output
-     * is parsed for a formal decision (APPROVE / REQUEST_CHANGES / NONE), which
-     * is submitted together with the review body via
-     * {@link RepositoryApiClient#postReview}.
+     * is parsed for a severity classification, and the formal review action
+     * (APPROVE / REQUEST_CHANGES / NONE) is computed deterministically from
+     * {@code severityThresholds}. The action is submitted together with the
+     * review body via {@link RepositoryApiClient#postReview}.
      *
-     * @param maxToolRounds       operator-tunable cap on the number of
-     *                            explore/answer rounds (clamped to a sane range)
-     * @param enableFormalDecision when true, the model may return a formal review decision
-     * @param decisionPrompt       operator-provided criteria for the decision
+     * @param maxToolRounds         operator-tunable cap on the number of
+     *                              explore/answer rounds (clamped to a sane range)
+     * @param enableFormalDecision  when true, the model returns a severity
+     *                              classification and the action is derived from
+     *                              the configured thresholds
+     * @param decisionPrompt        operator-provided criteria for the severity
+     *                              classification
+     * @param severityThresholds    optional per-severity thresholds used to
+     *                              compute the final review action
      * @return {@code true} when a non-empty review was produced and posted;
      *         {@code false} when there was nothing to review or the agent failed
      */
     public boolean reviewPullRequest(WebhookPayload payload, int maxToolRounds,
                                      boolean enableFormalDecision, String decisionPrompt,
+                                     SeverityThresholds severityThresholds,
                                      Long runId,
                                      Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
         String owner = payload.getRepository().getOwner().getLogin();
@@ -184,7 +207,7 @@ public class AgentReviewService {
             }
 
             ParseResult parsed = enableFormalDecision
-                    ? parseDecision(review) : ParseResult.noDecision(review);
+                    ? parseFormalReviewResult(review, severityThresholds) : ParseResult.noDecision(review);
 
             PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
             String reviewBody = formatReview(parsed.reviewText());
@@ -300,55 +323,90 @@ public class AgentReviewService {
     }
 
     /**
-     * Parses a formal review decision from the model output and strips the
-     * trailing decision block so the review comment is clean. A detected block
-     * is stripped regardless of validity; an unparseable value yields a
-     * {@code null} action (fail-open) but still-cleaned text.
+     * Parses a severity classification from the model output, strips the trailing
+     * classification block so the review comment is clean, and computes the formal
+     * {@link PostReviewAction} from the configured thresholds. A detected block is
+     * stripped regardless of validity; an unparseable value yields {@code NONE}
+     * (fail-open) but still-cleaned text.
      */
-    static ParseResult parseDecision(String review) {
+    static ParseResult parseFormalReviewResult(String review, SeverityThresholds thresholds) {
         if (review == null || review.isBlank()) {
             return ParseResult.noDecision(review);
         }
 
         // Canonical form: a bare JSON object on the last line.
-        Matcher bare = DECISION_BARE_PATTERN.matcher(review);
+        Matcher bare = SEVERITY_BARE_PATTERN.matcher(review);
         if (bare.find()) {
             String cleaned = review.substring(0, bare.start()).stripTrailing();
-            return new ParseResult(cleaned, fromString(bare.group(1)));
+            return new ParseResult(cleaned, evaluateAction(parseSeverityJson(bare.group()), thresholds));
         }
 
         // Tolerant fallback: a fenced ```json block at the end.
-        Matcher fenced = DECISION_JSON_PATTERN.matcher(review);
+        Matcher fenced = SEVERITY_JSON_PATTERN.matcher(review);
         if (fenced.find()) {
             String cleaned = review.substring(0, fenced.start()).stripTrailing();
-            return new ParseResult(cleaned, extractAction(fenced.group(1)));
+            return new ParseResult(cleaned, evaluateAction(parseSeverityJson(fenced.group(1)), thresholds));
         }
 
         return ParseResult.noDecision(review);
     }
 
-    private static PostReviewAction extractAction(String json) {
-        // Minimal JSON extraction — avoids a full parser dependency for this one field.
-        Matcher m = Pattern.compile("\"decision\"\\s*:\\s*\"(APPROVE|REQUEST_CHANGES|NONE)\"")
-                .matcher(json);
-        return m.find() ? fromString(m.group(1)) : null;
+    private static SeverityClassification parseSeverityJson(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = OBJECT_MAPPER.readTree(json);
+            return new SeverityClassification(
+                    intField(root, "blocker"),
+                    intField(root, "medium"),
+                    intField(root, "low"));
+        } catch (Exception e) {
+            log.warn("Failed to parse severity classification JSON: {}", json);
+            return null;
+        }
     }
 
-    private static PostReviewAction fromString(String s) {
-        if (s == null) return null;
-        return switch (s.trim().toUpperCase()) {
-            case "APPROVE" -> PostReviewAction.APPROVE;
-            case "REQUEST_CHANGES" -> PostReviewAction.REQUEST_CHANGES;
-            case "NONE" -> PostReviewAction.NONE;
-            default -> null;
-        };
+    private static int intField(JsonNode root, String field) {
+        JsonNode node = root.get(field);
+        if (node == null || node.isMissingNode()) {
+            return 0;
+        }
+        if (!node.canConvertToInt()) {
+            throw new IllegalArgumentException("Field '" + field + "' is not an integer");
+        }
+        return node.asInt();
+    }
+
+    private static PostReviewAction evaluateAction(SeverityClassification classification,
+                                                   SeverityThresholds thresholds) {
+        if (classification == null || thresholds == null) {
+            return PostReviewAction.NONE;
+        }
+        boolean anyConfigured = thresholds.blocker() != null
+                || thresholds.medium() != null
+                || thresholds.low() != null;
+        if (!anyConfigured) {
+            return PostReviewAction.NONE;
+        }
+        if (thresholds.blocker() != null && classification.blocker() > thresholds.blocker()) {
+            return PostReviewAction.REQUEST_CHANGES;
+        }
+        if (thresholds.medium() != null && classification.medium() > thresholds.medium()) {
+            return PostReviewAction.REQUEST_CHANGES;
+        }
+        if (thresholds.low() != null && classification.low() > thresholds.low()) {
+            return PostReviewAction.REQUEST_CHANGES;
+        }
+        return PostReviewAction.APPROVE;
     }
 
     /**
      * Parsed result of extracting a formal review decision from model output.
      *
-     * @param reviewText the review text with the decision JSON stripped
-     * @param action     the parsed decision, or {@code null} when unparseable
+     * @param reviewText the review text with the classification JSON stripped
+     * @param action     the computed formal review action, or {@code null} when
+     *                   no formal decision was requested
      */
     public record ParseResult(String reviewText, PostReviewAction action) {
         static ParseResult noDecision(String reviewText) {

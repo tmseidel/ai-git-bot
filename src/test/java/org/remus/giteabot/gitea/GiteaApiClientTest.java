@@ -62,7 +62,7 @@ class GiteaApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.body").value("The findings"))
-                .andExpect(jsonPath("$.event").value("APPROVE"))
+                .andExpect(jsonPath("$.event").value("APPROVED"))
                 .andRespond(withSuccess());
 
         client.postReview("owner", "repo", 7L, "The findings", PostReviewAction.APPROVE);

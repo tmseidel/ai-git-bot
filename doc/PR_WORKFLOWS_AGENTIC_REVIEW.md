@@ -37,16 +37,27 @@ PR Review**.
 |---|---|---|---|
 | `maxToolRounds` | integer | `12` | How much exploring the bot may do (1–30). Higher means deeper analysis at higher cost. |
 | `enableFormalReviewDecision` | boolean | `false` | Let the bot approve or request changes, not just comment. |
-| `formalReviewDecisionPrompt` | text | *(built-in default)* | Your criteria for when to approve, request changes, or leave the review state unchanged. Only used when the decision is enabled. |
+| `formalReviewDecisionPrompt` | text | *(built-in default)* | Criteria the model uses to classify findings by severity. Only used when the decision is enabled. |
+| `blockerThreshold` | integer | *(empty)* | Maximum allowed `BLOCKER` findings for a formal `APPROVE`. Empty means ignored. |
+| `mediumThreshold` | integer | *(empty)* | Maximum allowed `MEDIUM` findings for a formal `APPROVE`. Empty means ignored. |
+| `lowThreshold` | integer | *(empty)* | Maximum allowed `LOW` findings for a formal `APPROVE`. Empty means ignored. |
 
 ### Formal review decision
 
-When `enableFormalReviewDecision` is on, the bot ends its review with a
-structured decision and submits it together with the review body as a single
-review. Valid decisions are **approve**, **request changes**, or **leave
-unchanged**. Your `formalReviewDecisionPrompt` defines the criteria; if the bot
-can't produce a clean decision, it falls back to posting a plain comment so the
-findings are never lost.
+When `enableFormalReviewDecision` is on, the model classifies its findings as
+`BLOCKER`, `MEDIUM`, or `LOW` and emits a JSON object such as
+`{"blocker": 0, "medium": 1, "low": 2}`. The application then compares each
+count to the configured thresholds:
+
+- If **all configured thresholds** are satisfied, the bot submits `APPROVE`.
+- If **any configured threshold** is exceeded, the bot submits `REQUEST_CHANGES`.
+- If **no thresholds** are configured, the bot leaves the review state unchanged
+  (`NONE`) while still posting the review text.
+- An unset threshold is ignored entirely, so you can enforce only the severities
+  that matter to you (for example, only `BLOCKER`).
+
+If the model fails to emit a clean classification, the bot falls back to posting
+a plain review comment so the findings are never lost.
 
 ## The review prompt
 
@@ -61,7 +72,8 @@ are not part of this prompt, so editing it can't break anything.
    relevant configuration.
 2. Tick **Agentic PR Review** and adjust its settings if you like.
 3. To let the bot approve / request changes, tick **Enable formal review
-   decision** and optionally customise the decision prompt.
+   decision**, optionally customise the decision prompt, and set at least one
+   severity threshold (for example, **Blocker must be less or equal = 0**).
 
 It only runs for bots that have it explicitly enabled — it never replaces or
 duplicates the default **PR Review** workflow.
