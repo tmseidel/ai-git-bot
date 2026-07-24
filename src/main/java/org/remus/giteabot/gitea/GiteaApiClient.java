@@ -106,7 +106,7 @@ public class GiteaApiClient implements RepositoryApiClient {
             return "COMMENT";
         }
         return switch (action) {
-            case APPROVE -> "APPROVE";
+            case APPROVE -> "APPROVED";
             case REQUEST_CHANGES -> "REQUEST_CHANGES";
             case NONE -> "COMMENT";
         };

@@ -26,22 +26,23 @@ public class AgentReviewWorkflow implements PrWorkflow {
     static final String DEFAULT_FORMAL_REVIEW_DECISION_PROMPT = """
             # Formal Review Decision
 
-            Based on your review findings, decide whether to approve, request changes,
-            or leave the PR review state unchanged. Use the following guidelines:
+            After writing your review findings, classify them by severity:
 
-            - **APPROVE** — The PR is correct, follows best practices, and has no
-            significant issues that should block merging. Minor style nits or
-            optional suggestions do not warrant blocking.
+            - **BLOCKER** — Critical issues that must be fixed before merging:
+              bugs, security vulnerabilities, broken tests, missing error handling,
+              or any problem that could cause a production defect.
 
-            - **REQUEST_CHANGES** — The PR has non-trivial bugs, security concerns,
-            missing error handling, broken tests, or significant code quality issues
-            that must be fixed before merging. Regression risk alone is not enough —
-            there must be an identifiable problem.
+            - **MEDIUM** — Notable issues that should be addressed but may not block
+              merging on their own: significant code-quality concerns, unclear
+              naming, missing tests for edge cases, or maintainability risks.
 
-            - **NONE** — There are minor issues or suggestions, but nothing blocking.
-            Also use NONE when you lack sufficient information to make a confident
-            decision, or when the change is too large to assess reliably from the
-            diff alone.""";
+            - **LOW** — Minor issues, style nits, optional suggestions, or small
+              observations that should not block merging.
+
+            The application will decide whether to approve or request changes based
+            on the configured thresholds for each severity class. Do not emit
+            APPROVE, REQUEST_CHANGES, or NONE yourself; only provide the classification
+            counts below.""";
 
     private final AgentReviewServiceFactory serviceFactory;
     private final WorkflowSelectionService selectionService;
@@ -78,7 +79,22 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         "Approval decision prompt",
                         WorkflowParamField.ParamType.TEXT, false,
                         DEFAULT_FORMAL_REVIEW_DECISION_PROMPT,
-                        "Criteria for when the bot should approve or request changes."));
+                        "Criteria the model uses to classify findings by severity."),
+                new WorkflowParamField(AgentReviewParam.BLOCKER_THRESHOLD,
+                        "Blocker must be less or equal",
+                        WorkflowParamField.ParamType.INTEGER, false,
+                        null,
+                        "Maximum allowed BLOCKER findings for a formal APPROVE. Leave empty to ignore."),
+                new WorkflowParamField(AgentReviewParam.MEDIUM_THRESHOLD,
+                        "Medium must be less or equal",
+                        WorkflowParamField.ParamType.INTEGER, false,
+                        null,
+                        "Maximum allowed MEDIUM findings for a formal APPROVE. Leave empty to ignore."),
+                new WorkflowParamField(AgentReviewParam.LOW_THRESHOLD,
+                        "Low must be less or equal",
+                        WorkflowParamField.ParamType.INTEGER, false,
+                        null,
+                        "Maximum allowed LOW findings for a formal APPROVE. Leave empty to ignore."));
     }
 
     @Override
@@ -96,11 +112,15 @@ public class AgentReviewWorkflow implements PrWorkflow {
         boolean enableFormalDecision = boolParam(params, AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION, false);
         String decisionPrompt = strParam(params, AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
                 DEFAULT_FORMAL_REVIEW_DECISION_PROMPT);
+        AgentReviewService.SeverityThresholds thresholds = new AgentReviewService.SeverityThresholds(
+                integerParam(params, AgentReviewParam.BLOCKER_THRESHOLD),
+                integerParam(params, AgentReviewParam.MEDIUM_THRESHOLD),
+                integerParam(params, AgentReviewParam.LOW_THRESHOLD));
 
         context.requireActive("before running agentic review");
 
         boolean reviewed = serviceFactory.create(bot)
-                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt,
+                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
                         context.runId(), context.auditToolCallConsumer());
 
         context.appendStep("agentic-review",
@@ -140,6 +160,14 @@ public class AgentReviewWorkflow implements PrWorkflow {
         if (raw == null) return fallback;
         try { return Integer.parseInt(raw.toString().trim()); }
         catch (NumberFormatException e) { return fallback; }
+    }
+
+    private Integer integerParam(Map<String, Object> params, AgentReviewParam name) {
+        Object raw = params.get(name.key());
+        if (raw instanceof Number n) return n.intValue();
+        if (raw == null) return null;
+        try { return Integer.parseInt(raw.toString().trim()); }
+        catch (NumberFormatException e) { return null; }
     }
 
     private boolean boolParam(Map<String, Object> params, AgentReviewParam name, boolean fallback) {

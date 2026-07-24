@@ -8,134 +8,150 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AgentReviewServiceTest {
 
     @Test
-    void parseDecision_nullAndEmptyYieldNone() {
-        assertThat(AgentReviewService.parseDecision(null).action()).isNull();
-        assertThat(AgentReviewService.parseDecision("").action()).isNull();
-        assertThat(AgentReviewService.parseDecision("   ").action()).isNull();
+    void parseFormalReviewResult_nullAndEmptyYieldsNone() {
+        assertThat(AgentReviewService.parseFormalReviewResult(null, thresholds(0, null, null)).action()).isNull();
+        assertThat(AgentReviewService.parseFormalReviewResult("", thresholds(0, null, null)).action()).isNull();
+        assertThat(AgentReviewService.parseFormalReviewResult("   ", thresholds(0, null, null)).action()).isNull();
     }
 
     @Test
-    void parseDecision_approveInFencedBlock() {
+    void parseFormalReviewResult_onlyBlockerThreshold_zeroBlockersApproves() {
         String review = """
                 ## Review
                 Looks good.
 
                 ```json
-                {"decision": "APPROVE"}
+                {"blocker": 0, "medium": 1, "low": 2}
                 ```""";
 
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, null, null));
         assertThat(result.action()).isEqualTo(PostReviewAction.APPROVE);
-        assertThat(result.reviewText()).doesNotContain("decision");
+        assertThat(result.reviewText()).doesNotContain("blocker", "medium", "low");
     }
 
     @Test
-    void parseDecision_requestChangesInFencedBlock() {
+    void parseFormalReviewResult_onlyBlockerThreshold_oneBlockerRequestsChanges() {
         String review = """
                 ## Review
-                There are issues.
+                There is a critical issue.
 
                 ```json
-                {"decision": "REQUEST_CHANGES"}
+                {"blocker": 1, "medium": 0, "low": 0}
                 ```""";
 
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, null, null));
         assertThat(result.action()).isEqualTo(PostReviewAction.REQUEST_CHANGES);
-        assertThat(result.reviewText()).doesNotContain("REQUEST_CHANGES");
+        assertThat(result.reviewText()).doesNotContain("blocker", "medium", "low");
     }
 
     @Test
-    void parseDecision_noneInFencedBlock() {
-        String review = """
-                ## Review
-                Minor issues but not blocking.
+    void parseFormalReviewResult_multipleThresholds_allWithinLimitsApproves() {
+        String review = "Here is my review.\n\n{\"blocker\": 0, \"medium\": 1, \"low\": 2}";
 
-                ```json
-                {"decision": "NONE"}
-                ```""";
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 2, 3));
+        assertThat(result.action()).isEqualTo(PostReviewAction.APPROVE);
+        assertThat(result.reviewText()).isEqualTo("Here is my review.");
+    }
 
-        var result = AgentReviewService.parseDecision(review);
+    @Test
+    void parseFormalReviewResult_multipleThresholds_anyExceededRequestsChanges() {
+        String review = "Here is my review.\n\n{\"blocker\": 0, \"medium\": 3, \"low\": 2}";
+
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 2, 3));
+        assertThat(result.action()).isEqualTo(PostReviewAction.REQUEST_CHANGES);
+    }
+
+    @Test
+    void parseFormalReviewResult_emptyThresholds_ignoredSeveritiesDoNotBlockApproval() {
+        String review = "Here is my review.\n\n{\"blocker\": 0, \"medium\": 5, \"low\": 10}";
+
+        // Only blocker is configured; medium/low are ignored.
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, null, null));
+        assertThat(result.action()).isEqualTo(PostReviewAction.APPROVE);
+    }
+
+    @Test
+    void parseFormalReviewResult_allThresholdsEmpty_yieldsNone() {
+        String review = "Here is my review.\n\n{\"blocker\": 0, \"medium\": 0, \"low\": 0}";
+
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(null, null, null));
         assertThat(result.action()).isEqualTo(PostReviewAction.NONE);
-        assertThat(result.reviewText()).doesNotContain("NONE");
     }
 
     @Test
-    void parseDecision_bareJsonAtEnd() {
-        String review = "Here is my review text.\n\n{\"decision\":\"APPROVE\"}";
+    void parseFormalReviewResult_bareJsonAtEnd() {
+        String review = "Here is my review text.\n\n{\"blocker\": 0, \"medium\": 0, \"low\": 0}";
 
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 0, 0));
         assertThat(result.action()).isEqualTo(PostReviewAction.APPROVE);
         assertThat(result.reviewText()).isEqualTo("Here is my review text.");
     }
 
     @Test
-    void parseDecision_noDecisionBlock() {
-        String review = "Just a plain review with no decision.";
+    void parseFormalReviewResult_noClassificationBlock() {
+        String review = "Just a plain review with no classification.";
 
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 0, 0));
         assertThat(result.action()).isNull();
         assertThat(result.reviewText()).isEqualTo(review);
     }
 
     @Test
-    void parseDecision_malformedFencedBlock_strippedWithNoAction() {
+    void parseFormalReviewResult_malformedFencedBlock_strippedWithNoAction() {
         String review = """
                 ## Review
                 Some text.
 
                 ```json
-                {"decision": "INVALID_VALUE"}
+                {"blocker": "not-a-number"}
                 ```""";
 
-        var result = AgentReviewService.parseDecision(review);
-        assertThat(result.action()).isNull();
-        assertThat(result.reviewText()).doesNotContain("decision", "INVALID_VALUE", "```");
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 0, 0));
+        assertThat(result.action()).isEqualTo(PostReviewAction.NONE);
+        assertThat(result.reviewText()).doesNotContain("blocker", "not-a-number", "```");
     }
 
     @Test
-    void parseDecision_malformedBareBlock_strippedWithNoAction() {
-        String review = "Here is my review text.\n\n{\"decision\":\"REQUEST-CHANGES\"}";
+    void parseFormalReviewResult_malformedBareBlock_strippedWithNoAction() {
+        String review = "Here is my review text.\n\n{\"blocker\": \"invalid\"}";
 
-        var result = AgentReviewService.parseDecision(review);
-        assertThat(result.action()).isNull();
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, null, null));
+        assertThat(result.action()).isEqualTo(PostReviewAction.NONE);
         assertThat(result.reviewText()).isEqualTo("Here is my review text.");
     }
 
     @Test
-    void parseDecision_approveFencedWithExtraFields() {
-        String review = """
-                ## Review
-                All good.
+    void parseFormalReviewResult_missingSeverityFields_defaultToZero() {
+        String review = "Here is my review.\n\n{\"blocker\": 0}";
 
-                ```json
-                { "decision": "APPROVE", "confidence": 0.95 }
-                ```""";
-
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 0, 0));
         assertThat(result.action()).isEqualTo(PostReviewAction.APPROVE);
-        assertThat(result.reviewText()).doesNotContain("decision");
     }
 
     @Test
-    void parseDecision_midDocumentJsonIsIgnored() {
-        // JSON block in the middle, not at end — should not be parsed
+    void parseFormalReviewResult_midDocumentJsonIsIgnored() {
+        // JSON block in the middle, not at end — should not be parsed.
         String review = """
                 ```json
-                {"decision": "APPROVE"}
+                {"blocker": 0, "medium": 0, "low": 0}
                 ```
                 But wait, there's more text after this.""";
 
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 0, 0));
         assertThat(result.action()).isNull();
         assertThat(result.reviewText()).isEqualTo(review);
     }
 
     @Test
-    void parseDecision_loneTextarea_reviewTextPreserved() {
+    void parseFormalReviewResult_loneTextarea_reviewTextPreserved() {
         String review = "Simple review text with no JSON blocks.";
 
-        var result = AgentReviewService.parseDecision(review);
+        var result = AgentReviewService.parseFormalReviewResult(review, thresholds(0, 0, 0));
         assertThat(result.action()).isNull();
         assertThat(result.reviewText()).isEqualTo(review);
+    }
+
+    private static AgentReviewService.SeverityThresholds thresholds(Integer blocker, Integer medium, Integer low) {
+        return new AgentReviewService.SeverityThresholds(blocker, medium, low);
     }
 }

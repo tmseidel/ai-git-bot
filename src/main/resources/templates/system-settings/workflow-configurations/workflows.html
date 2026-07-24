@@ -188,12 +188,18 @@
                 // disabled) while its "Enable formal review decision" checkbox is
                 // unchecked. Disabled controls are not submitted, which would drop a
                 // persisted custom prompt on save; read-only ones still round-trip.
+                // Also show/hide the severity threshold fields so they are only
+                // visible when formal review decisioning is enabled.
                 var decisionCheckboxes = document.querySelectorAll(
                         'input[type="checkbox"][name="params.agentic-review.enableFormalReviewDecision"]');
                 decisionCheckboxes.forEach(function (decisionCheckbox) {
                     var container = decisionCheckbox.closest('form') || document;
                     var decisionTextarea = container.querySelector(
                             'textarea[name="params.agentic-review.formalReviewDecisionPrompt"]');
+                    var thresholdInputs = container.querySelectorAll(
+                            'input[name="params.agentic-review.blockerThreshold"],' +
+                            'input[name="params.agentic-review.mediumThreshold"],' +
+                            'input[name="params.agentic-review.lowThreshold"]');
                     if (!decisionTextarea) {
                         return;
                     }
@@ -201,6 +207,12 @@
                         decisionTextarea.readOnly = !decisionCheckbox.checked;
                         decisionTextarea.closest('.mb-3').style.opacity =
                                 decisionCheckbox.checked ? '1' : '0.5';
+                        thresholdInputs.forEach(function (input) {
+                            var mb3 = input.closest('.mb-3');
+                            if (mb3) {
+                                mb3.style.display = decisionCheckbox.checked ? '' : 'none';
+                            }
+                        });
                     }
                     decisionCheckbox.addEventListener('change', syncDecision);
                     syncDecision();
