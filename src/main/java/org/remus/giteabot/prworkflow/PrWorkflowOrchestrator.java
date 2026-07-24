@@ -152,6 +152,17 @@ public class PrWorkflowOrchestrator {
                         .actorType(ActorType.BOT.name()).actorId(bot.getName())
                         .eventPayloadJson(PrAuditEventService.toJson(Map.of("workflow_key", workflow.key())))
                         .build());
+
+                auditService.record(PrAuditEvent.builder()
+                        .eventType(AuditEventType.FINDING_POSTED)
+                        .eventTimestamp(Instant.now())
+                        .botId(bot.getId()).repoOwner(owner).repoName(repoName).prNumber(prNumber)
+                        .runId(run.getId())
+                        .actorType(ActorType.BOT.name()).actorId(bot.getName())
+                        .eventPayloadJson(PrAuditEventService.toJson(Map.of(
+                                "workflow_key", workflow.key(),
+                                "note", "v1 proxy: one event per posted review")))
+                        .build());
             }
 
             log.info("[Workflow '{}'] Finished run id={} status={}", workflow.key(), completed.getId(), effective);

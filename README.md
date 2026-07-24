@@ -19,7 +19,7 @@
 - 📝 Keep documentation in sync with the code
 - 🌍 Keep translations in sync across locale files
 - 💬 Answer questions inside code reviews
-
+- 📊 Observe workflows via Prometheus metrics
 
 ## Why does this project exist?
 
@@ -247,6 +247,7 @@ Assign an issue to a coding bot and it can create an implementation pull request
 | **[i18n Coverage](doc/PR_WORKFLOWS_I18N_COVERAGE.md)** | PR opened or command triggered | Missing translations drafted across locale files |
 | **[PR Re-Review](doc/PR_WORKFLOWS_REVIEW.md)** | Force-push or review request | Updated analysis |
 | **[Workflow Automation](doc/PR_WORKFLOWS.md)** | Git events | Automated engineering chores |
+| **[Prometheus Metrics](doc/DEPLOYMENT.md#metrics-prometheus)** | Built-in `/actuator/prometheus` endpoint | Operational metrics for reviews, findings, AI usage, errors, and tool calls |
 
 ---
 

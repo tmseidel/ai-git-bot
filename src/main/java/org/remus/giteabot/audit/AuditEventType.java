@@ -17,6 +17,9 @@ public enum AuditEventType {
     /** Review — implemented. */
     REVIEW_COMPLETED,
 
+    /** Finding posted as part of a review — implemented (v1: one event per posted review). */
+    FINDING_POSTED,
+
     /** Deferred: not yet in product. */
     @Deprecated GATE_OVERRIDDEN,
     @Deprecated FINDING_SUPPRESSED,
@@ -27,7 +30,8 @@ public enum AuditEventType {
     public boolean isImplemented() {
         return switch (this) {
             case PR_WORKFLOW_RUN_STARTED, PR_WORKFLOW_STEP_APPENDED,
-                 PR_WORKFLOW_RUN_COMPLETED, TOOL_CALL_EXECUTED, REVIEW_COMPLETED -> true;
+                 PR_WORKFLOW_RUN_COMPLETED, TOOL_CALL_EXECUTED, REVIEW_COMPLETED,
+                 FINDING_POSTED -> true;
             default -> false;
         };
     }
