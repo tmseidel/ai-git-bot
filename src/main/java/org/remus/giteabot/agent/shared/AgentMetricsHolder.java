@@ -47,5 +47,12 @@ public final class AgentMetricsHolder {
             m.recordCriticOutcome(outcome);
         }
     }
+
+    public static void recordToolCall(String provider) {
+        AgentMetrics m = instance;
+        if (m != null) {
+            m.recordToolCall(provider);
+        }
+    }
 }
 

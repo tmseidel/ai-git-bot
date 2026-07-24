@@ -124,6 +124,12 @@
             <artifactId>micrometer-core</artifactId>
         </dependency>
 
+        <!-- Prometheus metrics exposition for Actuator. -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- Spring Data JPA -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -233,6 +239,7 @@
                                         <include>com.networknt:json-schema-validator</include>
                                         <include>com.tngtech.archunit:archunit-junit5</include>
                                         <include>io.micrometer:micrometer-core</include>
+                                        <include>io.micrometer:micrometer-registry-prometheus</include>
                                         <include>io.modelcontextprotocol.sdk:mcp</include>
                                         <include>org.apache.httpcomponents.client5:httpclient5</include>
                                         <include>org.flywaydb:flyway-database-postgresql</include>

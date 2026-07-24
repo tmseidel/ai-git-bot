@@ -171,6 +171,52 @@ GET http://<bot-host>:8080/actuator/health
 
 Use this for load balancer health checks or container orchestration.
 
+## Metrics (Prometheus)
+
+The bot exposes a Prometheus-compatible metrics endpoint on the standard Spring Boot Actuator path:
+
+```
+GET http://<bot-host>:8080/actuator/prometheus
+```
+
+The endpoint is **disabled by default** for operational security. To enable it, set:
+
+```yaml
+environment:
+  PROMETHEUS_ENABLED: "true"
+```
+
+Included metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `giteabot_reviews` | gauge | Total completed reviews |
+| `giteabot_findings` | gauge | Total findings posted (v1: one per completed review) |
+| `giteabot_ai_usage_input_tokens{integration}` | gauge | Total input tokens per AI integration |
+| `giteabot_ai_usage_output_tokens{integration}` | gauge | Total output tokens per AI integration |
+| `giteabot_ai_errors` | gauge | Total AI provider errors |
+| `giteabot_audit_tool_calls` | gauge | Total tool calls recorded in the audit trail |
+| `prworkflow.run_total` | counter | PR workflow runs by workflow and status |
+| `prworkflow.run_duration_seconds` | timer | PR workflow run durations |
+| `agent.tool_calls_total{provider}` | counter | Individual tool-call invocations per provider |
+| `agent.tool_call.mode_total{mode,provider}` | counter | Tool-call mode distribution |
+| `agent.tool_call.latency_seconds` | timer | Tool-call latencies |
+| `agent.tool_call.parse_failures_total` | counter | Tool-call parse failures |
+| `agent.critic.outcome_total{outcome}` | counter | Critic/reflection outcomes |
+
+Labels are deliberately low-cardinality: `integration`, `provider`, `mode`, and `outcome`. Repository names, PR numbers, session IDs, branch names, and error messages are never used as labels.
+
+### Prometheus scrape configuration example
+
+```yaml
+scrape_configs:
+  - job_name: 'ai-git-bot'
+    static_configs:
+      - targets: ['bot-host:8080']
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 30s
+```
+
 ## Stopping
 
 ```bash

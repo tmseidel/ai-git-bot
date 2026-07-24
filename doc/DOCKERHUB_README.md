@@ -223,6 +223,19 @@ GET http://<host>:8080/actuator/health
 
 Built-in health check runs every 30s with a 30s start period.
 
+## Metrics (Prometheus)
+
+```
+GET http://<host>:8080/actuator/prometheus
+```
+
+Disabled by default. Enable with `PROMETHEUS_ENABLED=true`.
+
+Includes PR workflow, AI usage, agent tool-call, review/finding, and error metrics.
+Labels are low-cardinality; repository names, PR numbers, session IDs, branch names, and error messages are never used.
+
+See the [Deployment Guide](https://github.com/tmseidel/ai-git-bot/blob/main/doc/DEPLOYMENT.md) for a full metric table and Prometheus scrape configuration.
+
 ---
 
 ## Documentation

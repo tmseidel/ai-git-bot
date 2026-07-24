@@ -32,4 +32,7 @@ public interface PrAuditEventRepository extends JpaRepository<PrAuditEvent, Long
     @Transactional
     @Query("DELETE FROM PrAuditEvent e WHERE e.createdAt < :cutoff")
     int deleteByCreatedAtBefore(@Param("cutoff") Instant cutoff);
+
+    /** Counts audit events of a given type. */
+    long countByEventType(AuditEventType eventType);
 }

@@ -83,5 +83,24 @@ class AgentMetricsTest {
         assertThat(c).isNotNull();
         assertThat(c.count()).isEqualTo(1.0);
     }
+
+    @Test
+    void recordToolCall_incrementsTaggedCounter() {
+        metrics.recordToolCall("anthropicaiclient");
+        metrics.recordToolCall("anthropicaiclient");
+        Counter c = registry.find("agent.tool_calls_total")
+                .tag("provider", "anthropicaiclient").counter();
+        assertThat(c).isNotNull();
+        assertThat(c.count()).isEqualTo(2.0);
+    }
+
+    @Test
+    void recordToolCall_normalisesNullProvider() {
+        metrics.recordToolCall(null);
+        Counter c = registry.find("agent.tool_calls_total")
+                .tag("provider", "unknown").counter();
+        assertThat(c).isNotNull();
+        assertThat(c.count()).isEqualTo(1.0);
+    }
 }
 

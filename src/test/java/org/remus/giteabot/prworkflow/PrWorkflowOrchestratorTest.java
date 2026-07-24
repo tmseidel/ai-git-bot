@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.audit.PrAuditEventService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
@@ -67,12 +68,25 @@ class PrWorkflowOrchestratorTest {
 
     private PrWorkflow throwingWorkflow(RuntimeException ex) {
         return new PrWorkflow() {
-            @Override public String key() { return "test-wf"; }
-            @Override public String displayName() { return "Test"; }
-            @Override public String description() { return ""; }
-            @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
-            @Override public WorkflowParamsSchema paramsSchema() { return WorkflowParamsSchema.empty(); }
-            @Override public WorkflowResult run(PrWorkflowContext ctx) { throw ex; }
+            @Override
+            public String key() {
+                return "test-wf";
+            }
+
+            @Override
+            public String displayName() {
+                return "Test";
+            }
+
+            @Override
+            public PrWorkflowCategory category() {
+                return PrWorkflowCategory.REVIEW;
+            }
+
+            @Override
+            public WorkflowResult run(PrWorkflowContext ctx) {
+                throw ex;
+            }
         };
     }
 
@@ -80,9 +94,7 @@ class PrWorkflowOrchestratorTest {
         return new PrWorkflow() {
             @Override public String key() { return "test-wf"; }
             @Override public String displayName() { return "Test"; }
-            @Override public String description() { return ""; }
             @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
-            @Override public WorkflowParamsSchema paramsSchema() { return WorkflowParamsSchema.empty(); }
             @Override public WorkflowResult run(PrWorkflowContext ctx) { return result; }
         };
     }
@@ -163,9 +175,7 @@ class PrWorkflowOrchestratorTest {
         PrWorkflow slowWf = new PrWorkflow() {
             @Override public String key() { return "test-wf"; }
             @Override public String displayName() { return "Test"; }
-            @Override public String description() { return ""; }
             @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
-            @Override public WorkflowParamsSchema paramsSchema() { return WorkflowParamsSchema.empty(); }
             @Override public WorkflowResult run(PrWorkflowContext ctx) {
                 firstRunId.set(ctx.runId());
                 try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
@@ -217,6 +227,32 @@ class PrWorkflowOrchestratorTest {
         PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 7), "test-wf");
 
         assertEquals(PrWorkflowRunStatus.CANCELLED, result.getStatus());
+    }
+
+    @Test
+    void runEmitsReviewCompletedAndFindingPostedAuditEventsForReviewWorkflow() {
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(8L));
+        when(runService.complete(anyLong(), any(), any()))
+                .thenReturn(runWithIdAndStatus(8L, PrWorkflowRunStatus.SUCCESS));
+
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
+        Bot bot = new Bot();
+        bot.setId(1L);
+        bot.setName("test-bot");
+
+        orchestrator.run(bot, payloadFor("o", "r", 8), "test-wf");
+
+        ArgumentCaptor<org.remus.giteabot.audit.PrAuditEvent> captor =
+                ArgumentCaptor.forClass(org.remus.giteabot.audit.PrAuditEvent.class);
+        verify(auditService, org.mockito.Mockito.atLeast(2)).record(captor.capture());
+        var emitted = captor.getAllValues().stream()
+                .filter(e -> e.getEventType() == org.remus.giteabot.audit.AuditEventType.REVIEW_COMPLETED
+                        || e.getEventType() == org.remus.giteabot.audit.AuditEventType.FINDING_POSTED)
+                .toList();
+        assertEquals(2, emitted.size());
+        assertEquals(org.remus.giteabot.audit.AuditEventType.REVIEW_COMPLETED, emitted.get(0).getEventType());
+        assertEquals(org.remus.giteabot.audit.AuditEventType.FINDING_POSTED, emitted.get(1).getEventType());
     }
 
     private static PrWorkflowRun runWithId(long id) {

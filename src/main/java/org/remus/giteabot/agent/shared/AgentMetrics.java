@@ -39,6 +39,7 @@ public class AgentMetrics {
     private final ConcurrentMap<String, Counter> parseFailureCounters = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Timer> latencyTimers = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Counter> criticOutcomeCounters = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Counter> toolCallCounters = new ConcurrentHashMap<>();
 
     public AgentMetrics(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -97,6 +98,19 @@ public class AgentMetrics {
                 Counter.builder("agent.critic.outcome_total")
                         .description("Number of critic/reflection outcomes per outcome class")
                         .tag("outcome", safeOutcome)
+                        .register(meterRegistry)
+        ).increment();
+    }
+
+    /**
+     * Counts individual tool-call invocations (one per tool result, not per AI round).
+     */
+    public void recordToolCall(String provider) {
+        String safeProvider = normalise(provider);
+        toolCallCounters.computeIfAbsent(safeProvider, key ->
+                Counter.builder("agent.tool_calls_total")
+                        .description("Number of individual tool-call invocations per provider")
+                        .tag("provider", safeProvider)
                         .register(meterRegistry)
         ).increment();
     }

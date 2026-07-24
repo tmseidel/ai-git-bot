@@ -18,6 +18,7 @@
 - 📝 让文档与代码保持同步
 - 🌍 让翻译在各语言文件间保持同步
 - 💬 在代码审查中回答问题
+- 📊 通过 Prometheus 指标观察工作流
 
 💡 已经在使用 GitHub Copilot？
 
@@ -240,6 +241,7 @@ Bot 直接在线程中回答，并保持对话上下文。
 | **[i18n 覆盖](doc/PR_WORKFLOWS_I18N_COVERAGE.md)** | PR 打开或命令触发 | 在各语言文件间起草缺失的翻译 |
 | **[PR 重新审查](doc/PR_WORKFLOWS_REVIEW.md)** | 强制推送或审查请求 | 更新的分析 |
 | **[工作流自动化](doc/PR_WORKFLOWS.md)** | Git 事件 | 工程杂务自动化 |
+| **[Prometheus 指标](doc/DEPLOYMENT.md#metrics-prometheus)** | 内置 `/actuator/prometheus` 端点 | 审查、发现、AI 用量、错误和工具调用的运营指标 |
 
 ---
 

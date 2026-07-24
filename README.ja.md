@@ -18,6 +18,7 @@
 - 📝 ドキュメントをコードと同期
 - 🌍 ロケールファイル間で翻訳を同期
 - 💬 コードレビュー内で質問に回答
+- 📊 Prometheus メトリクスでワークフローを監視
 
 💡 GitHub Copilot をすでに使っていますか？
 
@@ -240,6 +241,7 @@ PR を bot に割り当てると、変更に対する Playwright テストスイ
 | **[i18n カバレッジ](doc/PR_WORKFLOWS_I18N_COVERAGE.md)** | PR オープンまたはコマンド | ロケールファイル全体で不足している翻訳を起草 |
 | **[PR 再レビュー](doc/PR_WORKFLOWS_REVIEW.md)** | フォースプッシュまたはレビュー依頼 | 更新された分析 |
 | **[ワークフロー自動化](doc/PR_WORKFLOWS.md)** | Git イベント | エンジニアリング作業の自動化 |
+| **[Prometheus メトリクス](doc/DEPLOYMENT.md#metrics-prometheus)** | 組み込み `/actuator/prometheus` エンドポイント | レビュー、調査結果、AI 使用量、エラー、ツール呼び出しの運用メトリクス |
 
 ---
 

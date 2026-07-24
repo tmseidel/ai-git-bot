@@ -178,6 +178,7 @@ public final class AgentLoop {
                     var tc = toolCalls.get(i);
                     var r = results.get(i);
                     String args = tc.args() != null ? tc.args().toString() : "{}";
+                    AgentMetricsHolder.recordToolCall(providerTag);
                     ctx.auditToolCallConsumer().accept(new AgentRunContext.ToolCallRecord(
                             tc.name() != null ? tc.name() : "unknown",
                             args,
