@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * An admin-configured outgoing-webhook endpoint.
  *
  * <p>{@link #secret} and {@link #authorizationHeader} hold
- * <strong>encrypted</strong> values (AES-GCM ciphertext, Base64) — never
+ * <strong>encrypted</strong> values (AES-GCM ciphertext, Base64) - never
  * plaintext. Callers that need the plaintext must go through
  * {@link EventHookEndpointService#decryptSecret} /
  * {@link EventHookEndpointService#decryptAuthorizationHeader}. Both are
@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * auth-header-only, or both are all valid configurations.
  *
  * <p>Null scope columns ({@link #botId}, {@link #repoOwner},
- * {@link #repoName}) mean "global" — the endpoint receives events from
+ * {@link #repoName}) mean "global" - the endpoint receives events from
  * every bot and repository.
  */
 @Slf4j
@@ -125,11 +125,16 @@ public class EventHookEndpoint {
 
     /** Parses {@link #customHeaders} as a JSON object; empty map on missing/invalid content. */
     public Map<String, String> parsedCustomHeaders(ObjectMapper mapper) {
-        if (customHeaders == null || customHeaders.isBlank()) {
+        return parsedCustomHeaders(mapper, customHeaders);
+    }
+
+    /** Parses the given raw JSON as a headers object; empty map on missing/invalid content. */
+    public Map<String, String> parsedCustomHeaders(ObjectMapper mapper, String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) {
             return Map.of();
         }
         try {
-            Map<String, String> parsed = mapper.readValue(customHeaders, new TypeReference<>() {
+            Map<String, String> parsed = mapper.readValue(rawJson, new TypeReference<>() {
             });
             return parsed == null ? Map.of() : parsed;
         } catch (Exception e) {

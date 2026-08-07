@@ -23,11 +23,11 @@ import java.util.stream.Stream;
  * The directory is created with the framework-specific minimal scaffolding
  * ({@code package.json} + Playwright config for {@link E2eTestFramework#PLAYWRIGHT})
  * and is the only path the {@code TestAuthorAgent}'s {@code pr-test-write}
- * tool is allowed to write into — path-traversal guards mirror
+ * tool is allowed to write into - path-traversal guards mirror
  * {@code WorkspaceFileTools}.</p>
  *
  * <p>The workspace is intentionally <strong>not</strong> a checkout of the
- * source repository — generated tests must never have access to repository
+ * source repository - generated tests must never have access to repository
  * source code or secrets. The agents communicate with the source repo
  * exclusively through the existing repository-aware tools
  * ({@code cat}, {@code rg}, {@code tree}, {@code get-issue}).</p>
@@ -38,10 +38,12 @@ public class PrTestWorkspaceManager {
 
     private final Path root;
     private final boolean npmInstallEnabled;
+    private final org.remus.giteabot.agent.validation.SandboxedCommandExecutor sandboxedCommandExecutor;
 
     public PrTestWorkspaceManager(
             @Value("${ai-git-bot.e2e.workspace-root:#{null}}") String configuredRoot,
-            @Value("${ai-git-bot.e2e.npm-install-enabled:true}") boolean npmInstallEnabled) {
+            @Value("${ai-git-bot.e2e.npm-install-enabled:true}") boolean npmInstallEnabled,
+            org.remus.giteabot.agent.validation.SandboxedCommandExecutor sandboxedCommandExecutor) {
         if (configuredRoot == null || configuredRoot.isBlank()) {
             this.root = Path.of(System.getProperty("java.io.tmpdir"), "ai-bot-pr-tests")
                     .toAbsolutePath().normalize();
@@ -49,12 +51,15 @@ public class PrTestWorkspaceManager {
             this.root = Path.of(configuredRoot).toAbsolutePath().normalize();
         }
         this.npmInstallEnabled = npmInstallEnabled;
+        this.sandboxedCommandExecutor = sandboxedCommandExecutor;
         log.debug("PrTestWorkspaceManager root={} npmInstallEnabled={}", root, npmInstallEnabled);
     }
 
     /** Test seam: build a manager rooted at the given path with npm install disabled. */
     public static PrTestWorkspaceManager rootedAt(Path root) {
-        return new PrTestWorkspaceManager(root.toAbsolutePath().normalize().toString(), false);
+        return new PrTestWorkspaceManager(root.toAbsolutePath().normalize().toString(), false,
+                new org.remus.giteabot.agent.validation.SandboxedCommandExecutor(
+                        new org.remus.giteabot.config.AgentConfigProperties()));
     }
 
     /**
@@ -75,24 +80,11 @@ public class PrTestWorkspaceManager {
     /**
      * Resolves a caller-supplied relative path inside the given workspace,
      * rejecting any value that would escape the workspace root (absolute
-     * paths, {@code ..} traversal, symlink trickery).
+     * paths, {@code ..} traversal, symlink trickery - including directory
+     * symlinks in intermediate path segments).
      */
     public Path resolveInsideWorkspace(Path workspace, String relativePath) {
-        if (relativePath == null || relativePath.isBlank()) {
-            throw new IllegalArgumentException("relativePath must not be blank");
-        }
-        Path candidate = workspace.resolve(relativePath).toAbsolutePath().normalize();
-        Path normalizedWorkspace = workspace.toAbsolutePath().normalize();
-        if (!candidate.startsWith(normalizedWorkspace)) {
-            throw new IllegalArgumentException(
-                    "Path '" + relativePath + "' escapes the workspace");
-        }
-        // No symlink-following escape either.
-        if (Files.isSymbolicLink(candidate)) {
-            throw new IllegalArgumentException(
-                    "Path '" + relativePath + "' resolves to a symlink");
-        }
-        return candidate;
+        return org.remus.giteabot.util.WorkspacePaths.resolveInsideWorkspace(workspace, relativePath);
     }
 
     /**
@@ -157,19 +149,19 @@ public class PrTestWorkspaceManager {
                 const baseURL = process.env.BASE_URL;
                 if (!baseURL) {
                   throw new Error(
-                      'BASE_URL environment variable is required — the PR-workflow '
+                      'BASE_URL environment variable is required - the PR-workflow '
                       + 'executor must set it from the deployment preview URL.');
                 }
                 // Idempotency contract:
-                //   * `workers: 1` + `fullyParallel: false` — every test sees the
+                //   * `workers: 1` + `fullyParallel: false` - every test sees the
                 //     same server-side state in deterministic order; parallel
                 //     workers against a single preview deployment would race on
                 //     the shared database and produce flaky failures.
-                //   * `storageState: undefined` — start each browser context with
+                //   * `storageState: undefined` - start each browser context with
                 //     no cookies / localStorage so a previous test's auth or
                 //     wizard progress cannot leak into the next one. (Default in
                 //     Playwright, set explicitly to document the intent.)
-                //   * `retries: 0` — masking flakiness with retries is the
+                //   * `retries: 0` - masking flakiness with retries is the
                 //     opposite of what we want here; a flaky run must surface as
                 //     a real failure so we can fix the underlying state leak.
                 export default defineConfig({
@@ -195,7 +187,7 @@ public class PrTestWorkspaceManager {
         if (!Files.isDirectory(workspace.resolve("node_modules/@playwright/test"))) {
             runNpmInstall(workspace, "@playwright/test@1.60.0");
         } else {
-            log.debug("@playwright/test already installed in {} — skipping npm install",
+            log.debug("@playwright/test already installed in {} - skipping npm install",
                     workspace);
         }
     }
@@ -211,7 +203,7 @@ public class PrTestWorkspaceManager {
                 const baseUrl = process.env.BASE_URL;
                 if (!baseUrl) {
                   throw new Error(
-                      'BASE_URL environment variable is required — the PR-workflow '
+                      'BASE_URL environment variable is required - the PR-workflow '
                       + 'executor must set it from the deployment preview URL.');
                 }
                 export default defineConfig({
@@ -226,7 +218,7 @@ public class PrTestWorkspaceManager {
         if (!Files.isDirectory(workspace.resolve("node_modules/cypress"))) {
             runNpmInstall(workspace, "cypress@15");
         } else {
-            log.debug("cypress already installed in {} — skipping npm install", workspace);
+            log.debug("cypress already installed in {} - skipping npm install", workspace);
         }
     }
 
@@ -244,7 +236,7 @@ public class PrTestWorkspaceManager {
     private void scaffoldK6(Path workspace) throws IOException {
         Files.createDirectories(workspace.resolve("scenarios"));
         writeIfMissing(workspace.resolve("README-k6.md"),
-                "k6 scenarios live under ./scenarios — invoke with `k6 run`.\n");
+                "k6 scenarios live under ./scenarios - invoke with `k6 run`.\n");
     }
 
     private void writeIfMissing(Path file, String content) throws IOException {
@@ -267,7 +259,7 @@ public class PrTestWorkspaceManager {
     /**
      * Best-effort {@code npm install -D <pkg>} inside {@code workspace}.
      * Failures (no {@code npm} on PATH, no network, registry errors) are
-     * logged but do not abort scaffolding — the agent will surface a more
+     * logged but do not abort scaffolding - the agent will surface a more
      * actionable error when {@code pr-test-run} subsequently fails.
      */
     private void runNpmInstall(Path workspace, String packageSpec) {
@@ -279,31 +271,22 @@ public class PrTestWorkspaceManager {
                 "--no-audit", "--no-fund", "--loglevel=error",
                 "--prefer-offline", packageSpec);
         try {
-            ProcessBuilder pb = new ProcessBuilder(cmd)
-                    .directory(workspace.toFile())
-                    .redirectErrorStream(true);
-            pb.environment().putIfAbsent("CI", "1");
-            Process p = pb.start();
-            try (var in = p.getInputStream()) {
-                // Drain so the child does not block on a full pipe — but we
-                // do not need to keep the output beyond the log line below.
-                in.readAllBytes();
-            }
-            boolean finished = p.waitFor(120, TimeUnit.SECONDS);
-            if (!finished) {
-                p.destroyForcibly();
+            // npm install executes package scripts from PR-controlled content -
+            // run it sandboxed (or with a scrubbed env) like any other untrusted command.
+            var result = sandboxedCommandExecutor.run(workspace, cmd, 120);
+            if (result.timedOut()) {
                 log.warn("npm install of {} in {} timed out after 120s", packageSpec, workspace);
                 return;
             }
-            if (p.exitValue() != 0) {
+            if (result.exitCode() != 0) {
                 log.warn("npm install of {} in {} exited with code {}",
-                        packageSpec, workspace, p.exitValue());
+                        packageSpec, workspace, result.exitCode());
             } else {
                 log.debug("npm install of {} in {} succeeded", packageSpec, workspace);
             }
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            log.warn("npm install of {} in {} failed: {} — continuing scaffold",
+            log.warn("npm install of {} in {} failed: {} - continuing scaffold",
                     packageSpec, workspace, e.getMessage());
         }
     }

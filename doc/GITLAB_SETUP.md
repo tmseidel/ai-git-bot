@@ -99,7 +99,7 @@ Code reviews are explicit-request only: pushes to an existing merge request do n
 2. Click **Add new webhook**
 3. Configure:
    - **URL:** Paste the bot's webhook URL
-   - **Secret token:** (leave empty — authentication is via the URL path)
+   - **Secret token:** Set a strong random secret here and enter the same value as **Webhook signing secret** on the bot. AI-Git-Bot then compares the `X-Gitlab-Token` header of every delivery and rejects forged events. (Leave empty only on fully trusted networks — authentication then relies solely on the URL path secret.)
 4. Under **Trigger**, enable:
    - ✅ **Merge request events** (MR opened, reviewer added/re-requested, MR closed/merged)
    - ✅ **Comments** (for bot commands in MR comments and review-request fallback comments)

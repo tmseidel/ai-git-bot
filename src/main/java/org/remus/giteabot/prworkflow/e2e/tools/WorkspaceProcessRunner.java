@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow.e2e.tools;
 
+import org.remus.giteabot.agent.validation.SandboxedCommandExecutor;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -18,14 +19,24 @@ import java.util.concurrent.TimeUnit;
  * stream because most test frameworks (Playwright, pytest, k6) interleave
  * them, and the agent only needs a single textual blob to reason about the
  * outcome.</p>
+ *
+ * <p>When the Docker sandbox is enabled ({@code agent.sandbox.enabled=true})
+ * and available, the generated test suites execute inside an ephemeral
+ * container instead of on the application host.</p>
  */
 @Component
 public class WorkspaceProcessRunner {
 
+    private final SandboxedCommandExecutor sandboxedCommandExecutor;
+
+    public WorkspaceProcessRunner(SandboxedCommandExecutor sandboxedCommandExecutor) {
+        this.sandboxedCommandExecutor = sandboxedCommandExecutor;
+    }
+
     /** Result of one process invocation. */
     public record ProcessResult(int exitCode, String combinedOutput, long durationMs, boolean timedOut) { }
 
-    /** Backwards-compatible overload — no extra environment overrides. */
+    /** Backwards-compatible overload - no extra environment overrides. */
     public ProcessResult run(Path workspace, List<String> command,
                              long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
         return run(workspace, command, Map.of(), timeoutMs, maxOutputBytes);
@@ -44,10 +55,16 @@ public class WorkspaceProcessRunner {
     public ProcessResult run(Path workspace, List<String> command,
                              Map<String, String> extraEnv,
                              long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
+        if (sandboxedCommandExecutor.isSandboxed()) {
+            return runSandboxed(workspace, command, extraEnv, timeoutMs, maxOutputBytes);
+        }
         long start = System.nanoTime();
         ProcessBuilder pb = new ProcessBuilder(command)
                 .directory(workspace.toFile())
                 .redirectErrorStream(true);
+        // Never inherit application secrets (DB credentials, encryption key,
+        // OAuth secrets) into untrusted test/build processes.
+        org.remus.giteabot.util.ProcessSupport.scrubEnvironment(pb);
         // Make sure CI-style envs do not break the runner with interactive prompts.
         pb.environment().putIfAbsent("CI", "1");
         if (extraEnv != null) {
@@ -90,5 +107,20 @@ public class WorkspaceProcessRunner {
         reader.join(2_000);
         long durationMs = (System.nanoTime() - start) / 1_000_000L;
         return new ProcessResult(process.exitValue(), out.toString(), durationMs, false);
+    }
+
+    private ProcessResult runSandboxed(Path workspace, List<String> command,
+                                       Map<String, String> extraEnv,
+                                       long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
+        long start = System.nanoTime();
+        int timeoutSeconds = (int) Math.max(1, timeoutMs / 1000);
+        SandboxedCommandExecutor.Result result =
+                sandboxedCommandExecutor.run(workspace, command, timeoutSeconds, extraEnv);
+        String output = result.output();
+        if (output != null && output.length() > maxOutputBytes) {
+            output = output.substring(0, maxOutputBytes);
+        }
+        long durationMs = (System.nanoTime() - start) / 1_000_000L;
+        return new ProcessResult(result.exitCode(), output == null ? "" : output, durationMs, result.timedOut());
     }
 }

@@ -76,7 +76,7 @@ Code reviews are explicit-request only: pushes to an existing pull request do no
    - **Target URL:** Paste the bot's webhook URL
    - **HTTP Method:** POST
    - **Content Type:** application/json
-   - **Secret:** (leave empty — authentication is via the URL path)
+   - **Secret:** Set a strong random secret here and enter the same value as **Webhook signing secret** on the bot. AI-Git-Bot then verifies the `X-Gitea-Signature` HMAC of every delivery and rejects forged events. (Leave empty only on fully trusted networks — authentication then relies solely on the URL path secret.)
 3. Under **Trigger On**, select **Custom Events**, then enable:
    - ✅ **Pull Request** — handles PR open/close events and reviewer requests/re-requests
    - ✅ **Pull Request Comment** — allows the bot to respond to inline code review comments

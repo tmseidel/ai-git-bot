@@ -63,7 +63,7 @@ class McpConfigurationParserTest {
                 """);
         McpServerDiscovery discovery = new McpServerDiscovery(parser);
 
-        List<McpServerDefinition> servers = discovery.discover(configuration);
+        List<McpServerDefinition> servers = discovery.discover(configuration.getJsonContent());
 
         assertEquals(1, servers.size());
         assertEquals("remote", servers.getFirst().name());

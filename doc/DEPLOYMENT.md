@@ -99,6 +99,30 @@ The **coding agent** is enabled per coding bot via the web UI. Writer workflows 
 
 See [Agent Documentation](AGENT.md) for full details.
 
+### Sandboxed Execution (Optional)
+
+Untrusted build/test commands (agent validation tools, generated test suites,
+`npm install` of PR-controlled `package.json` files) can run in an ephemeral
+Docker container instead of directly on the application host. Requires a
+reachable Docker host (`DOCKER_HOST`).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_SANDBOX_ENABLED` | `false` | Run untrusted build/test commands in an ephemeral Docker container |
+| `AGENT_SANDBOX_IMAGE` | `tmseidel/ai-git-bot:latest` | Image with the build toolchain |
+| `AGENT_SANDBOX_NETWORK` | `none` | Docker network mode. `none` fully isolates builds; use `bridge` when builds must download dependencies |
+| `AGENT_SANDBOX_MEMORY_MB` | `2048` | Memory limit per sandbox container |
+| `AGENT_SANDBOX_CPUS` | `2.0` | CPU limit per sandbox container |
+| `AGENT_SANDBOX_PIDS_LIMIT` | `256` | PID limit (fork-bomb protection) |
+| `AGENT_SANDBOX_DOCKER_HOST` | (env) | Explicit Docker host; falls back to `DOCKER_HOST` / `CLOUDRON_DOCKER_HOST` |
+| `GITEABOT_WORKSPACES_DIR` | (system temp) | Workspace root. Must be under an allowed bind-mount root (e.g. `/app/data/workspaces`) when the Docker host restricts mounts |
+
+Sandbox containers run with dropped capabilities, `no-new-privileges`, a
+read-only root filesystem (workspace mounted read-write at `/ws`) and a
+scrubbed, secret-free environment as uid 1000. Without a Docker host, commands
+fall back to direct execution with a scrubbed environment (no isolation).
+
+
 ## Configuration via Web UI
 
 All AI provider and Git configuration is managed through the web interface:

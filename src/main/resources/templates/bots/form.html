@@ -184,7 +184,7 @@
                         <div class="col-12">
                             <label for="deploymentTargetId" class="form-label">Deployment Target <span class="text-secondary">(optional)</span></label>
                             <select class="form-select" id="deploymentTargetId" name="deploymentTargetId">
-                                <option value="">(none — preview-aware workflows will be skipped)</option>
+                                <option value="">(none - preview-aware workflows will be skipped)</option>
                                 <option th:each="deploymentTarget : ${deploymentTargets}"
                                         th:value="${deploymentTarget.id}"
                                         th:text="${deploymentTarget.name + ' [' + deploymentTarget.strategyType + ']'}"
@@ -193,7 +193,7 @@
                             </select>
                             <div class="form-text">
                                 Per-PR preview environment used by workflows that need a live deployment (e.g. E2E tests). Manage targets under
-                                <a th:href="@{/system-settings/deployment-targets}">System settings → Deployment targets</a>.
+                                <a th:href="@{/system-settings/deployment-targets}">System settings -> Deployment targets</a>.
                             </div>
                         </div>
 
@@ -209,6 +209,20 @@
                                 <strong>Leave blank to allow everyone</strong> (historical default).
                                 Recommended for <strong>public repositories</strong> so unknown users
                                 cannot burn the bot's AI tokens.
+                            </div>
+                        </div>
+
+                        <div class="col-12">
+                            <label for="webhookSigningSecret" class="form-label">Webhook signing secret <span class="text-secondary">(optional, recommended)</span></label>
+                            <input type="password" class="form-control font-monospace" id="webhookSigningSecret"
+                                   name="webhookSigningSecret" autocomplete="new-password"
+                                   th:placeholder="${bot.id != null and bot.webhookSigningSecret != null} ? 'configured - leave blank to keep' : 'shared secret configured at the provider'"/>
+                            <div class="form-text">
+                                When set, the bot verifies the provider's webhook signature
+                                (<code>X-Hub-Signature-256</code> for GitHub, <code>X-Gitea-Signature</code> for Gitea,
+                                <code>X-Gitlab-Token</code> for GitLab, <code>X-Hub-Signature</code> for Bitbucket)
+                                and rejects forged events. Configure the same secret in the provider's webhook settings.
+                                Stored encrypted. <strong>Highly recommended for public repositories.</strong>
                             </div>
                         </div>
 
@@ -255,11 +269,11 @@
                         <p>Before you can create a bot, the following integrations must be set up first:</p>
                         <ul>
                             <li th:if="${missingAiIntegration}">
-                                <strong>AI Integration</strong> — connects the bot to an AI provider
+                                <strong>AI Integration</strong> - connects the bot to an AI provider
                                 (Anthropic, OpenAI, Google, ...).
                             </li>
                             <li th:if="${missingGitIntegration}">
-                                <strong>Git Integration</strong> — connects the bot to a Git platform
+                                <strong>Git Integration</strong> - connects the bot to a Git platform
                                 (Gitea, GitHub, GitLab, ...).
                             </li>
                         </ul>

@@ -25,7 +25,7 @@ import java.util.Optional;
  * {@link EventHookEndpointService#save}).
  *
  * <p>The routes inherit the web security filter chain
- * ({@code anyRequest().authenticated()}) — no explicit rule is needed.</p>
+ * ({@code anyRequest().authenticated()}) - no explicit rule is needed.</p>
  */
 @Slf4j
 @Controller
@@ -85,8 +85,9 @@ public class EventHookController {
     public String save(@ModelAttribute("endpoint") EventHookEndpoint endpoint,
                        @RequestParam(name = "plainSecret", required = false) String plainSecret,
                        @RequestParam(name = "plainAuthorizationHeader", required = false) String plainAuthorizationHeader,
+                       @RequestParam(name = "plainCustomHeaders", required = false) String plainCustomHeaders,
                        Model model, RedirectAttributes redirectAttributes) {
-        String error = validate(endpoint);
+        String error = validate(endpoint, plainCustomHeaders);
         if (error == null && endpoint.getId() != null) {
             // An edit must target an existing endpoint: a forged or stale id is
             // rejected instead of falling into JPA merge semantics.
@@ -95,7 +96,7 @@ public class EventHookController {
                 redirectAttributes.addFlashAttribute("error", "Event hook endpoint not found");
                 return REDIRECT_LIST;
             }
-            // Blank credential inputs on edit mean "keep current" — copy the
+            // Blank credential inputs on edit mean "keep current" - copy the
             // existing ciphertext into the bound entity before saving
             // (mirrors AiIntegrationController#save).
             EventHookEndpoint persisted = existing.get();
@@ -105,10 +106,13 @@ public class EventHookController {
             if (plainAuthorizationHeader == null || plainAuthorizationHeader.isBlank()) {
                 endpoint.setAuthorizationHeader(persisted.getAuthorizationHeader());
             }
+            if (plainCustomHeaders == null || plainCustomHeaders.isBlank()) {
+                endpoint.setCustomHeaders(persisted.getCustomHeaders());
+            }
         }
         if (error == null) {
             try {
-                endpointService.save(endpoint, plainSecret, plainAuthorizationHeader);
+                endpointService.save(endpoint, plainSecret, plainAuthorizationHeader, plainCustomHeaders);
                 redirectAttributes.addFlashAttribute("success",
                         "Event hook endpoint '" + endpoint.getName() + "' saved successfully");
                 return REDIRECT_LIST;
@@ -126,7 +130,7 @@ public class EventHookController {
     public String toggle(@PathVariable Long id, RedirectAttributes redirectAttributes) {
         endpointService.findById(id).ifPresentOrElse(endpoint -> {
             endpoint.setEnabled(!endpoint.isEnabled());
-            endpointService.save(endpoint, null, null);
+            endpointService.save(endpoint, null, null, null);
             redirectAttributes.addFlashAttribute("success",
                     "Event hook endpoint '" + endpoint.getName() + "' "
                             + (endpoint.isEnabled() ? "enabled" : "disabled"));
@@ -173,7 +177,7 @@ public class EventHookController {
                         deliveryWorker.deliverAsync(delivery.getId());
                         redirectAttributes.addFlashAttribute("success", "Delivery re-queued");
                     }
-                    // Redirect target is derived from the delivery itself — the
+                    // Redirect target is derived from the delivery itself - the
                     // caller cannot steer a retry across endpoints.
                     return "redirect:/admin/event-hooks/" + delivery.getEndpointId() + "/deliveries";
                 })
@@ -191,7 +195,7 @@ public class EventHookController {
     }
 
     /** Returns the validation error message, or null when the endpoint is valid. */
-    private String validate(EventHookEndpoint endpoint) {
+    private String validate(EventHookEndpoint endpoint, String plainCustomHeaders) {
         if (endpoint.getName() == null || endpoint.getName().isBlank()) {
             return "Name is required";
         }
@@ -202,10 +206,9 @@ public class EventHookController {
         if (endpoint.getEventTypes() == null || endpoint.getEventTypes().isBlank()) {
             return "Select at least one event type";
         }
-        String headers = endpoint.getCustomHeaders();
-        if (headers != null && !headers.isBlank()) {
+        if (plainCustomHeaders != null && !plainCustomHeaders.isBlank()) {
             try {
-                JsonNode parsed = objectMapper.readTree(headers);
+                JsonNode parsed = objectMapper.readTree(plainCustomHeaders);
                 if (parsed == null || !parsed.isObject()) {
                     return "Custom headers must be a JSON object";
                 }

@@ -34,18 +34,28 @@ public class EventHookEndpointService {
         return endpointRepository.findById(id);
     }
 
-    /**
-     * Blank credential inputs on edit mean "keep current" (mirrors the
-     * ai-integrations form contract). Both credentials are optional: an
-     * endpoint may have neither, either, or both.
-     */
+    /** Backwards-compatible overload without custom headers. */
     public EventHookEndpoint save(EventHookEndpoint endpoint,
                                   String plainSecret, String plainAuthorizationHeader) {
+        return save(endpoint, plainSecret, plainAuthorizationHeader, null);
+    }
+
+    /**
+     * Blank credential inputs on edit mean "keep current" (mirrors the
+     * ai-integrations form contract). All three credentials are optional: an
+     * endpoint may have none, any, or all of them.
+     */
+    public EventHookEndpoint save(EventHookEndpoint endpoint,
+                                  String plainSecret, String plainAuthorizationHeader,
+                                  String plainCustomHeaders) {
         if (plainSecret != null && !plainSecret.isBlank()) {
             endpoint.setSecret(encryptionService.encrypt(plainSecret));
         }
         if (plainAuthorizationHeader != null && !plainAuthorizationHeader.isBlank()) {
             endpoint.setAuthorizationHeader(encryptionService.encrypt(plainAuthorizationHeader));
+        }
+        if (plainCustomHeaders != null && !plainCustomHeaders.isBlank()) {
+            endpoint.setCustomHeaders(encryptionService.encrypt(plainCustomHeaders));
         }
         return endpointRepository.save(endpoint);
     }
@@ -64,5 +74,11 @@ public class EventHookEndpointService {
     public String decryptAuthorizationHeader(EventHookEndpoint endpoint) {
         String header = endpoint.getAuthorizationHeader();
         return (header == null || header.isBlank()) ? null : encryptionService.decrypt(header);
+    }
+
+    /** Plaintext custom-headers JSON object, or null when unset. */
+    public String decryptCustomHeaders(EventHookEndpoint endpoint) {
+        String headers = endpoint.getCustomHeaders();
+        return (headers == null || headers.isBlank()) ? null : encryptionService.decrypt(headers);
     }
 }

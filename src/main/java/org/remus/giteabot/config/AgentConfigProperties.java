@@ -47,9 +47,65 @@ public class AgentConfigProperties {
     private ValidationConfig validation = new ValidationConfig();
 
     /**
+     * Sandboxed execution settings for untrusted build/test commands.
+     */
+    private SandboxConfig sandbox = new SandboxConfig();
+
+    /**
      * Context-size settings for prompts built during issue implementation.
      */
     private ContextConfig context = new ContextConfig();
+
+    /**
+     * Sandboxed execution settings for untrusted build/test commands (agent
+     * validation tools, generated test suites). When enabled, commands run in
+     * an ephemeral Docker container with no credential environment, no
+     * network (by default), and hard resource limits, instead of directly on
+     * the application host.
+     */
+    @Data
+    public static class SandboxConfig {
+        /**
+         * Whether to run untrusted build/test commands in an ephemeral Docker
+         * container. Requires a reachable Docker host (DOCKER_HOST, or the
+         * Cloudron docker addon's CLOUDRON_DOCKER_HOST).
+         */
+        private boolean enabled = false;
+
+        /**
+         * Docker image with the build toolchain. Defaults to the application's
+         * own image (same version), which ships all toolchains.
+         */
+        private String image = "";
+
+        /**
+         * Docker network mode for sandbox containers. "none" fully isolates
+         * the build; use "bridge" (or an allowlist proxy network) when builds
+         * must download dependencies.
+         */
+        private String network = "none";
+
+        /**
+         * Memory limit in MB per sandbox container.
+         */
+        private int memoryMb = 2048;
+
+        /**
+         * CPU limit per sandbox container.
+         */
+        private double cpus = 2.0;
+
+        /**
+         * PID limit per sandbox container (fork-bomb protection).
+         */
+        private int pidsLimit = 256;
+
+        /**
+         * Explicit Docker host (e.g. "tcp://172.18.0.1:2375"). When empty,
+         * DOCKER_HOST or CLOUDRON_DOCKER_HOST from the environment is used.
+         */
+        private String dockerHost = "";
+    }
 
     /**
      * Writer-agent specific settings.
@@ -62,7 +118,7 @@ public class AgentConfigProperties {
     private SchemaConfig schema = new SchemaConfig();
 
     /**
-     * Step 7.2 — consolidated budget knobs for the agent loop. Replaces the
+     * Step 7.2 - consolidated budget knobs for the agent loop. Replaces the
      * scattered counters that were previously sprinkled across
      * {@link ValidationConfig}, {@link WriterConfig} and hard-coded constants
      * in the implementation services.
@@ -70,7 +126,7 @@ public class AgentConfigProperties {
     private BudgetConfig budget = new BudgetConfig();
 
     /**
-     * Step 7.3 — optional Critic / Reflection step. Disabled by default; when
+     * Step 7.3 - optional Critic / Reflection step. Disabled by default; when
      * enabled, runs an extra LLM call after successful validation to review
      * whether the diff actually addresses the issue.
      */
@@ -128,7 +184,7 @@ public class AgentConfigProperties {
     }
 
     /**
-     * Step 7.2 — single source of truth for all numeric agent-loop budgets.
+     * Step 7.2 - single source of truth for all numeric agent-loop budgets.
      */
     @Data
     public static class BudgetConfig {
@@ -168,7 +224,7 @@ public class AgentConfigProperties {
 
         /**
          * Maximum characters retained from a single tool result in the
-         * in-memory history. This field is currently unused — individual
+         * in-memory history. This field is currently unused - individual
          * tool results are kept at full size; all tool messages are truncated
          * together when the context window budget is exceeded.
          * Default: 8_000.
@@ -192,7 +248,7 @@ public class AgentConfigProperties {
     }
 
     /**
-     * Step 7.3 — Critic / Reflection step configuration.
+     * Step 7.3 - Critic / Reflection step configuration.
      */
     @Data
     public static class CriticConfig {
@@ -212,7 +268,7 @@ public class AgentConfigProperties {
 
         /**
          * Optional triggers; if non-empty, the critic only runs when one of
-         * the listed conditions matches. Currently informational — strategies
+         * the listed conditions matches. Currently informational - strategies
          * may evaluate it themselves. Supported tokens: {@code LARGE_DIFF}.
          */
         private List<String> requireApprovalFor = List.of();

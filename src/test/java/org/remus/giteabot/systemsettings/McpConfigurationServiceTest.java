@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
+import org.remus.giteabot.admin.EncryptionService;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +24,10 @@ class McpConfigurationServiceTest {
 
     @Mock
     private BotRepository botRepository;
+
+    /** Real encryption with a test key so save() encrypts the JSON content. */
+    @Spy
+    private EncryptionService encryptionService = new EncryptionService("test-key");
 
     @InjectMocks
     private McpConfigurationService mcpConfigurationService;

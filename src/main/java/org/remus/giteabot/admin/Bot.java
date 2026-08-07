@@ -70,6 +70,13 @@ public class Bot {
 
     private String webhookSecret;
 
+    /**
+     * Optional shared secret used to verify the provider's webhook signature
+     * (HMAC or token header) in addition to the URL path secret. Stored
+     * encrypted via {@link EncryptionService} (see {@link BotService#save}).
+     */
+    private String webhookSigningSecret;
+
     @Column(name = "user_whitelist", columnDefinition = "TEXT")
     private String userWhitelist;
 

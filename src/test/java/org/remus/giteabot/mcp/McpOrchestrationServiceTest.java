@@ -12,7 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpOrchestrationServiceTest {
 
-    private final McpOrchestrationService service = new McpOrchestrationService();
+    private final McpOrchestrationService service = new McpOrchestrationService(
+            new org.remus.giteabot.admin.EncryptionService("test-key"));
 
     @Test
     void resolveTransportEndpoint_streamableHttpUsesConfiguredMcpEndpointWithoutTrailingSlash() {

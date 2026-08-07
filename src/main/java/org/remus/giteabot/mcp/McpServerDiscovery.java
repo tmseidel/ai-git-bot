@@ -1,7 +1,5 @@
 package org.remus.giteabot.mcp;
 
-import org.remus.giteabot.systemsettings.McpConfiguration;
-
 import java.util.List;
 
 public class McpServerDiscovery {
@@ -12,11 +10,15 @@ public class McpServerDiscovery {
         this.configurationParser = configurationParser;
     }
 
-    public List<McpServerDefinition> discover(McpConfiguration configuration) {
-        if (configuration == null) {
+    /**
+     * Parses the (already decrypted) MCP configuration JSON into server
+     * definitions with a non-blank URL.
+     */
+    public List<McpServerDefinition> discover(String jsonContent) {
+        if (jsonContent == null || jsonContent.isBlank()) {
             return List.of();
         }
-        return configurationParser.parse(configuration.getJsonContent()).stream()
+        return configurationParser.parse(jsonContent).stream()
                 .filter(server -> server.url() != null && !server.url().isBlank())
                 .toList();
     }

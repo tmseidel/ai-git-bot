@@ -23,6 +23,7 @@ public class BotService {
 
     private final BotRepository botRepository;
     private final BotToolConfigurationRepository botToolConfigurationRepository;
+    private final EncryptionService encryptionService;
 
     @Transactional(readOnly = true)
     public List<Bot> findAll() {
@@ -43,6 +44,18 @@ public class BotService {
         if (bot.getWebhookSecret() == null) {
             bot.setWebhookSecret(UUID.randomUUID().toString());
         }
+        // Encrypt a newly provided webhook signing secret; keep the stored one
+        // when the form field is left blank on update (same pattern as the
+        // git integration token).
+        String signingSecret = bot.getWebhookSigningSecret();
+        if (signingSecret != null && !signingSecret.isBlank()) {
+            bot.setWebhookSigningSecret(encryptionService.encrypt(signingSecret));
+        } else if (bot.getId() != null) {
+            botRepository.findById(bot.getId())
+                    .ifPresent(existing -> bot.setWebhookSigningSecret(existing.getWebhookSigningSecret()));
+        } else {
+            bot.setWebhookSigningSecret(null);
+        }
         if (bot.getToolConfiguration() == null) {
             // Defensive fallback for callers that bypass the BotController
             // (integration tests, scripts): assign the Default tool
@@ -62,6 +75,19 @@ public class BotService {
                             + "explicitly before saving the bot.");
         }
         return botRepository.save(bot);
+    }
+
+    /**
+     * Returns the bot's decrypted webhook signing secret, or {@code null} when
+     * none is configured (signature verification then stays disabled).
+     */
+    @Transactional(readOnly = true)
+    public String getDecryptedWebhookSigningSecret(Bot bot) {
+        String secret = bot.getWebhookSigningSecret();
+        if (secret == null || secret.isBlank()) {
+            return null;
+        }
+        return encryptionService.decrypt(secret);
     }
 
     public void deleteById(Long id) {
@@ -88,7 +114,7 @@ public class BotService {
      * prefer in the admin UI.
      *
      * <p>Returns an empty set when the whitelist is {@code null} or
-     * blank — callers that treat an empty set as "everyone allowed"
+     * blank - callers that treat an empty set as "everyone allowed"
      * preserve the unrestricted historical behaviour. The bot entity
      * intentionally holds no logic for this (JPA entities stay anaemic);
      * all whitelist semantics live here in the service layer.</p>

@@ -1,6 +1,7 @@
 package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.util.ProcessSupport;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -31,70 +32,118 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class WorkspaceService {
 
+    /**
+     * Optional base directory for workspaces. When unset, the system temp dir
+     * is used. On hosts where workspaces are bind-mounted into sandbox
+     * containers (e.g. Cloudron docker addon), this must point under the
+     * allowed mount root (e.g. {@code /app/data/workspaces}).
+     */
+    private final Path workspaceBaseDir;
 
+    public WorkspaceService() {
+        this(null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public WorkspaceService(
+            @org.springframework.beans.factory.annotation.Value("${giteabot.workspaces.dir:#{null}}")
+            String configuredDir) {
+        this.workspaceBaseDir = (configuredDir == null || configuredDir.isBlank())
+                ? null
+                : Path.of(configuredDir).toAbsolutePath().normalize();
+    }
+
+    private Path createWorkspaceDir() throws IOException {
+        if (workspaceBaseDir != null) {
+            Files.createDirectories(workspaceBaseDir);
+            return Files.createTempDirectory(workspaceBaseDir, "agent-workspace-");
+        }
+        return Files.createTempDirectory("agent-workspace-");
+    }
     /**
      * Clones a repository workspace. When a branch-based shallow clone fails and
      * {@code prNumber} is non-null, falls back to cloning the default branch then
      * fetching {@code refs/pull/<prNumber>/head} (GitHub/Gitea fork-safe ref).
      */
+    /**
+     * Clones a repository workspace. When a branch-based shallow clone fails and
+     * {@code prNumber} is non-null, falls back to cloning the default branch then
+     * fetching {@code refs/pull/<prNumber>/head} (GitHub/Gitea fork-safe ref).
+     *
+     * <p>Credentials are never embedded in the remote URL: the clone/push use a
+     * git credential-store file placed <em>outside</em> the workspace, so the
+     * token never lands in {@code .git/config}, in git error output, or in the
+     * agent's file/search tools.</p>
+     */
     public WorkspaceResult prepareWorkspace(String owner, String repo, String branch,
                                             String cloneBaseUrl, String token, Long prNumber) {
+        Path credentialsFile = null;
         try {
-            Path tempDir = Files.createTempDirectory("agent-workspace-");
+            Path tempDir = createWorkspaceDir();
             log.info("Cloning repository to {} for workspace", tempDir);
 
-            String cloneUrl = buildCloneUrl(owner, repo, cloneBaseUrl, token);
+            String cloneUrl = buildCloneUrl(owner, repo, cloneBaseUrl);
+            credentialsFile = createCredentialsFile(cloneBaseUrl, token, tempDir);
+            String[] credentialConfig = credentialConfigArgs(credentialsFile);
             CommandResult cloneResult = runCommand(tempDir.getParent().toFile(),
-                    new String[]{"git", "clone", "--depth", "1", "--branch", branch,
-                            cloneUrl, tempDir.getFileName().toString()},
-                    60);
+                    withCredentialConfig(credentialConfig,
+                            "clone", "--depth", "1", "--branch", branch,
+                            cloneUrl, tempDir.getFileName().toString()),
+                    60, token);
 
             if (cloneResult.success()) {
+                persistCredentialHelper(tempDir, credentialsFile);
                 return WorkspaceResult.success(tempDir);
             }
 
-            // Fork PR fallback: clone default branch → fetch PR head ref
+            // Fork PR fallback: clone default branch Ã¢â€ â€™ fetch PR head ref
             if (prNumber != null) {
                 log.info("Branch clone failed, falling back to PR head ref for PR #{}: {}",
                         prNumber, cloneResult.output());
                 deleteDirectory(tempDir);
-                tempDir = Files.createTempDirectory("agent-workspace-");
+                tempDir = createWorkspaceDir();
 
                 CommandResult defaultCloneResult = runCommand(tempDir.getParent().toFile(),
-                        new String[]{"git", "clone", "--depth", "1",
-                                cloneUrl, tempDir.getFileName().toString()},
-                        60);
+                        withCredentialConfig(credentialConfig,
+                                "clone", "--depth", "1",
+                                cloneUrl, tempDir.getFileName().toString()),
+                        60, token);
 
                 if (!defaultCloneResult.success()) {
                     log.error("Fallback clone (default branch) also failed: {}",
                             defaultCloneResult.output());
                     deleteDirectory(tempDir);
+                    deleteCredentialsFile(credentialsFile);
                     return WorkspaceResult.failure(
                             "Failed to clone repository (branch: " + cloneResult.output()
                                     + "; default branch: " + defaultCloneResult.output() + ")");
                 }
 
+                persistCredentialHelper(tempDir, credentialsFile);
+
                 CommandResult fetchResult = runCommand(tempDir.toFile(),
                         new String[]{"git", "fetch", "origin",
                                 "refs/pull/" + prNumber + "/head"},
-                        60);
+                        60, token);
 
                 if (!fetchResult.success()) {
                     log.error("Failed to fetch PR head ref for PR #{}: {}", prNumber,
                             fetchResult.output());
                     deleteDirectory(tempDir);
+                    deleteCredentialsFile(credentialsFile);
                     return WorkspaceResult.failure(
                             "Failed to fetch PR head ref for PR #" + prNumber + ": "
                                     + fetchResult.output());
                 }
 
                 CommandResult checkoutResult = runCommand(tempDir.toFile(),
-                        new String[]{"git", "checkout", "-B", branch, "FETCH_HEAD"}, 15);
+                        new String[]{"git", "checkout", "-B", branch, "FETCH_HEAD"}, 15, token);
 
                 if (!checkoutResult.success()) {
                     log.error("Failed to checkout FETCH_HEAD for PR #{}: {}", prNumber,
                             checkoutResult.output());
                     deleteDirectory(tempDir);
+                    deleteCredentialsFile(credentialsFile);
                     return WorkspaceResult.failure(
                             "Failed to checkout FETCH_HEAD for PR #" + prNumber + ": "
                                     + checkoutResult.output());
@@ -103,13 +152,15 @@ public class WorkspaceService {
                 return WorkspaceResult.success(tempDir);
             }
 
-            // No fallback — report the original clone error
+            // No fallback Ã¢â‚¬â€ report the original clone error
             log.error("Failed to clone repository: {}", cloneResult.output());
             deleteDirectory(tempDir);
+            deleteCredentialsFile(credentialsFile);
             return WorkspaceResult.failure("Failed to clone repository: " + cloneResult.output());
 
         } catch (IOException e) {
             log.error("Failed to prepare workspace: {}", e.getMessage());
+            deleteCredentialsFile(credentialsFile);
             return WorkspaceResult.failure("Failed to prepare workspace: " + e.getMessage());
         }
     }
@@ -162,7 +213,7 @@ public class WorkspaceService {
         if (!commitResult.success()) {
             // "nothing to commit" is not a real error
             if (commitResult.output().contains("nothing to commit")) {
-                log.warn("Nothing to commit in workspace — no file changes were made");
+                log.warn("Nothing to commit in workspace Ã¢â‚¬â€ no file changes were made");
                 return false;
             }
             log.error("git commit failed: {}", commitResult.output());
@@ -199,7 +250,7 @@ public class WorkspaceService {
      * changed (added, modified, renamed or untracked) in {@code workspaceDir}.
      * Parsed from {@code git status --porcelain}; rename entries surface their
      * destination path. Used by callers that need to assert which files are
-     * about to be committed — e.g. the unit-test workflow's pre-commit guard.
+     * about to be committed Ã¢â‚¬â€ e.g. the unit-test workflow's pre-commit guard.
      *
      * @return the changed paths (forward slashes), never {@code null}.
      */
@@ -237,7 +288,7 @@ public class WorkspaceService {
     }
 
     /**
-     * Step 7.3 — returns a {@code git diff --stat} style summary of the
+     * Step 7.3 Ã¢â‚¬â€ returns a {@code git diff --stat} style summary of the
      * uncommitted changes in {@code workspaceDir}. Used by the optional
      * Critic / Reflection step to give the LLM a compact view of what is
      * about to be committed without paying for the full diff.
@@ -260,12 +311,14 @@ public class WorkspaceService {
 
 
     /**
-     * Cleans up a workspace directory by deleting it recursively.
+     * Cleans up a workspace directory by deleting it recursively. Also removes
+     * the sibling git-credentials file created by {@link #prepareWorkspace}.
      */
     public void cleanupWorkspace(Path workspaceDir) {
         if (workspaceDir != null) {
             try {
                 deleteDirectory(workspaceDir);
+                deleteCredentialsFile(credentialsFileFor(workspaceDir));
                 log.debug("Cleaned up workspace: {}", workspaceDir);
             } catch (IOException e) {
                 log.warn("Failed to clean up workspace {}: {}", workspaceDir, e.getMessage());
@@ -275,9 +328,11 @@ public class WorkspaceService {
 
     // ---- internal helpers ------------------------------------------------
 
-    String buildCloneUrl(String owner, String repo, String cloneBaseUrl, String token) {
-        // For local filesystem paths (used in tests and local development),
-        // pass through as-is — git handles bare directory paths natively.
+    /**
+     * Builds the credential-free clone URL. For local filesystem paths (used in
+     * tests and local development), passes through as-is.
+     */
+    String buildCloneUrl(String owner, String repo, String cloneBaseUrl) {
         if (cloneBaseUrl.startsWith("file://") || cloneBaseUrl.startsWith("/")) {
             return cloneBaseUrl;
         }
@@ -288,15 +343,111 @@ public class WorkspaceService {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
 
-        // oauth2:TOKEN format works for GitLab, GitHub, Gitea, and Bitbucket
-        return String.format("%s://oauth2:%s@%s/%s/%s.git", protocol, token, baseUrl, owner, repo);
+        return String.format("%s://%s/%s/%s.git", protocol, baseUrl, owner, repo);
+    }
+
+    /**
+     * Writes a git credential-store file <em>outside</em> the workspace
+     * (sibling of the workspace dir, named after it) so the token is never
+     * stored inside the cloned repository. Returns {@code null} for local
+     * paths or blank tokens.
+     */
+    private Path createCredentialsFile(String cloneBaseUrl, String token, Path workspaceDir)
+            throws IOException {
+        if (token == null || token.isBlank()
+                || cloneBaseUrl.startsWith("file://") || cloneBaseUrl.startsWith("/")) {
+            return null;
+        }
+        String protocol = cloneBaseUrl.startsWith("https://") ? "https" : "http";
+        String baseUrl = cloneBaseUrl.replaceFirst("https?://", "");
+        if (baseUrl.endsWith("/")) {
+            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        }
+        String host = baseUrl.contains("/") ? baseUrl.substring(0, baseUrl.indexOf('/')) : baseUrl;
+
+        Path credentialsFile = credentialsFileFor(workspaceDir);
+        Files.writeString(credentialsFile, protocol + "://oauth2:" + token + "@" + host + "\n");
+        // Best-effort owner-only permissions.
+        credentialsFile.toFile().setReadable(false, false);
+        credentialsFile.toFile().setWritable(false, false);
+        credentialsFile.toFile().setReadable(true, true);
+        credentialsFile.toFile().setWritable(true, true);
+        return credentialsFile;
+    }
+
+    /** The credential-store file associated with a workspace directory. */
+    private Path credentialsFileFor(Path workspaceDir) {
+        return workspaceDir.resolveSibling(workspaceDir.getFileName() + ".credentials");
+    }
+
+    /**
+     * git {@code -c} arguments that authenticate via the credential-store file
+     * (used for the initial clone, before the repo-local config exists).
+     */
+    private String[] credentialConfigArgs(Path credentialsFile) {
+        if (credentialsFile == null) {
+            return new String[0];
+        }
+        return new String[]{
+                "-c", "credential.helper=",
+                "-c", "credential.helper=store --file=" + credentialsFile.toAbsolutePath()};
+    }
+
+    private String[] withCredentialConfig(String[] credentialConfig, String... gitArgs) {
+        String[] command = new String[1 + credentialConfig.length + gitArgs.length];
+        command[0] = "git";
+        System.arraycopy(credentialConfig, 0, command, 1, credentialConfig.length);
+        System.arraycopy(gitArgs, 0, command, 1 + credentialConfig.length, gitArgs.length);
+        return command;
+    }
+
+    /**
+     * Persists the credential helper into the cloned repo's local config so
+     * later fetches/pushes authenticate without any environment state.
+     */
+    private void persistCredentialHelper(Path workspaceDir, Path credentialsFile) {
+        if (credentialsFile == null) {
+            return;
+        }
+        runCommand(workspaceDir.toFile(),
+                new String[]{"git", "config", "--local", "credential.helper", ""}, 10);
+        runCommand(workspaceDir.toFile(),
+                new String[]{"git", "config", "--local", "--add", "credential.helper",
+                        "store --file=" + credentialsFile.toAbsolutePath()}, 10);
+    }
+
+    /**
+     * Deletes the credential-store file belonging to a workspace, if present.
+     * Called from {@link #cleanupWorkspace(Path)}.
+     */
+    private void deleteCredentialsFile(Path credentialsFile) {
+        if (credentialsFile != null) {
+            try {
+                Files.deleteIfExists(credentialsFile);
+            } catch (IOException e) {
+                log.warn("Failed to delete git credentials file {}: {}", credentialsFile, e.getMessage());
+            }
+        }
     }
 
     private CommandResult runCommand(File workDir, String[] command, int timeoutSeconds) {
+        return runCommand(workDir, command, timeoutSeconds, null);
+    }
+
+    /**
+     * Runs a command with a scrubbed child environment (no inherited secrets).
+     * Any occurrences of the given {@code secrets} are redacted from the
+     * captured output before it is returned (defense-in-depth: with
+     * credential-store authentication the token should never appear in git
+     * output in the first place).
+     */
+    private CommandResult runCommand(File workDir, String[] command, int timeoutSeconds,
+                                     String... secrets) {
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workDir);
             pb.redirectErrorStream(true);
+            ProcessSupport.scrubEnvironment(pb);
 
             Process process = pb.start();
 
@@ -316,7 +467,9 @@ public class WorkspaceService {
             }
 
             boolean success = process.exitValue() == 0;
-            return new CommandResult(success, output.toString());
+            String sanitized = ProcessSupport.redactSecrets(
+                    output.toString(), secrets == null ? List.of() : List.of(secrets));
+            return new CommandResult(success, sanitized);
         } catch (IOException | InterruptedException e) {
             log.error("Failed to run command: {}", e.getMessage());
             return new CommandResult(false, "Exception: " + e.getMessage());

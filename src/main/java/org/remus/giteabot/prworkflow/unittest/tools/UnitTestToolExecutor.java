@@ -130,18 +130,7 @@ public class UnitTestToolExecutor {
      * symlink trickery). Mirrors {@code PrTestWorkspaceManager.resolveInsideWorkspace}.
      */
     static Path resolveInsideWorkspace(Path workspace, String relativePath) {
-        if (relativePath == null || relativePath.isBlank()) {
-            throw new IllegalArgumentException("path must not be blank");
-        }
-        Path candidate = workspace.resolve(relativePath).toAbsolutePath().normalize();
-        Path normalizedWorkspace = workspace.toAbsolutePath().normalize();
-        if (!candidate.startsWith(normalizedWorkspace)) {
-            throw new IllegalArgumentException("Path '" + relativePath + "' escapes the workspace");
-        }
-        if (Files.isSymbolicLink(candidate)) {
-            throw new IllegalArgumentException("Path '" + relativePath + "' resolves to a symlink");
-        }
-        return candidate;
+        return org.remus.giteabot.util.WorkspacePaths.resolveInsideWorkspace(workspace, relativePath);
     }
 
     private static String requireString(Map<String, Object> args, String key) {

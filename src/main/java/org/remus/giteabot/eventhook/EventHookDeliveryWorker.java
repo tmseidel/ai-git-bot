@@ -123,14 +123,18 @@ public class EventHookDeliveryWorker {
                     .header(EventHookSignatureService.EVENT_HEADER, delivery.getEventType())
                     .header(EventHookSignatureService.DELIVERY_HEADER, delivery.getDeliveryUuid())
                     .headers(h -> {
-                        endpoint.parsedCustomHeaders(objectMapper).forEach(h::add);
+                        // custom_headers are stored encrypted - decrypt only at delivery time.
+                        String customHeadersJson = endpointService.decryptCustomHeaders(endpoint);
+                        if (customHeadersJson != null && !customHeadersJson.isBlank()) {
+                            endpoint.parsedCustomHeaders(objectMapper, customHeadersJson).forEach(h::add);
+                        }
                         // Static Authorization wins over any conflicting custom header.
                         if (authorization != null) {
                             h.set(HttpHeaders.AUTHORIZATION, authorization);
                         }
                     })
                     .body(body);
-            // Optional HMAC signature — skipped entirely when the endpoint has no secret.
+            // Optional HMAC signature - skipped entirely when the endpoint has no secret.
             if (secret != null) {
                 request = request.header(EventHookSignatureService.SIGNATURE_HEADER,
                         signatureService.sign(body, secret));
@@ -153,7 +157,7 @@ public class EventHookDeliveryWorker {
     RestClient clientFor(EventHookEndpoint endpoint) {
         if (endpoint.isSkipTlsVerify()) {
             if (tlsWarnedEndpoints.add(endpoint.getId())) {
-                log.warn("Endpoint '{}' ({}) has TLS certificate verification DISABLED — "
+                log.warn("Endpoint '{}' ({}) has TLS certificate verification DISABLED - "
                         + "insecure, use only for self-signed/internal targets",
                         endpoint.getName(), endpoint.getUrl());
             }

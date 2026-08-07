@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.util.ProcessSupport;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -28,7 +29,7 @@ import java.util.stream.Stream;
  * <p>
  * Pure executor: classification of tool names lives in {@link ToolCatalog}
  * and callers that need it should inject the catalog directly. This service
- * no longer exposes {@code is*Tool} / {@code getAvailable*Tools} forwarders —
+ * no longer exposes {@code is*Tool} / {@code getAvailable*Tools} forwarders -
  * having two ways to ask the same question was the root cause of duplicated
  * taxonomy lists across the codebase.
  */
@@ -47,11 +48,16 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
+    private final SandboxedCommandExecutor sandboxedCommandExecutor;
 
     /**
      * Executes a configured validation tool (mvn, gradle, …) in the given
      * workspace directory. Rejects tools not in
      * {@link ToolCatalog#validationToolNames()}.
+     *
+     * <p>Validation tools run untrusted repository build scripts - they are
+     * executed via the {@link SandboxedCommandExecutor} (ephemeral Docker
+     * container when available, scrubbed environment otherwise).</p>
      */
     public ToolResult executeTool(Path workspaceDir, String tool, List<String> arguments) {
         List<String> availableTools = catalog.validationToolNames();
@@ -62,18 +68,36 @@ public class ToolExecutionService {
                     "");
         }
 
-        String[] command = new String[1 + (arguments != null ? arguments.size() : 0)];
-        command[0] = tool;
+        List<String> command = new ArrayList<>();
+        command.add(tool);
         if (arguments != null) {
-            for (int i = 0; i < arguments.size(); i++) {
-                command[i + 1] = arguments.get(i);
-            }
+            command.addAll(arguments);
         }
 
         log.info("Executing tool: {} {}", tool,
                 arguments != null ? String.join(" ", arguments) : "");
 
-        return executeCommand(workspaceDir, command);
+        try {
+            int timeoutSeconds = agentConfig.getValidation().getToolTimeoutSeconds();
+            SandboxedCommandExecutor.Result result =
+                    sandboxedCommandExecutor.run(workspaceDir, command, timeoutSeconds);
+            if (result.timedOut()) {
+                return new ToolResult(false, -1, "",
+                        "Tool execution timed out after " + timeoutSeconds + " seconds");
+            }
+            log.info("Tool {} with exit code {}", result.success() ? "succeeded" : "failed",
+                    result.exitCode());
+            return new ToolResult(result.success(), result.exitCode(),
+                    truncateOutput(result.output()), "");
+        } catch (IOException e) {
+            log.error("Failed to execute tool: {}", e.getMessage());
+            return new ToolResult(false, -1, "",
+                    "Failed to execute tool: " + e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ToolResult(false, -1, "",
+                    "Tool execution interrupted");
+        }
     }
 
     /**
@@ -257,7 +281,7 @@ public class ToolExecutionService {
                     String hint = attempt.matchTier() == MatchTier.EXACT
                             ? ""
                             : " (matched via " + attempt.matchTier().label()
-                                    + " — line endings/trailing whitespace normalized)";
+                                    + " - line endings/trailing whitespace normalized)";
                     yield new ToolResult(true, 0, "File patched: " + relativePath + hint, "");
                 }
                 case NOT_FOUND -> new ToolResult(false, 1, "",
@@ -267,7 +291,7 @@ public class ToolExecutionService {
                                 + "the exact current content first.");
                 case AMBIGUOUS -> new ToolResult(false, 1, "",
                         "patch-file: search text matches " + attempt.occurrences() + " locations in "
-                                + relativePath + " — the replacement would be ambiguous. "
+                                + relativePath + " - the replacement would be ambiguous. "
                                 + "Provide a more specific search string that matches exactly once "
                                 + "(use `cat` to identify a unique surrounding context).");
                 case NO_CHANGE -> new ToolResult(false, 1, "",
@@ -314,11 +338,11 @@ public class ToolExecutionService {
      * (CRLF vs LF) or trailing whitespace.
      *
      * <ol>
-     *   <li><b>Tier 1 — exact:</b> {@code String.contains} / {@code replace}.</li>
-     *   <li><b>Tier 2 — normalized line endings:</b> CRLF/CR are folded to LF in both file
+     *   <li><b>Tier 1 - exact:</b> {@code String.contains} / {@code replace}.</li>
+     *   <li><b>Tier 2 - normalized line endings:</b> CRLF/CR are folded to LF in both file
      *       and search text before matching. The replacement is spliced in and the file's
      *       original dominant line-ending style is restored before writing.</li>
-     *   <li><b>Tier 3 — whitespace-tolerant line match:</b> compare line-by-line ignoring
+     *   <li><b>Tier 3 - whitespace-tolerant line match:</b> compare line-by-line ignoring
      *       trailing whitespace (and collapsing runs of horizontal whitespace within a
      *       line). On a unique match the original line range is replaced verbatim with the
      *       replacement text (line endings normalized to the file's dominant style).</li>
@@ -567,6 +591,7 @@ public class ToolExecutionService {
         List<String> matches = new ArrayList<>();
         try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
             List<Path> files = stream
+                    .filter(path -> !isGitInternalPath(path))
                     .filter(Files::isRegularFile)
                     .filter(this::isReasonableTextFile)
                     .sorted()
@@ -686,6 +711,7 @@ public class ToolExecutionService {
         try (Stream<Path> stream = Files.walk(basePath)) {
             List<String> matches = stream
                     .filter(path -> !path.equals(basePath))
+                    .filter(path -> !isGitInternalPath(path))
                     .filter(Files::isRegularFile)
                     .sorted()
                     .map(workspaceDir::relativize)
@@ -896,6 +922,7 @@ public class ToolExecutionService {
 
         try (Stream<Path> stream = Files.walk(basePath, maxDepth)) {
             List<String> lines = stream
+                    .filter(path -> !isGitInternalPath(path))
                     .sorted(Comparator.naturalOrder())
                     .map(path -> formatTreeEntry(basePath, path))
                     .toList();
@@ -1009,7 +1036,7 @@ public class ToolExecutionService {
      * Filters to classes, interfaces, methods, functions, constructors, macros, namespaces.
      * Skips variables and local scopes to minimise context consumption.
      * <p>
-     * Ctags 5.9 (Ubuntu Noble default) does not emit a distinct {@code constructor} kind —
+     * Ctags 5.9 (Ubuntu Noble default) does not emit a distinct {@code constructor} kind -
      * constructors are tagged as {@code method}. We detect them by name equality with the
      * enclosing class. Ctags 6.x adds a native {@code constructor} kind which we also handle.
      */
@@ -1113,7 +1140,7 @@ public class ToolExecutionService {
             case "constructor" -> indent + "constructor " + tag.name()
                     + (tag.signature() != null ? tag.signature() : "()");
             case "m", "method" -> {
-                // ctags 5.9: constructors are tagged as "method" — detect by name == enclosing class
+                // ctags 5.9: constructors are tagged as "method" - detect by name == enclosing class
                 if (tag.scope() != null && tag.name().equals(tag.scope())) {
                     yield indent + "constructor " + tag.scope()
                             + (tag.signature() != null ? tag.signature() : "()");
@@ -1205,7 +1232,7 @@ public class ToolExecutionService {
                 if (name == null || kind == null) continue;
                 String kindLower = kind.toLowerCase();
                 // ctags tags imports/includes with extras=reference.
-                // This is the reliable cross-language signal — the kind
+                // This is the reliable cross-language signal - the kind
                 // letter alone is ambiguous (e.g. Java emits kind=package
                 // for both "package com.foo" and "import com.foo.Bar").
                 String extras = extractCtagsField(line, "extras");
@@ -1221,7 +1248,7 @@ public class ToolExecutionService {
             }
         }
 
-        // Compact single-line JSON (not pretty-printed — the AI doesn't care)
+        // Compact single-line JSON (not pretty-printed - the AI doesn't care)
         StringBuilder json = new StringBuilder();
         json.append("{\"file\":\"").append(escapeJson(fileName)).append("\"");
         json.append(",\"declared_namespace_or_package\":\"").append(
@@ -1257,16 +1284,38 @@ public class ToolExecutionService {
         if (!normalized.startsWith(workspaceDir.normalize())) {
             throw new IOException("Path escapes workspace: " + relativePath);
         }
-        // Stage 2: if the target already exists, re-check after symlink resolution so that
-        // a symlink inside the workspace pointing outside is also caught.
-        if (Files.exists(normalized)) {
-            Path realBase = workspaceDir.toRealPath();
-            Path realPath = normalized.toRealPath();
-            if (!realPath.startsWith(realBase)) {
-                throw new IOException("Path escapes workspace via symlink: " + relativePath);
+        // Never expose the repository's internal .git directory (it may contain
+        // credentials in remotes/hooks and is not part of the source tree).
+        for (Path segment : normalized) {
+            if (".git".equals(segment.toString())) {
+                throw new IOException("Access to .git internals is not allowed: " + relativePath);
             }
         }
+        // Stage 2: re-check against the real path of the nearest existing
+        // ancestor, so symlinks in intermediate directories (committed in a PR)
+        // cannot redirect reads/writes outside the workspace.
+        Path realBase = workspaceDir.toRealPath();
+        Path existing = normalized;
+        while (existing != null && !Files.exists(existing)) {
+            existing = existing.getParent();
+        }
+        if (existing == null) {
+            throw new IOException("No existing ancestor inside workspace: " + relativePath);
+        }
+        if (!existing.toRealPath().startsWith(realBase)) {
+            throw new IOException("Path escapes workspace via symlink: " + relativePath);
+        }
         return normalized;
+    }
+
+    /** True when any path segment is a {@code .git} directory. */
+    private boolean isGitInternalPath(Path path) {
+        for (Path segment : path) {
+            if (".git".equals(segment.toString())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private ToolResult executeCommand(Path workspaceDir, String[] command) {
@@ -1274,6 +1323,9 @@ public class ToolExecutionService {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workspaceDir.toFile());
             pb.redirectErrorStream(true);
+            // Do not let tool processes inherit application secrets (DB
+            // credentials, encryption key, OAuth secrets) from the JVM env.
+            ProcessSupport.scrubEnvironment(pb);
 
             Process process = pb.start();
 

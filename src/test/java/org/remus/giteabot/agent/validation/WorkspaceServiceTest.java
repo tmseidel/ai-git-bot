@@ -70,14 +70,14 @@ class WorkspaceServiceTest {
     @Test
     void buildCloneUrl_http() {
         String url = workspaceService.buildCloneUrl("owner", "repo",
-                "http://git.example.com", "mytoken");
-        assertThat(url).isEqualTo("http://oauth2:mytoken@git.example.com/owner/repo.git");
+                "http://git.example.com");
+        assertThat(url).isEqualTo("http://git.example.com/owner/repo.git");
     }
     @Test
     void buildCloneUrl_https_trailingSlash() {
         String url = workspaceService.buildCloneUrl("owner", "repo",
-                "https://git.example.com/", "tok");
-        assertThat(url).isEqualTo("https://oauth2:tok@git.example.com/owner/repo.git");
+                "https://git.example.com/");
+        assertThat(url).isEqualTo("https://git.example.com/owner/repo.git");
     }
 
     @Test
