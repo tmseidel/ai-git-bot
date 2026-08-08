@@ -2,6 +2,7 @@ package org.remus.giteabot.prworkflow.e2e.workspace;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
+import org.remus.giteabot.util.WorkspacePaths;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -78,21 +79,7 @@ public class PrTestWorkspaceManager {
      * paths, {@code ..} traversal, symlink trickery).
      */
     public Path resolveInsideWorkspace(Path workspace, String relativePath) {
-        if (relativePath == null || relativePath.isBlank()) {
-            throw new IllegalArgumentException("relativePath must not be blank");
-        }
-        Path candidate = workspace.resolve(relativePath).toAbsolutePath().normalize();
-        Path normalizedWorkspace = workspace.toAbsolutePath().normalize();
-        if (!candidate.startsWith(normalizedWorkspace)) {
-            throw new IllegalArgumentException(
-                    "Path '" + relativePath + "' escapes the workspace");
-        }
-        // No symlink-following escape either.
-        if (Files.isSymbolicLink(candidate)) {
-            throw new IllegalArgumentException(
-                    "Path '" + relativePath + "' resolves to a symlink");
-        }
-        return candidate;
+        return WorkspacePaths.resolveInsideWorkspace(workspace, relativePath);
     }
 
     /**

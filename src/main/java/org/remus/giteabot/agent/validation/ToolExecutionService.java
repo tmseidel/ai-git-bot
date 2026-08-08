@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -567,7 +568,8 @@ public class ToolExecutionService {
         List<String> matches = new ArrayList<>();
         try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
             List<Path> files = stream
-                    .filter(Files::isRegularFile)
+                    .filter(this::isVisibleWorkspacePath)
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .filter(this::isReasonableTextFile)
                     .sorted()
                     .toList();
@@ -686,7 +688,8 @@ public class ToolExecutionService {
         try (Stream<Path> stream = Files.walk(basePath)) {
             List<String> matches = stream
                     .filter(path -> !path.equals(basePath))
-                    .filter(Files::isRegularFile)
+                    .filter(this::isVisibleWorkspacePath)
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .sorted()
                     .map(workspaceDir::relativize)
                     .map(Path::toString)
@@ -896,6 +899,7 @@ public class ToolExecutionService {
 
         try (Stream<Path> stream = Files.walk(basePath, maxDepth)) {
             List<String> lines = stream
+                    .filter(this::isVisibleWorkspacePath)
                     .sorted(Comparator.naturalOrder())
                     .map(path -> formatTreeEntry(basePath, path))
                     .toList();
@@ -1252,21 +1256,26 @@ public class ToolExecutionService {
 
 
     private Path resolveWorkspacePath(Path workspaceDir, String relativePath) throws IOException {
-        // Stage 1: normalize() resolves any ".." segments without touching the filesystem.
-        Path normalized = workspaceDir.resolve(relativePath).normalize();
-        if (!normalized.startsWith(workspaceDir.normalize())) {
-            throw new IOException("Path escapes workspace: " + relativePath);
+        try {
+            return org.remus.giteabot.util.WorkspacePaths.resolveInsideWorkspace(workspaceDir, relativePath);
+        } catch (IllegalArgumentException e) {
+            throw new IOException(e.getMessage(), e);
         }
-        // Stage 2: if the target already exists, re-check after symlink resolution so that
-        // a symlink inside the workspace pointing outside is also caught.
-        if (Files.exists(normalized)) {
-            Path realBase = workspaceDir.toRealPath();
-            Path realPath = normalized.toRealPath();
-            if (!realPath.startsWith(realBase)) {
-                throw new IOException("Path escapes workspace via symlink: " + relativePath);
+    }
+
+    /** True when any path segment belongs to the repository's internal Git metadata. */
+    private boolean isGitInternalPath(Path path) {
+        for (Path segment : path) {
+            if (".git".equalsIgnoreCase(segment.toString())) {
+                return true;
             }
         }
-        return normalized;
+        return false;
+    }
+
+    /** Symlinks can point outside the workspace even when recursive walks do not follow directories. */
+    private boolean isVisibleWorkspacePath(Path path) {
+        return !isGitInternalPath(path) && !Files.isSymbolicLink(path);
     }
 
     private ToolResult executeCommand(Path workspaceDir, String[] command) {
