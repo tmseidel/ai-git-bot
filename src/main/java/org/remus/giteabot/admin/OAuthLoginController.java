@@ -10,7 +10,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
-/** Displays OAuth failures without routing back through the provider-login entry point. */
+/** Displays OAuth status pages without routing back through the provider-login entry point. */
 @Slf4j
 @Controller
 @ConditionalOnProperty(prefix = "giteabot.security", name = "login-method", havingValue = "oauth")
@@ -26,5 +26,11 @@ public class OAuthLoginController {
         }
         model.addAttribute("error", "OAuth sign-in failed. Check the server logs and your OAuth client configuration, then try again.");
         return "oauth-login-error";
+    }
+
+    /** Displays the public confirmation page after a local OAuth logout. */
+    @GetMapping("/signed-out")
+    public String signedOut() {
+        return "signed-out";
     }
 }

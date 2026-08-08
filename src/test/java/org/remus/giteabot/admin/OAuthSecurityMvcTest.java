@@ -19,7 +19,10 @@ import org.springframework.security.oauth2.core.AuthorizationGrantType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
@@ -49,6 +52,20 @@ class OAuthSecurityMvcTest {
         mockMvc.perform(get("/oauth2/error"))
                 .andExpect(status().isOk())
                 .andExpect(view().name("oauth-login-error"));
+    }
+
+    @Test
+    void logoutRedirectsToSignedOutPageInsteadOfRestartingOAuth() throws Exception {
+        mockMvc.perform(post("/logout").with(user("admin")).with(csrf()))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/signed-out"));
+    }
+
+    @Test
+    void signedOutPageIsAccessibleWithoutStartingAnotherLogin() throws Exception {
+        mockMvc.perform(get("/signed-out"))
+                .andExpect(status().isOk())
+                .andExpect(view().name("signed-out"));
     }
 
     @Controller

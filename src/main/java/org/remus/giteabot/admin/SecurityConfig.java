@@ -101,7 +101,7 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/css/**", "/js/**", "/images/**", "/favicon.ico",
-                                "/oauth2/**", "/login/oauth2/**").permitAll()
+                                "/oauth2/**", "/login/oauth2/**", "/signed-out").permitAll()
                         .anyRequest().authenticated()
                 )
                 .oauth2Login(oauth -> oauth
@@ -118,7 +118,7 @@ public class SecurityConfig {
                                 "/oauth2/authorization/" + OAuthLoginConfiguration.REGISTRATION_ID))
                 )
                 .logout(logout -> logout
-                        .logoutSuccessUrl("/")
+                        .logoutSuccessUrl("/signed-out")
                         .permitAll()
                 );
 
