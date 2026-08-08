@@ -1,9 +1,14 @@
 package org.remus.giteabot.prworkflow.e2e.tools;
 
+import lombok.RequiredArgsConstructor;
+import org.remus.giteabot.agent.validation.SandboxedCommandExecutor;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -20,7 +25,14 @@ import java.util.concurrent.TimeUnit;
  * outcome.</p>
  */
 @Component
+@RequiredArgsConstructor
 public class WorkspaceProcessRunner {
+
+    private static final int MAX_EXPORTED_ARTIFACT_BYTES = 4 * 1024 * 1024;
+    private static final List<String> EXPORTED_ARTIFACT_DIRECTORIES = List.of(
+            "playwright-report", "test-results", "cypress/screenshots", "cypress/videos");
+
+    private final SandboxedCommandExecutor sandboxedCommandExecutor;
 
     /** Result of one process invocation. */
     public record ProcessResult(int exitCode, String combinedOutput, long durationMs, boolean timedOut) { }
@@ -36,59 +48,87 @@ public class WorkspaceProcessRunner {
      * stdout/stderr (UTF-8) up to {@code maxOutputBytes} bytes and waiting
      * at most {@code timeout} ms before terminating the process.
      *
-     * @param extraEnv environment overrides applied on top of the inherited
-     *                 JVM environment (later entries win). Use this to inject
-     *                 {@code BASE_URL} for browser tests or
-     *                 {@code PLAYWRIGHT_JSON_OUTPUT_NAME} to route the report.
+     * @param extraEnv additional environment variables supplied to the command
+     *                 after the executor has scrubbed its environment. Use this to inject
+     *                 {@code BASE_URL} for browser tests.
      */
     public ProcessResult run(Path workspace, List<String> command,
-                             Map<String, String> extraEnv,
-                             long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
+                              Map<String, String> extraEnv,
+                              long timeoutMs, int maxOutputBytes) throws IOException, InterruptedException {
         long start = System.nanoTime();
-        ProcessBuilder pb = new ProcessBuilder(command)
-                .directory(workspace.toFile())
-                .redirectErrorStream(true);
-        // Make sure CI-style envs do not break the runner with interactive prompts.
-        pb.environment().putIfAbsent("CI", "1");
+        Map<String, String> sandboxEnvironment = new LinkedHashMap<>();
         if (extraEnv != null) {
-            for (Map.Entry<String, String> e : extraEnv.entrySet()) {
-                if (e.getKey() == null || e.getValue() == null) continue;
-                pb.environment().put(e.getKey(), e.getValue());
-            }
+            sandboxEnvironment.putAll(extraEnv);
         }
-        Process process = pb.start();
-        StringBuilder out = new StringBuilder();
-        Thread reader = new Thread(() -> {
-            try (var in = process.getInputStream()) {
-                byte[] buf = new byte[8192];
-                int read;
-                while ((read = in.read(buf)) > 0) {
-                    if (out.length() >= maxOutputBytes) {
-                        // Drain so the child does not block on a full pipe.
-                        continue;
-                    }
-                    int spare = Math.max(0, maxOutputBytes - out.length());
-                    int take = Math.min(read, spare);
-                    if (take > 0) {
-                        out.append(new String(buf, 0, take, java.nio.charset.StandardCharsets.UTF_8));
-                    }
-                }
-            } catch (IOException ignored) {
-                // process exited
-            }
-        }, "pr-test-run-reader");
-        reader.setDaemon(true);
-        reader.start();
-
-        boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-        if (!finished) {
-            process.destroyForcibly();
-            reader.join(2_000);
-            long durationMs = (System.nanoTime() - start) / 1_000_000L;
-            return new ProcessResult(-1, out.toString(), durationMs, true);
-        }
-        reader.join(2_000);
+        sandboxEnvironment.put(SandboxedCommandExecutor.EXPORT_ARTIFACTS_ENV, "true");
+        SandboxedCommandExecutor.Result result =
+                sandboxedCommandExecutor.run(workspace, command, timeoutMs, TimeUnit.MILLISECONDS,
+                        maxOutputBytes, sandboxEnvironment);
         long durationMs = (System.nanoTime() - start) / 1_000_000L;
-        return new ProcessResult(process.exitValue(), out.toString(), durationMs, false);
+        String output = restoreArtifacts(workspace, result.output());
+        return new ProcessResult(result.exitCode(), output,
+                durationMs, result.timedOut());
+    }
+
+    private String restoreArtifacts(Path workspace, String output) {
+        if (output == null) {
+            return "";
+        }
+        int marker = output.lastIndexOf(SandboxedCommandExecutor.ARTIFACTS_MARKER);
+        if (marker < 0) {
+            return output;
+        }
+        int totalBytes = 0;
+        String artifactData = output.substring(marker + SandboxedCommandExecutor.ARTIFACTS_MARKER.length());
+        for (String line : artifactData.split("\\R")) {
+            int separator = line.indexOf('\t');
+            if (separator <= 0) {
+                continue;
+            }
+            String relativePath = line.substring(0, separator);
+            if (!isExportedArtifact(relativePath)) {
+                continue;
+            }
+            byte[] content;
+            try {
+                content = Base64.getDecoder().decode(line.substring(separator + 1));
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            if (content.length > MAX_EXPORTED_ARTIFACT_BYTES - totalBytes) {
+                continue;
+            }
+            Path target = workspace.resolve(relativePath).normalize();
+            if (!target.startsWith(workspace.normalize()) || Files.isSymbolicLink(target)
+                    || !isSafeArtifactTarget(workspace, target)) {
+                continue;
+            }
+            try {
+                Files.createDirectories(target.getParent());
+                Files.write(target, content);
+                totalBytes += content.length;
+            } catch (IOException ignored) {
+                // The command result remains available even when an optional artifact cannot be restored.
+            }
+        }
+        return output.substring(0, marker).stripTrailing();
+    }
+
+    private boolean isExportedArtifact(String relativePath) {
+        return EXPORTED_ARTIFACT_DIRECTORIES.stream()
+                .anyMatch(directory -> relativePath.startsWith(directory + "/"));
+    }
+
+    private boolean isSafeArtifactTarget(Path workspace, Path target) {
+        try {
+            Path realWorkspace = workspace.toRealPath();
+            Path existingParent = target.getParent();
+            while (existingParent != null && !Files.exists(existingParent)) {
+                existingParent = existingParent.getParent();
+            }
+            return existingParent != null && existingParent.toRealPath().startsWith(realWorkspace);
+        } catch (IOException e) {
+            return false;
+        }
     }
 }

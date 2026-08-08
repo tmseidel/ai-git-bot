@@ -96,5 +96,3 @@ class PrTestWorkspaceManagerTest {
         assertThat(k6.resolve("scenarios")).isDirectory();
     }
 }
-
-

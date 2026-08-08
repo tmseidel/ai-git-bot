@@ -100,6 +100,35 @@ The **coding agent** is enabled per coding bot via the web UI. Writer workflows 
 
 See [Agent Documentation](AGENT.md) for full details.
 
+### Sandboxed Command Execution
+
+Build and test commands can execute untrusted repository code, including package-manager scripts. Set `AGENT_SANDBOX_ENABLED=true` to run them in ephemeral Docker containers. Sandboxing is disabled by default for compatibility.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_SANDBOX_ENABLED` | `false` | Enable Docker execution for untrusted build/test commands |
+| `AGENT_SANDBOX_FALLBACK_TO_DIRECT` | `false` | Explicitly allow scrubbed direct execution if Docker is unavailable |
+| `AGENT_SANDBOX_IMAGE` | `tmseidel/ai-git-bot:latest` | Image providing the required toolchain |
+| `AGENT_SANDBOX_NETWORK` | `none` | Docker network mode; use a restricted network only for dependency downloads or preview-URL E2E tests |
+| `AGENT_SANDBOX_MEMORY_MB` | `2048` | Per-container memory limit |
+| `AGENT_SANDBOX_CPUS` | `2.0` | Per-container CPU limit |
+| `AGENT_SANDBOX_PIDS_LIMIT` | `256` | Per-container PID limit |
+| `AGENT_SANDBOX_WORKSPACE_MB` | `1024` | Writable tmpfs workspace size per sandbox container |
+| `AGENT_SANDBOX_DOCKER_HOST` | unset | Explicit Docker host; otherwise `DOCKER_HOST` or `CLOUDRON_DOCKER_HOST` is used |
+| `GITEABOT_WORKSPACES_DIR` | system temp | Absolute host-visible root for agent workspaces |
+| `AI_GIT_BOT_E2E_WORKSPACE_ROOT` | system temp | Absolute host-visible root for generated E2E workspaces |
+
+The application image includes the Docker CLI but not a Docker daemon. The daemon must see the workspace path under the same absolute host path used by the application. For a local Docker daemon, configure the provided override:
+
+```bash
+export GITEABOT_WORKSPACES_DIR=/srv/ai-git-bot/workspaces
+export DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+sudo install -d -o 1000 -g 1000 "$GITEABOT_WORKSPACES_DIR"
+docker compose -f docker-compose.yml -f docker-compose.sandbox.yml up --build -d
+```
+
+Pre-create the workspace directory and make it writable by UID/GID `1000:1000` before starting the override. The override mounts the Docker socket only into the trusted application container, adds its socket group, and bind-mounts the workspace root at the same path for the application and daemon. For a remote daemon, configure an equivalent shared filesystem and set `AGENT_SANDBOX_DOCKER_HOST` instead. Sandboxes run without network access by default, drop Linux capabilities, use a read-only root filesystem, run as UID/GID `1000:1000`, and receive only a scrubbed environment. The host workspace is mounted read-only; each command copies it into a bounded tmpfs workspace (`AGENT_SANDBOX_WORKSPACE_MB`). Writable npm, Maven, Gradle, Go, Rust, and .NET caches are placed under `/tmp`, and Docker logging is disabled so untrusted output cannot consume host disk. Supported E2E result directories (`playwright-report`, `test-results`, Cypress screenshots and videos) are exported back with a combined 4 MiB cap for later artifact attachment. When a Git workspace is mounted, its `.git` metadata is read-only and `.git/config` is masked inside the container, so build scripts cannot read clone credentials or install Git hooks for later host-side commands. Host Git lifecycle commands also use a trusted empty hooks directory. Direct fallback requires Linux `setsid` process-group support so ordinary background children are terminated with their parent, but this fallback remains non-isolated. Set `AGENT_SANDBOX_NETWORK=bridge` or a restricted network for dependency downloads and E2E requests to a preview URL. When sandboxing is enabled, unavailable Docker fails the command by default; set `AGENT_SANDBOX_FALLBACK_TO_DIRECT=true` only when a scrubbed but non-isolated fallback is acceptable.
+
 ## Configuration via Web UI
 
 All AI provider and Git configuration is managed through the web interface:

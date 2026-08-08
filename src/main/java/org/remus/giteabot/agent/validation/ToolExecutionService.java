@@ -1,15 +1,14 @@
 package org.remus.giteabot.agent.validation;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.util.ProcessSupport;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,7 +33,6 @@ import java.util.stream.Stream;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ToolExecutionService {
 
     private static final int MAX_TOOL_OUTPUT_CHARS = 10_000;
@@ -47,6 +45,20 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
+    private final SandboxedCommandExecutor sandboxedCommandExecutor;
+
+    /** Test seam that preserves callers which do not need a custom sandbox executor. */
+    public ToolExecutionService(AgentConfigProperties agentConfig, ToolCatalog catalog) {
+        this(agentConfig, catalog, new SandboxedCommandExecutor(agentConfig));
+    }
+
+    @Autowired
+    public ToolExecutionService(AgentConfigProperties agentConfig, ToolCatalog catalog,
+                                SandboxedCommandExecutor sandboxedCommandExecutor) {
+        this.agentConfig = agentConfig;
+        this.catalog = catalog;
+        this.sandboxedCommandExecutor = sandboxedCommandExecutor;
+    }
 
     /**
      * Executes a configured validation tool (mvn, gradle, …) in the given
@@ -62,18 +74,33 @@ public class ToolExecutionService {
                     "");
         }
 
-        String[] command = new String[1 + (arguments != null ? arguments.size() : 0)];
-        command[0] = tool;
+        List<String> command = new ArrayList<>();
+        command.add(tool);
         if (arguments != null) {
-            for (int i = 0; i < arguments.size(); i++) {
-                command[i + 1] = arguments.get(i);
-            }
+            command.addAll(arguments);
         }
 
         log.info("Executing tool: {} {}", tool,
                 arguments != null ? String.join(" ", arguments) : "");
 
-        return executeCommand(workspaceDir, command);
+        try {
+            int timeoutSeconds = agentConfig.getValidation().getToolTimeoutSeconds();
+            SandboxedCommandExecutor.Result result =
+                    sandboxedCommandExecutor.run(workspaceDir, command, timeoutSeconds);
+            if (result.timedOut()) {
+                return new ToolResult(false, -1, "",
+                        "Tool execution timed out after " + timeoutSeconds + " seconds");
+            }
+            log.info("Tool {} with exit code {}", result.success() ? "succeeded" : "failed",
+                    result.exitCode());
+            return new ToolResult(result.success(), result.exitCode(), truncateOutput(result.output()), "");
+        } catch (IOException e) {
+            log.error("Failed to execute tool: {}", e.getMessage());
+            return new ToolResult(false, -1, "", "Failed to execute tool: " + e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ToolResult(false, -1, "", "Tool execution interrupted");
+        }
     }
 
     /**
@@ -1274,34 +1301,25 @@ public class ToolExecutionService {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workspaceDir.toFile());
             pb.redirectErrorStream(true);
+            ProcessSupport.scrubEnvironment(pb);
 
             Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
-            }
-
             int timeoutSeconds = agentConfig.getValidation().getToolTimeoutSeconds();
-            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            ProcessSupport.CommandResult result = ProcessSupport.waitFor(process, timeoutSeconds,
+                    TimeUnit.SECONDS, MAX_TOOL_OUTPUT_CHARS + 1_000);
 
-            if (!finished) {
-                process.destroyForcibly();
+            if (!result.finished()) {
                 return new ToolResult(false, -1, "",
                         "Tool execution timed out after " + timeoutSeconds + " seconds");
             }
 
-            int exitCode = process.exitValue();
+            int exitCode = result.exitCode();
             boolean success = exitCode == 0;
 
             log.info("Tool {} with exit code {}",
                     success ? "succeeded" : "failed", exitCode);
 
-            return new ToolResult(success, exitCode, truncateOutput(output.toString()), "");
+            return new ToolResult(success, exitCode, truncateOutput(result.output()), "");
 
         } catch (IOException e) {
             log.error("Failed to execute tool: {}", e.getMessage());

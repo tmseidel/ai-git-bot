@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.e2e.tools;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.agent.validation.SandboxedCommandExecutor;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestCaseRepository;
@@ -277,7 +278,8 @@ class PrWorkflowToolExecutorTest {
 
         assertThat(envCap.getValue())
                 .containsEntry("BASE_URL", "http://localhost:8054")
-                .containsEntry("PLAYWRIGHT_BASE_URL", "http://localhost:8054");
+                .containsEntry("PLAYWRIGHT_BASE_URL", "http://localhost:8054")
+                .containsEntry(SandboxedCommandExecutor.INSTALL_PACKAGE_ENV, "@playwright/test@1.60.0");
         // The CLI must NOT pass --reporter=json — that would override the
         // scaffolded playwright.config.ts file reporter and dump JSON to stdout
         // mixed with npx warnings, breaking JSON parsing.
