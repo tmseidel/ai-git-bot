@@ -1,0 +1,19 @@
+services:
+  app:
+    environment:
+      AGENT_SANDBOX_ENABLED: "true"
+      AGENT_SANDBOX_FALLBACK_TO_DIRECT: ${AGENT_SANDBOX_FALLBACK_TO_DIRECT:-false}
+      AGENT_SANDBOX_IMAGE: ${AGENT_SANDBOX_IMAGE:-}
+      AGENT_SANDBOX_NETWORK: ${AGENT_SANDBOX_NETWORK:-none}
+      AGENT_SANDBOX_MEMORY_MB: ${AGENT_SANDBOX_MEMORY_MB:-2048}
+      AGENT_SANDBOX_CPUS: ${AGENT_SANDBOX_CPUS:-2.0}
+      AGENT_SANDBOX_PIDS_LIMIT: ${AGENT_SANDBOX_PIDS_LIMIT:-256}
+      AGENT_SANDBOX_WORKSPACE_MB: ${AGENT_SANDBOX_WORKSPACE_MB:-1024}
+      AGENT_SANDBOX_DOCKER_HOST: unix:///var/run/docker.sock
+      GITEABOT_WORKSPACES_DIR: ${GITEABOT_WORKSPACES_DIR:?Set an absolute host workspace path}
+      AI_GIT_BOT_E2E_WORKSPACE_ROOT: ${GITEABOT_WORKSPACES_DIR:?Set an absolute host workspace path}/e2e
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GITEABOT_WORKSPACES_DIR:?Set an absolute host workspace path}:${GITEABOT_WORKSPACES_DIR:?Set an absolute host workspace path}
+    group_add:
+      - ${DOCKER_GID:?Set the Docker socket group ID}

@@ -2,6 +2,7 @@ package org.remus.giteabot.prworkflow.e2e.tools;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.validation.SandboxedCommandExecutor;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestCaseRepository;
@@ -60,8 +61,8 @@ public class PrWorkflowToolExecutor {
 
     /** Default cap for {@code pr-test-run} per-invocation runtime. */
     public static final long DEFAULT_RUN_TIMEOUT_MS = 5L * 60L * 1000L;
-    /** Hard cap for captured stdout/stderr per {@code pr-test-run}. */
-    public static final int  DEFAULT_RUN_OUTPUT_BYTES = 256 * 1024;
+    /** Hard cap for captured stdout/stderr and bounded sandbox artifact exports per {@code pr-test-run}. */
+    public static final int  DEFAULT_RUN_OUTPUT_BYTES = 6 * 1024 * 1024;
     /** Hard cap on artifact size we are willing to load into memory. */
     public static final int  ATTACH_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024;
 
@@ -185,6 +186,11 @@ public class PrWorkflowToolExecutor {
         // stripping by intermediate shells, sandboxing, …) the others still
         // carry the value so tests never silently target the wrong origin.
         Map<String, String> extraEnv = new LinkedHashMap<>();
+        if (framework == E2eTestFramework.PLAYWRIGHT) {
+            extraEnv.put(SandboxedCommandExecutor.INSTALL_PACKAGE_ENV, "@playwright/test@1.60.0");
+        } else if (framework == E2eTestFramework.CYPRESS) {
+            extraEnv.put(SandboxedCommandExecutor.INSTALL_PACKAGE_ENV, "cypress@15");
+        }
         if (ctx.previewUrl() != null && !ctx.previewUrl().isBlank()) {
             // Strip trailing slash — many AI-authored tests do
             // `await page.goto(`${BASE_URL}/`)` which would otherwise
@@ -220,7 +226,8 @@ public class PrWorkflowToolExecutor {
         try {
             result = processRunner.run(ctx.workspace(), command, extraEnv,
                     DEFAULT_RUN_TIMEOUT_MS, DEFAULT_RUN_OUTPUT_BYTES);
-            log.debug("Result: ExitCode: {}, Combined output: {}",result.exitCode(),result.combinedOutput());
+            log.debug("pr-test-run finished with exit code {} after {}ms",
+                    result.exitCode(), result.durationMs());
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             throw new RuntimeException("Failed to execute " + framework.key() + " runner: " + e.getMessage(), e);

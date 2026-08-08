@@ -2,8 +2,11 @@ package org.remus.giteabot.agent.validation;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,10 +14,16 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class ToolExecutionServiceTest {
 
     private ToolExecutionService service;
+
+    @Mock
+    private SandboxedCommandExecutor sandboxedExecutor;
 
     @TempDir
     Path tempDir;
@@ -23,7 +32,99 @@ class ToolExecutionServiceTest {
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
-                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+                new org.remus.giteabot.agent.tools.ToolCatalog(config),
+                new SandboxedCommandExecutor(config));
+    }
+
+    @Test
+    void executeTool_routesValidationCommandsThroughSandbox() throws Exception {
+        AgentConfigProperties config = new AgentConfigProperties();
+        ToolExecutionService sandboxedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config), sandboxedExecutor);
+        when(sandboxedExecutor.run(tempDir, List.of("mvn", "test"),
+                config.getValidation().getToolTimeoutSeconds()))
+                .thenReturn(new SandboxedCommandExecutor.Result(true, 0, "validation passed", false));
+
+        ToolResult result = sandboxedService.executeTool(tempDir, "mvn", List.of("test"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).isEqualTo("validation passed");
+        verify(sandboxedExecutor).run(tempDir, List.of("mvn", "test"),
+                config.getValidation().getToolTimeoutSeconds());
+    }
+
+    @Test
+    void executeTool_reportsSandboxTimeout() throws Exception {
+        AgentConfigProperties config = new AgentConfigProperties();
+        ToolExecutionService sandboxedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config), sandboxedExecutor);
+        when(sandboxedExecutor.run(tempDir, List.of("mvn", "test"),
+                config.getValidation().getToolTimeoutSeconds()))
+                .thenReturn(new SandboxedCommandExecutor.Result(false, -1, "", true));
+
+        ToolResult result = sandboxedService.executeTool(tempDir, "mvn", List.of("test"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("timed out");
+    }
+
+    @Test
+    void executeTool_reportsSandboxStartFailure() throws Exception {
+        AgentConfigProperties config = new AgentConfigProperties();
+        ToolExecutionService sandboxedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config), sandboxedExecutor);
+        when(sandboxedExecutor.run(tempDir, List.of("mvn", "test"),
+                config.getValidation().getToolTimeoutSeconds()))
+                .thenThrow(new IOException("Docker sandbox is unavailable"));
+
+        ToolResult result = sandboxedService.executeTool(tempDir, "mvn", List.of("test"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("Docker sandbox is unavailable");
+    }
+
+    @Test
+    void executeTool_preservesInterruptStatus() throws Exception {
+        AgentConfigProperties config = new AgentConfigProperties();
+        ToolExecutionService sandboxedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config), sandboxedExecutor);
+        when(sandboxedExecutor.run(tempDir, List.of("mvn", "test"),
+                config.getValidation().getToolTimeoutSeconds()))
+                .thenThrow(new InterruptedException("interrupted"));
+
+        try {
+            ToolResult result = sandboxedService.executeTool(tempDir, "mvn", List.of("test"));
+
+            assertThat(result.success()).isFalse();
+            assertThat(result.error()).contains("interrupted");
+            assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @Test
+    void executeFileTool_rejectsGitMetadata() throws IOException {
+        Files.createDirectories(tempDir.resolve(".git"));
+
+        ToolResult result = service.executeFileTool(tempDir, "write-file",
+                List.of(".git/config", "[core]\nfsmonitor = malicious"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("Git metadata cannot be accessed");
+    }
+
+    @Test
+    void executeFileTool_rejectsSymlinkToGitMetadata() throws IOException {
+        Files.createDirectories(tempDir.resolve(".git"));
+        Files.writeString(tempDir.resolve(".git/config"), "[core]\n");
+        Files.createSymbolicLink(tempDir.resolve("git-link"), tempDir.resolve(".git"));
+
+        ToolResult result = service.executeFileTool(tempDir, "write-file",
+                List.of("git-link/config", "[core]\nfsmonitor = malicious"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("Git metadata cannot be accessed");
     }
 
     @Test

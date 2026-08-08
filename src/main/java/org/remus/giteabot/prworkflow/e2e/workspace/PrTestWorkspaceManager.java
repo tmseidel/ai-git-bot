@@ -1,6 +1,8 @@
 package org.remus.giteabot.prworkflow.e2e.workspace;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.validation.SandboxedCommandExecutor;
+import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -11,7 +13,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -38,10 +39,13 @@ public class PrTestWorkspaceManager {
 
     private final Path root;
     private final boolean npmInstallEnabled;
+    private final SandboxedCommandExecutor sandboxedCommandExecutor;
 
+    /** Creates the manager with the configured workspace root and sandbox executor. */
     public PrTestWorkspaceManager(
             @Value("${ai-git-bot.e2e.workspace-root:#{null}}") String configuredRoot,
-            @Value("${ai-git-bot.e2e.npm-install-enabled:true}") boolean npmInstallEnabled) {
+            @Value("${ai-git-bot.e2e.npm-install-enabled:true}") boolean npmInstallEnabled,
+            SandboxedCommandExecutor sandboxedCommandExecutor) {
         if (configuredRoot == null || configuredRoot.isBlank()) {
             this.root = Path.of(System.getProperty("java.io.tmpdir"), "ai-bot-pr-tests")
                     .toAbsolutePath().normalize();
@@ -49,12 +53,14 @@ public class PrTestWorkspaceManager {
             this.root = Path.of(configuredRoot).toAbsolutePath().normalize();
         }
         this.npmInstallEnabled = npmInstallEnabled;
+        this.sandboxedCommandExecutor = sandboxedCommandExecutor;
         log.debug("PrTestWorkspaceManager root={} npmInstallEnabled={}", root, npmInstallEnabled);
     }
 
     /** Test seam: build a manager rooted at the given path with npm install disabled. */
     public static PrTestWorkspaceManager rootedAt(Path root) {
-        return new PrTestWorkspaceManager(root.toAbsolutePath().normalize().toString(), false);
+        return new PrTestWorkspaceManager(root.toAbsolutePath().normalize().toString(), false,
+                new SandboxedCommandExecutor(new AgentConfigProperties()));
     }
 
     /**
@@ -64,6 +70,10 @@ public class PrTestWorkspaceManager {
     public Path allocate(long runId, E2eTestFramework framework) throws IOException {
         if (runId <= 0) {
             throw new IllegalArgumentException("runId must be positive");
+        }
+        if (sandboxedCommandExecutor.isNetworkIsolated()) {
+            throw new IOException("E2E test workspaces require a sandbox network that can reach the preview URL. "
+                    + "Set agent.sandbox.network to bridge or a restricted preview network.");
         }
         Path workspace = root.resolve("run-" + runId).toAbsolutePath().normalize();
         ensureUnderRoot(workspace);
@@ -275,29 +285,24 @@ public class PrTestWorkspaceManager {
             log.debug("npm install skipped (disabled) for {} in {}", packageSpec, workspace);
             return;
         }
+        if (sandboxedCommandExecutor.isSandboxed()) {
+            // Each sandbox receives a disposable workspace copy, so node_modules would not persist.
+            // The subsequent sandboxed test run installs its framework dependency in that same copy.
+            log.debug("npm install deferred to sandboxed test run for {} in {}", packageSpec, workspace);
+            return;
+        }
         List<String> cmd = List.of("npm", "install", "-D",
                 "--no-audit", "--no-fund", "--loglevel=error",
                 "--prefer-offline", packageSpec);
         try {
-            ProcessBuilder pb = new ProcessBuilder(cmd)
-                    .directory(workspace.toFile())
-                    .redirectErrorStream(true);
-            pb.environment().putIfAbsent("CI", "1");
-            Process p = pb.start();
-            try (var in = p.getInputStream()) {
-                // Drain so the child does not block on a full pipe — but we
-                // do not need to keep the output beyond the log line below.
-                in.readAllBytes();
-            }
-            boolean finished = p.waitFor(120, TimeUnit.SECONDS);
-            if (!finished) {
-                p.destroyForcibly();
+            SandboxedCommandExecutor.Result result = sandboxedCommandExecutor.run(workspace, cmd, 120);
+            if (result.timedOut()) {
                 log.warn("npm install of {} in {} timed out after 120s", packageSpec, workspace);
                 return;
             }
-            if (p.exitValue() != 0) {
+            if (result.exitCode() != 0) {
                 log.warn("npm install of {} in {} exited with code {}",
-                        packageSpec, workspace, p.exitValue());
+                        packageSpec, workspace, result.exitCode());
             } else {
                 log.debug("npm install of {} in {} succeeded", packageSpec, workspace);
             }

@@ -1,13 +1,17 @@
 package org.remus.giteabot.config;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.List;
 
 @Data
 @Component
+@Validated
 @ConfigurationProperties(prefix = "agent")
 public class AgentConfigProperties {
 
@@ -47,6 +51,12 @@ public class AgentConfigProperties {
     private ValidationConfig validation = new ValidationConfig();
 
     /**
+     * Sandboxed execution settings for untrusted build and test commands.
+     */
+    @Valid
+    private SandboxConfig sandbox = new SandboxConfig();
+
+    /**
      * Context-size settings for prompts built during issue implementation.
      */
     private ContextConfig context = new ContextConfig();
@@ -75,6 +85,41 @@ public class AgentConfigProperties {
      * whether the diff actually addresses the issue.
      */
     private CriticConfig critic = new CriticConfig();
+
+    /** Configuration for Docker isolation of untrusted build and test commands. */
+    @Data
+    public static class SandboxConfig {
+        /** Whether untrusted commands run in an ephemeral Docker container. */
+        private boolean enabled = false;
+
+        /** Allow direct execution with a scrubbed environment when Docker is unavailable. */
+        private boolean fallbackToDirect = false;
+
+        /** Docker image containing the required build toolchain. */
+        private String image = "";
+
+        /** Docker network mode for sandbox containers. */
+        private String network = "none";
+
+        /** Memory limit in megabytes per sandbox container. */
+        @Positive
+        private int memoryMb = 2048;
+
+        /** CPU limit per sandbox container. */
+        @Positive
+        private double cpus = 2.0;
+
+        /** PID limit per sandbox container. */
+        @Positive
+        private int pidsLimit = 256;
+
+        /** Writable workspace size in megabytes inside each sandbox container. */
+        @Positive
+        private int workspaceMb = 1024;
+
+        /** Explicit Docker host; environment variables are used when blank. */
+        private String dockerHost = "";
+    }
 
 
     @Data

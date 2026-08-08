@@ -30,13 +30,13 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NODE_PATH=/usr/local/lib/node_modules
 
 # ---------------------------------------------------------------------------
-# Base utilities + AI-agent build toolchain
+# Base utilities + AI-agent build toolchain + Docker client for optional sandboxes
 # (Java/Maven, Python, Go, C/C++, Ruby — Node.js, .NET, k6 and Rust are
 # installed below from upstream channels to get current versions and avoid
 # the patchy Ubuntu repos.)
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl wget git bash gnupg lsb-release apt-transport-https \
+        ca-certificates curl wget git bash gnupg lsb-release apt-transport-https docker.io \
         unzip xz-utils tini \
         universal-ctags \
         maven \
@@ -163,5 +163,3 @@ ENTRYPOINT ["/usr/bin/tini", "--", "java", \
     "-XX:+UseContainerSupport", \
     "-XX:MaxRAMPercentage=75.0", \
     "-jar", "app.jar" ]
-
-
