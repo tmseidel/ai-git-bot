@@ -104,30 +104,6 @@ class ToolExecutionServiceTest {
     }
 
     @Test
-    void executeFileTool_rejectsGitMetadata() throws IOException {
-        Files.createDirectories(tempDir.resolve(".git"));
-
-        ToolResult result = service.executeFileTool(tempDir, "write-file",
-                List.of(".git/config", "[core]\nfsmonitor = malicious"));
-
-        assertThat(result.success()).isFalse();
-        assertThat(result.error()).contains("Git metadata cannot be accessed");
-    }
-
-    @Test
-    void executeFileTool_rejectsSymlinkToGitMetadata() throws IOException {
-        Files.createDirectories(tempDir.resolve(".git"));
-        Files.writeString(tempDir.resolve(".git/config"), "[core]\n");
-        Files.createSymbolicLink(tempDir.resolve("git-link"), tempDir.resolve(".git"));
-
-        ToolResult result = service.executeFileTool(tempDir, "write-file",
-                List.of("git-link/config", "[core]\nfsmonitor = malicious"));
-
-        assertThat(result.success()).isFalse();
-        assertThat(result.error()).contains("Git metadata cannot be accessed");
-    }
-
-    @Test
     void executeContextTool_branchSwitcher_invalidBranchName_returnsFailure() {
         ToolResult result = service.executeContextTool(tempDir, "branch-switcher", List.of("../main"));
 

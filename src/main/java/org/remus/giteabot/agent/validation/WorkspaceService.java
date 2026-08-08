@@ -1,13 +1,12 @@
 package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
-import org.remus.giteabot.util.ProcessSupport;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -32,21 +31,6 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class WorkspaceService {
 
-    private final Path workspaceBaseDir;
-
-    /** Creates a service that places workspaces under the system temporary directory. */
-    public WorkspaceService() {
-        this(null);
-    }
-
-    /** Creates a service that places workspaces below the configured absolute directory when set. */
-    @Autowired
-    public WorkspaceService(@Value("${giteabot.workspaces.dir:#{null}}") String configuredDir) {
-        this.workspaceBaseDir = configuredDir == null || configuredDir.isBlank()
-                ? null
-                : Path.of(configuredDir).toAbsolutePath().normalize();
-    }
-
 
     /**
      * Clones a repository workspace. When a branch-based shallow clone fails and
@@ -56,7 +40,7 @@ public class WorkspaceService {
     public WorkspaceResult prepareWorkspace(String owner, String repo, String branch,
                                             String cloneBaseUrl, String token, Long prNumber) {
         try {
-            Path tempDir = createWorkspaceDirectory();
+            Path tempDir = Files.createTempDirectory("agent-workspace-");
             log.info("Cloning repository to {} for workspace", tempDir);
 
             String cloneUrl = buildCloneUrl(owner, repo, cloneBaseUrl, token);
@@ -74,7 +58,7 @@ public class WorkspaceService {
                 log.info("Branch clone failed, falling back to PR head ref for PR #{}: {}",
                         prNumber, cloneResult.output());
                 deleteDirectory(tempDir);
-                tempDir = createWorkspaceDirectory();
+                tempDir = Files.createTempDirectory("agent-workspace-");
 
                 CommandResult defaultCloneResult = runCommand(tempDir.getParent().toFile(),
                         new String[]{"git", "clone", "--depth", "1",
@@ -291,15 +275,6 @@ public class WorkspaceService {
 
     // ---- internal helpers ------------------------------------------------
 
-    /** Creates a workspace below the configured Docker-bindable root when one is supplied. */
-    Path createWorkspaceDirectory() throws IOException {
-        if (workspaceBaseDir == null) {
-            return Files.createTempDirectory("agent-workspace-");
-        }
-        Files.createDirectories(workspaceBaseDir);
-        return Files.createTempDirectory(workspaceBaseDir, "agent-workspace-");
-    }
-
     String buildCloneUrl(String owner, String repo, String cloneBaseUrl, String token) {
         // For local filesystem paths (used in tests and local development),
         // pass through as-is — git handles bare directory paths natively.
@@ -318,63 +293,33 @@ public class WorkspaceService {
     }
 
     private CommandResult runCommand(File workDir, String[] command, int timeoutSeconds) {
-        Path disabledHooksDirectory = null;
-        Path emptyGlobalGitConfig = null;
         try {
-            // This service performs trusted Git lifecycle operations after untrusted code ran in a workspace.
-            // Disable local hooks and external Git configuration before reading workspace metadata.
-            disabledHooksDirectory = Files.createTempDirectory("ai-git-bot-empty-hooks-");
-            emptyGlobalGitConfig = Files.createTempFile(disabledHooksDirectory, "global-", ".gitconfig");
-            List<String> gitCommand = new ArrayList<>(command.length + 7);
-            gitCommand.add(command[0]);
-            gitCommand.add("-c");
-            gitCommand.add("core.hooksPath=" + disabledHooksDirectory.toAbsolutePath().normalize());
-            gitCommand.add("-c");
-            gitCommand.add("core.fsmonitor=false");
-            gitCommand.add("-c");
-            gitCommand.add("credential.helper=");
-            for (int index = 1; index < command.length; index++) {
-                gitCommand.add(command[index]);
-            }
-            ProcessBuilder pb = new ProcessBuilder(gitCommand);
+            ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workDir);
             pb.redirectErrorStream(true);
-            ProcessSupport.scrubEnvironmentForGit(pb);
-            pb.environment().put("GIT_CONFIG_NOSYSTEM", "1");
-            pb.environment().put("GIT_CONFIG_GLOBAL", emptyGlobalGitConfig.toString());
 
             Process process = pb.start();
-            ProcessSupport.CommandResult result = ProcessSupport.waitFor(process, timeoutSeconds,
-                    TimeUnit.SECONDS, 1_000_000);
-            if (!result.finished()) {
+
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+            }
+
+            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
                 return new CommandResult(false,
                         "Command timed out after " + timeoutSeconds + " seconds");
             }
 
-            return new CommandResult(result.exitCode() == 0, result.output());
+            boolean success = process.exitValue() == 0;
+            return new CommandResult(success, output.toString());
         } catch (IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
-            }
             log.error("Failed to run command: {}", e.getMessage());
             return new CommandResult(false, "Exception: " + e.getMessage());
-        } finally {
-            if (emptyGlobalGitConfig != null) {
-                try {
-                    Files.deleteIfExists(emptyGlobalGitConfig);
-                } catch (IOException e) {
-                    log.warn("Failed to remove empty global Git config {}: {}",
-                            emptyGlobalGitConfig, e.getMessage());
-                }
-            }
-            if (disabledHooksDirectory != null) {
-                try {
-                    Files.deleteIfExists(disabledHooksDirectory);
-                } catch (IOException e) {
-                    log.warn("Failed to remove empty Git hooks directory {}: {}",
-                            disabledHooksDirectory, e.getMessage());
-                }
-            }
         }
     }
 

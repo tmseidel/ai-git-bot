@@ -1,13 +1,10 @@
 package org.remus.giteabot.agent.validation;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermission;
-import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 class WorkspaceServiceTest {
     private WorkspaceService workspaceService;
@@ -54,15 +51,12 @@ class WorkspaceServiceTest {
 
         // Now clone with a branch that does NOT exist in the remote, but prNumber=42
         // The --branch clone will fail, triggering the PR ref fallback
-        Path workspaceRoot = tempDir.resolve("sandbox-workspaces");
-        workspaceService = new WorkspaceService(workspaceRoot.toString());
         WorkspaceResult result = workspaceService.prepareWorkspace(
                 "any", "any", "nonexistent-branch",
                 remoteDir.toAbsolutePath().toString(), "dummy-token", 42L);
 
         assertThat(result.success()).isTrue();
         assertThat(result.workspacePath()).isNotNull();
-        assertThat(result.workspacePath().getParent()).isEqualTo(workspaceRoot);
 
         // Verify the fallback created a real local branch, not detached HEAD
         assertThat(runGitCapture(result.workspacePath(), "rev-parse", "--abbrev-ref", "HEAD"))
@@ -101,52 +95,6 @@ class WorkspaceServiceTest {
         Files.createDirectories(tempDir.resolve("empty-dir"));
 
         assertThat(workspaceService.hasUncommittedChanges(tempDir)).isFalse();
-    }
-
-    @Test
-    void commitAndPush_disablesWorkspaceHooks() throws Exception {
-        initGitRepository(tempDir);
-        Path remote = tempDir.resolve("remote");
-        Files.createDirectories(remote);
-        runGit(remote, "init", "--bare");
-        String branch = runGitCapture(tempDir, "branch", "--show-current");
-        runGit(tempDir, "remote", "add", "origin", remote.toAbsolutePath().toString());
-        runGit(tempDir, "push", "-u", "origin", branch);
-
-        Path hook = tempDir.resolve(".git/hooks/pre-commit");
-        Files.writeString(hook, "#!/bin/sh\nexit 1\n");
-        Assumptions.assumeTrue(Files.getFileStore(hook).supportsFileAttributeView("posix"));
-        Files.setPosixFilePermissions(hook, Set.of(
-                PosixFilePermission.OWNER_READ,
-                PosixFilePermission.OWNER_WRITE,
-                PosixFilePermission.OWNER_EXECUTE));
-        Files.writeString(tempDir.resolve("README.md"), "changed");
-
-        assertThat(workspaceService.commitAndPush(tempDir, branch, "test commit",
-                "Test User", "test@example.com", false)).isTrue();
-    }
-
-    @Test
-    void gitCommands_disableWorkspaceFsMonitor() throws Exception {
-        initGitRepository(tempDir);
-        Path monitorDirectory = tempDir.getParent().resolve(tempDir.getFileName() + "-fsmonitor");
-        Files.createDirectories(monitorDirectory);
-        Path marker = monitorDirectory.resolve("ran");
-        Path monitor = monitorDirectory.resolve("monitor.sh");
-        Files.writeString(monitor, "#!/bin/sh\ntouch " + marker + "\n");
-        Assumptions.assumeTrue(Files.getFileStore(monitor).supportsFileAttributeView("posix"));
-        Files.setPosixFilePermissions(monitor, Set.of(
-                PosixFilePermission.OWNER_READ,
-                PosixFilePermission.OWNER_WRITE,
-                PosixFilePermission.OWNER_EXECUTE));
-        runGit(tempDir, "config", "core.fsmonitor", monitor.toString());
-
-        runGit(tempDir, "status", "--porcelain");
-        assertThat(marker).exists();
-        Files.delete(marker);
-
-        assertThat(workspaceService.hasUncommittedChanges(tempDir)).isFalse();
-        assertThat(marker).doesNotExist();
     }
 
     private void initGitRepository(Path dir) throws IOException, InterruptedException {

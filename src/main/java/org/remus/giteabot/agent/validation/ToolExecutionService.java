@@ -1,10 +1,10 @@
 package org.remus.giteabot.agent.validation;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.util.ProcessSupport;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -33,7 +33,6 @@ import java.util.stream.Stream;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ToolExecutionService {
 
     private static final int MAX_TOOL_OUTPUT_CHARS = 10_000;
@@ -47,6 +46,19 @@ public class ToolExecutionService {
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
     private final SandboxedCommandExecutor sandboxedCommandExecutor;
+
+    /** Test seam that preserves callers which do not need a custom sandbox executor. */
+    public ToolExecutionService(AgentConfigProperties agentConfig, ToolCatalog catalog) {
+        this(agentConfig, catalog, new SandboxedCommandExecutor(agentConfig));
+    }
+
+    @Autowired
+    public ToolExecutionService(AgentConfigProperties agentConfig, ToolCatalog catalog,
+                                SandboxedCommandExecutor sandboxedCommandExecutor) {
+        this.agentConfig = agentConfig;
+        this.catalog = catalog;
+        this.sandboxedCommandExecutor = sandboxedCommandExecutor;
+    }
 
     /**
      * Executes a configured validation tool (mvn, gradle, …) in the given
@@ -1272,11 +1284,6 @@ public class ToolExecutionService {
         if (!normalized.startsWith(workspaceDir.normalize())) {
             throw new IOException("Path escapes workspace: " + relativePath);
         }
-        Path pathWithinWorkspace = workspaceDir.normalize().relativize(normalized);
-        if (pathWithinWorkspace.getNameCount() > 0
-                && ".git".equalsIgnoreCase(pathWithinWorkspace.getName(0).toString())) {
-            throw new IOException("Git metadata cannot be accessed: " + relativePath);
-        }
         // Stage 2: if the target already exists, re-check after symlink resolution so that
         // a symlink inside the workspace pointing outside is also caught.
         if (Files.exists(normalized)) {
@@ -1284,9 +1291,6 @@ public class ToolExecutionService {
             Path realPath = normalized.toRealPath();
             if (!realPath.startsWith(realBase)) {
                 throw new IOException("Path escapes workspace via symlink: " + relativePath);
-            }
-            if (realPath.startsWith(realBase.resolve(".git"))) {
-                throw new IOException("Git metadata cannot be accessed: " + relativePath);
             }
         }
         return normalized;
