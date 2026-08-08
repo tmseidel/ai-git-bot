@@ -137,27 +137,23 @@ class EventHookEndpointTest {
 
     @Test
     void parsedCustomHeaders_validJson_returnsMap() {
-        EventHookEndpoint endpoint = endpoint("PR_WORKFLOW_STARTED");
-        endpoint.setCustomHeaders("{\"X-Team\":\"infra\",\"X-Env\":\"prod\"}");
-
         assertEquals(Map.of("X-Team", "infra", "X-Env", "prod"),
-                endpoint.parsedCustomHeaders(objectMapper));
+                endpoint("PR_WORKFLOW_STARTED").parsedCustomHeaders(objectMapper,
+                        "{\"X-Team\":\"infra\",\"X-Env\":\"prod\"}"));
     }
 
     @Test
     void parsedCustomHeaders_nullOrBlank_returnsEmpty() {
-        assertTrue(endpoint("PR_WORKFLOW_STARTED").parsedCustomHeaders(objectMapper).isEmpty());
+        EventHookEndpoint endpoint = endpoint("PR_WORKFLOW_STARTED");
 
-        EventHookEndpoint blank = endpoint("PR_WORKFLOW_STARTED");
-        blank.setCustomHeaders("  ");
-        assertTrue(blank.parsedCustomHeaders(objectMapper).isEmpty());
+        assertTrue(endpoint.parsedCustomHeaders(objectMapper, null).isEmpty());
+        assertTrue(endpoint.parsedCustomHeaders(objectMapper, "  ").isEmpty());
     }
 
     @Test
     void parsedCustomHeaders_invalidJson_returnsEmpty() {
         EventHookEndpoint endpoint = endpoint("PR_WORKFLOW_STARTED");
-        endpoint.setCustomHeaders("{not json");
 
-        assertTrue(endpoint.parsedCustomHeaders(objectMapper).isEmpty());
+        assertTrue(endpoint.parsedCustomHeaders(objectMapper, "{not json").isEmpty());
     }
 }

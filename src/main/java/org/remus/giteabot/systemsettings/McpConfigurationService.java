@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
+import org.remus.giteabot.admin.EncryptionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +21,7 @@ public class McpConfigurationService {
 
     private final McpConfigurationRepository mcpConfigurationRepository;
     private final BotRepository botRepository;
+    private final EncryptionService encryptionService;
 
     @Transactional(readOnly = true)
     public List<McpConfiguration> findAll() {
@@ -31,6 +33,12 @@ public class McpConfigurationService {
         return mcpConfigurationRepository.findById(id);
     }
 
+    /**
+     * Validates and persists the configuration. The JSON content may contain
+     * MCP server credentials (authorization tokens, custom headers), so it is
+     * stored encrypted via {@link EncryptionService}. The incoming value is
+     * always plaintext (e.g. from the admin form).
+     */
     public McpConfiguration save(McpConfiguration mcpConfiguration) {
         if (mcpConfiguration.getName() == null || mcpConfiguration.getName().isBlank()) {
             throw new IllegalArgumentException("Name is required");
@@ -46,7 +54,28 @@ public class McpConfigurationService {
         if (duplicateName) {
             throw new IllegalArgumentException("An MCP configuration with this name already exists");
         }
+        mcpConfiguration.setJsonContent(encryptionService.encrypt(mcpConfiguration.getJsonContent()));
         return mcpConfigurationRepository.save(mcpConfiguration);
+    }
+
+    /** Decrypted JSON content of the configuration (may contain credentials). */
+    @Transactional(readOnly = true)
+    public String getDecryptedJsonContent(McpConfiguration configuration) {
+        String json = configuration.getJsonContent();
+        return (json == null || json.isBlank()) ? json : encryptionService.decrypt(json);
+    }
+
+    /**
+     * Returns a transient copy of the configuration with decrypted JSON
+     * content, for rendering in the admin edit form. Never persisted.
+     */
+    @Transactional(readOnly = true)
+    public McpConfiguration decryptedView(McpConfiguration configuration) {
+        McpConfiguration copy = new McpConfiguration();
+        copy.setId(configuration.getId());
+        copy.setName(configuration.getName());
+        copy.setJsonContent(getDecryptedJsonContent(configuration));
+        return copy;
     }
 
     public void deleteById(Long id) {

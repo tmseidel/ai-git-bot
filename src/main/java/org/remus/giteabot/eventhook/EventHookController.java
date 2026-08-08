@@ -4,7 +4,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.BotService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -55,6 +57,11 @@ public class EventHookController {
         this.objectMapper = objectMapper;
     }
 
+    @InitBinder("endpoint")
+    void disallowEncryptedFieldBinding(WebDataBinder binder) {
+        binder.setDisallowedFields("secret", "authorizationHeader", "customHeaders");
+    }
+
     @GetMapping
     public String list(Model model) {
         model.addAttribute("endpoints", endpointService.findAll());
@@ -85,8 +92,9 @@ public class EventHookController {
     public String save(@ModelAttribute("endpoint") EventHookEndpoint endpoint,
                        @RequestParam(name = "plainSecret", required = false) String plainSecret,
                        @RequestParam(name = "plainAuthorizationHeader", required = false) String plainAuthorizationHeader,
+                       @RequestParam(name = "plainCustomHeaders", required = false) String plainCustomHeaders,
                        Model model, RedirectAttributes redirectAttributes) {
-        String error = validate(endpoint);
+        String error = validate(endpoint, plainCustomHeaders);
         if (error == null && endpoint.getId() != null) {
             // An edit must target an existing endpoint: a forged or stale id is
             // rejected instead of falling into JPA merge semantics.
@@ -105,10 +113,13 @@ public class EventHookController {
             if (plainAuthorizationHeader == null || plainAuthorizationHeader.isBlank()) {
                 endpoint.setAuthorizationHeader(persisted.getAuthorizationHeader());
             }
+            if (plainCustomHeaders == null || plainCustomHeaders.isBlank()) {
+                endpoint.setCustomHeaders(persisted.getCustomHeaders());
+            }
         }
         if (error == null) {
             try {
-                endpointService.save(endpoint, plainSecret, plainAuthorizationHeader);
+                endpointService.save(endpoint, plainSecret, plainAuthorizationHeader, plainCustomHeaders);
                 redirectAttributes.addFlashAttribute("success",
                         "Event hook endpoint '" + endpoint.getName() + "' saved successfully");
                 return REDIRECT_LIST;
@@ -126,7 +137,7 @@ public class EventHookController {
     public String toggle(@PathVariable Long id, RedirectAttributes redirectAttributes) {
         endpointService.findById(id).ifPresentOrElse(endpoint -> {
             endpoint.setEnabled(!endpoint.isEnabled());
-            endpointService.save(endpoint, null, null);
+            endpointService.save(endpoint, null, null, null);
             redirectAttributes.addFlashAttribute("success",
                     "Event hook endpoint '" + endpoint.getName() + "' "
                             + (endpoint.isEnabled() ? "enabled" : "disabled"));
@@ -191,7 +202,7 @@ public class EventHookController {
     }
 
     /** Returns the validation error message, or null when the endpoint is valid. */
-    private String validate(EventHookEndpoint endpoint) {
+    private String validate(EventHookEndpoint endpoint, String plainCustomHeaders) {
         if (endpoint.getName() == null || endpoint.getName().isBlank()) {
             return "Name is required";
         }
@@ -202,10 +213,9 @@ public class EventHookController {
         if (endpoint.getEventTypes() == null || endpoint.getEventTypes().isBlank()) {
             return "Select at least one event type";
         }
-        String headers = endpoint.getCustomHeaders();
-        if (headers != null && !headers.isBlank()) {
+        if (plainCustomHeaders != null && !plainCustomHeaders.isBlank()) {
             try {
-                JsonNode parsed = objectMapper.readTree(headers);
+                JsonNode parsed = objectMapper.readTree(plainCustomHeaders);
                 if (parsed == null || !parsed.isObject()) {
                     return "Custom headers must be a JSON object";
                 }

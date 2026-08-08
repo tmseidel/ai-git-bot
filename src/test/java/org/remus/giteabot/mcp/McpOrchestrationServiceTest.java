@@ -1,6 +1,8 @@
 package org.remus.giteabot.mcp;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.admin.EncryptionService;
+import org.remus.giteabot.systemsettings.McpConfiguration;
 
 import java.net.http.HttpClient;
 import java.util.List;
@@ -12,7 +14,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class McpOrchestrationServiceTest {
 
-    private final McpOrchestrationService service = new McpOrchestrationService();
+    private final EncryptionService encryptionService = new EncryptionService("test-key");
+    private final McpOrchestrationService service = new McpOrchestrationService(encryptionService);
+
+    @Test
+    void discoverServers_decryptsPersistedConfiguration() {
+        McpConfiguration configuration = new McpConfiguration();
+        configuration.setJsonContent(encryptionService.encrypt("""
+                [{"name":"github","type":"url","url":"https://example.test/mcp"}]
+                """));
+
+        List<McpServerDefinition> servers = service.discoverServers(configuration);
+
+        assertEquals(1, servers.size());
+        assertEquals("github", servers.getFirst().name());
+    }
 
     @Test
     void resolveTransportEndpoint_streamableHttpUsesConfiguredMcpEndpointWithoutTrailingSlash() {
@@ -76,4 +92,3 @@ class McpOrchestrationServiceTest {
         assertTrue(attempts.stream().anyMatch(attempt -> attempt.protocolVersions().equals(List.of("2024-11-05"))));
     }
 }
-

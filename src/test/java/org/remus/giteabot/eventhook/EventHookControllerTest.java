@@ -13,6 +13,7 @@ import org.springframework.web.context.WebApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -38,6 +39,8 @@ class EventHookControllerTest {
     private WebApplicationContext wac;
     @Autowired
     private EventHookEndpointRepository endpointRepository;
+    @Autowired
+    private EventHookEndpointService endpointService;
     @Autowired
     private EventHookDeliveryRepository deliveryRepository;
 
@@ -113,6 +116,43 @@ class EventHookControllerTest {
         assertTrue(endpoint.isSubscribedTo(EventHookEventType.PR_WORKFLOW_STARTED));
         assertTrue(endpoint.isSubscribedTo(EventHookEventType.AGENT_REVIEW_FINDING_DETECTED));
         assertFalse(endpoint.isSubscribedTo(EventHookEventType.ISSUE_ASSIGNMENT_STARTED));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void saveIgnoresDirectBindingOfEncryptedFields() throws Exception {
+        mvc.perform(post("/admin/event-hooks/save").with(csrf())
+                        .param("name", "Protected fields")
+                        .param("url", "https://example.com/hook")
+                        .param("eventTypes", "PR_WORKFLOW_STARTED")
+                        .param("secret", "plain-secret")
+                        .param("authorizationHeader", "Bearer token123456")
+                        .param("customHeaders", "{\"X-Api-Key\":\"token123456\"}"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/admin/event-hooks"));
+
+        EventHookEndpoint endpoint = endpointRepository.findAll().getFirst();
+        assertNull(endpoint.getSecret());
+        assertNull(endpoint.getAuthorizationHeader());
+        assertNull(endpoint.getCustomHeaders());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void saveWithPlainCustomHeadersEncryptsTheirStoredValue() throws Exception {
+        String customHeaders = "{\"X-Api-Key\":\"token123456\"}";
+
+        mvc.perform(post("/admin/event-hooks/save").with(csrf())
+                        .param("name", "Encrypted headers")
+                        .param("url", "https://example.com/hook")
+                        .param("eventTypes", "PR_WORKFLOW_STARTED")
+                        .param("plainCustomHeaders", customHeaders))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/admin/event-hooks"));
+
+        EventHookEndpoint endpoint = endpointRepository.findAll().getFirst();
+        assertNotEquals(customHeaders, endpoint.getCustomHeaders());
+        assertEquals(customHeaders, endpointService.decryptCustomHeaders(endpoint));
     }
 
     @Test

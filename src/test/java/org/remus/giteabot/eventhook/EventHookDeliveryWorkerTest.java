@@ -155,10 +155,10 @@ class EventHookDeliveryWorkerTest {
     }
 
     @Test
-    void deliver_authorizationHeader_sentVerbatimAndOverridesCustomHeader() {
+    void deliver_encryptedCustomHeadersAndAuthorizationHeader() {
         EventHookEndpoint endpoint = endpoint(false);
         endpoint.setAuthorizationHeader(encryptionService.encrypt("Bearer token123456"));
-        endpoint.setCustomHeaders("{\"Authorization\": \"Bearer wrong\", \"X-Custom\": \"yes\"}");
+        endpoint.setCustomHeaders(encryptionService.encrypt("{\"Authorization\": \"Bearer wrong\", \"X-Custom\": \"yes\"}"));
         EventHookDelivery delivery = delivery(endpoint);
         stubLoad(delivery, endpoint);
 

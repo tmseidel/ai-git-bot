@@ -58,6 +58,29 @@ class SystemSettingsControllerTest {
     }
 
     @Test
+    void editMcpForm_usesDecryptedConfigurationView() {
+        McpConfigurationService mcpConfigurationService = mock(McpConfigurationService.class);
+        SystemSettingsController controller = newController(mock(SystemPromptService.class),
+                mcpConfigurationService, mock(McpToolSelectionService.class),
+                mock(BotToolConfigurationService.class), mock(BotToolSelectionService.class));
+        McpConfiguration encryptedConfiguration = new McpConfiguration();
+        encryptedConfiguration.setId(5L);
+        encryptedConfiguration.setJsonContent("ciphertext");
+        McpConfiguration decryptedConfiguration = new McpConfiguration();
+        decryptedConfiguration.setId(5L);
+        decryptedConfiguration.setJsonContent("{\"url\":\"https://example.test/mcp\"}");
+        when(mcpConfigurationService.findById(5L)).thenReturn(Optional.of(encryptedConfiguration));
+        when(mcpConfigurationService.decryptedView(encryptedConfiguration)).thenReturn(decryptedConfiguration);
+        ConcurrentModel model = new ConcurrentModel();
+
+        String view = controller.editMcpForm(5L, model, new RedirectAttributesModelMap());
+
+        assertEquals("system-settings/mcp-form", view);
+        assertEquals(decryptedConfiguration, model.getAttribute("mcpConfiguration"));
+        verify(mcpConfigurationService).decryptedView(encryptedConfiguration);
+    }
+
+    @Test
     void saveMcpToolSelection_persistsSelectionAndRedirects() {
         McpToolSelectionService mcpToolSelectionService = mock(McpToolSelectionService.class);
         SystemSettingsController controller = newController(mock(SystemPromptService.class),

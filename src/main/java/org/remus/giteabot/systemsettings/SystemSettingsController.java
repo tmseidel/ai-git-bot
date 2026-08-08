@@ -59,7 +59,8 @@ public class SystemSettingsController {
     public String editMcpForm(@PathVariable Long id, Model model, RedirectAttributes redirectAttributes) {
         return mcpConfigurationService.findById(id)
                 .map(mcpConfiguration -> {
-                    model.addAttribute("mcpConfiguration", mcpConfiguration);
+                    // The stored JSON is encrypted - render the decrypted view in the form.
+                    model.addAttribute("mcpConfiguration", mcpConfigurationService.decryptedView(mcpConfiguration));
                     model.addAttribute("activeNav", "system-settings");
                     return "system-settings/mcp-form";
                 })

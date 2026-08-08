@@ -16,11 +16,12 @@ import java.util.stream.Collectors;
 /**
  * An admin-configured outgoing-webhook endpoint.
  *
- * <p>{@link #secret} and {@link #authorizationHeader} hold
+ * <p>{@link #secret}, {@link #authorizationHeader}, and {@link #customHeaders} hold
  * <strong>encrypted</strong> values (AES-GCM ciphertext, Base64) — never
  * plaintext. Callers that need the plaintext must go through
  * {@link EventHookEndpointService#decryptSecret} /
- * {@link EventHookEndpointService#decryptAuthorizationHeader}. Both are
+ * {@link EventHookEndpointService#decryptAuthorizationHeader} /
+ * {@link EventHookEndpointService#decryptCustomHeaders}. All are
  * optional and independent: unsigned + unauthenticated, signed-only,
  * auth-header-only, or both are all valid configurations.
  *
@@ -64,7 +65,7 @@ public class EventHookEndpoint {
     @Column(nullable = false, length = 1024)
     private String eventTypes;
 
-    /** JSON object of extra HTTP headers sent with every delivery. */
+    /** AES-GCM ciphertext (Base64) of a JSON object of extra HTTP headers. */
     @Column(columnDefinition = "TEXT")
     private String customHeaders;
 
@@ -123,13 +124,13 @@ public class EventHookEndpoint {
         return true;
     }
 
-    /** Parses {@link #customHeaders} as a JSON object; empty map on missing/invalid content. */
-    public Map<String, String> parsedCustomHeaders(ObjectMapper mapper) {
-        if (customHeaders == null || customHeaders.isBlank()) {
+    /** Parses the given raw JSON as a headers object; empty map on missing/invalid content. */
+    public Map<String, String> parsedCustomHeaders(ObjectMapper mapper, String rawJson) {
+        if (rawJson == null || rawJson.isBlank()) {
             return Map.of();
         }
         try {
-            Map<String, String> parsed = mapper.readValue(customHeaders, new TypeReference<>() {
+            Map<String, String> parsed = mapper.readValue(rawJson, new TypeReference<>() {
             });
             return parsed == null ? Map.of() : parsed;
         } catch (Exception e) {

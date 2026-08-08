@@ -49,9 +49,10 @@
 
             <div class="mb-3">
                 <label class="form-label">Custom headers (JSON object, optional)</label>
-                <textarea class="form-control font-monospace" rows="3" th:field="*{customHeaders}"
-                          placeholder='{ "X-Source": "ai-git-bot" }'></textarea>
-                <div class="form-text">Sent with every delivery. Must be a single JSON object.</div>
+                <textarea class="form-control font-monospace" rows="3" name="plainCustomHeaders"
+                          th:placeholder="${endpoint.customHeaders != null} ? 'configured - leave blank to keep' : '{ &quot;X-Source&quot;: &quot;ai-git-bot&quot; }'"></textarea>
+                <div class="form-text">Sent with every delivery. Must be a single JSON object. Stored
+                    encrypted; leave blank on edit to keep the current value.</div>
             </div>
 
             <div class="row">

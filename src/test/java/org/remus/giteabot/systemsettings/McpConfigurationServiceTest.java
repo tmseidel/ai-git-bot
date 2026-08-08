@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
+import org.remus.giteabot.admin.EncryptionService;
 
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +24,10 @@ class McpConfigurationServiceTest {
 
     @Mock
     private BotRepository botRepository;
+
+    /** Real encryption with a test key so save() encrypts the JSON content. */
+    @Spy
+    private EncryptionService encryptionService = new EncryptionService("test-key");
 
     @InjectMocks
     private McpConfigurationService mcpConfigurationService;
@@ -52,14 +58,18 @@ class McpConfigurationServiceTest {
 
     @Test
     void save_acceptsRemoteTransport() {
-        McpConfiguration mcpConfiguration = configuration("""
+        String jsonContent = """
                 {"name":"github","type":"url","url":"https://api.githubcopilot.com/mcp/"}
-                """);
+                """;
+        McpConfiguration mcpConfiguration = configuration(jsonContent);
         when(mcpConfigurationRepository.save(mcpConfiguration)).thenReturn(mcpConfiguration);
 
         McpConfiguration result = mcpConfigurationService.save(mcpConfiguration);
 
         assertSame(mcpConfiguration, result);
+        assertNotEquals(jsonContent, result.getJsonContent());
+        assertEquals(jsonContent, mcpConfigurationService.getDecryptedJsonContent(result));
+        assertEquals(jsonContent, mcpConfigurationService.decryptedView(result).getJsonContent());
         verify(mcpConfigurationRepository).save(mcpConfiguration);
     }
 

@@ -48,6 +48,16 @@ class EventHookEndpointServiceTest {
     }
 
     @Test
+    void save_encryptsCustomHeaders_andDecryptsThemForDelivery() {
+        String customHeaders = "{\"X-Api-Key\":\"token123456\"}";
+
+        EventHookEndpoint saved = service.save(new EventHookEndpoint(), null, null, customHeaders);
+
+        assertNotEquals(customHeaders, saved.getCustomHeaders());
+        assertEquals(customHeaders, service.decryptCustomHeaders(saved));
+    }
+
+    @Test
     void save_blankCredentialsOnEdit_keepExistingCiphertext() {
         EventHookEndpoint endpoint = service.save(new EventHookEndpoint(), "plain-secret", "Bearer token123456");
         String secretCiphertext = endpoint.getSecret();
@@ -70,6 +80,16 @@ class EventHookEndpointServiceTest {
 
         assertEquals(secretCiphertext, resaved.getSecret());
         assertEquals(authCiphertext, resaved.getAuthorizationHeader());
+    }
+
+    @Test
+    void save_blankCustomHeadersOnEdit_keepsExistingCiphertext() {
+        EventHookEndpoint endpoint = service.save(new EventHookEndpoint(), null, null, "{\"X-Test\":\"value\"}");
+        String customHeadersCiphertext = endpoint.getCustomHeaders();
+
+        EventHookEndpoint resaved = service.save(endpoint, null, null, "  ");
+
+        assertEquals(customHeadersCiphertext, resaved.getCustomHeaders());
     }
 
     @Test
