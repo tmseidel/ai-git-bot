@@ -208,4 +208,36 @@ class ToolCatalogTest {
         assertThat(catalog.validationToolNames(null)).isEqualTo(catalog.validationToolNames());
         assertThat(catalog.writerRepositoryToolNames(null)).isEqualTo(catalog.writerRepositoryToolNames());
     }
+
+    @Test
+    void describeWithReadRoots_annotatesExplorationTools_exposesAlias() {
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.setAdditionalReadRoots(Map.of("vcpkg", "/opt/vcpkg_installed/x64-linux/include"));
+        ToolCatalog rooted = new ToolCatalog(config);
+
+        assertThat(rooted.describeFor(ToolCatalog.Role.WRITER, "cat")).isPresent();
+        assertThat(rooted.describeFor(ToolCatalog.Role.WRITER, "cat").orElseThrow())
+                .contains("vcpkg/")
+                .contains("/opt/vcpkg_installed/x64-linux/include");
+
+        assertThat(rooted.describeFor(ToolCatalog.Role.WRITER, "rg")).isPresent();
+        assertThat(rooted.describeFor(ToolCatalog.Role.WRITER, "rg").orElseThrow())
+                .contains("vcpkg/");
+    }
+
+    @Test
+    void describeWithReadRoots_withoutRoots_leavesDescriptionsUntouched() {
+        assertThat(catalog.describeFor(ToolCatalog.Role.WRITER, "cat").orElseThrow())
+                .doesNotContain("Additional read-only");
+    }
+
+    @Test
+    void describeWithReadRoots_nonExplorationTool_untouchedEvenWithRoots() {
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.setAdditionalReadRoots(Map.of("vcpkg", "/opt/vcpkg_installed"));
+        ToolCatalog rooted = new ToolCatalog(config);
+
+        assertThat(rooted.describeFor(ToolCatalog.Role.CODING, "write-file").orElseThrow())
+                .doesNotContain("Additional read-only");
+    }
 }

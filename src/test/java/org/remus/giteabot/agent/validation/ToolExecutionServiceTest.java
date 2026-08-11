@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -391,5 +392,83 @@ class ToolExecutionServiceTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("escapes");
+    }
+
+    @Test
+    void additionalReadRoot_cat_readsHeaderThroughAliasPrefix(@TempDir Path rootDir) throws IOException {
+        Path vcpkg = rootDir.resolve("vcpkg");
+        Path header = vcpkg.resolve("include/fmt/format.h");
+        Files.createDirectories(header.getParent());
+        Files.writeString(header, "// fmt format.h\nnamespace fmt { struct Fmt {}; }\n");
+
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.setAdditionalReadRoots(Map.of("vcpkg", vcpkg.toString()));
+        ToolExecutionService rootedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+
+        ToolResult result = rootedService.executeContextTool(tempDir, "cat",
+                List.of("vcpkg/include/fmt/format.h"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("namespace fmt");
+    }
+
+    @Test
+    void additionalReadRoot_cat_unknownAliasFallsBackToWorkspace() throws IOException {
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.setAdditionalReadRoots(Map.of("vcpkg", tempDir.resolve("nope").toString()));
+        ToolExecutionService rootedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+
+        ToolResult result = rootedService.executeContextTool(tempDir, "cat", List.of("vcpkg/anything"));
+
+        // No match in workspace and no such file in the (missing) root -> not found, not an escape.
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("File not found");
+    }
+
+    @Test
+    void additionalReadRoot_cat_rejectsTraversalOutOfRoot(@TempDir Path rootDir) throws IOException {
+        Path vcpkg = rootDir.resolve("vcpkg");
+        Files.createDirectories(vcpkg);
+
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.setAdditionalReadRoots(Map.of("vcpkg", vcpkg.toString()));
+        ToolExecutionService rootedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+
+        ToolResult result = rootedService.executeContextTool(tempDir, "cat",
+                List.of("vcpkg/../secret.txt"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("escapes read root");
+    }
+
+    @Test
+    void additionalReadRoot_find_listsFilesUnderAliasPath(@TempDir Path rootDir) throws IOException {
+        Path vcpkg = rootDir.resolve("vcpkg");
+        Path header = vcpkg.resolve("include/fmt/format.h");
+        Files.createDirectories(header.getParent());
+        Files.writeString(header, "int a;\n");
+
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.setAdditionalReadRoots(Map.of("vcpkg", vcpkg.toString()));
+        ToolExecutionService rootedService = new ToolExecutionService(config,
+                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+
+        ToolResult result = rootedService.executeContextTool(tempDir, "find",
+                List.of("*.h", "vcpkg"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("vcpkg/include/fmt/format.h");
+    }
+
+    @Test
+    void testOnly_serviceWithoutRoots_keepsWorkspaceBehaviour() {
+        ToolResult result = service.executeContextTool(tempDir, "cat",
+                List.of("vcpkg/include/fmt/format.h"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("File not found");
     }
 }

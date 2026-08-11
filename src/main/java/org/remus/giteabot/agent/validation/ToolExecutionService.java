@@ -16,8 +16,10 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -48,6 +50,14 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
+
+    /**
+     * Lazily resolved additional read-only roots (alias → absolute normalized
+     * path) from {@link AgentConfigProperties#getAdditionalReadRoots()}. Agents
+     * reach them through the alias prefix (e.g. {@code vcpkg/...}), and only the
+     * read-only exploration tools ever resolve into them.
+     */
+    private Map<String, Path> additionalReadRoots;
 
     /**
      * Executes a configured validation tool (mvn, gradle, …) in the given
@@ -519,7 +529,7 @@ public class ToolExecutionService {
         String relativePath = searchRequest.relativePath();
         Path basePath;
         try {
-            basePath = resolveWorkspacePath(workspaceDir, relativePath);
+            basePath = resolveReadPath(workspaceDir, relativePath);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
@@ -575,7 +585,7 @@ public class ToolExecutionService {
                     .toList();
 
             for (Path file : files) {
-                String relativeFilePath = workspaceDir.relativize(file).toString();
+                String relativeFilePath = displayPath(workspaceDir, file);
                 if (!matchesAnyGlob(relativeFilePath, searchRequest.includeGlobs(), searchRequest.caseInsensitive())) {
                     continue;
                 }
@@ -676,7 +686,7 @@ public class ToolExecutionService {
         String relativePath = request.relativePath();
         Path basePath;
         try {
-            basePath = resolveWorkspacePath(workspaceDir, relativePath);
+            basePath = resolveReadPath(workspaceDir, relativePath);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
@@ -691,8 +701,7 @@ public class ToolExecutionService {
                     .filter(this::isVisibleWorkspacePath)
                     .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .sorted()
-                    .map(workspaceDir::relativize)
-                    .map(Path::toString)
+                    .map(path -> displayPath(workspaceDir, path))
                     .filter(path -> matchesGlob(path, globPattern, request.caseInsensitive()))
                     .filter(path -> matchesAnyGlob(path, request.includeGlobs(), request.caseInsensitive()))
                     .toList();
@@ -796,7 +805,7 @@ public class ToolExecutionService {
 
         Path filePath;
         try {
-            filePath = resolveWorkspacePath(workspaceDir, relativePath);
+            filePath = resolveReadPath(workspaceDir, relativePath);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
@@ -888,7 +897,7 @@ public class ToolExecutionService {
 
         Path basePath;
         try {
-            basePath = resolveWorkspacePath(workspaceDir, relativePath);
+            basePath = resolveReadPath(workspaceDir, relativePath);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
@@ -989,7 +998,7 @@ public class ToolExecutionService {
 
         Path filePath;
         try {
-            filePath = resolveWorkspacePath(workspaceDir, relativePath);
+            filePath = resolveReadPath(workspaceDir, relativePath);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
@@ -1166,7 +1175,7 @@ public class ToolExecutionService {
         String relativePath = arguments.getFirst();
         Path filePath;
         try {
-            filePath = resolveWorkspacePath(workspaceDir, relativePath);
+            filePath = resolveReadPath(workspaceDir, relativePath);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
@@ -1261,6 +1270,72 @@ public class ToolExecutionService {
         } catch (IllegalArgumentException e) {
             throw new IOException(e.getMessage(), e);
         }
+    }
+
+    /** Lazily-bound alias → absolute read-only root map (see {@link #additionalReadRoots}). */
+    private Map<String, Path> readRoots() {
+        Map<String, Path> roots = additionalReadRoots;
+        if (roots == null) {
+            Map<String, Path> built = new LinkedHashMap<>();
+            agentConfig.getAdditionalReadRoots().forEach((alias, configured) -> {
+                if (alias != null && !alias.isBlank() && configured != null && !configured.isBlank()) {
+                    built.put(alias.strip(), Path.of(configured).toAbsolutePath().normalize());
+                }
+            });
+            roots = Map.copyOf(built);
+            additionalReadRoots = roots;
+        }
+        return roots;
+    }
+
+    /** The display prefix ({@code <alias>/…}) of a path that lives under a read root, or the raw path. */
+    private String displayPath(Path workspaceDir, Path path) {
+        for (Map.Entry<String, Path> entry : readRoots().entrySet()) {
+            Path root = entry.getValue();
+            if (path.startsWith(root)) {
+                return entry.getKey() + "/" + root.relativize(path).toString().replace('\\', '/');
+            }
+        }
+        return workspaceDir.relativize(path).toString().replace('\\', '/');
+    }
+
+    /**
+     * Resolves a caller-supplied path for the read-only exploration tools
+     * ({@code cat}, {@code rg}, {@code find}, {@code tree},
+     * {@code ctags-signatures}, {@code ctags-deps}). Paths that start with a
+     * configured additional read-root alias (e.g. {@code vcpkg/...}) resolve into
+     * that root; everything else must stay inside the workspace. Windows/POSIX
+     * separators are both accepted for the alias prefix.
+     */
+    private Path resolveReadPath(Path workspaceDir, String relativePath) throws IOException {
+        if (relativePath == null || relativePath.isBlank()) {
+            return resolveWorkspacePath(workspaceDir, relativePath);
+        }
+        String normalized = relativePath.trim().replace('\\', '/');
+        int slash = normalized.indexOf('/');
+        String alias = slash < 0 ? normalized : normalized.substring(0, slash);
+        Path root = readRoots().get(alias);
+        if (root == null) {
+            return resolveWorkspacePath(workspaceDir, relativePath);
+        }
+        String rest = slash < 0 ? "" : normalized.substring(slash + 1);
+        for (java.util.Iterator<Path> it = Path.of(rest).iterator(); it.hasNext(); ) {
+            if ("..".equals(it.next().toString())) {
+                throw new IOException("Path escapes read root via traversal: " + relativePath);
+            }
+        }
+        Path resolved = root.resolve(rest).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new IOException("Path escapes read root: " + relativePath);
+        }
+        if (Files.exists(resolved)) {
+            Path realRoot = root.toRealPath();
+            Path realPath = resolved.toRealPath();
+            if (!realPath.startsWith(realRoot)) {
+                throw new IOException("Path escapes read root via symlink: " + relativePath);
+            }
+        }
+        return resolved;
     }
 
     /** True when any path segment belongs to the repository's internal Git metadata. */

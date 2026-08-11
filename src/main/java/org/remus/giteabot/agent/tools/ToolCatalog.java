@@ -424,6 +424,29 @@ public class ToolCatalog {
     /** Display bucket used by the notification service to group tools in a single comment. */
     public enum DisplayBucket { CONTEXT, MUTATION, VALIDATION }
 
+    /**
+     * Appends a hint about the configured additional read-only roots to the
+     * exploration tools that can resolve them ({@code cat}, {@code rg}, {@code find},
+     * {@code tree}, {@code ctags-signatures}, {@code ctags-deps}). Keeps every
+     * agent (coding, writer, review, PR-workflow) aware that e.g. a vcpkg
+     * installation is browsable via its alias prefix.
+     */
+    private String describeWithReadRoots(String toolName, String description) {
+        Map<String, String> roots = agentConfig.getAdditionalReadRoots();
+        if (roots.isEmpty()) {
+            return description;
+        }
+        if (!Set.of("cat", "rg", "find", "tree", "ctags-signatures", "ctags-deps")
+                .contains(normalize(toolName))) {
+            return description;
+        }
+        StringBuilder sb = new StringBuilder(description).append('\n');
+        sb.append("Additional read-only library roots are available through these path prefixes:");
+        roots.forEach((alias, path) -> sb.append('\n').append("  - `").append(alias)
+                .append("/...` maps to `").append(path).append('`'));
+        return sb.toString();
+    }
+
     // ---------------------------------------------------------- native descriptors
 
     /**
@@ -448,7 +471,8 @@ public class ToolCatalog {
             if (allowedBuiltinTools != null && !allowedBuiltinTools.contains(e.name())) {
                 continue;
             }
-            out.add(new ToolDescriptor(e.name(), e.description(), e.schema()));
+            out.add(new ToolDescriptor(e.name(), describeWithReadRoots(e.name(), e.description()),
+                    e.schema()));
         }
         if (role == Role.CODING) {
             for (String name : validationToolNames()) {
@@ -551,7 +575,7 @@ public class ToolCatalog {
     public Optional<String> describeFor(Role role, String toolName) {
         Entry e = byName.get(normalize(toolName));
         if (e != null && e.roles().contains(role) && e.description() != null) {
-            return Optional.of(e.description());
+            return Optional.of(describeWithReadRoots(e.name(), e.description()));
         }
         if (role == Role.CODING && validationToolNames().contains(normalize(toolName))) {
             return Optional.ofNullable(VALIDATION_DESCRIPTIONS.get(normalize(toolName)));

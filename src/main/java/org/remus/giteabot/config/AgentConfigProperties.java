@@ -5,6 +5,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Component
@@ -40,6 +41,17 @@ public class AgentConfigProperties {
      * For local models with 16k context: use ~20000
      */
     private int maxFileContentChars = 100000;
+
+    /**
+     * Additional read-only roots (alias → absolute host path) exposed to every
+     * agent for repository exploration, e.g. a vcpkg installation whose headers
+     * back the libraries under review:
+     * {@code agent.additional-read-roots.vcpkg=/opt/vcpkg_installed/x64-linux/include}.
+     * Agents can then inspect them with the read-only tools using the alias as a
+     * path prefix (e.g. {@code cat vcpkg/fmt/format.h}). The roots are strictly
+     * read-only: file-mutation tools never resolve into them.
+     */
+    private Map<String, String> additionalReadRoots = Map.of();
 
     /**
      * Validation settings.
