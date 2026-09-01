@@ -17,7 +17,7 @@ class WorkspaceSetup {
     private Path credentialsFile;
     private Path sshPrivateKeyFile;
     private Path sshKnownHostsFile;
-    private String cloneBaseUrl;
+    private String repositoryRemote;
     private RepositoryCredentials repositoryCredentials;
     private volatile boolean closed;
 
@@ -60,16 +60,16 @@ class WorkspaceSetup {
         this.sshKnownHostsFile = sshKnownHostsFile;
     }
 
-    String cloneBaseUrl() {
-        return cloneBaseUrl;
+    String repositoryRemote() {
+        return repositoryRemote;
     }
 
     RepositoryCredentials repositoryCredentials() {
         return repositoryCredentials;
     }
 
-    void setAuthentication(String cloneBaseUrl, RepositoryCredentials repositoryCredentials) {
-        this.cloneBaseUrl = cloneBaseUrl;
+    void setAuthentication(String repositoryRemote, RepositoryCredentials repositoryCredentials) {
+        this.repositoryRemote = repositoryRemote;
         this.repositoryCredentials = repositoryCredentials;
     }
 
@@ -79,7 +79,7 @@ class WorkspaceSetup {
 
     void close() {
         closed = true;
-        cloneBaseUrl = null;
+        repositoryRemote = null;
         repositoryCredentials = null;
     }
 }

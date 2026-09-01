@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -10,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.gitea.GiteaApiClient;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.SshEndpoint;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.HttpClientErrorException;
 
@@ -57,12 +59,13 @@ class GiteaSshSetupServiceTest {
     void setUp() {
         integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(3L);
         integration.setName("production");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setUrl("https://gitea.example.com");
         integration.setToken("encrypted-token");
         hostKeys = new SshCommandService.HostKeyScan(
-                new SshCommandService.SshEndpoint("gitea.example.com", 2222),
+                new SshEndpoint("gitea.example.com", 2222),
                 "[gitea.example.com]:2222 ssh-ed25519 AQID\n",
                 List.of(new SshCommandService.HostKeyFingerprint("ssh-ed25519", "SHA256:fingerprint")),
                 "confirmed-scan");
@@ -81,7 +84,7 @@ class GiteaSshSetupServiceTest {
 
     @Test
     void preview_scansEndpointFromGiteaRepository() {
-        prepareIntegration();
+        preparePreview();
 
         GiteaSshSetupService.SshSetupPreview preview = setupService.preview(7L);
 
@@ -98,20 +101,23 @@ class GiteaSshSetupServiceTest {
         when(giteaApiClient.createSshKey(anyString(), org.mockito.ArgumentMatchers.eq(keyPair.publicKey())))
                 .thenReturn(42L);
         when(gitIntegrationService.configureGeneratedSsh(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(keyPair.privateKey()),
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq(keyPair.privateKey()),
                 org.mockito.ArgumentMatchers.eq(hostKeys.knownHosts()), org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq(17L), anyString()))
                 .thenReturn(integration);
 
-        assertEquals(integration, setupService.setup(7L, "confirmed-scan", true));
+        assertEquals(integration, setupService.setup(7L, 3L, "confirmed-scan", true));
 
         InOrder order = inOrder(giteaApiClient, gitIntegrationService);
         order.verify(giteaApiClient).getCurrentUserId();
         order.verify(gitIntegrationService).prepareManagedSshKeyCreation(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(17L), anyString());
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq(17L), anyString());
         order.verify(giteaApiClient).createSshKey(anyString(), org.mockito.ArgumentMatchers.eq(keyPair.publicKey()));
         order.verify(gitIntegrationService).configureGeneratedSsh(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq("private-key"),
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq("private-key"),
                 org.mockito.ArgumentMatchers.eq("[gitea.example.com]:2222 ssh-ed25519 AQID\n"),
                 org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.eq(17L), anyString());
     }
@@ -121,10 +127,10 @@ class GiteaSshSetupServiceTest {
         integration.setTransport(GitTransport.SSH);
         integration.setSshPrivateKey("encrypted-private-key");
         when(gitIntegrationService.isEncryptionEnabled()).thenReturn(true);
-        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(integration));
+        when(gitIntegrationService.requireActiveVersion(7L, 3L)).thenReturn(integration);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> setupService.setup(7L, "confirmed-scan", true));
+                () -> setupService.setup(7L, 3L, "confirmed-scan", true));
 
         assertEquals("SSH is already configured; switch to HTTP and save before replacing the key",
                 error.getMessage());
@@ -143,45 +149,61 @@ class GiteaSshSetupServiceTest {
                 .thenThrow(new IllegalStateException("Gitea unavailable"));
 
         assertThrows(IllegalStateException.class,
-                () -> setupService.setup(7L, "confirmed-scan", true));
+                () -> setupService.setup(7L, 3L, "confirmed-scan", true));
 
         verify(gitIntegrationService).prepareManagedSshKeyCreation(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(17L), anyString());
-        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L);
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq(17L), anyString());
+        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L, 3L);
         verify(gitIntegrationService, never()).configureGeneratedSsh(
-                org.mockito.ArgumentMatchers.anyLong(), anyString(), anyString(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(),
+                anyString(), anyString(),
                 org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong(), anyString());
     }
 
     @Test
     void setup_rejectsChangedHostKeysBeforeGeneratingKey() {
-        prepareIntegration();
+        prepareSetupContext();
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> setupService.setup(7L, "different-scan", true));
+                () -> setupService.setup(7L, 3L, "different-scan", true));
 
         assertEquals("SSH host keys changed; inspect and confirm them again", error.getMessage());
         verify(sshCommandService, never()).generateKeyPair(anyString());
     }
 
     @Test
-    void setup_removesNewRemoteKeyWhenLocalSaveFails() {
+    void setup_rejectsStaleConfirmationBeforeCallingGitea() {
+        when(gitIntegrationService.isEncryptionEnabled()).thenReturn(true);
+        when(gitIntegrationService.requireActiveVersion(7L, 2L))
+                .thenThrow(new OptimisticLockException("stale"));
+
+        assertThrows(OptimisticLockException.class,
+                () -> setupService.setup(7L, 2L, "confirmed-scan", true));
+
+        verify(giteaClientFactory, never()).getApiClient(integration);
+        verify(giteaApiClient, never()).createSshKey(anyString(), anyString());
+    }
+
+    @Test
+    void setup_rollsBackNewRemoteKeyOnVersionConflict() {
         prepareSetup();
         var keyPair = new SshCommandService.SshKeyPair("private-key", "ssh-ed25519 public-key gitbot");
         when(sshCommandService.generateKeyPair(anyString())).thenReturn(keyPair);
         when(giteaApiClient.createSshKey(anyString(), org.mockito.ArgumentMatchers.eq(keyPair.publicKey())))
                 .thenReturn(42L);
         when(gitIntegrationService.configureGeneratedSsh(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(keyPair.privateKey()),
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq(keyPair.privateKey()),
                 org.mockito.ArgumentMatchers.eq(hostKeys.knownHosts()), org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq(17L), anyString()))
-                .thenThrow(new IllegalStateException("database unavailable"));
+                .thenThrow(new OptimisticLockException("concurrent update"));
 
-        assertThrows(IllegalStateException.class,
-                () -> setupService.setup(7L, "confirmed-scan", true));
+        assertThrows(OptimisticLockException.class,
+                () -> setupService.setup(7L, 3L, "confirmed-scan", true));
 
         verify(giteaApiClient).deleteSshKey(42L);
-        verify(gitIntegrationService).finishManagedSshKeyRemoval(7L);
+        verify(gitIntegrationService).finishManagedSshKeyRemoval(7L, 3L);
     }
 
     @Test
@@ -192,16 +214,17 @@ class GiteaSshSetupServiceTest {
         when(giteaApiClient.createSshKey(anyString(), org.mockito.ArgumentMatchers.eq(keyPair.publicKey())))
                 .thenReturn(42L);
         when(gitIntegrationService.configureGeneratedSsh(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(keyPair.privateKey()),
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq(keyPair.privateKey()),
                 org.mockito.ArgumentMatchers.eq(hostKeys.knownHosts()), org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq(17L), anyString()))
                 .thenThrow(new IllegalStateException("database unavailable"));
         doThrow(new IllegalStateException("Gitea unavailable")).when(giteaApiClient).deleteSshKey(42L);
 
         assertThrows(IllegalStateException.class,
-                () -> setupService.setup(7L, "confirmed-scan", true));
+                () -> setupService.setup(7L, 3L, "confirmed-scan", true));
 
-        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L);
+        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L, 3L);
     }
 
     @Test
@@ -209,18 +232,19 @@ class GiteaSshSetupServiceTest {
         integration.setSshRemoteKeyId(11L);
         prepareSetup();
         var keyPair = new SshCommandService.SshKeyPair("private-key", "ssh-ed25519 public-key gitbot");
-        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(integration);
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L, 3L)).thenReturn(integration);
         when(giteaApiClient.getSshKeyIds()).thenReturn(List.of(11L));
         doThrow(new IllegalStateException("Gitea unavailable")).when(giteaApiClient).deleteSshKey(11L);
 
         assertThrows(IllegalStateException.class,
-                () -> setupService.setup(7L, "confirmed-scan", true));
+                () -> setupService.setup(7L, 3L, "confirmed-scan", true));
 
-        verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L);
-        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L);
+        verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L, 3L);
+        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L, 3L);
         verify(giteaApiClient, never()).createSshKey(anyString(), org.mockito.ArgumentMatchers.eq(keyPair.publicKey()));
         verify(gitIntegrationService, never()).configureGeneratedSsh(
-                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq("private-key"),
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq("private-key"),
                 org.mockito.ArgumentMatchers.eq(hostKeys.knownHosts()), org.mockito.ArgumentMatchers.eq(42L),
                 org.mockito.ArgumentMatchers.eq(17L), anyString());
     }
@@ -328,9 +352,19 @@ class GiteaSshSetupServiceTest {
         verify(replacementGiteaApiClient).deleteSshKey(42L);
     }
 
-    private void prepareIntegration() {
+    private void preparePreview() {
         when(gitIntegrationService.isEncryptionEnabled()).thenReturn(true);
         when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(integration));
+        prepareRemoteScan();
+    }
+
+    private void prepareSetupContext() {
+        when(gitIntegrationService.isEncryptionEnabled()).thenReturn(true);
+        when(gitIntegrationService.requireActiveVersion(7L, 3L)).thenReturn(integration);
+        prepareRemoteScan();
+    }
+
+    private void prepareRemoteScan() {
         when(giteaClientFactory.getApiClient(integration)).thenReturn(giteaApiClient);
         when(giteaApiClient.getAnySshCloneUrl())
                 .thenReturn("ssh://git@gitea.example.com:2222/owner/repo.git");
@@ -339,7 +373,10 @@ class GiteaSshSetupServiceTest {
     }
 
     private void prepareSetup() {
-        prepareIntegration();
+        prepareSetupContext();
         when(giteaApiClient.getCurrentUserId()).thenReturn(17L);
+        org.mockito.Mockito.lenient().when(gitIntegrationService.prepareManagedSshKeyCreation(
+                org.mockito.ArgumentMatchers.eq(7L), org.mockito.ArgumentMatchers.eq(3L),
+                org.mockito.ArgumentMatchers.eq(17L), anyString())).thenReturn(integration);
     }
 }

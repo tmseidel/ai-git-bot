@@ -54,6 +54,7 @@
 
                 <form th:action="@{/git-integrations/{id}/ssh/setup(id=${preview.integration.id})}" method="post">
                     <input type="hidden" name="confirmation" th:value="${preview.hostKeys.confirmation}"/>
+                    <input type="hidden" name="lockVersion" th:value="${preview.integration.lockVersion}"/>
                     <div class="form-check mb-4">
                         <input class="form-check-input" type="checkbox" id="confirmed" name="confirmed"
                                value="true" required/>

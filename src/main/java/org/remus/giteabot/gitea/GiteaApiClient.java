@@ -7,6 +7,7 @@ import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
@@ -53,19 +54,21 @@ public class GiteaApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public String getCloneUrl(String owner, String repo) {
+    public String getCloneUrl() {
+        return credentials.cloneUrl();
+    }
+
+    @Override
+    public String getRepositoryRemote(String owner, String repo) {
         if (!credentials.usesSsh()) {
-            return RepositoryApiClient.super.getCloneUrl(owner, repo);
+            return RepositoryApiClient.super.getRepositoryRemote(owner, repo);
         }
         Map<String, Object> repoInfo = giteaRestClient.get()
                 .uri("/api/v1/repos/{owner}/{repo}", owner, repo)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-        Object sshUrl = repoInfo == null ? null : repoInfo.get("ssh_url");
-        if (sshUrl instanceof String url && !url.isBlank()) {
-            return url;
-        }
-        throw new IllegalStateException("Gitea did not provide an SSH clone URL for " + owner + "/" + repo);
+        return validateSshUrl(repoInfo == null ? null : repoInfo.get("ssh_url"),
+                "Gitea did not provide an SSH clone URL for " + owner + "/" + repo);
     }
 
     /** Returns an SSH clone URL from a repository visible to the authenticated user. */
@@ -78,12 +81,30 @@ public class GiteaApiClient implements RepositoryApiClient {
         Object data = searchResult == null ? null : searchResult.get("data");
         if (data instanceof List<?> repositories && !repositories.isEmpty()
                 && repositories.getFirst() instanceof Map<?, ?> repository) {
-            Object sshUrl = repository.get("ssh_url");
-            if (sshUrl instanceof String url && !url.isBlank()) {
-                return url;
-            }
+            return validateSshUrl(repository.get("ssh_url"),
+                    "Gitea did not provide an SSH URL for a visible repository");
         }
         throw new IllegalStateException("Gitea did not provide an SSH URL for a visible repository");
+    }
+
+    private String validateSshUrl(Object sshUrl, String missingMessage) {
+        if (!(sshUrl instanceof String url) || url.isBlank()) {
+            throw new IllegalStateException(missingMessage);
+        }
+        SshEndpoint endpoint;
+        try {
+            endpoint = SshEndpoint.parse(url);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("Gitea returned an invalid SSH clone URL", e);
+        }
+        SshEndpoint.fromKnownHosts(credentials.sshKnownHosts()).ifPresent(expected -> {
+            if (!expected.matches(endpoint)) {
+                throw new IllegalStateException("Gitea SSH clone URL endpoint " + endpoint.host() + ":"
+                        + endpoint.port() + " does not match known_hosts endpoint "
+                        + expected.host() + ":" + expected.port());
+            }
+        });
+        return url;
     }
 
     /** Returns the immutable ID of the user authenticated by this client's token. */

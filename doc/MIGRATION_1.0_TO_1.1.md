@@ -116,7 +116,7 @@ The webhook secret is shown in the bot management UI after creating a bot.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENCRYPTION_KEY` | (none) | Encryption key for sensitive data. Without it, credentials are stored in plain text. |
+| `APP_ENCRYPTION_KEY` | (none) | Encryption key for sensitive data. Without it, other credentials are stored in plain text and SSH private keys are rejected. |
 
 ## Rollback
 

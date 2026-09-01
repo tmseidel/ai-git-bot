@@ -114,8 +114,7 @@ public class ReadmeSyncService {
         try {
             context.requireActive("before preparing readme-sync workspace");
             WorkspaceResult ws = workspaceService.prepareWorkspace(
-                    owner, repo, headBranch,
-                    repositoryClient.getCloneUrl(owner, repo), repositoryClient.getCredentials(), prNumber);
+                    repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderFailed(prNumber,
                         "failed to prepare workspace: " + ws.error()));

@@ -4,14 +4,15 @@ import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.repository.GitTransport;
 
 /**
- * Credentials for authenticating with a Git repository provider.
- * This record encapsulates all authentication-related information needed
- * by repository API clients.
+ * Authentication and transport configuration for a repository API client.
+ * HTTP Git operations use the credential-free clone base URL plus username/token;
+ * SSH Git operations use a repository-specific remote resolved by the client plus
+ * the private key and pinned {@code known_hosts} data.
  *
  * @param baseUrl   the API base URL (e.g., "https://api.github.com")
- * @param cloneUrl  the web URL for git clone operations (e.g., "https://github.com")
- * @param username  the username for authentication (required for Bitbucket App Passwords, optional otherwise)
- * @param token     the access token or app password
+ * @param cloneUrl  the credential-free HTTP clone base URL (e.g., "https://github.com")
+ * @param username  the HTTP Git username (required for Bitbucket App Passwords, optional otherwise)
+ * @param token     the API token and HTTP Git access token or app password
  * @param transport transport used by Git commands
  * @param sshPrivateKey decrypted private key when SSH is selected
  * @param sshKnownHosts verified known_hosts entries when SSH is selected

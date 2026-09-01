@@ -4,6 +4,7 @@ import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 
@@ -21,7 +22,7 @@ import java.util.Map;
  */
 public interface RepositoryApiClient {
 
-    /** Returns the credentials used by this client (base URL, clone URL, username, token). */
+    /** Returns this client's API, HTTP Git, and optional SSH authentication material. */
     RepositoryCredentials getCredentials();
 
     /** Returns the API base URL of the repository provider (e.g. {@code https://api.github.com}). */
@@ -29,14 +30,33 @@ public interface RepositoryApiClient {
         return getCredentials().baseUrl();
     }
 
-    /** Returns the web/clone URL of the repository provider (e.g. {@code https://github.com}). */
-    default String getCloneUrl() {
-        return getCredentials().cloneUrl();
-    }
+    /** Returns the credential-free HTTP clone base URL (e.g. {@code https://github.com}). */
+    String getCloneUrl();
 
-    /** Returns the clone URL for one repository; providers may select a repository-specific transport. */
-    default String getCloneUrl(String owner, String repo) {
-        return getCloneUrl();
+    /**
+     * Resolves the complete, credential-free Git remote for one repository.
+     * Providers may override this to select a repository-specific transport.
+     */
+    default String getRepositoryRemote(String owner, String repo) {
+        String cloneBaseUrl = getCloneUrl();
+        if (cloneBaseUrl == null || cloneBaseUrl.isBlank()
+                || owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+            throw new IllegalStateException("Repository remote cannot be resolved");
+        }
+        try {
+            URI base = URI.create(cloneBaseUrl);
+            if (!("http".equals(base.getScheme()) || "https".equals(base.getScheme()))
+                    || base.getHost() == null || base.getUserInfo() != null
+                    || base.getRawQuery() != null || base.getRawFragment() != null) {
+                throw new IllegalStateException("HTTP clone base URL must be credential-free");
+            }
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("HTTP clone base URL is invalid", e);
+        }
+        while (cloneBaseUrl.endsWith("/")) {
+            cloneBaseUrl = cloneBaseUrl.substring(0, cloneBaseUrl.length() - 1);
+        }
+        return cloneBaseUrl + "/" + owner + "/" + repo + ".git";
     }
 
     /** Returns the authentication token used by this client. */

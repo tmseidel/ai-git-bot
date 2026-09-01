@@ -86,12 +86,13 @@ public class GitIntegrationController {
 
     /** Applies automatic SSH setup after the operator confirms the scanned host keys. */
     @PostMapping("/{id}/ssh/setup")
-    public synchronized String confirmSshSetup(@PathVariable Long id,
-                                  @RequestParam String confirmation,
-                                  @RequestParam(required = false, defaultValue = "false") boolean confirmed,
-                                  RedirectAttributes redirectAttributes) {
+    public String confirmSshSetup(@PathVariable Long id,
+                                   @RequestParam Long lockVersion,
+                                   @RequestParam String confirmation,
+                                   @RequestParam(required = false, defaultValue = "false") boolean confirmed,
+                                   RedirectAttributes redirectAttributes) {
         try {
-            giteaSshSetupService.setup(id, confirmation, confirmed);
+            giteaSshSetupService.setup(id, lockVersion, confirmation, confirmed);
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage(
                     "flash.gitSshSetup", null, LocaleContextHolder.getLocale()));
         } catch (Exception e) {
@@ -103,17 +104,16 @@ public class GitIntegrationController {
     }
 
     @PostMapping("/save")
-    // ponytail: admin writes are rare; use a distributed lock if this app runs on multiple nodes.
-    public synchronized String save(@ModelAttribute GitIntegration integration,
+    public String save(@ModelAttribute GitIntegration integration,
                        @RequestParam(required = false) String token,
                        @RequestParam(required = false, defaultValue = "false") boolean clearToken,
                        @RequestParam(required = false) String sshPrivateKey,
                        @RequestParam(required = false) String sshKnownHosts,
                        @RequestParam(required = false, defaultValue = "false") boolean clearSshCredentials,
                        RedirectAttributes redirectAttributes) {
-        GitIntegration existing = integration.getId() == null ? null
-                : gitIntegrationService.findById(integration.getId()).orElse(null);
         try {
+            GitIntegration existing = integration.getId() == null ? null
+                    : gitIntegrationService.findById(integration.getId()).orElse(null);
             // The token form field is a one-way write: only override when a new
             // token is provided. Blank means "keep the stored token" and the
             // explicit Clear button requests removal - both resolved in the
@@ -121,8 +121,7 @@ public class GitIntegrationController {
             if (token != null && !token.isBlank()) {
                 integration.setToken(token);
             }
-            boolean hasManagedKey = existing != null && (existing.getSshRemoteKeyId() != null
-                    || existing.getSshRemoteKeyOwnerId() != null || existing.getSshRemoteKeyTitle() != null);
+            boolean hasManagedKey = existing != null && existing.hasManagedSshKeyTracking();
             boolean providerChanged = existing != null
                     && existing.getProviderType() != integration.getProviderType();
             boolean urlChanged = existing != null && !Objects.equals(existing.getUrl(), integration.getUrl());
@@ -157,12 +156,15 @@ public class GitIntegrationController {
             boolean cleanupManagedKey = hasManagedKey && (pendingCleanup || clearStoredSsh);
             if (cleanupManagedKey) {
                 gitIntegrationService.validateSave(integration, clearToken, clearStoredSsh);
-                GitIntegration pending = gitIntegrationService.prepareManagedSshKeyRemoval(existing.getId());
+                GitIntegration pending = gitIntegrationService.prepareManagedSshKeyRemoval(
+                        existing.getId(), integration.getLockVersion());
                 String replacementToken = !providerChanged && !urlChanged && !clearToken ? token : null;
                 if (!removeManagedKey(pending, replacementToken, redirectAttributes)) {
                     return "redirect:/git-integrations";
                 }
-                gitIntegrationService.finishManagedSshKeyRemoval(existing.getId());
+                GitIntegration cleaned = gitIntegrationService.finishManagedSshKeyRemoval(
+                        existing.getId(), pending.getLockVersion());
+                integration.setLockVersion(cleaned.getLockVersion());
             }
             gitIntegrationService.save(integration, clearToken, clearStoredSsh);
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.gitSaved", null, LocaleContextHolder.getLocale()));
@@ -174,18 +176,17 @@ public class GitIntegrationController {
     }
 
     @PostMapping("/{id}/delete")
-    public synchronized String delete(@PathVariable Long id, RedirectAttributes redirectAttributes) {
-        GitIntegration existing = gitIntegrationService.findById(id).orElse(null);
+    public String delete(@PathVariable Long id, RedirectAttributes redirectAttributes) {
         try {
-            gitIntegrationService.validateDelete(id);
-            if (existing != null && (existing.getSshRemoteKeyId() != null
-                    || existing.getSshRemoteKeyOwnerId() != null || existing.getSshRemoteKeyTitle() != null)) {
-                GitIntegration pending = gitIntegrationService.prepareManagedSshKeyRemoval(id);
-                if (!removeManagedKey(pending, null, redirectAttributes)) {
+            var pending = gitIntegrationService.beginDelete(id);
+            if (pending.isPresent() && pending.get().hasManagedSshKeyTracking()) {
+                if (!removeManagedKey(pending.get(), null, redirectAttributes)) {
                     return "redirect:/git-integrations";
                 }
             }
-            gitIntegrationService.deleteById(id);
+            if (pending.isPresent()) {
+                gitIntegrationService.completeDelete(id, pending.get().getLockVersion());
+            }
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.gitDeleted", null, LocaleContextHolder.getLocale()));
         } catch (Exception e) {
             log.error("Failed to delete Git Integration", e);

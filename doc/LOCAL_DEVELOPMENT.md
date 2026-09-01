@@ -7,6 +7,9 @@ This guide covers building, testing, and running AI-Git-Bot locally for developm
 - **Java 21** or later
 - **Maven 3.9+**
 - **Docker** and **Docker Compose** (for the local Gitea instance)
+- **OpenSSH client tools** (`ssh`, `ssh-keygen`, and `ssh-keyscan`) on `PATH`
+  when using SSH Git transport in native or executable-JAR runs. The official
+  Docker image includes them through `openssh-client`.
 
 ## Build & Test
 
@@ -177,4 +180,3 @@ To add support for a new Git hosting platform:
    ```
 5. Create a webhook controller to handle provider-specific payload format
 6. The provider will automatically be discovered by `RepositoryProviderRegistry`
-

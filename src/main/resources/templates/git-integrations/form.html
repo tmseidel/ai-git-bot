@@ -16,6 +16,7 @@
             <div class="card-body">
                 <form th:action="@{/git-integrations/save}" method="post" th:object="${integration}">
                     <input type="hidden" th:if="${integration.id != null}" th:field="*{id}"/>
+                    <input type="hidden" th:if="${integration.id != null}" th:field="*{lockVersion}"/>
 
                     <div class="row g-3">
                         <div class="col-md-6">
@@ -199,7 +200,7 @@
             /*<![CDATA[*/
             const isEditMode = /*[[${integration.id != null}]]*/ false;
             const hasStoredToken = /*[[${integration.token != null && !integration.token.isBlank()}]]*/ false;
-            const hasManagedSshKey = /*[[${integration.sshRemoteKeyId != null || integration.sshRemoteKeyOwnerId != null || integration.sshRemoteKeyTitle != null}]]*/ false;
+            const hasManagedSshKey = /*[[${integration.hasManagedSshKeyTracking()}]]*/ false;
             const originalProviderType = /*[[${integration.providerType}]]*/ 'GITEA';
             const originalUrl = /*[[${integration.url}]]*/ null;
             const originalTransport = /*[[${integration.transport}]]*/ 'HTTP';

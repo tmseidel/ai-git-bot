@@ -178,8 +178,8 @@ mixed estates (GitHub for product, Gitea for embedded, Bitbucket for
 the legacy acquisition) with mixed AI budgets (Claude for the
 high-value review bot, Ollama for the cheap planner step) — all from
 **one admin UI, one PostgreSQL database, one set of webhook secrets,
-one encrypted credential store** (AES-256-GCM via
-`EncryptionService`).
+one credential store** (AES-256-GCM encryption via `EncryptionService`
+when `APP_ENCRYPTION_KEY` is configured).
 
 ---
 
@@ -201,9 +201,10 @@ design choices below exist specifically to keep that risk near zero:
   never invents a deploy path. The four `DeploymentStrategy`
   implementations exist precisely so deployment stays under your
   team's existing controls.
-- **Encrypted at rest.** Every credential, every webhook secret,
-  every deployment-target `config_json` is encrypted with the
-  application's AES-256-GCM key.
+- **Encrypted at rest when configured.** `APP_ENCRYPTION_KEY` enables
+  AES-256-GCM encryption for every credential, every webhook secret,
+  and every deployment-target `config_json`. Without it, other credentials
+  use plaintext storage and SSH private keys are rejected.
 - **HMAC-signed callbacks with per-run secrets.** The async callback
   endpoint validates secrets in constant time and refuses replays
   past a terminal state with HTTP 409.
@@ -231,7 +232,7 @@ design choices below exist specifically to keep that risk near zero:
 | **Sweep / Aider / Devin** | A multi-tenant, per-bot UI with shared session memory, audit logs, and provider-agnostic tool routing — not a per-developer CLI. |
 | **Playwright MCP / Browser-Use** | Orchestration around the test execution: plan generation, deployment lifecycle, artifact upload to the PR, suite-promotion follow-up PRs. Plug Playwright MCP into AI-Git-Bot via the standard MCP whitelist — best of both worlds. |
 | **Renovate / Mergify** | Generative steps. Renovate is rule-based; AI-Git-Bot decides *which* user journeys to test from the diff, then writes them. |
-| **A bespoke Python script calling OpenAI** | Five AI providers behind one switch, four Git providers behind another, encryption at rest, an admin UI, an audit trail, a dashboard, and a maintainer who isn't you. |
+| **A bespoke Python script calling OpenAI** | Five AI providers behind one switch, four Git providers behind another, optional AES-256-GCM encryption at rest, an admin UI, an audit trail, a dashboard, and a maintainer who isn't you. |
 
 There is **no** open-source product today that offers configurable,
 agentic PR follow-up workflows combining **test generation +
@@ -278,10 +279,10 @@ There is no big-bang migration. Every step above is opt-in per bot.
 - It does so **inside the Git tools your team already uses**, with
   the **AI provider you already pay for**, against the **CI/CD you
   already operate**.
-- It is **self-hostable**, **encrypted end-to-end**, **opt-in per
-  bot**, and **provider-agnostic on both the Git axis and the AI
-  axis** — the only open-source product in its category that hits all
-  four.
+- It is **self-hostable**, **supports AES-256-GCM credential encryption
+  when configured**, **opt-in per bot**, and **provider-agnostic on both
+  the Git axis and the AI axis** — the only open-source product in its
+  category that hits all four.
 - One Docker image. One PostgreSQL database. One admin UI. Adopt
   one chore this sprint, ship value next week, expand from there.
 
@@ -311,4 +312,3 @@ There is no big-bang migration. Every step above is opt-in per bot.
 - Docker image: [`tmseidel/ai-git-bot` on Docker Hub](https://hub.docker.com/r/tmseidel/ai-git-bot)
 - Source: [`github.com/tmseidel/ai-git-bot`](https://github.com/tmseidel/ai-git-bot)
 - License: MIT
-

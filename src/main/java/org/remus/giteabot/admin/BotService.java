@@ -22,6 +22,7 @@ import java.util.UUID;
 public class BotService {
 
     private final BotRepository botRepository;
+    private final GitIntegrationRepository gitIntegrationRepository;
     private final BotToolConfigurationRepository botToolConfigurationRepository;
     private final EncryptionService encryptionService;
 
@@ -53,6 +54,16 @@ public class BotService {
      * Clear button in the UI).</p>
      */
     public Bot save(Bot bot, boolean clearSigningSecret) {
+        GitIntegration selectedIntegration = bot.getGitIntegration();
+        if (selectedIntegration != null && selectedIntegration.getId() != null) {
+            GitIntegration currentIntegration = gitIntegrationRepository
+                    .findByIdForUpdate(selectedIntegration.getId())
+                    .orElseThrow(() -> new IllegalArgumentException("Git Integration not found"));
+            if (currentIntegration.isDeletionPending()) {
+                throw new IllegalStateException("Git Integration deletion is pending");
+            }
+            bot.setGitIntegration(currentIntegration);
+        }
         if (bot.getWebhookSecret() == null) {
             bot.setWebhookSecret(UUID.randomUUID().toString());
         }

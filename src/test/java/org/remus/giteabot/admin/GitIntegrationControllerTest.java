@@ -1,10 +1,12 @@
 package org.remus.giteabot.admin;
 
+import jakarta.persistence.OptimisticLockException;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.SshEndpoint;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -84,6 +86,7 @@ class GitIntegrationControllerTest {
     void editForm_showsClearButton() throws Exception {
         GitIntegration existing = new GitIntegration();
         existing.setId(7L);
+        existing.setLockVersion(4L);
         existing.setName("Existing");
         existing.setProviderType(RepositoryType.GITEA);
         existing.setUrl("https://gitea.example.com");
@@ -94,6 +97,7 @@ class GitIntegrationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(view().name("git-integrations/form"))
                 .andExpect(content().string(containsString("id=\"clearTokenBtn\"")))
+                .andExpect(content().string(containsString("name=\"lockVersion\" value=\"4\"")))
                 .andExpect(content().string(containsString("id=\"clearToken\"")))
                 .andExpect(content().string(containsString("id=\"tokenClearPendingHint\"")));
     }
@@ -173,9 +177,10 @@ class GitIntegrationControllerTest {
     void sshSetupPreview_rendersScannedFingerprintWithoutChangingConfiguration() throws Exception {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(4L);
         integration.setName("Production");
         var hostKeys = new SshCommandService.HostKeyScan(
-                new SshCommandService.SshEndpoint("gitea.example.com", 2222),
+                new SshEndpoint("gitea.example.com", 2222),
                 "[gitea.example.com]:2222 ssh-ed25519 AQID\n",
                 List.of(new SshCommandService.HostKeyFingerprint("ssh-ed25519", "SHA256:fingerprint")),
                 "scan-confirmation");
@@ -187,7 +192,8 @@ class GitIntegrationControllerTest {
                 .andExpect(view().name("git-integrations/ssh-setup"))
                 .andExpect(content().string(containsString("gitea.example.com:2222")))
                 .andExpect(content().string(containsString("SHA256:fingerprint")))
-                .andExpect(content().string(containsString("value=\"scan-confirmation\"")));
+                .andExpect(content().string(containsString("value=\"scan-confirmation\"")))
+                .andExpect(content().string(containsString("name=\"lockVersion\" value=\"4\"")));
     }
 
     @Test
@@ -195,12 +201,13 @@ class GitIntegrationControllerTest {
         mockMvc.perform(post("/git-integrations/7/ssh/setup")
                         .with(user("admin").roles("ADMIN"))
                         .with(csrf())
+                        .param("lockVersion", "4")
                         .param("confirmation", "scan-confirmation")
                         .param("confirmed", "true"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/git-integrations/7/edit"));
 
-        verify(giteaSshSetupService).setup(7L, "scan-confirmation", true);
+        verify(giteaSshSetupService).setup(7L, 4L, "scan-confirmation", true);
     }
 
     @Test
@@ -303,20 +310,30 @@ class GitIntegrationControllerTest {
     void save_replacingGeneratedCredentialsRemovesManagedGiteaKey() throws Exception {
         GitIntegration existing = new GitIntegration();
         existing.setId(7L);
+        existing.setLockVersion(3L);
         existing.setName("My Gitea");
         existing.setProviderType(RepositoryType.GITEA);
         existing.setUrl("https://gitea.example.com");
         existing.setTransport(GitTransport.SSH);
         existing.setSshPrivateKey("encrypted-private-key");
         existing.setSshRemoteKeyId(42L);
+        GitIntegration pending = new GitIntegration();
+        pending.setId(7L);
+        pending.setLockVersion(4L);
+        pending.setSshRemoteKeyId(42L);
+        GitIntegration cleaned = new GitIntegration();
+        cleaned.setId(7L);
+        cleaned.setLockVersion(5L);
         when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
-        when(giteaSshSetupService.removeManagedKey(existing, null)).thenReturn(true);
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L, 3L)).thenReturn(pending);
+        when(gitIntegrationService.finishManagedSshKeyRemoval(7L, 4L)).thenReturn(cleaned);
+        when(giteaSshSetupService.removeManagedKey(pending, null)).thenReturn(true);
 
         mockMvc.perform(post("/git-integrations/save")
                         .with(user("admin").roles("ADMIN"))
                         .with(csrf())
                         .param("id", "7")
+                        .param("lockVersion", "3")
                         .param("name", "My Gitea")
                         .param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com")
@@ -329,10 +346,11 @@ class GitIntegrationControllerTest {
         InOrder order = inOrder(giteaSshSetupService, gitIntegrationService);
         order.verify(gitIntegrationService).validateSave(
                 org.mockito.ArgumentMatchers.any(), eq(false), eq(true));
-        order.verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L);
-        order.verify(giteaSshSetupService).removeManagedKey(existing, null);
-        order.verify(gitIntegrationService).finishManagedSshKeyRemoval(7L);
-        order.verify(gitIntegrationService).save(org.mockito.ArgumentMatchers.any(), eq(false), eq(true));
+        order.verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L, 3L);
+        order.verify(giteaSshSetupService).removeManagedKey(pending, null);
+        order.verify(gitIntegrationService).finishManagedSshKeyRemoval(7L, 4L);
+        order.verify(gitIntegrationService).save(argThat(integration ->
+                Long.valueOf(5L).equals(integration.getLockVersion())), eq(false), eq(true));
     }
 
     @Test
@@ -342,8 +360,7 @@ class GitIntegrationControllerTest {
         existing.setName("My Gitea");
         existing.setProviderType(RepositoryType.GITEA);
         existing.setSshRemoteKeyId(42L);
-        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(gitIntegrationService.beginDelete(7L)).thenReturn(Optional.of(existing));
         when(giteaSshSetupService.removeManagedKey(existing, null)).thenReturn(true);
 
         mockMvc.perform(post("/git-integrations/7/delete")
@@ -352,10 +369,33 @@ class GitIntegrationControllerTest {
                 .andExpect(status().is3xxRedirection());
 
         InOrder order = inOrder(giteaSshSetupService, gitIntegrationService);
-        order.verify(gitIntegrationService).validateDelete(7L);
-        order.verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L);
+        order.verify(gitIntegrationService).beginDelete(7L);
         order.verify(giteaSshSetupService).removeManagedKey(existing, null);
-        order.verify(gitIntegrationService).deleteById(7L);
+        order.verify(gitIntegrationService).completeDelete(7L, null);
+    }
+
+    @Test
+    void delete_retriesRemoteCleanupFromPersistedFence() throws Exception {
+        GitIntegration pending = new GitIntegration();
+        pending.setId(7L);
+        pending.setLockVersion(5L);
+        pending.setDeletionPending(true);
+        pending.setSshRemoteKeyId(42L);
+        when(gitIntegrationService.beginDelete(7L)).thenReturn(Optional.of(pending));
+        when(giteaSshSetupService.removeManagedKey(pending, null)).thenReturn(false, true);
+
+        mockMvc.perform(post("/git-integrations/7/delete")
+                        .with(user("admin").roles("ADMIN"))
+                        .with(csrf()))
+                .andExpect(status().is3xxRedirection());
+        mockMvc.perform(post("/git-integrations/7/delete")
+                        .with(user("admin").roles("ADMIN"))
+                        .with(csrf()))
+                .andExpect(status().is3xxRedirection());
+
+        verify(gitIntegrationService, org.mockito.Mockito.times(2)).beginDelete(7L);
+        verify(giteaSshSetupService, org.mockito.Mockito.times(2)).removeManagedKey(pending, null);
+        verify(gitIntegrationService).completeDelete(7L, 5L);
     }
 
     @Test
@@ -366,7 +406,7 @@ class GitIntegrationControllerTest {
         existing.setProviderType(RepositoryType.GITEA);
         existing.setSshRemoteKeyId(42L);
         when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L, null)).thenReturn(existing);
         when(giteaSshSetupService.removeManagedKey(existing, null)).thenReturn(false);
 
         mockMvc.perform(post("/git-integrations/save")
@@ -382,8 +422,8 @@ class GitIntegrationControllerTest {
                         .param("postReviewAction", "NONE"))
                 .andExpect(status().is3xxRedirection());
 
-        verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L);
-        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L);
+        verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L, null);
+        verify(gitIntegrationService, never()).finishManagedSshKeyRemoval(7L, null);
         verify(gitIntegrationService, never()).save(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean());
     }
@@ -398,7 +438,8 @@ class GitIntegrationControllerTest {
         existing.setSshPrivateKey("encrypted-private-key");
         existing.setSshRemoteKeyId(42L);
         when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L, null)).thenReturn(existing);
+        when(gitIntegrationService.finishManagedSshKeyRemoval(7L, null)).thenReturn(existing);
         when(giteaSshSetupService.removeManagedKey(existing, null)).thenReturn(true);
 
         mockMvc.perform(post("/git-integrations/save")
@@ -415,9 +456,9 @@ class GitIntegrationControllerTest {
         InOrder order = inOrder(giteaSshSetupService, gitIntegrationService);
         order.verify(gitIntegrationService).validateSave(
                 org.mockito.ArgumentMatchers.any(), eq(false), eq(true));
-        order.verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L);
+        order.verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L, null);
         order.verify(giteaSshSetupService).removeManagedKey(existing, null);
-        order.verify(gitIntegrationService).finishManagedSshKeyRemoval(7L);
+        order.verify(gitIntegrationService).finishManagedSshKeyRemoval(7L, null);
         order.verify(gitIntegrationService).save(argThat(integration ->
                 integration.getTransport() == GitTransport.HTTP), eq(false), eq(true));
     }
@@ -434,7 +475,8 @@ class GitIntegrationControllerTest {
         existing.setSshRemoteKeyId(42L);
         existing.setSshRemoteKeyOwnerId(17L);
         when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L, null)).thenReturn(existing);
+        when(gitIntegrationService.finishManagedSshKeyRemoval(7L, null)).thenReturn(existing);
         when(giteaSshSetupService.removeManagedKey(existing, "replacement-token")).thenReturn(true);
 
         mockMvc.perform(post("/git-integrations/save")
@@ -450,13 +492,13 @@ class GitIntegrationControllerTest {
                 .andExpect(status().is3xxRedirection());
 
         verify(giteaSshSetupService).removeManagedKey(existing, "replacement-token");
-        verify(gitIntegrationService).finishManagedSshKeyRemoval(7L);
+        verify(gitIntegrationService).finishManagedSshKeyRemoval(7L, null);
         verify(gitIntegrationService).save(argThat(integration ->
                 integration.getTransport() == GitTransport.HTTP), eq(false), eq(true));
     }
 
     @Test
-    void save_validationFailureDoesNotRemoveManagedKey() throws Exception {
+    void save_staleFormDoesNotRemoveManagedKey() throws Exception {
         GitIntegration existing = new GitIntegration();
         existing.setId(7L);
         existing.setProviderType(RepositoryType.GITEA);
@@ -465,13 +507,14 @@ class GitIntegrationControllerTest {
         existing.setSshPrivateKey("encrypted-private-key");
         existing.setSshRemoteKeyId(42L);
         when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        doThrow(new IllegalArgumentException("invalid replacement")).when(gitIntegrationService)
+        doThrow(new OptimisticLockException("stale form")).when(gitIntegrationService)
                 .validateSave(org.mockito.ArgumentMatchers.any(), eq(false), eq(true));
 
         mockMvc.perform(post("/git-integrations/save")
                         .with(user("admin").roles("ADMIN"))
                         .with(csrf())
                         .param("id", "7")
+                        .param("lockVersion", "3")
                         .param("name", "My Gitea")
                         .param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com")
@@ -480,7 +523,8 @@ class GitIntegrationControllerTest {
                         .param("postReviewAction", "NONE"))
                 .andExpect(status().is3xxRedirection());
 
-        verify(gitIntegrationService, never()).prepareManagedSshKeyRemoval(7L);
+        verify(gitIntegrationService, never()).prepareManagedSshKeyRemoval(
+                eq(7L), org.mockito.ArgumentMatchers.any());
         verify(giteaSshSetupService, never()).removeManagedKey(existing, null);
         verify(gitIntegrationService, never()).save(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyBoolean(), org.mockito.ArgumentMatchers.anyBoolean());
@@ -491,16 +535,15 @@ class GitIntegrationControllerTest {
         GitIntegration existing = new GitIntegration();
         existing.setId(7L);
         existing.setSshRemoteKeyId(42L);
-        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        doThrow(new IllegalStateException("still in use")).when(gitIntegrationService).validateDelete(7L);
+        doThrow(new IllegalStateException("still in use")).when(gitIntegrationService).beginDelete(7L);
 
         mockMvc.perform(post("/git-integrations/7/delete")
                         .with(user("admin").roles("ADMIN"))
                         .with(csrf()))
                 .andExpect(status().is3xxRedirection());
 
-        verify(gitIntegrationService, never()).prepareManagedSshKeyRemoval(7L);
         verify(giteaSshSetupService, never()).removeManagedKey(existing, null);
-        verify(gitIntegrationService, never()).deleteById(7L);
+        verify(gitIntegrationService, never()).completeDelete(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
     }
 }

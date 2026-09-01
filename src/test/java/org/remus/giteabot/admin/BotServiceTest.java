@@ -22,6 +22,9 @@ class BotServiceTest {
     private BotRepository botRepository;
 
     @Mock
+    private GitIntegrationRepository gitIntegrationRepository;
+
+    @Mock
     private BotToolConfigurationRepository botToolConfigurationRepository;
 
     @Mock
@@ -127,6 +130,41 @@ class BotServiceTest {
 
         assertEquals("encrypted-signing-secret", result.getWebhookSigningSecret());
         verify(encryptionService).encrypt("plain-signing-secret");
+    }
+
+    @Test
+    void save_locksAndUsesCurrentGitIntegration() {
+        Bot bot = newBotWithDefaultToolConfig();
+        GitIntegration submitted = new GitIntegration();
+        submitted.setId(7L);
+        bot.setGitIntegration(submitted);
+        GitIntegration current = new GitIntegration();
+        current.setId(7L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(current));
+        when(botRepository.save(bot)).thenReturn(bot);
+
+        Bot saved = botService.save(bot);
+
+        assertSame(current, saved.getGitIntegration());
+        verify(gitIntegrationRepository).findByIdForUpdate(7L);
+    }
+
+    @Test
+    void save_rejectsGitIntegrationWithDeletionFence() {
+        Bot bot = newBotWithDefaultToolConfig();
+        GitIntegration selected = new GitIntegration();
+        selected.setId(7L);
+        bot.setGitIntegration(selected);
+        GitIntegration pending = new GitIntegration();
+        pending.setId(7L);
+        pending.setDeletionPending(true);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(pending));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> botService.save(bot));
+
+        assertEquals("Git Integration deletion is pending", error.getMessage());
+        verify(botRepository, never()).save(any());
     }
 
     @Test

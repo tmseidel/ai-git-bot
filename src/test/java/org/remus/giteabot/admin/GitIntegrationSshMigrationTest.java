@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.sql.DriverManager;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 class GitIntegrationSshMigrationTest {
@@ -13,7 +14,7 @@ class GitIntegrationSshMigrationTest {
     private static final String URL = "jdbc:h2:mem:git-integration-ssh-migration;DB_CLOSE_DELAY=-1";
 
     @Test
-    void sshMigrations_defaultExistingIntegrationsAndTrackRemoteKeys() throws Exception {
+    void sshAndConcurrencyMigrations_defaultExistingIntegrations() throws Exception {
         migrateTo("46");
         try (var connection = DriverManager.getConnection(URL, "sa", "");
              var statement = connection.createStatement()) {
@@ -24,12 +25,13 @@ class GitIntegrationSshMigrationTest {
         }
 
         migrateTo("50");
+        migrateTo("51");
 
         try (var connection = DriverManager.getConnection(URL, "sa", "");
              var statement = connection.createStatement();
              var result = statement.executeQuery("""
                      SELECT transport, ssh_private_key, ssh_known_hosts, ssh_remote_key_id,
-                            ssh_remote_key_owner_id, ssh_remote_key_title
+                            ssh_remote_key_owner_id, ssh_remote_key_title, lock_version, deletion_pending
                      FROM git_integrations WHERE name = 'Existing Gitea'
                      """)) {
             result.next();
@@ -39,6 +41,8 @@ class GitIntegrationSshMigrationTest {
             assertNull(result.getObject("ssh_remote_key_id"));
             assertNull(result.getObject("ssh_remote_key_owner_id"));
             assertNull(result.getString("ssh_remote_key_title"));
+            assertEquals(0L, result.getLong("lock_version"));
+            assertFalse(result.getBoolean("deletion_pending"));
         }
 
         String largeKey = "k".repeat(5_000);

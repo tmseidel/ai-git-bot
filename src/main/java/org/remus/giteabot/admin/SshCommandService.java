@@ -1,11 +1,11 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.util.ProcessSupport;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -61,31 +61,7 @@ public class SshCommandService {
     }
 
     static SshEndpoint parseEndpoint(String cloneUrl) {
-        if (cloneUrl != null && cloneUrl.startsWith("ssh://")) {
-            URI uri = URI.create(cloneUrl);
-            if (uri.getHost() != null && !uri.getHost().isBlank()) {
-                String host = uri.getHost();
-                if (host.startsWith("[") && host.endsWith("]")) {
-                    host = host.substring(1, host.length() - 1);
-                }
-                return new SshEndpoint(host, uri.getPort() < 0 ? 22 : uri.getPort());
-            }
-        } else if (cloneUrl != null && !cloneUrl.contains("://")) {
-            int userSeparator = cloneUrl.indexOf('@');
-            int hostStart = userSeparator < 0 ? 0 : userSeparator + 1;
-            int closingBracket = cloneUrl.startsWith("[", hostStart) ? cloneUrl.indexOf(']', hostStart + 1) : -1;
-            int pathSeparator = closingBracket >= 0
-                    ? cloneUrl.indexOf(':', closingBracket + 1)
-                    : cloneUrl.indexOf(':', hostStart);
-            if (pathSeparator > hostStart) {
-                String host = cloneUrl.substring(hostStart, pathSeparator);
-                if (host.startsWith("[") && host.endsWith("]")) {
-                    host = host.substring(1, host.length() - 1);
-                }
-                return new SshEndpoint(host, 22);
-            }
-        }
-        throw new IllegalArgumentException("Invalid SSH clone URL returned by Gitea");
+        return SshEndpoint.parse(cloneUrl);
     }
 
     static HostKeyScan parseHostKeyScan(SshEndpoint endpoint, String output) {
@@ -177,15 +153,6 @@ public class SshCommandService {
         }
         if (failure != null) {
             throw new IllegalStateException("Failed to delete temporary SSH key files", failure);
-        }
-    }
-
-    /** Host and port parsed from a Gitea SSH clone URL. */
-    public record SshEndpoint(String host, int port) {
-        public SshEndpoint {
-            if (host == null || host.isBlank() || host.startsWith("-") || port < 1 || port > 65_535) {
-                throw new IllegalArgumentException("Invalid SSH endpoint");
-            }
         }
     }
 

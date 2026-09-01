@@ -2,6 +2,7 @@ package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.repository.SshEndpoint;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,13 +18,13 @@ class SshCommandServiceTest {
 
     @Test
     void parseEndpoint_supportsGiteaSshUrls() {
-        assertEquals(new SshCommandService.SshEndpoint("gitea.example.com", 22),
+        assertEquals(new SshEndpoint("gitea.example.com", 22),
                 SshCommandService.parseEndpoint("git@gitea.example.com:owner/repo.git"));
-        assertEquals(new SshCommandService.SshEndpoint("gitea.example.com", 2222),
+        assertEquals(new SshEndpoint("gitea.example.com", 2222),
                 SshCommandService.parseEndpoint("ssh://git@gitea.example.com:2222/owner/repo.git"));
-        assertEquals(new SshCommandService.SshEndpoint("2001:db8::1", 2222),
+        assertEquals(new SshEndpoint("2001:db8::1", 2222),
                 SshCommandService.parseEndpoint("ssh://git@[2001:db8::1]:2222/owner/repo.git"));
-        assertEquals(new SshCommandService.SshEndpoint("2001:db8::1", 22),
+        assertEquals(new SshEndpoint("2001:db8::1", 22),
                 SshCommandService.parseEndpoint("git@[2001:db8::1]:owner/repo.git"));
     }
 
@@ -37,7 +38,7 @@ class SshCommandServiceTest {
 
     @Test
     void parseHostKeyScan_filtersCommentsAndBuildsStableFingerprints() {
-        var endpoint = new SshCommandService.SshEndpoint("gitea.example.com", 22);
+        var endpoint = new SshEndpoint("gitea.example.com", 22);
         var first = SshCommandService.parseHostKeyScan(endpoint, """
                 # gitea.example.com:22 SSH-2.0-OpenSSH
                 gitea.example.com ssh-rsa BAUG
@@ -59,7 +60,7 @@ class SshCommandServiceTest {
 
     @Test
     void parseHostKeyScan_rejectsEmptyResult() {
-        var endpoint = new SshCommandService.SshEndpoint("gitea.example.com", 22);
+        var endpoint = new SshEndpoint("gitea.example.com", 22);
 
         assertThrows(IllegalStateException.class,
                 () -> SshCommandService.parseHostKeyScan(endpoint, "# no host keys\n"));

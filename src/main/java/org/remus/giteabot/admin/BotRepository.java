@@ -31,5 +31,6 @@ public interface BotRepository extends JpaRepository<Bot, Long> {
 
     boolean existsByName(String name);
 
+    /** Returns whether any bot currently references the Git integration. */
     boolean existsByGitIntegrationId(Long gitIntegrationId);
 }

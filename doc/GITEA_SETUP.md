@@ -62,6 +62,10 @@ If Gitea uses `[repository] DISABLE_HTTP_GIT = true`, configure SSH for reposito
 clone and push operations. The API token above remains required for comments,
 reviews, and repository metadata.
 
+Native and executable-JAR deployments require `ssh`, `ssh-keygen`, and
+`ssh-keyscan` on `PATH`. The official Docker image installs `openssh-client` and
+already includes these commands.
+
 Configure `APP_ENCRYPTION_KEY` before storing any SSH private key. For automatic
 setup, save the Gitea integration, then edit it and select **SSH** under
 **Git Transport**:
@@ -71,7 +75,8 @@ setup, save the Gitea integration, then edit it and select **SSH** under
 2. Compare every displayed server host-key fingerprint with a trusted value from
    the Gitea administrator and confirm it.
 3. AI Git Bot generates an Ed25519 key locally, sends only its public key to
-   Gitea, and stores the private key encrypted. Automatically registered keys
+   Gitea, and encrypts the private key at rest using the configured
+   `APP_ENCRYPTION_KEY`. Automatically registered keys
    are also removed from Gitea when they are rotated or the integration is deleted.
    If remote cleanup fails, the integration falls back to HTTP and retains the
    key reference so the next save can retry safely.

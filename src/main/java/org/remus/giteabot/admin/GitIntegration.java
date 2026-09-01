@@ -20,6 +20,10 @@ public class GitIntegration {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    @Column(name = "lock_version", nullable = false)
+    private Long lockVersion;
+
     @Column(nullable = false, unique = true)
     private String name;
 
@@ -62,6 +66,9 @@ public class GitIntegration {
     @Column
     private String sshRemoteKeyTitle;
 
+    @Column(name = "deletion_pending", nullable = false)
+    private boolean deletionPending;
+
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private PostReviewAction postReviewAction = PostReviewAction.NONE;
@@ -84,5 +91,10 @@ public class GitIntegration {
     @PreUpdate
     void preUpdate() {
         updatedAt = Instant.now();
+    }
+
+    /** Returns whether any retryable managed-key marker is present. */
+    public boolean hasManagedSshKeyTracking() {
+        return sshRemoteKeyId != null || sshRemoteKeyOwnerId != null || sshRemoteKeyTitle != null;
     }
 }

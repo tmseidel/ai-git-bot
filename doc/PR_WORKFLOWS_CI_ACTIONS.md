@@ -79,7 +79,8 @@ pure failure-detector.
 
 ## Deployment-target schema
 
-`deployment_targets.config_json` (encrypted at rest):
+`deployment_targets.config_json` (encrypted at rest when
+`APP_ENCRYPTION_KEY` is configured):
 
 ```jsonc
 {
@@ -421,5 +422,3 @@ Deployment-target config:
   — stakeholder rationale (Sam the SRE).
 * [`agentic-workflows/INTERNALS.md` § M6](./agentic-workflows/INTERNALS.md)
   — implementation plan & acceptance criteria.
-
-

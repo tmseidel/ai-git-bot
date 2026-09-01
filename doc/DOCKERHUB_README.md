@@ -279,7 +279,7 @@ See the [Deployment Guide](https://github.com/tmseidel/ai-git-bot/blob/main/doc/
 
 ## Technical Highlights
 
-- 🔒 AES-256-GCM secret encryption
+- 🔒 AES-256-GCM secret encryption when `APP_ENCRYPTION_KEY` is configured
 - 🤖 Multi-provider AI support
 - 🏢 Multi-platform Git support
 - 🧠 Local LLM support

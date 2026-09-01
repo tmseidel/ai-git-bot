@@ -3,6 +3,7 @@ package org.remus.giteabot.admin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.gitea.GiteaApiClient;
@@ -35,11 +36,11 @@ class GiteaClientFactoryTest {
     @Mock
     private RestClient restClient;
 
+    @InjectMocks
     private GiteaClientFactory factory;
 
     @BeforeEach
     void setUp() {
-        factory = new GiteaClientFactory(integrationService, providerRegistry);
         when(providerRegistry.getProvider(RepositoryType.GITEA)).thenReturn(provider);
         when(provider.buildRestClient(any(), anyString())).thenReturn(restClient);
         when(provider.createCredentials(any(), anyString())).thenAnswer(invocation -> {

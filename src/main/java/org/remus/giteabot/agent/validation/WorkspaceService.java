@@ -1,6 +1,8 @@
 package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.util.ProcessSupport;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -73,24 +75,37 @@ public class WorkspaceService {
      * {@code prNumber} is non-null, falls back to cloning the default branch then
      * fetching {@code refs/pull/<prNumber>/head} (GitHub/Gitea fork-safe ref).
      *
-     * <p>Credentials are never embedded in the remote URL: the clone/push use a
-     * git credential-store file placed <em>outside</em> the workspace, so the
-     * token never lands in {@code .git/config}, in git error output, or in the
-     * agent's file/search tools.</p>
+     * <p>The repository client resolves the credential-free remote and its
+     * credentials once before any workspace is allocated. HTTP credentials use
+     * a credential-store file outside the checkout; SSH credentials use private
+     * key and {@code known_hosts} files in the same private temporary parent.</p>
      */
-    public WorkspaceResult prepareWorkspace(String owner, String repo, String branch,
-                                            String cloneBaseUrl, RepositoryCredentials credentials, Long prNumber) {
+    public WorkspaceResult prepareWorkspace(RepositoryApiClient repositoryClient,
+                                            String owner, String repo, String branch, Long prNumber) {
+        final String repositoryRemote;
+        final RepositoryCredentials credentials;
+        try {
+            repositoryRemote = repositoryClient.getRepositoryRemote(owner, repo);
+            credentials = repositoryClient.getCredentials();
+            if (repositoryRemote == null || repositoryRemote.isBlank() || credentials == null) {
+                throw new IllegalStateException("Repository client returned incomplete checkout configuration");
+            }
+        } catch (RuntimeException e) {
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            log.error("Failed to resolve repository checkout for {}/{}: {}", owner, repo, message, e);
+            return WorkspaceResult.failure("Failed to resolve repository checkout: " + message);
+        }
+
         WorkspaceSetup setup = null;
         try {
             setup = createWorkspaceSetup();
             Path workspaceDir = setup.workspaceDir();
             log.info("Cloning repository to {} for workspace", workspaceDir);
 
-            String cloneUrl = buildCloneUrl(owner, repo, cloneBaseUrl);
-            setup.setAuthentication(cloneBaseUrl, credentials);
+            setup.setAuthentication(repositoryRemote, credentials);
             CommandResult cloneResult = runRemoteCommand(setup, workspaceDir.getParent().toFile(), 60,
                     "clone", "--depth", "1", "--branch", branch,
-                    cloneUrl, workspaceDir.getFileName().toString());
+                    repositoryRemote, workspaceDir.getFileName().toString());
 
             if (cloneResult.success()) {
                 registerWorkspace(setup);
@@ -107,11 +122,11 @@ public class WorkspaceService {
                 }
                 setup = createWorkspaceSetup();
                 workspaceDir = setup.workspaceDir();
-                setup.setAuthentication(cloneBaseUrl, credentials);
+                setup.setAuthentication(repositoryRemote, credentials);
 
                 CommandResult defaultCloneResult = runRemoteCommand(setup,
                         workspaceDir.getParent().toFile(), 60,
-                        "clone", "--depth", "1", cloneUrl, workspaceDir.getFileName().toString());
+                        "clone", "--depth", "1", repositoryRemote, workspaceDir.getFileName().toString());
 
                 if (!defaultCloneResult.success()) {
                     log.error("Fallback clone (default branch) also failed: {}",
@@ -364,43 +379,24 @@ public class WorkspaceService {
     // ---- internal helpers ------------------------------------------------
 
     /**
-     * Builds the credential-free clone URL. For local filesystem paths (used in
-     * tests and local development), passes through as-is.
-     */
-    String buildCloneUrl(String owner, String repo, String cloneBaseUrl) {
-        if (cloneBaseUrl.startsWith("file://") || isLocalClonePath(cloneBaseUrl)
-                || isSshCloneUrl(cloneBaseUrl)) {
-            return cloneBaseUrl;
-        }
-        String protocol = cloneBaseUrl.startsWith("https://") ? "https" : "http";
-        String baseUrl = cloneBaseUrl.replaceFirst("https?://", "");
-
-        if (baseUrl.endsWith("/")) {
-            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
-        }
-
-        return String.format("%s://%s/%s/%s.git", protocol, baseUrl, owner, repo);
-    }
-
-    /**
      * Writes a git credential-store file <em>outside</em> the workspace in its
      * private temporary parent, so the token is never stored inside the cloned
      * repository. Returns {@code null} for local paths or blank tokens.
      */
-    Path createCredentialsFile(String cloneBaseUrl, String token, Path workspaceDir)
+    Path createCredentialsFile(String repositoryRemote, String token, Path workspaceDir)
             throws IOException {
-        return createCredentialsFile(cloneBaseUrl, null, token, workspaceDir, null);
+        return createCredentialsFile(repositoryRemote, null, token, workspaceDir, null);
     }
 
-    private Path createCredentialsFile(String cloneBaseUrl, String username, String token,
+    private Path createCredentialsFile(String repositoryRemote, String username, String token,
                                        Path workspaceDir, WorkspaceSetup setup) throws IOException {
         if (token == null || token.isBlank()
-                || cloneBaseUrl.startsWith("file://") || isLocalClonePath(cloneBaseUrl)
-                || isSshCloneUrl(cloneBaseUrl)) {
+                || repositoryRemote.startsWith("file://") || isLocalClonePath(repositoryRemote)
+                || isSshCloneUrl(repositoryRemote)) {
             return null;
         }
-        String protocol = cloneBaseUrl.startsWith("https://") ? "https" : "http";
-        String baseUrl = cloneBaseUrl.replaceFirst("https?://", "");
+        String protocol = repositoryRemote.startsWith("https://") ? "https" : "http";
+        String baseUrl = repositoryRemote.replaceFirst("https?://", "");
         if (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -426,10 +422,10 @@ public class WorkspaceService {
         }
     }
 
-    void createAuthenticationFiles(String cloneBaseUrl, RepositoryCredentials credentials,
+    void createAuthenticationFiles(String repositoryRemote, RepositoryCredentials credentials,
                                     WorkspaceSetup setup) throws IOException {
         if (!credentials.usesSsh()) {
-            createCredentialsFile(cloneBaseUrl, credentials.username(), credentials.token(),
+            createCredentialsFile(repositoryRemote, credentials.username(), credentials.token(),
                     setup.workspaceDir(), setup);
             return;
         }
@@ -574,8 +570,7 @@ public class WorkspaceService {
     }
 
     private boolean isSshCloneUrl(String cloneUrl) {
-        return cloneUrl.startsWith("ssh://")
-                || (!cloneUrl.contains("://") && cloneUrl.contains("@") && cloneUrl.contains(":"));
+        return SshEndpoint.isSshRemote(cloneUrl);
     }
 
     private boolean isLocalClonePath(String cloneUrl) {
@@ -618,7 +613,7 @@ public class WorkspaceService {
                 if (hasAuthenticationFiles(setup)) {
                     result = new CommandResult(false, "Could not remove previous Git authentication files");
                 } else {
-                    createAuthenticationFiles(setup.cloneBaseUrl(), setup.repositoryCredentials(), setup);
+                    createAuthenticationFiles(setup.repositoryRemote(), setup.repositoryCredentials(), setup);
                     result = runCommand(workDir, withGitConfig(gitConfigArgs(setup), gitArgs), timeoutSeconds);
                 }
             } catch (IOException e) {
