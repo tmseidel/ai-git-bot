@@ -26,7 +26,9 @@ class SshEndpointTest {
             "git@-f/etc/hosts:owner/repo.git", "git@gitea.example.com", "ssh:///owner/repo.git",
             "SSH://git@gitea.example.com/owner/repo.git",
             "ssh://%20-option@gitea.example.com/owner/repo.git",
-            "ssh://-option@gitea.example.com/owner/repo.git", "ext::owner/repo.git"
+            "ssh://-option@gitea.example.com/owner/repo.git", "ext::owner/repo.git",
+            "git@[gitea.example.com:owner/repo.git", "git@host]:owner/repo.git",
+            "git@[host]suffix:owner/repo.git"
     })
     void parse_rejectsNonSshAndMalformedRemotes(String remote) {
         assertThatThrownBy(() -> SshEndpoint.parse(remote))

@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 public record SshEndpoint(String host, int port) {
 
     private static final Pattern SCP_REMOTE = Pattern.compile(
-            "^(?:([^@:/\\\\]+)@)?(\\[[^]]+]|[^:/\\\\]+):(.+)$");
+            "^(?:([^@:/\\\\]+)@)?(\\[[^\\[\\]]+\\]|[^\\[\\]:/\\\\]+):(.+)$");
 
     public SshEndpoint {
         if (host != null && host.startsWith("[") && host.endsWith("]")) {
@@ -20,7 +20,8 @@ public record SshEndpoint(String host, int port) {
         if (host == null || host.isBlank() || !host.equals(host.trim())
                 || host.startsWith("-") || host.equals(".") || host.equals("..")
                 || host.chars().anyMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c)
-                        || c == '/' || c == '\\' || c == '@' || c == ',' || c == '*' || c == '?' || c == '!')
+                        || c == '/' || c == '\\' || c == '@' || c == ',' || c == '*' || c == '?' || c == '!'
+                        || c == '[' || c == ']')
                 || port < 1 || port > 65_535) {
             throw new IllegalArgumentException("Invalid SSH endpoint");
         }

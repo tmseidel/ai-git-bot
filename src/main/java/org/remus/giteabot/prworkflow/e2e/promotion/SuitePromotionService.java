@@ -132,7 +132,8 @@ public class SuitePromotionService {
         };
 
         WorkspaceResult ws = workspaceService.prepareWorkspace(
-                client, repoOwner, repoName, baseBranch, null);
+                client, repoOwner, repoName, baseBranch,
+                mode == SuiteLifecycleMode.PROMOTE_ON_MERGE ? null : prNumber);
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());
         }

@@ -105,7 +105,9 @@ class GiteaApiClientTest {
             "/tmp/repo.git", "C:/repos/repo.git", "C:../repo.git", "-uploader", "not-a-remote",
             "git@gitea.example.com", "ssh:///owner/repo.git",
             "SSH://git@gitea.example.com/owner/repo.git",
-            "ssh://%20-option@gitea.example.com/owner/repo.git"
+            "ssh://%20-option@gitea.example.com/owner/repo.git",
+            "git@[gitea.example.com:owner/repo.git", "git@host]:owner/repo.git",
+            "git@[host]suffix:owner/repo.git"
     })
     void getRepositoryRemote_rejectsNonSshApiValues(String sshUrl) {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");

@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -99,6 +100,8 @@ class SuitePromotionServiceTest {
         assertThat(run.getFollowUpPrNumber()).isEqualTo(4242L);
         // File actually written.
         assertThat(workspace.resolve("tests/e2e/pr-7/login.spec.ts")).exists();
+        verify(workspaceService).prepareWorkspace(
+                repoClient, "acme", "web", "feature/login", 7L);
         verify(workspaceService).commitAndPush(eq(workspace), eq(expectedBranch),
                 anyString(), anyString(), anyString(), eq(true));
     }
@@ -118,6 +121,8 @@ class SuitePromotionServiceTest {
         assertThat(out.writtenPaths()).containsExactly("tests/e2e/checkout.spec.ts");
         assertThat(workspace.resolve("tests/e2e/checkout.spec.ts")).exists();
         assertThat(run.getFollowUpPrNumber()).isEqualTo(5050L);
+        verify(workspaceService).prepareWorkspace(
+                eq(repoClient), eq("acme"), eq("web"), eq("main"), isNull());
     }
 
     @Test
