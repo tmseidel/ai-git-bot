@@ -72,4 +72,3 @@ class GiteaProviderMetadataTest {
         assertThat(header).isEqualTo("token mytoken123");
     }
 }
-

@@ -50,11 +50,41 @@ The bot authenticates against the Gitea API using a personal access token.
 5. Select the following **permissions**:
    - ✅ `write:issue` — Post review comments, add reactions
    - ✅ `write:repository` — Read diffs, post pull request reviews
-   - ✅ `write:user` — Needed for reading user context
+   - ✅ `write:user` — Read user context and register keys during automatic SSH setup
 6. Click **Generate Token**
 7. **Copy the token immediately** — it will not be shown again
 
 You'll enter this token when creating a **Git Integration** in the bot's web UI.
+
+### Gitea Instances with Git-over-HTTP Disabled
+
+If Gitea uses `[repository] DISABLE_HTTP_GIT = true`, configure SSH for repository
+clone and push operations. The API token above remains required for comments,
+reviews, and repository metadata.
+
+Configure `APP_ENCRYPTION_KEY` before storing any SSH private key. For automatic
+setup, save the Gitea integration, then edit it and select **SSH** under
+**Git Transport**:
+
+1. Click **Set up SSH automatically**. The token must be able to list at least
+   one visible repository so the bot can obtain Gitea's exact `ssh_url`.
+2. Compare every displayed server host-key fingerprint with a trusted value from
+   the Gitea administrator and confirm it.
+3. AI Git Bot generates an Ed25519 key locally, sends only its public key to
+   Gitea, and stores the private key encrypted. Automatically registered keys
+   are also removed from Gitea when they are rotated or the integration is deleted.
+   If remote cleanup fails, the integration falls back to HTTP and retains the
+   key reference so the next save can retry safely.
+
+If the token lacks `write:user`, use the manual fields instead: generate a
+dedicated key without a passphrase, register its public key under the bot user's
+**Settings -> SSH / GPG Keys**, and paste the private key plus independently
+verified `known_hosts` entries into the integration.
+
+When enabled, the bot obtains each repository's exact `ssh_url` from the Gitea
+API. SSH runs non-interactively with the integration's identity, strict host-key
+checking, and no fallback to other identities. The API token remains in use for
+comments, reviews, and repository metadata.
 
 ## 4. Configure Webhooks
 

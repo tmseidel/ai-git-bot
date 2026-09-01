@@ -78,5 +78,3 @@ public class GiteaProviderMetadata implements RepositoryProviderMetadata {
         return new GiteaApiClient(restClient, credentials);
     }
 }
-
-

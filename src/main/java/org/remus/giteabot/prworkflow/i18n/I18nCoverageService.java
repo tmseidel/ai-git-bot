@@ -107,7 +107,7 @@ public class I18nCoverageService {
             context.requireActive("before preparing i18n-coverage workspace");
             WorkspaceResult ws = workspaceService.prepareWorkspace(
                     owner, repo, headBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken(), prNumber);
+                    repositoryClient.getCloneUrl(owner, repo), repositoryClient.getCredentials(), prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderFailed(prNumber,
                         "failed to prepare workspace: " + ws.error()));

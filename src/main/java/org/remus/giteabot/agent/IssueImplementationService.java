@@ -165,7 +165,7 @@ public class IssueImplementationService {
             // Clone repository once — all operations happen in this workspace
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     owner, repo, baseBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken(), null);
+                    repositoryClient.getCloneUrl(owner, repo), repositoryClient.getCredentials(), null);
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -382,7 +382,7 @@ public class IssueImplementationService {
             // Clone working branch into fresh workspace
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     owner, repo, workingBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken(), null);
+                    repositoryClient.getCloneUrl(owner, repo), repositoryClient.getCredentials(), null);
             if (!wsResult.success()) {
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());

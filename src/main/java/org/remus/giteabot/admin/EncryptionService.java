@@ -14,7 +14,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 
 /**
- * Service for encrypting and decrypting sensitive data like API keys.
+ * Service for encrypting and decrypting sensitive credentials.
  *
  * If APP_ENCRYPTION_KEY environment variable is set, values are encrypted using AES-GCM.
  * If not set, values are stored as plain text (suitable for development, not recommended for production).
@@ -34,7 +34,7 @@ public class EncryptionService {
 
     public EncryptionService(@Value("${app.encryption-key:#{null}}") String encryptionKey) {
         if (encryptionKey == null || encryptionKey.isBlank()) {
-            log.warn("No APP_ENCRYPTION_KEY configured. API keys will be stored as plain text. " +
+            log.warn("No APP_ENCRYPTION_KEY configured. Secrets will be stored as plain text. " +
                     "Set APP_ENCRYPTION_KEY environment variable for production use.");
             this.secretKey = null;
             this.encryptionEnabled = false;

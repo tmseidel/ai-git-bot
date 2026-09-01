@@ -21,6 +21,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +50,107 @@ public class GiteaApiClient implements RepositoryApiClient {
     @Override
     public RepositoryCredentials getCredentials() {
         return credentials;
+    }
+
+    @Override
+    public String getCloneUrl(String owner, String repo) {
+        if (!credentials.usesSsh()) {
+            return RepositoryApiClient.super.getCloneUrl(owner, repo);
+        }
+        Map<String, Object> repoInfo = giteaRestClient.get()
+                .uri("/api/v1/repos/{owner}/{repo}", owner, repo)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        Object sshUrl = repoInfo == null ? null : repoInfo.get("ssh_url");
+        if (sshUrl instanceof String url && !url.isBlank()) {
+            return url;
+        }
+        throw new IllegalStateException("Gitea did not provide an SSH clone URL for " + owner + "/" + repo);
+    }
+
+    /** Returns an SSH clone URL from a repository visible to the authenticated user. */
+    public String getAnySshCloneUrl() {
+        Map<String, Object> searchResult = giteaRestClient.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/v1/repos/search")
+                        .queryParam("limit", 1).queryParam("private", true).build())
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        Object data = searchResult == null ? null : searchResult.get("data");
+        if (data instanceof List<?> repositories && !repositories.isEmpty()
+                && repositories.getFirst() instanceof Map<?, ?> repository) {
+            Object sshUrl = repository.get("ssh_url");
+            if (sshUrl instanceof String url && !url.isBlank()) {
+                return url;
+            }
+        }
+        throw new IllegalStateException("Gitea did not provide an SSH URL for a visible repository");
+    }
+
+    /** Returns the immutable ID of the user authenticated by this client's token. */
+    public long getCurrentUserId() {
+        Map<String, Object> user = giteaRestClient.get()
+                .uri("/api/v1/user")
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        Object id = user == null ? null : user.get("id");
+        if (id instanceof Number userId) {
+            return userId.longValue();
+        }
+        throw new IllegalStateException("Gitea did not provide the authenticated user's ID");
+    }
+
+    /** Returns all SSH key IDs with the exact title, across paginated user keys. */
+    public List<Long> getSshKeyIdsByTitle(String title) {
+        return getSshKeyIds(title);
+    }
+
+    /** Returns all SSH key IDs owned by the authenticated user. */
+    public List<Long> getSshKeyIds() {
+        return getSshKeyIds(null);
+    }
+
+    private List<Long> getSshKeyIds(String title) {
+        int page = 1;
+        List<Long> ids = new ArrayList<>();
+        while (true) {
+            int currentPage = page;
+            List<Map<String, Object>> keys = giteaRestClient.get()
+                    .uri(uriBuilder -> uriBuilder.path("/api/v1/user/keys")
+                            .queryParam("page", currentPage).queryParam("limit", 50).build())
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (keys == null || keys.isEmpty()) {
+                return ids;
+            }
+            for (Map<String, Object> key : keys) {
+                if ((title == null || title.equals(key.get("title"))) && key.get("id") instanceof Number id) {
+                    ids.add(id.longValue());
+                }
+            }
+            page++;
+        }
+    }
+
+    /** Registers a writable SSH public key for the authenticated Gitea user. */
+    public long createSshKey(String title, String publicKey) {
+        Map<String, Object> response = giteaRestClient.post()
+                .uri("/api/v1/user/keys")
+                .body(Map.of("title", title, "key", publicKey, "read_only", false))
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        Object id = response == null ? null : response.get("id");
+        if (id instanceof Number number) {
+            return number.longValue();
+        }
+        throw new IllegalStateException("Gitea did not return an ID for the registered SSH key");
+    }
+
+    /** Deletes an SSH public key owned by the authenticated Gitea user. */
+    public void deleteSshKey(long id) {
+        giteaRestClient.delete()
+                .uri("/api/v1/user/keys/{id}", id)
+                .retrieve()
+                .toBodilessEntity();
     }
 
     @Override

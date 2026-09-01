@@ -45,6 +45,25 @@
                             </div>
                         </div>
 
+                        <div class="col-md-6" id="transportField" style="display: none;">
+                            <label for="transport" class="form-label" th:text="#{label.gitTransport}">Git Transport</label>
+                            <select class="form-select" id="transport" th:field="*{transport}"
+                                    onchange="updateSshFields()">
+                                <option th:each="transportType : ${transportTypes}"
+                                        th:value="${transportType}"
+                                        th:disabled="${transportType == T(org.remus.giteabot.repository.GitTransport).SSH && !sshEncryptionEnabled && integration.transport != T(org.remus.giteabot.repository.GitTransport).SSH}"
+                                        th:text="${transportType == T(org.remus.giteabot.repository.GitTransport).HTTP ? #messages.msg('gitTransport.http') : #messages.msg('gitTransport.ssh')}">
+                                </option>
+                            </select>
+                            <div class="form-text" th:text="#{help.git.transport}">
+                                Select how repositories are cloned, fetched, and pushed. The API token remains required.
+                            </div>
+                            <div class="form-text text-warning" th:unless="${sshEncryptionEnabled}"
+                                 th:text="#{help.git.sshEncryptionRequired}">
+                                Configure APP_ENCRYPTION_KEY before storing SSH private keys.
+                            </div>
+                        </div>
+
                         <!-- Username field - shown for Bitbucket only -->
                         <div class="col-md-6" id="usernameField" style="display: none;">
                             <label for="username" class="form-label" th:text="#{label.username}">Username</label>
@@ -77,6 +96,69 @@
                             </div>
                             <div class="form-text" id="tokenDescription" th:text="#{help.git.tokenDescription}">
                                 The access token for API authentication.
+                            </div>
+                        </div>
+
+                        <div class="col-12" id="sshPrivateKeyField" style="display: none;">
+                            <label for="sshPrivateKey" class="form-label" th:text="#{label.sshPrivateKey}">SSH Private Key</label>
+                            <div class="input-group">
+                                <textarea class="form-control font-monospace" id="sshPrivateKey" name="sshPrivateKey"
+                                          rows="8" autocomplete="new-password" spellcheck="false"
+                                          th:placeholder="#{placeholder.sshPrivateKey}"
+                                          placeholder="Paste an unencrypted OpenSSH private key"></textarea>
+                                <button class="btn btn-outline-secondary" type="button" id="clearSshCredentialsBtn"
+                                        th:if="${integration.id != null}"
+                                        th:title="#{button.removeStoredSshCredentials}">
+                                    <i class="bi bi-trash"></i> <span th:text="#{button.clear}">Clear</span>
+                                </button>
+                            </div>
+                            <input type="hidden" id="clearSshCredentials" name="clearSshCredentials" value="false"/>
+                            <div th:if="${integration.id != null}" class="form-text" id="sshCredentialsKeepHint">
+                                <span th:text="#{help.git.keepSshCredentials}">Leave both SSH fields blank to keep the stored credentials.</span>
+                            </div>
+                            <div class="form-text text-warning" id="sshCredentialsClearPendingHint" style="display: none;">
+                                <i class="bi bi-exclamation-triangle"></i>
+                                <span th:text="#{help.git.sshCredentialsRemoved}">The stored SSH credentials will be removed on save.</span>
+                            </div>
+                            <div class="form-text" th:text="#{help.git.sshPrivateKey}">
+                                Use a dedicated, unencrypted private key registered on the Gitea bot account.
+                            </div>
+                            <div class="mt-3" th:if="${integration.id != null}"
+                                 th:with="sshAlreadyConfigured=${integration.transport == T(org.remus.giteabot.repository.GitTransport).SSH && integration.sshPrivateKey != null && !integration.sshPrivateKey.isBlank()},
+                                          autoSshSetupAvailable=${sshEncryptionEnabled && integration.providerType == T(org.remus.giteabot.repository.RepositoryType).GITEA && integration.token != null && !integration.token.isBlank() && !(integration.transport == T(org.remus.giteabot.repository.GitTransport).SSH && integration.sshPrivateKey != null && !integration.sshPrivateKey.isBlank())}">
+                                <a th:if="${autoSshSetupAvailable}" id="autoSshSetupBtn"
+                                   class="btn btn-outline-primary"
+                                   th:href="@{/git-integrations/{id}/ssh/setup(id=${integration.id})}">
+                                    <i class="bi bi-key"></i>
+                                    <span th:text="#{button.setupSshAutomatically}">Set up SSH automatically</span>
+                                </a>
+                                <button th:unless="${autoSshSetupAvailable}" id="autoSshSetupBtn"
+                                        class="btn btn-outline-primary" type="button" disabled>
+                                    <i class="bi bi-key"></i>
+                                    <span th:text="#{button.setupSshAutomatically}">Set up SSH automatically</span>
+                                </button>
+                                <div class="form-text" th:text="#{help.git.sshAutoSetup}">
+                                    Generates an Ed25519 key and registers its public key through the stored Gitea token.
+                                </div>
+                                <div class="form-text text-warning" th:if="${sshAlreadyConfigured}"
+                                     th:text="#{help.git.sshAutoSetupReplace}">
+                                    Switch to HTTP and save before replacing the configured SSH key.
+                                </div>
+                                <div class="form-text text-warning" th:unless="${sshEncryptionEnabled}"
+                                     th:text="#{help.git.sshAutoSetupEncryptionRequired}">
+                                    Configure APP_ENCRYPTION_KEY to enable automatic setup.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-12" id="sshKnownHostsField" style="display: none;">
+                            <label for="sshKnownHosts" class="form-label" th:text="#{label.sshKnownHosts}">SSH Host Keys (known_hosts)</label>
+                            <textarea class="form-control font-monospace" id="sshKnownHosts" name="sshKnownHosts"
+                                      rows="3" autocomplete="off" spellcheck="false"
+                                      th:placeholder="#{placeholder.sshKnownHosts}"
+                                      placeholder="gitea.example.com ssh-ed25519 AAAA..."></textarea>
+                            <div class="form-text" th:text="#{help.git.sshKnownHosts}">
+                                Paste verified known_hosts entries for the SSH host returned by Gitea.
                             </div>
                         </div>
 
@@ -116,6 +198,41 @@
         <script th:inline="javascript">
             /*<![CDATA[*/
             const isEditMode = /*[[${integration.id != null}]]*/ false;
+            const hasStoredToken = /*[[${integration.token != null && !integration.token.isBlank()}]]*/ false;
+            const hasManagedSshKey = /*[[${integration.sshRemoteKeyId != null || integration.sshRemoteKeyOwnerId != null || integration.sshRemoteKeyTitle != null}]]*/ false;
+            const originalProviderType = /*[[${integration.providerType}]]*/ 'GITEA';
+            const originalUrl = /*[[${integration.url}]]*/ null;
+            const originalTransport = /*[[${integration.transport}]]*/ 'HTTP';
+            let giteaTransport = /*[[${integration.transport}]]*/ 'HTTP';
+            const hasStoredSshPrivateKey = /*[[${integration.sshPrivateKey != null && !integration.sshPrivateKey.isBlank()}]]*/ false;
+            const hasStoredSshKnownHosts = /*[[${integration.sshKnownHosts != null && !integration.sshKnownHosts.isBlank()}]]*/ false;
+
+            function updateSshFields() {
+                const providerType = document.getElementById('providerType').value;
+                const transport = document.getElementById('transport').value;
+                const privateKeyField = document.getElementById('sshPrivateKeyField');
+                const knownHostsField = document.getElementById('sshKnownHostsField');
+                const privateKeyInput = document.getElementById('sshPrivateKey');
+                const knownHostsInput = document.getElementById('sshKnownHosts');
+                const clearPending = document.getElementById('clearSshCredentials').value === 'true';
+                const tokenClearPending = document.getElementById('clearToken').value === 'true';
+                const visible = providerType === 'GITEA' && transport === 'SSH';
+                const replacingPrivateKey = privateKeyInput.value.trim() !== '';
+                const endpointChanged = isEditMode && (providerType !== originalProviderType
+                    || document.getElementById('url').value !== originalUrl);
+
+                if (providerType === 'GITEA') giteaTransport = transport;
+
+                privateKeyField.style.display = visible ? 'block' : 'none';
+                knownHostsField.style.display = visible ? 'block' : 'none';
+                privateKeyInput.disabled = !visible;
+                knownHostsInput.disabled = !visible;
+                privateKeyInput.required = visible && (!isEditMode || !hasStoredSshPrivateKey || clearPending);
+                knownHostsInput.required = visible
+                    && (!isEditMode || !hasStoredSshKnownHosts || clearPending || replacingPrivateKey);
+                document.getElementById('token').required = !isEditMode
+                    || endpointChanged || visible && (!hasStoredToken || tokenClearPending);
+            }
 
             function updateFormFields() {
                 const providerType = document.getElementById('providerType').value;
@@ -124,17 +241,19 @@
                 const urlDescription = document.getElementById('urlDescription');
                 const usernameField = document.getElementById('usernameField');
                 const usernameInput = document.getElementById('username');
-                const tokenInput = document.getElementById('token');
                 const tokenLabel = document.getElementById('tokenLabel');
                 const tokenDescription = document.getElementById('tokenDescription');
                 const reviewTriggerNotice = document.getElementById('reviewTriggerNotice');
                 const postReviewActionField = document.getElementById('postReviewActionField');
+                const transportField = document.getElementById('transportField');
+                const transportInput = document.getElementById('transport');
 
                 // Reset visibility
                 urlField.style.display = 'block';
                 usernameField.style.display = 'none';
                 reviewTriggerNotice.style.display = 'none';
                 postReviewActionField.style.display = 'none';
+                transportField.style.display = 'none';
 
                 if (providerType === 'GITEA') {
                     // Gitea: URL + Token
@@ -147,11 +266,11 @@
                     tokenLabel.textContent = /*[[#{label.token}]]*/ 'Token';
                     tokenDescription.textContent = /*[[#{help.git.giteaToken}]]*/ 'A Gitea access token with repository read/write permissions.';
                     reviewTriggerNotice.style.display = 'block';
+                    transportField.style.display = 'block';
                 } else if (providerType === 'GITHUB') {
                     // GitHub: Token only (URL is fixed)
                     urlField.style.display = 'none';
                     urlInput.required = false;
-                    urlInput.value = 'https://github.com';
                     usernameField.style.display = 'none';
                     usernameInput.required = false;
                     tokenLabel.textContent = /*[[#{label.personalAccessToken}]]*/ 'Personal Access Token';
@@ -173,7 +292,6 @@
                     // Bitbucket: Username + Token (App Password)
                     urlField.style.display = 'none';
                     urlInput.required = false;
-                    urlInput.value = 'https://bitbucket.org';
                     usernameField.style.display = 'block';
                     usernameInput.required = true;
                     tokenLabel.textContent = /*[[#{label.appPassword}]]*/ 'App Password';
@@ -190,9 +308,13 @@
                     tokenDescription.textContent = /*[[#{help.git.tokenDescription}]]*/ 'The access token for API authentication.';
                 }
 
-                // Token is required when creating a new integration; on edit it
-                // can be left blank to keep the stored value or cleared explicitly.
-                tokenInput.required = !isEditMode;
+                if (providerType !== 'GITEA') {
+                    transportInput.value = 'HTTP';
+                } else {
+                    transportInput.value = giteaTransport;
+                }
+                updateSshFields();
+
             }
 
             // Initialize on page load
@@ -204,6 +326,15 @@
                 const keepHint = document.getElementById('tokenKeepHint');
                 const clearPendingHint = document.getElementById('tokenClearPendingHint');
                 const defaultPlaceholder = /*[[#{placeholder.enterAccessToken}]]*/ 'Enter access token';
+                const privateKeyInput = document.getElementById('sshPrivateKey');
+                const knownHostsInput = document.getElementById('sshKnownHosts');
+                const transportInput = document.getElementById('transport');
+                const urlInput = document.getElementById('url');
+                const clearSshInput = document.getElementById('clearSshCredentials');
+                const sshKeepHint = document.getElementById('sshCredentialsKeepHint');
+                const sshClearPendingHint = document.getElementById('sshCredentialsClearPendingHint');
+                let endpointEditClearedSsh = false;
+                let explicitSshClear = false;
 
                 function setClearPending(pending) {
                     clearTokenInput.value = pending ? 'true' : 'false';
@@ -216,16 +347,56 @@
                         if (keepHint) keepHint.style.display = 'block';
                         clearPendingHint.style.display = 'none';
                     }
+                    updateSshFields();
                 }
 
-                // ---- Token: remember that the operator wants it removed on
-                // save (an empty field alone means "keep the stored value", so
-                // we need an explicit marker). ----
+                function setSshClearPending(pending) {
+                    clearSshInput.value = pending ? 'true' : 'false';
+                    if (sshKeepHint) sshKeepHint.style.display = pending ? 'none' : 'block';
+                    sshClearPendingHint.style.display = pending ? 'block' : 'none';
+                    updateSshFields();
+                }
+
+                function switchToHttpAndClearSsh(endpointEdit = false) {
+                    const changedTransport = transportInput.value === 'SSH';
+                    if (changedTransport) {
+                        privateKeyInput.value = '';
+                        knownHostsInput.value = '';
+                        transportInput.value = 'HTTP';
+                    }
+                    if (endpointEdit && !explicitSshClear
+                            && (changedTransport || originalTransport === 'SSH')) {
+                        endpointEditClearedSsh = true;
+                    } else if (!endpointEdit) {
+                        explicitSshClear = true;
+                        endpointEditClearedSsh = false;
+                    }
+                    setSshClearPending(true);
+                }
+
+                function reconcileEndpointEdit() {
+                    const endpointChanged = isEditMode
+                        && (document.getElementById('providerType').value !== originalProviderType
+                            || urlInput.value !== originalUrl);
+                    const replacementTokenEntered = tokenInput.value.trim() !== '';
+                    const storedSshCredentials = originalTransport === 'SSH' && hasStoredSshPrivateKey;
+                    if (endpointChanged && (hasManagedSshKey || storedSshCredentials)
+                            || replacementTokenEntered && hasManagedSshKey) {
+                        switchToHttpAndClearSsh(true);
+                    } else if (endpointEditClearedSsh) {
+                        transportInput.value = originalTransport;
+                        setSshClearPending(false);
+                        endpointEditClearedSsh = false;
+                    }
+                }
+
+                // An empty token field means "keep", so removal needs an explicit marker.
                 const clearTokenBtn = document.getElementById('clearTokenBtn');
                 if (clearTokenBtn) {
                     clearTokenBtn.addEventListener('click', function() {
                         tokenInput.value = '';
                         setClearPending(true);
+                        switchToHttpAndClearSsh();
                     });
                 }
 
@@ -235,6 +406,45 @@
                     if (tokenInput.value.trim() !== '') {
                         setClearPending(false);
                     }
+                    reconcileEndpointEdit();
+                });
+
+                const clearSshCredentialsBtn = document.getElementById('clearSshCredentialsBtn');
+                if (clearSshCredentialsBtn) {
+                    clearSshCredentialsBtn.addEventListener('click', function() {
+                        switchToHttpAndClearSsh();
+                    });
+                }
+
+                urlInput.addEventListener('input', function() {
+                    reconcileEndpointEdit();
+                    updateSshFields();
+                });
+
+                document.getElementById('providerType').addEventListener('change', reconcileEndpointEdit);
+
+                transportInput.addEventListener('change', function() {
+                    if (isEditMode && originalTransport === 'SSH') {
+                        if (transportInput.value === 'HTTP') {
+                            explicitSshClear = true;
+                            endpointEditClearedSsh = false;
+                            setSshClearPending(true);
+                        } else {
+                            explicitSshClear = false;
+                            setSshClearPending(false);
+                            reconcileEndpointEdit();
+                        }
+                    }
+                });
+
+                [privateKeyInput, knownHostsInput].forEach(function(input) {
+                    input.addEventListener('input', function() {
+                        if (input.value.trim() !== '') {
+                            explicitSshClear = false;
+                            endpointEditClearedSsh = false;
+                            setSshClearPending(false);
+                        }
+                    });
                 });
             });
         </script>

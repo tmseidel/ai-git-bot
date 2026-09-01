@@ -34,6 +34,11 @@ public interface RepositoryApiClient {
         return getCredentials().cloneUrl();
     }
 
+    /** Returns the clone URL for one repository; providers may select a repository-specific transport. */
+    default String getCloneUrl(String owner, String repo) {
+        return getCloneUrl();
+    }
+
     /** Returns the authentication token used by this client. */
     default String getToken() {
         return getCredentials().token();

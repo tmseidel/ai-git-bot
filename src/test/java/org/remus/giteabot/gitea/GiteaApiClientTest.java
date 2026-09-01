@@ -5,6 +5,7 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -18,6 +19,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 /**
  * Unit tests for {@link GiteaApiClient}.
@@ -31,6 +33,123 @@ class GiteaApiClientTest {
     void implementsRepositoryApiClient() {
         GiteaApiClient client = new GiteaApiClient(null, CREDS);
         assertInstanceOf(RepositoryApiClient.class, client);
+    }
+
+    @Test
+    void getCloneUrl_sshDisabled_keepsHttpCloneUrl() {
+        GiteaApiClient client = new GiteaApiClient(null, CREDS);
+
+        assertEquals("https://gitea.example.com", client.getCloneUrl("owner", "repo"));
+    }
+
+    @Test
+    void getCloneUrl_sshEnabled_usesRepositorySshUrl() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(),
+                CREDS.withSsh("private-key", "gitea.example.com ssh-ed25519 host-key"));
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/owner/repo"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"ssh_url\":\"git@gitea.example.com:owner/repo.git\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals("git@gitea.example.com:owner/repo.git", client.getCloneUrl("owner", "repo"));
+        server.verify();
+    }
+
+    @Test
+    void getAnySshCloneUrl_returnsUrlFromVisibleRepository() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/search?limit=1&private=true"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"data\":[{\"ssh_url\":\"ssh://git@gitea.example.com:2222/owner/repo.git\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        assertEquals("ssh://git@gitea.example.com:2222/owner/repo.git", client.getAnySshCloneUrl());
+        server.verify();
+    }
+
+    @Test
+    void getCurrentUserId_returnsAuthenticatedUserId() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":17}", MediaType.APPLICATION_JSON));
+
+        assertEquals(17L, client.getCurrentUserId());
+        server.verify();
+    }
+
+    @Test
+    void getSshKeyIdsByTitle_returnsOnlyExactMatches() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/user/keys?page=1&limit=50"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("[{\"id\":41,\"title\":\"other\"},{\"id\":42,\"title\":\"AI Git Bot: integration-7\"}]",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://gitea.example.com/api/v1/user/keys?page=2&limit=50"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        assertEquals(List.of(42L), client.getSshKeyIdsByTitle("AI Git Bot: integration-7"));
+        server.verify();
+    }
+
+    @Test
+    void getSshKeyIds_returnsOnlyAuthenticatedUsersKeys() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/user/keys?page=1&limit=50"))
+                .andRespond(withSuccess("[{\"id\":41,\"title\":\"one\"},{\"id\":42,\"title\":\"two\"}]",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://gitea.example.com/api/v1/user/keys?page=2&limit=50"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        assertEquals(List.of(41L, 42L), client.getSshKeyIds());
+        server.verify();
+    }
+
+    @Test
+    void createSshKey_registersWritablePublicKeyAndReturnsId() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/user/keys"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.title").value("AI Git Bot: production"))
+                .andExpect(jsonPath("$.key").value("ssh-ed25519 public-key gitbot"))
+                .andExpect(jsonPath("$.read_only").value(false))
+                .andRespond(withSuccess("{\"id\":42}", MediaType.APPLICATION_JSON));
+
+        assertEquals(42L, client.createSshKey("AI Git Bot: production", "ssh-ed25519 public-key gitbot"));
+        server.verify();
+    }
+
+    @Test
+    void deleteSshKey_removesKeyById() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/user/keys/42"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        client.deleteSshKey(42L);
+        server.verify();
     }
 
     @Test
@@ -126,4 +245,3 @@ class GiteaApiClientTest {
         server.verify();
     }
 }
-

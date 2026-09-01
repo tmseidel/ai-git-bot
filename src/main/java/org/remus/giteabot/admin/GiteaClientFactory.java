@@ -2,6 +2,7 @@ package org.remus.giteabot.admin;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryProviderMetadata;
 import org.remus.giteabot.repository.RepositoryProviderRegistry;
@@ -15,8 +16,9 @@ import java.util.concurrent.ConcurrentMap;
  * Factory that creates and caches {@link RestClient} and {@link RepositoryApiClient}
  * instances from persisted {@link GitIntegration} entities.
  * <p>
- * Clients are cached by integration ID and {@link GitIntegration#getUpdatedAt()}
- * so that configuration changes automatically produce fresh clients.
+ * HTTP clients are cached by integration ID and {@link GitIntegration#getUpdatedAt()}
+ * so that configuration changes automatically produce fresh clients. SSH clients
+ * remain uncached to avoid retaining decrypted private keys.
  * <p>
  * Provider-specific logic (URL resolution, authentication) is delegated to
  * {@link RepositoryProviderMetadata} implementations via {@link RepositoryProviderRegistry}.
@@ -34,10 +36,21 @@ public class GiteaClientFactory {
 
     /**
      * Returns a {@link RepositoryApiClient} for the given Git integration.
-     * Results are cached and re-created when the integration's updatedAt changes.
+     * HTTP results are cached and re-created when the integration's updatedAt changes.
      */
     public RepositoryApiClient getApiClient(GitIntegration integration) {
+        if (integration.getTransport() == GitTransport.SSH) {
+            cache.remove(integration.getId());
+            return buildClients(integration).apiClient;
+        }
         return getCachedClient(integration).apiClient;
+    }
+
+    /** Creates an uncached API client with a supplied plaintext replacement token. */
+    public RepositoryApiClient createApiClient(GitIntegration integration, String token) {
+        RepositoryProviderMetadata provider = providerRegistry.getProvider(integration.getProviderType());
+        RestClient restClient = provider.buildRestClient(integration, token);
+        return provider.createClient(restClient, provider.createCredentials(integration, token));
     }
 
 
@@ -67,6 +80,11 @@ public class GiteaClientFactory {
 
         RestClient restClient = provider.buildRestClient(integration, decryptedToken);
         var credentials = provider.createCredentials(integration, decryptedToken);
+        if (integration.getTransport() == GitTransport.SSH) {
+            credentials = credentials.withSsh(
+                    gitIntegrationService.decryptSshPrivateKey(integration),
+                    integration.getSshKnownHosts());
+        }
         RepositoryApiClient apiClient = provider.createClient(restClient, credentials);
 
         return new CachedClient(integration.getUpdatedAt().toEpochMilli(), restClient, apiClient);

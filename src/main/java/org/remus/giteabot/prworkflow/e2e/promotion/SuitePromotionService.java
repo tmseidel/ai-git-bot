@@ -122,7 +122,7 @@ public class SuitePromotionService {
         };
 
         WorkspaceResult ws = workspaceService.prepareWorkspace(repoOwner, repoName, baseBranch,
-                client.getCloneUrl(), client.getToken(), null);
+                client.getCloneUrl(repoOwner, repoName), client.getCredentials(), null);
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());
         }
@@ -323,4 +323,3 @@ public class SuitePromotionService {
 
     }
 }
-

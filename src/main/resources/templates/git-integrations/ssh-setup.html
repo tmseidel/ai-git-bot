@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{page.gitIntegration.sshSetupTitle}, ~{::pageContent})}">
+<body>
+    <div th:fragment="pageContent">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>
+                <i class="bi bi-key"></i>
+                <span th:text="#{page.gitIntegration.sshSetupTitle}">Set up SSH automatically</span>
+            </h2>
+        </div>
+
+        <div class="alert alert-warning">
+            <i class="bi bi-shield-exclamation"></i>
+            <span th:text="#{help.git.sshFingerprintWarning}">
+                Compare these fingerprints with a trusted value from your Gitea administrator before continuing.
+            </span>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <dl class="row mb-4">
+                    <dt class="col-sm-3" th:text="#{label.name}">Name</dt>
+                    <dd class="col-sm-9" th:text="${preview.integration.name}">Integration</dd>
+
+                    <dt class="col-sm-3" th:text="#{label.sshEndpoint}">SSH endpoint</dt>
+                    <dd class="col-sm-9">
+                        <code th:text="${preview.hostKeys.endpoint.host + ':' + preview.hostKeys.endpoint.port}">
+                            gitea.example.com:22
+                        </code>
+                    </dd>
+
+                    <dt class="col-sm-3" th:text="#{label.sshCloneUrl}">Detected clone URL</dt>
+                    <dd class="col-sm-9"><code th:text="${preview.sshCloneUrl}">git@gitea.example.com:owner/repo.git</code></dd>
+                </dl>
+
+                <h5 th:text="#{label.sshHostFingerprints}">Server host-key fingerprints</h5>
+                <div class="table-responsive mb-4">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th th:text="#{label.type}">Type</th>
+                                <th th:text="#{label.fingerprint}">Fingerprint</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr th:each="fingerprint : ${preview.hostKeys.fingerprints}">
+                                <td><code th:text="${fingerprint.algorithm}">ssh-ed25519</code></td>
+                                <td><code th:text="${fingerprint.fingerprint}">SHA256:...</code></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <form th:action="@{/git-integrations/{id}/ssh/setup(id=${preview.integration.id})}" method="post">
+                    <input type="hidden" name="confirmation" th:value="${preview.hostKeys.confirmation}"/>
+                    <div class="form-check mb-4">
+                        <input class="form-check-input" type="checkbox" id="confirmed" name="confirmed"
+                               value="true" required/>
+                        <label class="form-check-label" for="confirmed"
+                               th:text="#{label.confirmSshFingerprint}">
+                            I verified these fingerprints using a trusted source.
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-key"></i>
+                        <span th:text="#{button.generateAndRegisterSshKey}">Generate and register key</span>
+                    </button>
+                    <a th:href="@{/git-integrations/{id}/edit(id=${preview.integration.id})}"
+                       class="btn btn-secondary ms-2">
+                        <i class="bi bi-x-lg"></i> <span th:text="#{button.cancel}">Cancel</span>
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

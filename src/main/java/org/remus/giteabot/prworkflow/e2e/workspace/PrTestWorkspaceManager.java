@@ -297,8 +297,10 @@ public class PrTestWorkspaceManager {
             } else {
                 log.debug("npm install of {} in {} succeeded", packageSpec, workspace);
             }
-        } catch (IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("npm install was interrupted", e);
+        } catch (IOException e) {
             log.warn("npm install of {} in {} failed: {} — continuing scaffold",
                     packageSpec, workspace, e.getMessage());
         }

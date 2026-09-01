@@ -47,6 +47,7 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
+    private final WorkspaceService workspaceService;
 
     /**
      * Executes a configured validation tool (mvn, gradle, …) in the given
@@ -125,11 +126,9 @@ public class ToolExecutionService {
                     "Invalid branch name for git: " + branch);
         }
 
-        ToolResult fetch = executeCommand(workspaceDir,
-                new String[]{"git", "fetch", "origin",
-                        "refs/heads/" + branch + ":refs/remotes/origin/" + branch});
+        CommandResult fetch = workspaceService.fetchBranch(workspaceDir, branch);
         if (!fetch.success()) {
-            return new ToolResult(false, fetch.exitCode(), "",
+            return new ToolResult(false, -1, "",
                     "Failed to fetch branch '" + branch + "' from origin: "
                             + normalizeToolMessage(fetch.output()));
         }
@@ -1305,7 +1304,11 @@ public class ToolExecutionService {
             log.info("Tool {} with exit code {}",
                     success ? "succeeded" : "failed", exitCode);
 
-            return new ToolResult(success, exitCode, truncateOutput(result.output()), "");
+            String output = truncateOutput(result.output());
+            if (result.truncated() && !output.endsWith("... (output truncated)")) {
+                output += "\n... (output truncated)";
+            }
+            return new ToolResult(success, exitCode, output, "");
 
         } catch (IOException e) {
             log.error("Failed to execute tool: {}", e.getMessage());

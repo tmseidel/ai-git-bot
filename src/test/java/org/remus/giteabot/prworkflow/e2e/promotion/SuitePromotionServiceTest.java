@@ -14,6 +14,7 @@ import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryCredentials;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -55,11 +56,12 @@ class SuitePromotionServiceTest {
         repoClient = mock(RepositoryApiClient.class);
 
         when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
-        when(repoClient.getCloneUrl()).thenReturn("http://git.local");
-        when(repoClient.getToken()).thenReturn("tok");
+        when(repoClient.getCloneUrl(anyString(), anyString())).thenReturn("http://git.local");
+        when(repoClient.getCredentials()).thenReturn(
+                RepositoryCredentials.of("http://git.local", "http://git.local", "tok"));
         when(repoClient.getDefaultBranch(anyString(), anyString())).thenReturn("main");
         when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(),
-                anyString(), anyString(), any()))
+                anyString(), any(RepositoryCredentials.class), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean()))

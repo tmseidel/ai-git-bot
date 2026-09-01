@@ -1,18 +1,21 @@
 package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.util.ProcessSupport;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -50,7 +53,7 @@ public class WorkspaceService {
             PosixFilePermission.OWNER_READ,
             PosixFilePermission.OWNER_WRITE);
     private final Path workspaceBaseDir;
-    private final ConcurrentMap<Path, Path> credentialsByWorkspace = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Path, WorkspaceSetup> setupsByWorkspace = new ConcurrentHashMap<>();
 
     /** Creates a service that places workspaces under the system temporary directory. */
     public WorkspaceService() {
@@ -76,7 +79,7 @@ public class WorkspaceService {
      * agent's file/search tools.</p>
      */
     public WorkspaceResult prepareWorkspace(String owner, String repo, String branch,
-                                            String cloneBaseUrl, String token, Long prNumber) {
+                                            String cloneBaseUrl, RepositoryCredentials credentials, Long prNumber) {
         WorkspaceSetup setup = null;
         try {
             setup = createWorkspaceSetup();
@@ -84,17 +87,13 @@ public class WorkspaceService {
             log.info("Cloning repository to {} for workspace", workspaceDir);
 
             String cloneUrl = buildCloneUrl(owner, repo, cloneBaseUrl);
-            Path credentialsFile = createCredentialsFile(cloneBaseUrl, token, workspaceDir);
-            setup.setCredentialsFile(credentialsFile);
-            String[] credentialConfig = credentialConfigArgs(credentialsFile);
-            CommandResult cloneResult = runCommand(workspaceDir.getParent().toFile(),
-                    withCredentialConfig(credentialConfig,
-                            "clone", "--depth", "1", "--branch", branch,
-                            cloneUrl, workspaceDir.getFileName().toString()),
-                    60);
+            setup.setAuthentication(cloneBaseUrl, credentials);
+            CommandResult cloneResult = runRemoteCommand(setup, workspaceDir.getParent().toFile(), 60,
+                    "clone", "--depth", "1", "--branch", branch,
+                    cloneUrl, workspaceDir.getFileName().toString());
 
             if (cloneResult.success()) {
-                registerCredentialsFile(workspaceDir, credentialsFile);
+                registerWorkspace(setup);
                 return WorkspaceResult.success(workspaceDir);
             }
 
@@ -102,22 +101,17 @@ public class WorkspaceService {
             if (prNumber != null) {
                 log.info("Branch clone failed, falling back to PR head ref for PR #{}: {}",
                         prNumber, cloneResult.output());
-                // Tear down the failed attempt (private parent AND its credential
-                // file) before starting the retry, so a partial directory deletion
-                // can never orphan the token file — the setup holder keeps both
-                // references alive until both are deleted.
-                cleanupWorkspace(setup);
+                // Tear down the failed attempt before starting the retry.
+                if (!cleanupWorkspace(setup)) {
+                    return WorkspaceResult.failure("Failed to clean up the initial clone attempt");
+                }
                 setup = createWorkspaceSetup();
                 workspaceDir = setup.workspaceDir();
-                credentialsFile = createCredentialsFile(cloneBaseUrl, token, workspaceDir);
-                setup.setCredentialsFile(credentialsFile);
-                credentialConfig = credentialConfigArgs(credentialsFile);
+                setup.setAuthentication(cloneBaseUrl, credentials);
 
-                CommandResult defaultCloneResult = runCommand(workspaceDir.getParent().toFile(),
-                        withCredentialConfig(credentialConfig,
-                                "clone", "--depth", "1",
-                                cloneUrl, workspaceDir.getFileName().toString()),
-                        60);
+                CommandResult defaultCloneResult = runRemoteCommand(setup,
+                        workspaceDir.getParent().toFile(), 60,
+                        "clone", "--depth", "1", cloneUrl, workspaceDir.getFileName().toString());
 
                 if (!defaultCloneResult.success()) {
                     log.error("Fallback clone (default branch) also failed: {}",
@@ -128,12 +122,10 @@ public class WorkspaceService {
                                     + "; default branch: " + defaultCloneResult.output() + ")");
                 }
 
-                registerCredentialsFile(workspaceDir, credentialsFile);
+                registerWorkspace(setup);
 
-                CommandResult fetchResult = runCommand(workspaceDir.toFile(),
-                        withCredentialConfig(credentialConfigForWorkspace(workspaceDir),
-                                "fetch", "origin", "refs/pull/" + prNumber + "/head"),
-                        60);
+                CommandResult fetchResult = runRemoteCommand(setup, workspaceDir.toFile(), 60,
+                        "fetch", "origin", "refs/pull/" + prNumber + "/head");
 
                 if (!fetchResult.success()) {
                     log.error("Failed to fetch PR head ref for PR #{}: {}", prNumber,
@@ -168,6 +160,9 @@ public class WorkspaceService {
             log.error("Failed to prepare workspace: {}", e.getMessage());
             cleanupWorkspace(setup);
             return WorkspaceResult.failure("Failed to prepare workspace: " + e.getMessage());
+        } catch (RuntimeException e) {
+            cleanupWorkspace(setup);
+            throw e;
         }
     }
 
@@ -188,54 +183,65 @@ public class WorkspaceService {
      */
     public boolean commitAndPush(Path workspaceDir, String branchName, String commitMessage,
                                  String authorName, String authorEmail, boolean createNewBranch) {
-        // Configure git author
-        if (!runCommand(workspaceDir.toFile(),
-                new String[]{"git", "config", "user.email", authorEmail}, 10).success()) {
-            log.warn("Could not set git user.email, continuing anyway");
+        WorkspaceSetup setup = setupsByWorkspace.get(workspaceKey(workspaceDir));
+        if (setup == null) {
+            log.error("Cannot commit workspace without authentication state: {}", workspaceDir);
+            return false;
         }
-        if (!runCommand(workspaceDir.toFile(),
-                new String[]{"git", "config", "user.name", authorName}, 10).success()) {
-            log.warn("Could not set git user.name, continuing anyway");
-        }
-
-        if (createNewBranch) {
-            CommandResult checkoutResult = runCommand(workspaceDir.toFile(),
-                    new String[]{"git", "checkout", "-b", branchName}, 15);
-            if (!checkoutResult.success()) {
-                log.error("Failed to create branch '{}': {}", branchName, checkoutResult.output());
+        synchronized (setup) {
+            if (setup.closed() || setup.repositoryCredentials() == null) {
+                log.error("Cannot commit a closed workspace: {}", workspaceDir);
                 return false;
             }
-        }
 
-        CommandResult addResult = runCommand(workspaceDir.toFile(),
-                new String[]{"git", "add", "-A"}, 15);
-        if (!addResult.success()) {
-            log.error("git add -A failed: {}", addResult.output());
-            return false;
-        }
+            // Configure git author
+            if (!runCommand(workspaceDir.toFile(),
+                    new String[]{"git", "config", "user.email", authorEmail}, 10).success()) {
+                log.warn("Could not set git user.email, continuing anyway");
+            }
+            if (!runCommand(workspaceDir.toFile(),
+                    new String[]{"git", "config", "user.name", authorName}, 10).success()) {
+                log.warn("Could not set git user.name, continuing anyway");
+            }
 
-        CommandResult commitResult = runCommand(workspaceDir.toFile(),
-                new String[]{"git", "commit", "-m", commitMessage}, 15);
-        if (!commitResult.success()) {
-            // "nothing to commit" is not a real error
-            if (commitResult.output().contains("nothing to commit")) {
-                log.warn("Nothing to commit in workspace — no file changes were made");
+            if (createNewBranch) {
+                CommandResult checkoutResult = runCommand(workspaceDir.toFile(),
+                        new String[]{"git", "checkout", "-b", branchName}, 15);
+                if (!checkoutResult.success()) {
+                    log.error("Failed to create branch '{}': {}", branchName, checkoutResult.output());
+                    return false;
+                }
+            }
+
+            CommandResult addResult = runCommand(workspaceDir.toFile(),
+                    new String[]{"git", "add", "-A"}, 15);
+            if (!addResult.success()) {
+                log.error("git add -A failed: {}", addResult.output());
                 return false;
             }
-            log.error("git commit failed: {}", commitResult.output());
-            return false;
-        }
 
-        CommandResult pushResult = runCommand(workspaceDir.toFile(),
-                withCredentialConfig(credentialConfigForWorkspace(workspaceDir),
-                        "push", "origin", branchName), 60);
-        if (!pushResult.success()) {
-            log.error("git push failed: {}", pushResult.output());
-            return false;
-        }
+            CommandResult commitResult = runCommand(workspaceDir.toFile(),
+                    new String[]{"git", "commit", "-m", commitMessage}, 15);
+            if (!commitResult.success()) {
+                // "nothing to commit" is not a real error
+                if (commitResult.output().contains("nothing to commit")) {
+                    log.warn("Nothing to commit in workspace — no file changes were made");
+                    return false;
+                }
+                log.error("git commit failed: {}", commitResult.output());
+                return false;
+            }
 
-        log.info("Successfully committed and pushed to branch '{}'", branchName);
-        return true;
+            CommandResult pushResult = runRemoteCommand(setup, workspaceDir.toFile(), 60,
+                    "push", "origin", branchName);
+            if (!pushResult.success()) {
+                log.error("git push failed: {}", pushResult.output());
+                return false;
+            }
+
+            log.info("Successfully committed and pushed to branch '{}'", branchName);
+            return true;
+        }
     }
 
     /**
@@ -269,9 +275,8 @@ public class WorkspaceService {
         CommandResult statusResult = runCommand(workspaceDir.toFile(),
                 new String[]{"git", "status", "--porcelain"}, 10);
         if (!statusResult.success() || statusResult.output() == null) {
-            log.warn("Could not list changed files via git status: {}",
-                    statusResult.output());
-            return changed;
+            throw new IllegalStateException("Could not list changed files via git status: "
+                    + statusResult.output());
         }
         for (String line : statusResult.output().split("\\R")) {
             if (line.isBlank()) {
@@ -318,35 +323,41 @@ public class WorkspaceService {
 
 
     /**
-     * Cleans up a workspace directory and its private temporary parent, including
-     * the external git credential-store file created by {@link #prepareWorkspace}.
+     * Cleans up a workspace directory, its private temporary parent, and any
+     * in-flight Git authentication files.
      */
     public void cleanupWorkspace(Path workspaceDir) {
         if (workspaceDir == null) {
             return;
         }
         Path workspaceRoot = workspaceRootFor(workspaceDir);
-        WorkspaceSetup setup = new WorkspaceSetup(workspaceRoot != null ? workspaceRoot : workspaceDir);
-        setup.setCredentialsFile(credentialsByWorkspace.remove(workspaceKey(workspaceDir)));
+        WorkspaceSetup setup = setupsByWorkspace.get(workspaceKey(workspaceDir));
+        if (setup == null) {
+            setup = new WorkspaceSetup(workspaceRoot != null ? workspaceRoot : workspaceDir);
+        }
         cleanupWorkspace(setup);
     }
 
     /**
-     * Cleans up a whole {@link WorkspaceSetup}: the credential-store file and
-     * the private temporary parent are deleted together. Keeping both
-     * references in one holder guarantees that no retry path can drop the
-     * credential file after a partial directory deletion.
+     * Cleans up a whole {@link WorkspaceSetup}, including any authentication
+     * files left by an interrupted remote Git command.
      */
-    void cleanupWorkspace(WorkspaceSetup setup) {
+    boolean cleanupWorkspace(WorkspaceSetup setup) {
         if (setup == null) {
-            return;
+            return true;
         }
-        deleteCredentialsFile(setup.credentialsFile());
-        try {
-            deleteDirectory(setup.workspaceRoot());
-            log.debug("Cleaned up workspace: {}", setup.workspaceDir());
-        } catch (IOException e) {
-            log.warn("Failed to clean up workspace {}: {}", setup.workspaceDir(), e.getMessage());
+        synchronized (setup) {
+            setup.close();
+            clearAuthenticationFiles(setup);
+            try {
+                deleteDirectory(setup.workspaceRoot());
+                setupsByWorkspace.remove(workspaceKey(setup.workspaceDir()), setup);
+                log.debug("Cleaned up workspace: {}", setup.workspaceDir());
+                return true;
+            } catch (IOException | RuntimeException e) {
+                log.warn("Failed to clean up workspace {}: {}", setup.workspaceDir(), e.getMessage());
+                return false;
+            }
         }
     }
 
@@ -357,7 +368,8 @@ public class WorkspaceService {
      * tests and local development), passes through as-is.
      */
     String buildCloneUrl(String owner, String repo, String cloneBaseUrl) {
-        if (cloneBaseUrl.startsWith("file://") || cloneBaseUrl.startsWith("/")) {
+        if (cloneBaseUrl.startsWith("file://") || isLocalClonePath(cloneBaseUrl)
+                || isSshCloneUrl(cloneBaseUrl)) {
             return cloneBaseUrl;
         }
         String protocol = cloneBaseUrl.startsWith("https://") ? "https" : "http";
@@ -377,8 +389,14 @@ public class WorkspaceService {
      */
     Path createCredentialsFile(String cloneBaseUrl, String token, Path workspaceDir)
             throws IOException {
+        return createCredentialsFile(cloneBaseUrl, null, token, workspaceDir, null);
+    }
+
+    private Path createCredentialsFile(String cloneBaseUrl, String username, String token,
+                                       Path workspaceDir, WorkspaceSetup setup) throws IOException {
         if (token == null || token.isBlank()
-                || cloneBaseUrl.startsWith("file://") || cloneBaseUrl.startsWith("/")) {
+                || cloneBaseUrl.startsWith("file://") || isLocalClonePath(cloneBaseUrl)
+                || isSshCloneUrl(cloneBaseUrl)) {
             return null;
         }
         String protocol = cloneBaseUrl.startsWith("https://") ? "https" : "http";
@@ -393,9 +411,61 @@ public class WorkspaceService {
             throw new IOException("Workspace does not have a private credential directory");
         }
         Path credentialsFile = Files.createTempFile(workspaceRoot, "credentials-", ".store");
-        restrictToOwner(credentialsFile, false);
-        Files.writeString(credentialsFile, protocol + "://oauth2:" + token + "@" + host + "\n");
-        return credentialsFile;
+        if (setup != null) {
+            setup.setCredentialsFile(credentialsFile);
+        }
+        try {
+            String credentialUsername = username == null || username.isBlank() ? "oauth2" : username;
+            return writeSecretFile(credentialsFile,
+                    protocol + "://" + credentialUsername + ":" + token + "@" + host + "\n");
+        } catch (IOException e) {
+            if (deleteSecretFile(credentialsFile) && setup != null) {
+                setup.setCredentialsFile(null);
+            }
+            throw e;
+        }
+    }
+
+    void createAuthenticationFiles(String cloneBaseUrl, RepositoryCredentials credentials,
+                                    WorkspaceSetup setup) throws IOException {
+        if (!credentials.usesSsh()) {
+            createCredentialsFile(cloneBaseUrl, credentials.username(), credentials.token(),
+                    setup.workspaceDir(), setup);
+            return;
+        }
+        if (credentials.sshPrivateKey() == null || credentials.sshPrivateKey().isBlank()
+                || credentials.sshKnownHosts() == null || credentials.sshKnownHosts().isBlank()) {
+            throw new IOException("SSH private key and known_hosts are required");
+        }
+        Path privateKey = Files.createTempFile(setup.workspaceRoot(), "ssh-key-", ".tmp");
+        setup.setSshPrivateKeyFile(privateKey);
+        writeSecretFile(privateKey, normalizeSecret(credentials.sshPrivateKey()));
+        Path knownHosts = Files.createTempFile(setup.workspaceRoot(), "known-hosts-", ".tmp");
+        setup.setSshKnownHostsFile(knownHosts);
+        writeSecretFile(knownHosts, normalizeSecret(credentials.sshKnownHosts()));
+    }
+
+    void clearAuthenticationFiles(WorkspaceSetup setup) {
+        if (deleteSecretFile(setup.credentialsFile())) {
+            setup.setCredentialsFile(null);
+        }
+        if (deleteSecretFile(setup.sshPrivateKeyFile())) {
+            setup.setSshPrivateKeyFile(null);
+        }
+        if (deleteSecretFile(setup.sshKnownHostsFile())) {
+            setup.setSshKnownHostsFile(null);
+        }
+    }
+
+    private String normalizeSecret(String content) {
+        String normalized = content.replace("\r\n", "\n").replace('\r', '\n');
+        return normalized.endsWith("\n") ? normalized : normalized + "\n";
+    }
+
+    private Path writeSecretFile(Path file, String content) throws IOException {
+        restrictToOwner(file, false);
+        Files.writeString(file, content);
+        return file;
     }
 
     /** Creates a private temporary parent and returns its repository child path. */
@@ -404,12 +474,10 @@ public class WorkspaceService {
     }
 
     /**
-     * Creates a new workspace attempt as a single {@link WorkspaceSetup} holding
-     * the private temporary parent (with its marker file) and, once created, the
-     * external credential-store file. The holder is the unit of cleanup, so both
-     * always travel together through retry and error paths.
+     * Creates a new workspace attempt with a private temporary parent and marker.
      */
     WorkspaceSetup createWorkspaceSetup() throws IOException {
+        retryFailedCleanups();
         Path workspaceRoot;
         if (workspaceBaseDir == null) {
             workspaceRoot = Files.createTempDirectory("agent-workspace-");
@@ -417,13 +485,23 @@ public class WorkspaceService {
             Files.createDirectories(workspaceBaseDir);
             workspaceRoot = Files.createTempDirectory(workspaceBaseDir, "agent-workspace-");
         }
+        WorkspaceSetup setup = new WorkspaceSetup(workspaceRoot);
+        registerWorkspace(setup);
         try {
             restrictToOwner(workspaceRoot, true);
             Files.createFile(workspaceRoot.resolve(WORKSPACE_ROOT_MARKER));
-            return new WorkspaceSetup(workspaceRoot);
-        } catch (IOException e) {
-            deleteDirectory(workspaceRoot);
+            return setup;
+        } catch (IOException | RuntimeException e) {
+            cleanupWorkspace(setup);
             throw e;
+        }
+    }
+
+    private void retryFailedCleanups() {
+        for (WorkspaceSetup setup : setupsByWorkspace.values()) {
+            if (setup.closed()) {
+                cleanupWorkspace(setup);
+            }
         }
     }
 
@@ -448,65 +526,143 @@ public class WorkspaceService {
                     directory ? OWNER_DIRECTORY_PERMISSIONS : OWNER_FILE_PERMISSIONS);
             return;
         } catch (UnsupportedOperationException ignored) {
-            // Windows ACLs do not expose POSIX permissions through NIO.
+            // Use the native ACL view when POSIX permissions are unavailable.
         }
-        File file = path.toFile();
-        file.setReadable(false, false);
-        file.setWritable(false, false);
-        if (directory) {
-            file.setExecutable(false, false);
+        AclFileAttributeView aclView = Files.getFileAttributeView(
+                path, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        if (aclView == null) {
+            throw new IOException("Owner-only permissions are unsupported for " + path);
         }
-        file.setReadable(true, true);
-        file.setWritable(true, true);
-        if (directory) {
-            file.setExecutable(true, true);
-        }
+        AclEntry ownerAccess = AclEntry.newBuilder()
+                .setType(AclEntryType.ALLOW)
+                .setPrincipal(Files.getOwner(path, LinkOption.NOFOLLOW_LINKS))
+                .setPermissions(AclEntryPermission.values())
+                .build();
+        aclView.setAcl(List.of(ownerAccess));
     }
 
-    /**
-     * git {@code -c} arguments that authenticate via the credential-store file
-     * used for every authenticated Git command.
-     */
-    private String[] credentialConfigArgs(Path credentialsFile) {
-        if (credentialsFile == null) {
-            return new String[0];
+    /** Git {@code -c} arguments used for every remote command in one workspace. */
+    String[] gitConfigArgs(WorkspaceSetup setup) {
+        List<String> args = new ArrayList<>();
+        if (setup != null && setup.credentialsFile() != null) {
+            args.add("-c");
+            args.add("credential.helper=");
+            args.add("-c");
+            args.add("credential.helper=store --file=" + setup.credentialsFile().toAbsolutePath());
         }
-        return new String[]{
-                "-c", "credential.helper=",
-                "-c", "credential.helper=store --file=" + credentialsFile.toAbsolutePath()};
+        if (setup != null && setup.sshPrivateKeyFile() != null && setup.sshKnownHostsFile() != null) {
+            String sshCommand = "ssh -F /dev/null -i " + shellQuote(setup.sshPrivateKeyFile())
+                    + " -o UserKnownHostsFile=" + shellQuote(setup.sshKnownHostsFile())
+                    + " -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
+                    + " -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes";
+            args.add("-c");
+            args.add("core.sshCommand=" + sshCommand);
+        }
+        return args.toArray(String[]::new);
     }
 
-    private String[] withCredentialConfig(String[] credentialConfig, String... gitArgs) {
-        String[] command = new String[1 + credentialConfig.length + gitArgs.length];
+    String[] withGitConfig(String[] gitConfig, String... gitArgs) {
+        String[] command = new String[1 + gitConfig.length + gitArgs.length];
         command[0] = "git";
-        System.arraycopy(credentialConfig, 0, command, 1, credentialConfig.length);
-        System.arraycopy(gitArgs, 0, command, 1 + credentialConfig.length, gitArgs.length);
+        System.arraycopy(gitConfig, 0, command, 1, gitConfig.length);
+        System.arraycopy(gitArgs, 0, command, 1 + gitConfig.length, gitArgs.length);
         return command;
     }
 
-    void registerCredentialsFile(Path workspaceDir, Path credentialsFile) {
-        if (credentialsFile == null) {
-            return;
-        }
-        credentialsByWorkspace.put(workspaceKey(workspaceDir), credentialsFile);
+    private String shellQuote(Path value) {
+        return "'" + value.toAbsolutePath().normalize().toString().replace("'", "'\"'\"'") + "'";
     }
 
-    String[] credentialConfigForWorkspace(Path workspaceDir) {
-        return credentialConfigArgs(credentialsByWorkspace.get(workspaceKey(workspaceDir)));
+    private boolean isSshCloneUrl(String cloneUrl) {
+        return cloneUrl.startsWith("ssh://")
+                || (!cloneUrl.contains("://") && cloneUrl.contains("@") && cloneUrl.contains(":"));
+    }
+
+    private boolean isLocalClonePath(String cloneUrl) {
+        return cloneUrl.startsWith("/") || cloneUrl.startsWith("\\\\")
+                || cloneUrl.length() >= 3 && Character.isLetter(cloneUrl.charAt(0))
+                && cloneUrl.charAt(1) == ':'
+                && (cloneUrl.charAt(2) == '\\' || cloneUrl.charAt(2) == '/');
+    }
+
+    void registerWorkspace(WorkspaceSetup setup) {
+        synchronized (setup) {
+            if (!setup.closed()) {
+                setupsByWorkspace.put(workspaceKey(setup.workspaceDir()), setup);
+            }
+        }
+    }
+
+    CommandResult fetchBranch(Path workspaceDir, String branch) {
+        return runRemoteCommand(setupsByWorkspace.get(workspaceKey(workspaceDir)),
+                workspaceDir.toFile(), 60,
+                "fetch", "origin", "refs/heads/" + branch + ":refs/remotes/origin/" + branch);
+    }
+
+    private CommandResult runRemoteCommand(WorkspaceSetup setup, File workDir, int timeoutSeconds,
+                                           String... gitArgs) {
+        if (setup == null) {
+            return new CommandResult(false, "Workspace authentication is unavailable");
+        }
+        synchronized (setup) {
+            if (setup.closed()) {
+                return new CommandResult(false, "Workspace was already cleaned up");
+            }
+            if (setup.repositoryCredentials() == null) {
+                return new CommandResult(false, "Workspace authentication is unavailable");
+            }
+            CommandResult result = null;
+            RuntimeException commandError = null;
+            try {
+                clearAuthenticationFiles(setup);
+                if (hasAuthenticationFiles(setup)) {
+                    result = new CommandResult(false, "Could not remove previous Git authentication files");
+                } else {
+                    createAuthenticationFiles(setup.cloneBaseUrl(), setup.repositoryCredentials(), setup);
+                    result = runCommand(workDir, withGitConfig(gitConfigArgs(setup), gitArgs), timeoutSeconds);
+                }
+            } catch (IOException e) {
+                result = new CommandResult(false, "Failed to prepare Git authentication: " + e.getMessage());
+            } catch (RuntimeException e) {
+                commandError = e;
+            } finally {
+                clearAuthenticationFiles(setup);
+            }
+            if (hasAuthenticationFiles(setup)) {
+                cleanupWorkspace(setup);
+                if (commandError != null) {
+                    commandError.addSuppressed(new IOException("Could not remove Git authentication files"));
+                    throw commandError;
+                }
+                return new CommandResult(false, "Could not remove Git authentication files");
+            }
+            if (commandError != null) {
+                throw commandError;
+            }
+            return result;
+        }
+    }
+
+    private boolean hasAuthenticationFiles(WorkspaceSetup setup) {
+        return setup.credentialsFile() != null || setup.sshPrivateKeyFile() != null
+                || setup.sshKnownHostsFile() != null;
     }
 
     private Path workspaceKey(Path workspaceDir) {
         return workspaceDir.toAbsolutePath().normalize();
     }
 
-    /** Deletes a credential-store file after a failed workspace setup. */
-    private void deleteCredentialsFile(Path credentialsFile) {
-        if (credentialsFile != null) {
-            try {
-                Files.deleteIfExists(credentialsFile);
-            } catch (IOException e) {
-                log.warn("Failed to delete git credentials file {}: {}", credentialsFile, e.getMessage());
-            }
+    /** Deletes an authentication file after a failed or completed workspace. */
+    private boolean deleteSecretFile(Path file) {
+        if (file == null) {
+            return true;
+        }
+        try {
+            Files.deleteIfExists(file);
+            return true;
+        } catch (IOException e) {
+            log.warn("Failed to delete Git authentication file {}: {}", file, e.getMessage());
+            return false;
         }
     }
 
@@ -533,29 +689,22 @@ public class WorkspaceService {
             pb.environment().put("GIT_CONFIG_NOSYSTEM", "1");
             pb.environment().put("GIT_CONFIG_GLOBAL", emptyGlobalGitConfig.toString());
 
-            Process process = pb.start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line).append("\n");
-                }
-            }
-
-            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-            if (!finished) {
-                process.destroyForcibly();
+            ProcessSupport.CommandResult result = ProcessSupport.run(
+                    pb, timeoutSeconds, TimeUnit.SECONDS, 1024 * 1024);
+            if (!result.finished()) {
                 return new CommandResult(false,
                         "Command timed out after " + timeoutSeconds + " seconds");
             }
-
-            boolean success = process.exitValue() == 0;
-            return new CommandResult(success, output.toString());
-        } catch (IOException | InterruptedException e) {
-            if (e instanceof InterruptedException) {
-                Thread.currentThread().interrupt();
+            if (result.truncated()) {
+                return new CommandResult(false,
+                        "Command output exceeded the 1 MiB safety limit");
             }
+
+            return new CommandResult(result.exitCode() == 0, result.output());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Git command was interrupted", e);
+        } catch (IOException e) {
             log.error("Failed to run command: {}", e.getMessage());
             return new CommandResult(false, "Exception: " + e.getMessage());
         } finally {
@@ -578,18 +727,31 @@ public class WorkspaceService {
         }
     }
 
-    private void deleteDirectory(Path dir) throws IOException {
-        if (Files.exists(dir)) {
-            try (var stream = Files.walk(dir)) {
-                stream.sorted(Comparator.reverseOrder())
-                        .forEach(path -> {
-                            try {
-                                Files.delete(path);
-                            } catch (IOException e) {
-                                log.warn("Failed to delete {}: {}", path, e.getMessage());
-                            }
-                        });
+    void deleteDirectory(Path dir) throws IOException {
+        if (Files.notExists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        List<Path> paths;
+        try (var stream = Files.walk(dir)) {
+            paths = stream.sorted(Comparator.reverseOrder()).toList();
+        } catch (java.io.UncheckedIOException e) {
+            throw e.getCause();
+        }
+        IOException failure = null;
+        for (Path path : paths) {
+            try {
+                Files.delete(path);
+            } catch (IOException e) {
+                log.warn("Failed to delete {}: {}", path, e.getMessage());
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
             }
+        }
+        if (failure != null) {
+            throw failure;
         }
     }
 }

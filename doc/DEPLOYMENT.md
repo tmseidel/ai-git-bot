@@ -77,11 +77,16 @@ volumes:
 
 ## Environment Variables
 
+### Security (Recommended)
+
+| Variable | Description |
+|----------|-------------|
+| `APP_ENCRYPTION_KEY` | Encryption key for sensitive data (API keys, tokens, SSH private keys). Without it, other credentials are stored in plain text and SSH private keys are rejected. |
+
 ### Required
 
 | Variable | Description |
 |----------|-------------|
-| `APP_ENCRYPTION_KEY` | Encryption key for sensitive data (API keys, tokens). Set to a fixed value for persistence across restarts. If not set, a random key is generated (data won't survive restarts). |
 | `DATABASE_URL` | JDBC connection URL (default: `jdbc:postgresql://db:5432/giteabot`) |
 | `DATABASE_USERNAME` | Database username (default: `giteabot`) |
 | `DATABASE_PASSWORD` | Database password |
@@ -238,14 +243,14 @@ All AI provider and Git configuration is managed through the web interface:
 1. **AI Integrations**: Create connections to AI providers (Anthropic, OpenAI, Ollama, llama.cpp)
    - Provider-specific default API URLs are pre-filled
    - Suggested models are available via dropdown
-   - API keys are encrypted at rest
+   - API keys are encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 
 2. **Git Integrations**: Create connections to Git hosting platforms
    - **Gitea**: Self-hosted Gitea instances — see [Gitea Setup](GITEA_SETUP.md)
    - **GitHub**: github.com or GitHub Enterprise Server — see [GitHub Setup](GITHUB_SETUP.md)
    - **GitLab**: gitlab.com or self-managed GitLab — see [GitLab Setup](GITLAB_SETUP.md)
    - **Bitbucket Cloud**: bitbucket.org — see [Bitbucket Setup](BITBUCKET_SETUP.md)
-   - Tokens are encrypted at rest
+   - Tokens are encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 
 3. **Bots**: Create bots that combine an AI integration with a Git integration
    - Each bot gets a unique webhook URL
@@ -320,8 +325,8 @@ each architecture on a native host.
 - Schema is automatically managed by Hibernate (`ddl-auto=update`)
 - The database stores:
   - Admin users
-  - AI integrations (with encrypted API keys)
-  - Git integrations (with encrypted tokens)
+  - AI integrations (API keys are encrypted when `APP_ENCRYPTION_KEY` is configured)
+  - Git integrations (tokens are encrypted when `APP_ENCRYPTION_KEY` is configured)
   - Bots
   - Review sessions and conversation history
 

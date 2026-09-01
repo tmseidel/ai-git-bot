@@ -93,6 +93,7 @@ class ProcessSupportTest {
 
         assertThat(result.output()).isEqualTo("€€€");
         assertThat(result.output().getBytes(StandardCharsets.UTF_8)).hasSizeLessThanOrEqualTo(10);
+        assertThat(result.truncated()).isTrue();
     }
 
     public static final class SlowOutputProcess {
