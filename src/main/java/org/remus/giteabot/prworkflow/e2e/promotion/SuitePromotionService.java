@@ -121,8 +121,9 @@ public class SuitePromotionService {
             case EPHEMERAL        -> throw new IllegalStateException("EPHEMERAL rejected above");
         };
 
-        WorkspaceResult ws = workspaceService.prepareWorkspace(repoOwner, repoName, baseBranch,
-                client.getCloneUrl(), client.getToken(), null);
+        WorkspaceResult ws = workspaceService.prepareWorkspace(
+                client, repoOwner, repoName, baseBranch,
+                mode == SuiteLifecycleMode.PROMOTE_ON_MERGE ? null : prNumber);
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());
         }

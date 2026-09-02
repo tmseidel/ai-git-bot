@@ -52,6 +52,11 @@ public class GiteaApiClient implements RepositoryApiClient {
     }
 
     @Override
+    public String getCloneUrl() {
+        return credentials.cloneUrl();
+    }
+
+    @Override
     public String getPullRequestDiff(String owner, String repo, Long pullNumber) {
         log.info("Fetching diff for PR #{} in {}/{}", pullNumber, owner, repo);
         return giteaRestClient.get()

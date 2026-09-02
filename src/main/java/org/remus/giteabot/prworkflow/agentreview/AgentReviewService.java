@@ -199,8 +199,7 @@ public class AgentReviewService {
         Path workspaceDir = null;
         try {
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    owner, repo, headBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken(), prNumber);
+                    repositoryClient, owner, repo, headBranch, prNumber);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
@@ -298,8 +297,7 @@ public class AgentReviewService {
         Path workspaceDir = null;
         try {
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    owner, repo, headBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken(),prNumber);
+                    repositoryClient, owner, repo, headBranch, prNumber);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
                         prNumber, wsResult.error());

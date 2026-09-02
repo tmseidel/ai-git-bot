@@ -26,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -55,11 +56,9 @@ class SuitePromotionServiceTest {
         repoClient = mock(RepositoryApiClient.class);
 
         when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
-        when(repoClient.getCloneUrl()).thenReturn("http://git.local");
-        when(repoClient.getToken()).thenReturn("tok");
         when(repoClient.getDefaultBranch(anyString(), anyString())).thenReturn("main");
-        when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(),
-                anyString(), anyString(), any()))
+        when(workspaceService.prepareWorkspace(any(RepositoryApiClient.class),
+                anyString(), anyString(), anyString(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean()))
@@ -79,7 +78,7 @@ class SuitePromotionServiceTest {
                 "acme", "web", "feature/login");
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.SKIPPED);
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -101,6 +100,8 @@ class SuitePromotionServiceTest {
         assertThat(run.getFollowUpPrNumber()).isEqualTo(4242L);
         // File actually written.
         assertThat(workspace.resolve("tests/e2e/pr-7/login.spec.ts")).exists();
+        verify(workspaceService).prepareWorkspace(
+                repoClient, "acme", "web", "feature/login", 7L);
         verify(workspaceService).commitAndPush(eq(workspace), eq(expectedBranch),
                 anyString(), anyString(), anyString(), eq(true));
     }
@@ -120,6 +121,8 @@ class SuitePromotionServiceTest {
         assertThat(out.writtenPaths()).containsExactly("tests/e2e/checkout.spec.ts");
         assertThat(workspace.resolve("tests/e2e/checkout.spec.ts")).exists();
         assertThat(run.getFollowUpPrNumber()).isEqualTo(5050L);
+        verify(workspaceService).prepareWorkspace(
+                eq(repoClient), eq("acme"), eq("web"), eq("main"), isNull());
     }
 
     @Test
@@ -161,6 +164,8 @@ class SuitePromotionServiceTest {
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.COMMITTED);
         assertThat(out.branch()).isEqualTo("feature/x");
         assertThat(workspace.resolve("tests/e2e/pr-3/smoke.spec.ts")).exists();
+        verify(workspaceService).prepareWorkspace(
+                repoClient, "acme", "web", "feature/x", 3L);
         verify(workspaceService).commitAndPush(eq(workspace), eq("feature/x"),
                 anyString(), anyString(), anyString(), eq(false));
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
@@ -180,7 +185,7 @@ class SuitePromotionServiceTest {
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.ALREADY_PROMOTED);
         assertThat(out.followUpPrNumber()).isEqualTo(123L);
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
     }
 
@@ -223,7 +228,7 @@ class SuitePromotionServiceTest {
 
     @Test
     void workspaceFailure_surfacesAsOutcomeFailure() {
-        when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any(), any()))
+        when(workspaceService.prepareWorkspace(any(), any(), any(), any(), any()))
                 .thenReturn(WorkspaceResult.failure("network down"));
 
         PrTestSuite suite = suite(SuiteLifecycleMode.OFFER_AS_PR, 7L,

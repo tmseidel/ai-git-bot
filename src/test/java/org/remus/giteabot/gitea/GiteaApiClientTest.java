@@ -34,6 +34,34 @@ class GiteaApiClientTest {
     }
 
     @Test
+    void getRepositoryRemote_buildsCompleteHttpUrl() {
+        GiteaApiClient client = new GiteaApiClient(null, CREDS);
+
+        assertEquals("https://gitea.example.com/owner/repo.git",
+                client.getRepositoryRemote("owner", "repo"));
+    }
+
+    @Test
+    void getRepositoryRemote_rejectsCredentialBearingHttpBase() {
+        GiteaApiClient client = new GiteaApiClient(null,
+                RepositoryCredentials.of("https://gitea.example.com",
+                        "https://user:secret@gitea.example.com", "gitea-token"));
+
+        assertThrows(IllegalStateException.class,
+                () -> client.getRepositoryRemote("owner", "repo"));
+    }
+
+    @Test
+    void getRepositoryRemote_rejectsNonCanonicalHttpScheme() {
+        GiteaApiClient client = new GiteaApiClient(null,
+                RepositoryCredentials.of("https://gitea.example.com",
+                        "HTTPS://gitea.example.com", "gitea-token"));
+
+        assertThrows(IllegalStateException.class,
+                () -> client.getRepositoryRemote("owner", "repo"));
+    }
+
+    @Test
     void getIssueComments_fetchesIssueCommentsWithLimit() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();

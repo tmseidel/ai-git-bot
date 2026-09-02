@@ -415,6 +415,7 @@ class PrWorkflowToolExecutorTest {
         @Override public RepositoryCredentials getCredentials() {
             return new RepositoryCredentials("http://x", "http://x", "u", "t");
         }
+        @Override public String getCloneUrl() { return "http://x"; }
         @Override public String getPullRequestDiff(String o, String r, Long p) { return ""; }
         @Override public void postReviewComment(String o, String r, Long p, String b) { }
         @Override public void postPullRequestComment(String o, String r, Long p, String b) { }
