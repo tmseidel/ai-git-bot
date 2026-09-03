@@ -240,7 +240,8 @@
                                 (<code>X-Hub-Signature-256</code> for GitHub, <code>X-Gitea-Signature</code> for Gitea,
                                 <code>X-Gitlab-Token</code> for GitLab, <code>X-Hub-Signature</code> for Bitbucket)
                                 and rejects forged events. Configure the same secret in the provider's webhook settings.
-                                Stored encrypted. <strong>Highly recommended for public repositories.</strong>
+                                Stored encrypted when <code>APP_ENCRYPTION_KEY</code> is configured.
+                                <strong>Highly recommended for public repositories.</strong>
                             </div>
                         </div>
 

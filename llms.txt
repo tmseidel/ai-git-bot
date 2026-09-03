@@ -25,7 +25,7 @@ License: MIT
 - Optional per-bot user whitelist to restrict who may trigger AI-spending interactions.
 - Built-in Prometheus metrics via `/actuator/prometheus`.
 - Signed, durable, retried outgoing webhooks for workflow-run and issue-assignment events.
-- Self-hosted deployment with Docker Compose and encrypted secrets.
+- Self-hosted deployment with Docker Compose and AES-256-GCM secret encryption when `APP_ENCRYPTION_KEY` is configured.
 
 ## Keywords
 

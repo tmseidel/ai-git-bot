@@ -62,7 +62,7 @@
                 <textarea class="form-control font-monospace" rows="3" name="plainCustomHeaders" id="plainCustomHeaders"
                           th:placeholder="${endpoint.customHeaders != null} ? #{placeholder.configuredKeep} : '{ &quot;X-Source&quot;: &quot;ai-git-bot&quot; }'"></textarea>
                 <div class="form-text" th:text="#{help.hook.customHeaders}">Sent with every delivery. Must be a single JSON object. Stored
-                    encrypted; leave blank on edit to keep the current value.</div>
+                    encrypted when APP_ENCRYPTION_KEY is configured; leave blank on edit to keep the current value.</div>
             </div>
 
             <div class="row">
