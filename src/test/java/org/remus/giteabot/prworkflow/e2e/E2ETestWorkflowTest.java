@@ -273,6 +273,40 @@ class E2ETestWorkflowTest {
     }
 
     @Test
+    void promotionFailure_doesNotChangeSuccessfulWorkflowStatus() {
+        TestSuiteRunner passing = new TestSuiteRunner() {
+            @Override public E2eTestFramework framework() { return E2eTestFramework.PLAYWRIGHT; }
+            @Override public TestSuiteOutcome run(TestSuiteRequest request) {
+                return TestSuiteOutcome.passed("all green", 1);
+            }
+        };
+        E2ETestWorkflow w = new E2ETestWorkflow(deploymentOrchestrator, suiteRepository,
+                workspaceManager, new TestSuiteRunnerRegistry(List.of(passing)),
+                selectionService, giteaClientFactory,
+                suitePromotionService, runRepository);
+
+        Bot bot = bot(new DeploymentTarget());
+        WebhookPayload payload = payload("acme", "web", 24L, "headAA");
+        payload.getPullRequest().getHead().setRef("feature/x");
+        when(deploymentOrchestrator.requestDeployment(any()))
+                .thenReturn(DeploymentResult.ready("https://x", "{}"));
+        when(selectionService.resolveParams(anyLong(), eq(E2ETestWorkflow.KEY)))
+                .thenReturn(Map.of("suiteLifecycle", "offer-as-pr"));
+        org.remus.giteabot.prworkflow.PrWorkflowRun runEntity =
+                new org.remus.giteabot.prworkflow.PrWorkflowRun();
+        runEntity.setId(42L);
+        when(runRepository.findById(42L)).thenReturn(java.util.Optional.of(runEntity));
+        when(suitePromotionService.promote(any(), any(), any(), eq("acme"), eq("web"), eq("feature/x")))
+                .thenReturn(org.remus.giteabot.prworkflow.e2e.promotion.SuitePromotionService.Outcome
+                        .failure("push failed"));
+
+        WorkflowResult result = w.run(ctx(bot, payload));
+
+        assertThat(result.status()).isEqualTo(WorkflowResultStatus.SUCCESS);
+        assertThat(result.summary()).isEqualTo("all green");
+    }
+
+    @Test
     void ephemeralLifecycle_skipsPromotionService() {
         Bot bot = bot(new DeploymentTarget());
         WebhookPayload payload = payload("acme", "web", 23L, "headZZ");

@@ -251,6 +251,20 @@ class SuitePromotionServiceTest {
     }
 
     @Test
+    void unexpectedRuntimeException_surfacesAsOutcomeFailure() {
+        when(repoClient.getDefaultBranch("acme", "web"))
+                .thenThrow(new IllegalStateException("provider unavailable"));
+
+        SuitePromotionService.Outcome out = service.promote(bot(), run(1L),
+                suite(SuiteLifecycleMode.PROMOTE_ON_MERGE, 7L,
+                        caseAt("login.spec.ts", "// hi")),
+                "acme", "web", "feature/x");
+
+        assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
+        assertThat(out.message()).contains("provider unavailable");
+    }
+
+    @Test
     void resolveConflict_suffixesBeforeFirstDot() throws IOException {
         Path base = Files.createDirectories(workspace.resolve("d"));
         Files.writeString(base.resolve("a.spec.ts"), "x");

@@ -77,6 +77,16 @@ public class SuitePromotionService {
 
     public Outcome promote(Bot bot, PrWorkflowRun run, PrTestSuite suite,
                            String repoOwner, String repoName, String featureBranch) {
+        try {
+            return promoteInternal(bot, run, suite, repoOwner, repoName, featureBranch);
+        } catch (RuntimeException e) {
+            log.error("M7 promotion failed unexpectedly for {}/{}", repoOwner, repoName, e);
+            return Outcome.failure("Unexpected promotion failure: " + e.getMessage());
+        }
+    }
+
+    private Outcome promoteInternal(Bot bot, PrWorkflowRun run, PrTestSuite suite,
+                                    String repoOwner, String repoName, String featureBranch) {
         if (suite == null || suite.getCases() == null || suite.getCases().isEmpty()) {
             return Outcome.skipped("No generated test cases to promote.");
         }
@@ -323,4 +333,3 @@ public class SuitePromotionService {
 
     }
 }
-
