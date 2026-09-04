@@ -52,10 +52,20 @@ class GiteaApiClientTest {
     }
 
     @Test
-    void getRepositoryRemote_rejectsNonCanonicalHttpScheme() {
+    void getRepositoryRemote_acceptsCaseInsensitiveHttpScheme() {
         GiteaApiClient client = new GiteaApiClient(null,
                 RepositoryCredentials.of("https://gitea.example.com",
                         "HTTPS://gitea.example.com", "gitea-token"));
+
+        assertEquals("https://gitea.example.com/owner/repo.git",
+                client.getRepositoryRemote("owner", "repo"));
+    }
+
+    @Test
+    void getRepositoryRemote_rejectsUnsupportedScheme() {
+        GiteaApiClient client = new GiteaApiClient(null,
+                RepositoryCredentials.of("https://gitea.example.com",
+                        "ftp://gitea.example.com", "gitea-token"));
 
         assertThrows(IllegalStateException.class,
                 () -> client.getRepositoryRemote("owner", "repo"));
@@ -154,4 +164,3 @@ class GiteaApiClientTest {
         server.verify();
     }
 }
-

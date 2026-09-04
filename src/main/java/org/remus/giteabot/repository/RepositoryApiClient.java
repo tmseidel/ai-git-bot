@@ -6,6 +6,7 @@ import org.remus.giteabot.repository.model.ReviewComment;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -31,7 +32,9 @@ public interface RepositoryApiClient {
     }
 
     /** Returns the credential-free HTTP clone base URL (e.g. {@code https://github.com}). */
-    String getCloneUrl();
+    default String getCloneUrl() {
+        return getCredentials().cloneUrl();
+    }
 
     /**
      * Resolves the complete, credential-free HTTP Git remote for one repository.
@@ -44,11 +47,13 @@ public interface RepositoryApiClient {
         }
         try {
             URI base = URI.create(cloneBaseUrl);
-            if (!("http".equals(base.getScheme()) || "https".equals(base.getScheme()))
+            if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
                     || base.getHost() == null || base.getUserInfo() != null
                     || base.getRawQuery() != null || base.getRawFragment() != null) {
                 throw new IllegalStateException("HTTP clone base URL must be credential-free");
             }
+            cloneBaseUrl = base.getScheme().toLowerCase(Locale.ROOT)
+                    + cloneBaseUrl.substring(base.getScheme().length());
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException("HTTP clone base URL is invalid", e);
         }

@@ -53,11 +53,6 @@ public class GitLabApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public String getCloneUrl() {
-        return credentials.cloneUrl();
-    }
-
-    @Override
     public String formatPullRequestReference(Long prNumber) {
         return "!" + prNumber;
     }

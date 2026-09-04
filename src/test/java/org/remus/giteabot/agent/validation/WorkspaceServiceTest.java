@@ -141,7 +141,7 @@ class WorkspaceServiceTest {
         // must remove the file and the private parent together.
         WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", setup.workspaceDir());
+                "https://git.example.com", null, "test-token", setup.workspaceDir());
         assertThat(credentials).isNotNull();
 
         workspaceService.cleanupWorkspace(setup);
@@ -178,7 +178,7 @@ class WorkspaceServiceTest {
         Path workspace = workspaceService.createWorkspaceDirectory();
 
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", workspace);
+                "https://git.example.com", null, "test-token", workspace);
 
         assertThat(credentials.getParent()).isEqualTo(workspace.getParent());
         assertThat(credentials.getFileName().toString()).startsWith("credentials-");
@@ -193,11 +193,11 @@ class WorkspaceServiceTest {
     }
 
     @Test
-    void createCredentialsFile_preservesConfiguredUsername() throws IOException {
+    void createCredentialsFile_preservesConfiguredUsernameWithUppercaseHttpsScheme() throws IOException {
         Path workspace = workspaceService.createWorkspaceDirectory();
 
         Path credentials = workspaceService.createCredentialsFile(
-                "https://bitbucket.org/owner/repo.git", "alice", "app-password", workspace);
+                "HTTPS://bitbucket.org/owner/repo.git", "alice", "app-password", workspace);
 
         assertThat(Files.readString(credentials))
                 .isEqualTo("https://alice:app-password@bitbucket.org\n");
@@ -226,7 +226,7 @@ class WorkspaceServiceTest {
         Files.createDirectories(unmanagedWorkspace);
 
         assertThatThrownBy(() -> workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", unmanagedWorkspace))
+                "https://git.example.com", null, "test-token", unmanagedWorkspace))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("private credential directory");
     }
@@ -235,7 +235,7 @@ class WorkspaceServiceTest {
     void credentialConfigForWorkspace_usesExternalCredentialStore() throws IOException {
         Path workspace = workspaceService.createWorkspaceDirectory();
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", workspace);
+                "https://git.example.com", null, "test-token", workspace);
 
         try {
             workspaceService.registerCredentialsFile(workspace, credentials);

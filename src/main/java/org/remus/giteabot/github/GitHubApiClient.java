@@ -43,11 +43,6 @@ public class GitHubApiClient implements RepositoryApiClient {
         return credentials;
     }
 
-    @Override
-    public String getCloneUrl() {
-        return credentials.cloneUrl();
-    }
-
     // ---- Pull request operations ----
 
     @Override

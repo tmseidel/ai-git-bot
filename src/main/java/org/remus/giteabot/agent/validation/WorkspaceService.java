@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -375,19 +376,17 @@ public class WorkspaceService {
      * private temporary parent, so the token is never stored inside the cloned
      * repository. Returns {@code null} for local paths or blank tokens.
      */
-    Path createCredentialsFile(String repositoryRemote, String token, Path workspaceDir)
-            throws IOException {
-        return createCredentialsFile(repositoryRemote, null, token, workspaceDir);
-    }
-
     Path createCredentialsFile(String repositoryRemote, String username, String token,
                                Path workspaceDir) throws IOException {
-        if (token == null || token.isBlank()
-                || repositoryRemote.startsWith("file://") || repositoryRemote.startsWith("/")) {
+        if (token == null || token.isBlank()) {
             return null;
         }
-        String protocol = repositoryRemote.startsWith("https://") ? "https" : "http";
-        String baseUrl = repositoryRemote.replaceFirst("https?://", "");
+        String lowerRemote = repositoryRemote.toLowerCase(Locale.ROOT);
+        if (lowerRemote.startsWith("file://") || repositoryRemote.startsWith("/")) {
+            return null;
+        }
+        String protocol = lowerRemote.startsWith("https://") ? "https://" : "http://";
+        String baseUrl = repositoryRemote.substring(protocol.length());
         if (baseUrl.endsWith("/")) {
             baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
         }
@@ -401,7 +400,7 @@ public class WorkspaceService {
         restrictToOwner(credentialsFile, false);
         String credentialUsername = username == null || username.isBlank() ? "oauth2" : username;
         Files.writeString(credentialsFile,
-                protocol + "://" + credentialUsername + ":" + token + "@" + host + "\n");
+                protocol + credentialUsername + ":" + token + "@" + host + "\n");
         return credentialsFile;
     }
 
