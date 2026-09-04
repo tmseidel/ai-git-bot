@@ -122,6 +122,7 @@ Supported AI/provider styles include:
 - `doc/ISSUE_WORKFLOWS.md`: issue-assigned workflow configurations that replace the legacy bot-type selector.
 - `doc/BOT_TOOL_CONFIGURATIONS.md`: per-bot built-in tool whitelists for agent execution.
 - `doc/MCP_SERVER_HANDLING.md`: MCP server JSON configuration, selected-tool persistence, bot details UI, transparency, and deployment strategy integration.
+- `doc/SECRET_REFERENCES.md`: the `${type:key}` secret-reference mechanism, late resolution, the `env` source with its whitelist and reserved names, and the `SecretSource` extension point.
 - `doc/TOOL_CALLING.md`: troubleshooting native vs legacy tool-calling mode for agentic workflows.
 - `doc/CONTEXT_WINDOW_MANAGEMENT.md`: four-layer strategy for managing long agent-session context windows.
 
@@ -265,6 +266,7 @@ AI-Git-Bot, AI Git Bot, ai-git-bot, self-hosted AI code review, AI pull request 
 - Use `doc/TOOL_CALLING.md` when investigating agent tool-call failures or provider-specific function-calling quirks.
 - Use `doc/CONTEXT_WINDOW_MANAGEMENT.md` when working on long-session agent context compaction.
 - Use `doc/BOT_TOOL_CONFIGURATIONS.md` and `doc/MCP_SERVER_HANDLING.md` before changing tool exposure or MCP integration.
+- Use `doc/SECRET_REFERENCES.md` before changing secret resolution or adding a secret source type.
 - Use `doc/OUTGOING_WEBHOOKS.md` before changing event delivery or webhook payload behavior.
 - Use the platform-specific setup guides before changing webhook payload or token permission logic.
 - Use `pom.xml` for Java/Spring Boot dependency and build metadata.

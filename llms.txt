@@ -55,6 +55,7 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 - [Context Window Management](doc/CONTEXT_WINDOW_MANAGEMENT.md): strategy for managing long agent-session contexts.
 - [Outgoing Webhooks](doc/OUTGOING_WEBHOOKS.md): signed, durable, retried event notifications to external systems.
 - [Deployment](doc/DEPLOYMENT.md): Docker Compose deployment, environment variables, and production setup.
+- [Secret References](doc/SECRET_REFERENCES.md): `${type:key}` references that keep credentials out of configuration, the `env` source and its whitelist, and how to add further secret sources.
 - [Local Development](doc/LOCAL_DEVELOPMENT.md): build, test, and project structure for contributors.
 - [Architecture](doc/ARCHITECTURE.md): components, request flows, persistence, webhook routing, and system diagrams.
 - [Security Policy](SECURITY.md): vulnerability reporting and operator security guidance.

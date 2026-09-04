@@ -86,6 +86,20 @@ volumes:
 | `DATABASE_USERNAME` | Database username (default: `giteabot`) |
 | `DATABASE_PASSWORD` | Database password |
 
+### Secret References (Optional)
+
+Configuration fields that support [secret references](SECRET_REFERENCES.md) can pull values from the environment with `${env:NAME}` instead of holding the credential itself. Only explicitly whitelisted variables are readable:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GITEABOT_SECRET_ENV_WHITELIST` | _(empty)_ | Comma-separated names of environment variables that `${env:NAME}` references may read, e.g. `MY_API_TOKEN,CI_DEPLOY_KEY`. Names are matched verbatim (case-sensitive). Empty means no environment variable is readable. |
+
+Whitelisting a name only permits it to be read — the variable itself still has to reach the process. In Docker, add it to the service's `environment:` block next to `GITEABOT_SECRET_ENV_WHITELIST`; Compose does not forward arbitrary host variables into the container.
+
+> **The application refuses to start** if the whitelist names a variable it reads for its own configuration (`GITEABOT_*`, `SPRING_*`, `DATABASE_*`, `APP_ENCRYPTION_KEY`). See [Reserved names](SECRET_REFERENCES.md#reserved-names).
+
+See [Secret References](SECRET_REFERENCES.md) for the syntax, resolution behavior and the available secret sources.
+
 ### Agent Configuration (Optional)
 
 The **coding agent** is enabled per coding bot via the web UI. Writer workflows are selected separately by choosing **Bot Type = Writer bot**. These environment variables configure global coding-agent behavior:

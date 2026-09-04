@@ -38,6 +38,26 @@ After save, the application validates the JSON and discovers tools from all conf
 
 You can also use object-style server definitions (for example with `mcpServers`) as long as remote endpoints are configured.
 
+### Secret References in the MCP JSON
+
+Credentials in the MCP JSON do not have to be written into the configuration itself. `authorization_token` (including its `authorizationToken` / `token` aliases) and every `headers` value accept a [secret reference](SECRET_REFERENCES.md), which is resolved each time a request to the MCP server is made:
+
+```json
+[
+  {
+    "name": "github",
+    "type": "url",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "authorization_token": "${env:GITHUB_MCP_TOKEN}",
+    "headers": {"X-Api-Key": "${env:MY_API_KEY}"}
+  }
+]
+```
+
+With `${env:...}`, the environment variable must be listed in `GITEABOT_SECRET_ENV_WHITELIST` before it can be read; nothing is readable by default. Escaping (`$${env:NAME}`), mixing references with literal text (`"Bearer ${env:TOKEN}"`), what happens when a reference cannot be resolved, the reserved variable names, and how to add further secret sources are all described in [Secret References](SECRET_REFERENCES.md) — the mechanism is not MCP-specific.
+
+MCP-specific detail: only `authorization_token` and `headers` values are resolved. The `url` field does **not** support secret references, because MCP endpoints are logged for diagnostics.
+
 ## 2) Select MCP Tools (Whitelist)
 
 After saving an MCP configuration, the tool-selection page opens automatically.
