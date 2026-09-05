@@ -1,8 +1,13 @@
 package org.remus.giteabot.agent.validation;
 import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryCredentials;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,14 +15,18 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+@ExtendWith(MockitoExtension.class)
 class WorkspaceServiceTest {
+    @InjectMocks
     private WorkspaceService workspaceService;
+    @Mock
+    private RepositoryApiClient repositoryClient;
     @TempDir
     Path tempDir;
-    @BeforeEach
-    void setUp() {
-        workspaceService = new WorkspaceService();
-    }
     @Test
     void cleanupWorkspace_deletesDirectory() throws IOException {
         Path wsDir = tempDir.resolve("workspace");
@@ -55,9 +64,9 @@ class WorkspaceServiceTest {
 
         // Now clone with a branch that does NOT exist in the remote, but prNumber=42
         // The --branch clone will fail, triggering the PR ref fallback
+        RepositoryApiClient client = repositoryClient(remoteDir.toAbsolutePath().toString());
         WorkspaceResult result = workspaceService.prepareWorkspace(
-                "any", "any", "nonexistent-branch",
-                remoteDir.toAbsolutePath().toString(), "dummy-token", 42L);
+                client, "any", "any", "nonexistent-branch", 42L);
 
         assertThat(result.success()).isTrue();
         assertThat(result.workspacePath()).isNotNull();
@@ -68,6 +77,9 @@ class WorkspaceServiceTest {
 
         String content = Files.readString(result.workspacePath().resolve("README.md"));
         assertThat(content).isEqualTo("pr content");
+
+        verify(client, times(1)).getRepositoryRemote("any", "any");
+        verify(client, times(1)).getCredentials();
 
         workspaceService.cleanupWorkspace(result.workspacePath());
     }
@@ -99,8 +111,8 @@ class WorkspaceServiceTest {
         runGit(localRepo, "push", "origin", "main:refs/pull/42/head");
 
         WorkspaceResult result = workspaceService.prepareWorkspace(
-                "any", "any", "nonexistent-branch",
-                remoteDir.toAbsolutePath().toString(), "dummy-token", 42L);
+                repositoryClient(remoteDir.toAbsolutePath().toString()),
+                "any", "any", "nonexistent-branch", 42L);
 
         assertThat(result.success()).isTrue();
 
@@ -129,7 +141,7 @@ class WorkspaceServiceTest {
         // must remove the file and the private parent together.
         WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", setup.workspaceDir());
+                "https://git.example.com", null, "test-token", setup.workspaceDir());
         assertThat(credentials).isNotNull();
 
         workspaceService.cleanupWorkspace(setup);
@@ -143,17 +155,22 @@ class WorkspaceServiceTest {
         workspaceService.cleanupWorkspace((WorkspaceSetup) null);
         // no exception expected
     }
+
     @Test
-    void buildCloneUrl_http() {
-        String url = workspaceService.buildCloneUrl("owner", "repo",
-                "http://git.example.com");
-        assertThat(url).isEqualTo("http://git.example.com/owner/repo.git");
-    }
-    @Test
-    void buildCloneUrl_https_trailingSlash() {
-        String url = workspaceService.buildCloneUrl("owner", "repo",
-                "https://git.example.com/");
-        assertThat(url).isEqualTo("https://git.example.com/owner/repo.git");
+    void prepareWorkspace_returnsFailureWhenProviderResolutionFailsWithoutAllocatingWorkspace() {
+        Path workspaceBaseDir = tempDir.resolve("sandbox-workspaces");
+        workspaceService = new WorkspaceService(workspaceBaseDir.toString());
+        when(repositoryClient.getRepositoryRemote("owner", "repo"))
+                .thenThrow(new IllegalStateException("provider unavailable"));
+
+        WorkspaceResult result = workspaceService.prepareWorkspace(
+                repositoryClient, "owner", "repo", "main", null);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("provider unavailable");
+        assertThat(workspaceBaseDir).doesNotExist();
+        verify(repositoryClient).getRepositoryRemote("owner", "repo");
+        verify(repositoryClient, never()).getCredentials();
     }
 
     @Test
@@ -161,7 +178,7 @@ class WorkspaceServiceTest {
         Path workspace = workspaceService.createWorkspaceDirectory();
 
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", workspace);
+                "https://git.example.com", null, "test-token", workspace);
 
         assertThat(credentials.getParent()).isEqualTo(workspace.getParent());
         assertThat(credentials.getFileName().toString()).startsWith("credentials-");
@@ -173,6 +190,18 @@ class WorkspaceServiceTest {
 
         assertThat(credentials).doesNotExist();
         assertThat(workspace.getParent()).doesNotExist();
+    }
+
+    @Test
+    void createCredentialsFile_preservesConfiguredUsernameWithUppercaseHttpsScheme() throws IOException {
+        Path workspace = workspaceService.createWorkspaceDirectory();
+
+        Path credentials = workspaceService.createCredentialsFile(
+                "HTTPS://bitbucket.org/owner/repo.git", "alice", "app-password", workspace);
+
+        assertThat(Files.readString(credentials))
+                .isEqualTo("https://alice:app-password@bitbucket.org\n");
+        workspaceService.cleanupWorkspace(workspace);
     }
 
     @Test
@@ -197,7 +226,7 @@ class WorkspaceServiceTest {
         Files.createDirectories(unmanagedWorkspace);
 
         assertThatThrownBy(() -> workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", unmanagedWorkspace))
+                "https://git.example.com", null, "test-token", unmanagedWorkspace))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("private credential directory");
     }
@@ -206,7 +235,7 @@ class WorkspaceServiceTest {
     void credentialConfigForWorkspace_usesExternalCredentialStore() throws IOException {
         Path workspace = workspaceService.createWorkspaceDirectory();
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", "test-token", workspace);
+                "https://git.example.com", null, "test-token", workspace);
 
         try {
             workspaceService.registerCredentialsFile(workspace, credentials);
@@ -289,6 +318,13 @@ class WorkspaceServiceTest {
         Files.writeString(dir.resolve("README.md"), "initial");
         runGit(dir, "add", "README.md");
         runGit(dir, "commit", "-m", "initial");
+    }
+
+    private RepositoryApiClient repositoryClient(String remote) {
+        when(repositoryClient.getRepositoryRemote("any", "any")).thenReturn(remote);
+        when(repositoryClient.getCredentials())
+                .thenReturn(RepositoryCredentials.of("", remote, "dummy-token"));
+        return repositoryClient;
     }
 
     private String runGitCapture(Path dir, String... args) throws IOException, InterruptedException {

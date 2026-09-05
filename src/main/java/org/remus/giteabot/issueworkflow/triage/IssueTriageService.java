@@ -157,7 +157,7 @@ public class IssueTriageService {
         Path workspaceDir = null;
         try {
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    owner, repo, baseBranch, repoClient.getCloneUrl(), repoClient.getToken(), null);
+                    repoClient, owner, repo, baseBranch, null);
             if (!wsResult.success()) {
                 postErrorComment(repoClient, owner, repo, issue.getNumber(),
                         "Issue triage failed: could not prepare the read-only repository context ("
