@@ -10,12 +10,15 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
+import org.springframework.http.converter.HttpMessageNotWritableException;
 
+import java.net.SocketException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 /**
@@ -175,6 +178,60 @@ class AgentLoopTest {
         assertThat(outcome.selectedBranch()).isEqualTo("dead-branch");
         verify(aiClient, times(2)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
     }
+
+    @Test
+    void run_brokenPipeDuringAiRequest_retriesOnceAndSucceeds() {
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
+        HttpMessageNotWritableException brokenPipe = new HttpMessageNotWritableException(
+                "Could not write JSON", new SocketException("Broken pipe"));
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenThrow(brokenPipe)
+                .thenReturn("ai-final");
+
+        LoopOutcome outcome = loop.run(ctx, "go", finishingStrategy());
+
+        assertThat(outcome.success()).isTrue();
+        verify(aiClient, times(2)).chat(anyList(), eq("go"), eq("sys"), isNull(), eq(8000));
+    }
+
+    @Test
+    void run_nonNetworkSerializationFailure_doesNotRetry() {
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
+        HttpMessageNotWritableException serializationFailure =
+                new HttpMessageNotWritableException("Could not write JSON");
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenThrow(serializationFailure);
+
+        assertThatThrownBy(() -> loop.run(ctx, "go", finishingStrategy()))
+                .isSameAs(serializationFailure);
+        verify(aiClient, times(1)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+    }
+
+    @Test
+    void transientNetworkWriteFailure_requiresKnownSocketFailure() {
+        assertThat(AgentLoop.isTransientNetworkWriteFailure(
+                new RuntimeException(new SocketException("Connection reset by peer")))).isTrue();
+        assertThat(AgentLoop.isTransientNetworkWriteFailure(
+                new RuntimeException(new SocketException("Permission denied")))).isFalse();
+        assertThat(AgentLoop.isTransientNetworkWriteFailure(
+                new RuntimeException("broken pipe"))).isFalse();
+    }
+
+    private static AgentStrategy finishingStrategy() {
+        return new AgentStrategy() {
+            @Override public String systemPrompt() { return "sys"; }
+            @Override public StepDecision step(AgentRunContext c, String r, int round) {
+                return new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), r));
+            }
+            @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) {
+                throw new AssertionError("budget should not be exhausted");
+            }
+        };
+    }
 }
-
-
