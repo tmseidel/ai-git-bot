@@ -92,7 +92,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
      | `llamacpp` | `http://localhost:8081` | *(user-configured)* |
      
    - **API URL**: Pre-filled based on provider; customize for self-hosted or proxy setups
-   - **API Key**: Your API key (encrypted at rest; not needed for Ollama or llama.cpp)
+   - **API Key**: Your API key (encrypted at rest when `APP_ENCRYPTION_KEY` is configured; not needed for Ollama or llama.cpp)
    - **API Version**: API version string (Anthropic only, e.g., `2023-06-01`)
    - **Model**: Select from the dropdown for suggested models, or type a custom model name
    - **Max Tokens**: Maximum tokens per AI response (default: 4096)
@@ -114,7 +114,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 - Suggested models: gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex
 
 #### Google AI
-- Requires a Gemini API key from Google AI Studio; the key is stored encrypted at rest
+- Requires a Gemini API key from Google AI Studio; the key is encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 - Uses the Gemini REST API at `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
 - Suggested models: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash
 - Enter model names without the `models/` prefix (for example, `gemini-2.5-flash`) or with the prefix if copied from Google documentation
@@ -185,7 +185,7 @@ Troubleshooting:
 
 ### Editing an AI Integration
 
-Click the **Edit** button on the integration's row. When editing, leave the API Key field blank to keep the existing encrypted value.
+Click the **Edit** button on the integration's row. When editing, leave the API Key field blank to keep the existing stored value.
 
 ### Deleting an AI Integration
 
@@ -223,7 +223,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
-    - **Token**: Your Git API token (encrypted at rest)
+    - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab can use it to approve the merge request or post a request-changes note after each bot review.
 3. Click **Save**
 
@@ -637,7 +637,7 @@ The migration that adds .NET validation support overwrites the **Default** codin
 
 ### Data Encryption
 
-Sensitive data (API keys, Git tokens) is encrypted at rest using AES-256-GCM encryption. Set the `APP_ENCRYPTION_KEY` environment variable to a secure value for production deployments. If not set, a random key is generated at startup (data won't survive restarts).
+When `APP_ENCRYPTION_KEY` is configured, sensitive data is encrypted at rest using AES-256-GCM. Without it, API keys and Git tokens are stored in plain text. Set a stable, secure value before entering production credentials.
 
 ### Authentication
 
@@ -660,7 +660,7 @@ The whitelist is the recommended defence for bots installed on **public reposito
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENCRYPTION_KEY` | *(random)* | Encryption key for sensitive data. Set to a fixed value for persistence across restarts. |
+| `APP_ENCRYPTION_KEY` | *(none)* | Encryption key for sensitive data. Without it, credentials use plain-text storage. |
 | `APP_PUBLIC_URL` | `http://localhost:8080` | Public base URL of the bot instance. Used as callback URL for CI deployment workflows and preview environments. Set to the externally reachable URL when running behind a reverse proxy or in CI. |
 | `DATABASE_URL` | H2 in-memory | Database JDBC URL |
 | `DATABASE_USERNAME` | `sa` | Database username |

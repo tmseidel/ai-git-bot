@@ -84,7 +84,7 @@ Supported AI/provider styles include:
 
 10. Self-hosted AI governance and observability
     - Teams can run the gateway in their own infrastructure.
-    - Credentials are centrally configured and encrypted at rest.
+    - Credentials are centrally configured and encrypted at rest when `APP_ENCRYPTION_KEY` is configured.
     - Local LLM setups via Ollama or llama.cpp help with compliance and data residency requirements.
     - Built-in Prometheus metrics expose reviews, findings, AI usage, errors, tool calls, and outgoing webhooks.
     - Signed, durable outgoing webhooks push workflow-run and issue-assignment events to external systems.
@@ -243,7 +243,7 @@ After startup, open `http://localhost:8080`, create the initial admin account, c
 ## Security and privacy model
 
 - AI-Git-Bot is designed for self-hosting.
-- Secrets such as API keys, tokens, webhook secrets, and outgoing webhook credentials are encrypted at rest with AES-256-GCM.
+- Secrets such as API keys, tokens, webhook secrets, and outgoing webhook credentials are encrypted at rest with AES-256-GCM when `APP_ENCRYPTION_KEY` is configured; otherwise they are stored in plain text.
 - Local LLM providers can be used to keep code and prompts inside controlled infrastructure.
 - Per-bot user whitelists can restrict token-spending interactions to trusted Git usernames.
 - Per-bot tool configurations and MCP whitelists limit the tools an agent can invoke.

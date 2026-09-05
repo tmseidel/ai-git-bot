@@ -168,7 +168,7 @@ volumes:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENCRYPTION_KEY` | *(random)* | Encryption key for API keys/tokens. Set for persistence across restarts. |
+| `APP_ENCRYPTION_KEY` | *(none)* | Encryption key for credentials. Without it, API keys and tokens are stored in plain text. |
 | `APP_PUBLIC_URL` | `http://localhost:8080` | Public base URL of the bot instance. |
 | `DATABASE_URL` | `jdbc:postgresql://db:5432/giteabot` | JDBC connection URL |
 | `DATABASE_USERNAME` | `giteabot` | Database username |
@@ -279,7 +279,7 @@ See the [Deployment Guide](https://github.com/tmseidel/ai-git-bot/blob/main/doc/
 
 ## Technical Highlights
 
-- 🔒 AES-256-GCM secret encryption
+- 🔒 AES-256-GCM secret encryption when `APP_ENCRYPTION_KEY` is configured
 - 🤖 Multi-provider AI support
 - 🏢 Multi-platform Git support
 - 🧠 Local LLM support
