@@ -60,6 +60,7 @@ class AiIntegrationControllerTest {
         when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of("google", "https://generativelanguage.googleapis.com"));
         when(providerRegistry.getSuggestedModels()).thenReturn(Map.of("google", List.of("gemini-2.5-flash")));
         when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of("google", true));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of("google", List.of()));
 
         mockMvc.perform(get("/ai-integrations/new").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -135,6 +136,7 @@ class AiIntegrationControllerTest {
         when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of("anthropic", "https://api.anthropic.com"));
         when(providerRegistry.getSuggestedModels()).thenReturn(Map.of("anthropic", List.of("claude-sonnet-4")));
         when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of("anthropic", true));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of("anthropic", List.of()));
 
         mockMvc.perform(get("/ai-integrations/7/edit").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
