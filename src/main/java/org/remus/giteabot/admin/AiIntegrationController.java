@@ -59,6 +59,7 @@ public class AiIntegrationController {
         model.addAttribute("defaultApiUrls", providerRegistry.getDefaultApiUrls());
         model.addAttribute("suggestedModels", providerRegistry.getSuggestedModels());
         model.addAttribute("apiKeyRequirements", providerRegistry.getApiKeyRequirements());
+        model.addAttribute("providerFlavors", providerRegistry.getFlavors());
     }
 
     @PostMapping("/save")

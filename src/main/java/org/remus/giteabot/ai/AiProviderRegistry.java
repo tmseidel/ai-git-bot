@@ -79,6 +79,19 @@ public class AiProviderRegistry {
     }
 
     /**
+     * Returns a map of provider type to model flavors (per-model request
+     * presets). Used by the admin form to render the flavor select for the
+     * currently selected provider.
+     */
+    public Map<String, List<ModelFlavor>> getFlavors() {
+        Map<String, List<ModelFlavor>> flavors = new LinkedHashMap<>();
+        for (AiProviderMetadata provider : providersByType.values()) {
+            flavors.put(provider.getProviderType(), provider.getFlavors());
+        }
+        return flavors;
+    }
+
+    /**
      * Returns a map of provider type to whether an API key is required.
      */
     public Map<String, Boolean> getApiKeyRequirements() {
@@ -89,10 +102,4 @@ public class AiProviderRegistry {
         return requirements;
     }
 
-    /**
-     * Returns all registered providers.
-     */
-    public List<AiProviderMetadata> getAllProviders() {
-        return List.copyOf(providersByType.values());
-    }
 }

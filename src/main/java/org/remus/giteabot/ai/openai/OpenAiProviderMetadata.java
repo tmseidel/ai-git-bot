@@ -1,18 +1,22 @@
 package org.remus.giteabot.ai.openai;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.ModelFlavor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Metadata and factory for OpenAI API integration.
  */
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class OpenAiProviderMetadata implements AiProviderMetadata {
@@ -60,12 +64,33 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
     }
 
     @Override
+    public List<ModelFlavor> getFlavors() {
+        // Stamp this provider's type into each flavor so the id is globally
+        // unique (e.g. "openai/no_reasoning") and never collides with another
+        // provider's "standard"/"no_reasoning".
+        return OpenAiFlavor.modelFlavors(PROVIDER_TYPE);
+    }
+
+    @Override
     public AiClient createClient(RestClient restClient, AiIntegration integration) {
+        String rawFlavor = integration.getModelFlavor();
+        String storedFlavor = (rawFlavor == null || rawFlavor.isBlank())
+                ? null
+                : rawFlavor.trim().toLowerCase(Locale.ROOT);
+        OpenAiFlavor flavor = OpenAiFlavor.fromId(storedFlavor);
+        // A blank or unknown value degrades to 'standard' silently; only a
+        // non-blank value that we do not recognise is worth flagging.
+        if (storedFlavor != null && !OpenAiFlavor.STANDARD.getId().equals(storedFlavor)
+                && flavor == OpenAiFlavor.STANDARD) {
+            log.warn("Unknown model flavor '{}' for OpenAI integration '{}'; using 'standard'",
+                    rawFlavor, integration.getName());
+        }
         return new OpenAiClient(
                 restClient,
                 integration.getModel(),
                 integration.getMaxTokens(),
-                !integration.isUseLegacyToolCalling()
+                !integration.isUseLegacyToolCalling(),
+                flavor
         );
     }
 }
