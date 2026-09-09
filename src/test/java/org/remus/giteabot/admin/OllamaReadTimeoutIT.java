@@ -58,7 +58,9 @@ class OllamaReadTimeoutIT {
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
-            byte[] body = "{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},"
+            byte[] body = ("{\"model\":\"test-model\",\"created_at\":\"2026-01-01T00:00:00Z\","
+                    + "\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":true,"
+                    + "\"done_reason\":\"stop\",\"prompt_eval_count\":1,\"eval_count\":1}")
                     .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             try (OutputStream os = exchange.getResponseBody()) {
