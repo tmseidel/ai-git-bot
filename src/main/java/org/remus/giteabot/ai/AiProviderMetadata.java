@@ -36,6 +36,19 @@ public interface AiProviderMetadata {
     List<String> getSuggestedModels();
 
     /**
+     * Returns the model flavors (per-model request presets) this provider
+     * offers. Flavors are selectable per AI integration in the admin UI and
+     * are applied by {@link #createClient} from the persisted flavor id.
+     *
+     * <p>Defaults to an empty list, which hides the flavor field for this
+     * provider in the form. Providers that offer flavors must always include
+     * a {@code "standard"} entry.
+     */
+    default java.util.List<ModelFlavor> getFlavors() {
+        return java.util.List.of();
+    }
+
+    /**
      * Returns whether this provider requires an API key.
      */
     boolean requiresApiKey();

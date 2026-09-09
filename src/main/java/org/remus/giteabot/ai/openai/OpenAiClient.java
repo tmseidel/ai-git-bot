@@ -32,12 +32,15 @@ public class OpenAiClient extends AbstractAiClient {
 
     private final RestClient restClient;
     private final boolean nativeToolsEnabled;
+    private final OpenAiFlavor flavor;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
-    public OpenAiClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled) {
+    public OpenAiClient(RestClient restClient, String model, int maxTokens,
+                        boolean nativeToolsEnabled, OpenAiFlavor flavor) {
         super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
+        this.flavor = flavor == null ? OpenAiFlavor.STANDARD : flavor;
     }
 
     @Override
@@ -91,12 +94,13 @@ public class OpenAiClient extends AbstractAiClient {
         OpenAiRequest request = OpenAiRequest.builder()
                 .model(effectiveModel)
                 .maxTokens(effectiveMaxTokens)
+                .reasoningEffort(flavor.reasoningEffort())
                 .messages(messages)
                 .tools(toolPayloads)
                 .build();
 
-        log.info("OpenAI chat-with-tools request: model={}, tools={}, history={}",
-                effectiveModel, toolPayloads.size(), messages.size());
+        log.info("OpenAI chat-with-tools request: model={}, flavor={}, tools={}, history={}",
+                effectiveModel, flavor.getId(), toolPayloads.size(), messages.size());
 
         OpenAiResponse response = executeRequest(request);
         return interpret(request, response);
@@ -230,6 +234,7 @@ public class OpenAiClient extends AbstractAiClient {
         OpenAiRequest request = OpenAiRequest.builder()
                 .model(model)
                 .maxTokens(maxTokens)
+                .reasoningEffort(flavor.reasoningEffort())
                 .messages(messages)
                 .tools(tools)
                 .build();

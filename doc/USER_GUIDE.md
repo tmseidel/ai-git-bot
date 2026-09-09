@@ -95,6 +95,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
    - **API Key**: Your API key (encrypted at rest when `APP_ENCRYPTION_KEY` is configured; not needed for Ollama or llama.cpp)
    - **API Version**: API version string (Anthropic only, e.g., `2023-06-01`)
    - **Model**: Select from the dropdown for suggested models, or type a custom model name
+   - **Model Flavor**: OpenAI integrations only. Provider default behavior for the model; the available flavors are listed under the field (see the OpenAI-compatible section below)
    - **Max Tokens**: Maximum tokens per AI response (default: 4096)
    - **Max Diff Chars Per Chunk**: Maximum characters per diff chunk (default: 120000)
    - **Max Diff Chunks**: Maximum number of diff chunks to process (default: 8)
@@ -112,6 +113,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 - Requires an API key
 - Compatible with OpenAI API proxies by changing the API URL
 - Suggested models: gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex
+- **Model Flavor** (this provider only): `Standard` sends no extra request fields. `No reasoning effort` sends `reasoning_effort: "none"` — use it when a gateway in front of the model (e.g. for `gpt-5.6-sol`) injects a default `reasoning_effort` and the provider rejects function tools on `/v1/chat/completions`
 
 #### Google AI
 - Requires a Gemini API key from Google AI Studio; the key is encrypted at rest when `APP_ENCRYPTION_KEY` is configured
@@ -145,6 +147,7 @@ Configure OpenAI-compatible providers in **AI Integrations → New Integration**
 | **API Key** | Enter the provider API key. For local tools that do not enforce authentication, enter a placeholder value such as `local` if the server accepts or ignores it. |
 | **API Version** | Leave blank. This field is only used for Anthropic integrations. |
 | **Model** | Enter the provider's exact model identifier, including any provider-specific prefix. |
+| **Model Flavor** | Keep the default `Standard` unless the selected model rejects function tools because of an injected `reasoning_effort` (see Troubleshooting). Select `No reasoning effort` for reasoning models such as `gpt-5.6-sol` used through a gateway that injects a default `reasoning_effort`. The field is only shown for providers that offer flavors (currently the OpenAI integration). |
 | **Max Tokens** and chunk limits | Start with the defaults, then reduce chunk limits if the selected model has a smaller context window. |
 
 Documented examples:
@@ -172,6 +175,7 @@ Troubleshooting:
 - **Model not found**: Copy the exact model identifier from the provider's model list.
 - **Empty or malformed responses**: The provider may not return the expected OpenAI chat completions response format for that model.
 - **Context length or token errors**: Reduce **Max Diff Chars/Chunk**, **Max Diff Chunks**, or **Max Tokens**, or choose a model with a larger context window.
+- **400 "Function tools with reasoning_effort are not supported"**: Your gateway injects a default `reasoning_effort`, which the selected model rejects when function tools are used on `/v1/chat/completions`. In the integration, set **Model Flavor** to `No reasoning effort` (sends `reasoning_effort: "none"`).
 
 #### Ollama
 - No API key required

@@ -21,6 +21,16 @@ public class OpenAiRequest {
     @JsonProperty("max_completion_tokens")
     private int maxTokens;
 
+    /**
+     * Sent only when the provider requires it. Some gateway front-ends inject
+     * a default {@code reasoning_effort} value; for models such as
+     * {@code gpt-5.6-sol} the Chat Completions API then rejects function tools
+     * unless {@code reasoning_effort} is explicitly {@code "none"}. See the
+     * targeted retry in OpenAiClient#executeRequest(OpenAiRequest).
+     */
+    @JsonProperty("reasoning_effort")
+    private String reasoningEffort;
+
     private List<Message> messages;
 
     /** Tool definitions advertised to the model (function calling, Step 6). */
