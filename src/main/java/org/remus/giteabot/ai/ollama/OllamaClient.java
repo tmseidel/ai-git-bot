@@ -117,6 +117,9 @@ public class OllamaClient extends AbstractAiClient {
     @Override
     public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
+        if (body == null) {
+            return false;
+        }
         String normalized = body.toLowerCase(Locale.ROOT);
         return normalized.contains("too long") || normalized.contains("context length");
     }
@@ -276,9 +279,12 @@ public class OllamaClient extends AbstractAiClient {
         // concatenated across chunks; done_reason / prompt_eval_count / eval_count
         // (and tool_calls) come from the final (done:true) chunk, which is the only
         // one that carries the usage counters — so audit/usage totals are unchanged
-        // from the non-streamed path.
+        // from the non-streamed path. If the stream ends without a done chunk
+        // (e.g. provider/proxy truncation), the last chunk is used as the
+        // metadata fallback, so model metadata is not lost.
         StringBuilder content = new StringBuilder();
         OllamaResponse[] finalRef = new OllamaResponse[1];
+        OllamaResponse[] lastRef = new OllamaResponse[1];
 
         StreamingLineReader.streamLines(restClient, "/api/chat", request, line -> {
             OllamaResponse chunk;
@@ -291,6 +297,7 @@ public class OllamaClient extends AbstractAiClient {
                 throw new ResourceAccessException(
                         "Malformed Ollama stream line: " + e.getMessage(), new IOException(e));
             }
+            lastRef[0] = chunk;
             if (chunk.getMessage() != null && chunk.getMessage().getContent() != null) {
                 content.append(chunk.getMessage().getContent());
             }
@@ -302,33 +309,31 @@ public class OllamaClient extends AbstractAiClient {
         // 0-chunk stream: reproduce the old empty-response path (body() used to
         // return null for an empty body), so extractText / interpret apply their
         // existing "Unable to generate ... empty response" fallback.
-        if (content.isEmpty() && finalRef[0] == null) {
+        OllamaResponse source = finalRef[0] != null ? finalRef[0] : lastRef[0];
+        if (source == null) {
             return null;
         }
 
         OllamaResponse merged = new OllamaResponse();
         String mergedContent = !content.isEmpty()
                 ? content.toString()
-                : (finalRef[0] != null && finalRef[0].getMessage() != null
-                    && finalRef[0].getMessage().getContent() != null
-                    ? finalRef[0].getMessage().getContent()
+                : (source.getMessage() != null && source.getMessage().getContent() != null
+                    ? source.getMessage().getContent()
                     : "");
         OllamaResponse.Message message = new OllamaResponse.Message();
         message.setRole("assistant");
         message.setContent(mergedContent);
-        if (finalRef[0] != null) {
-            merged.setDone(true);
-            merged.setDoneReason(finalRef[0].getDoneReason());
-            merged.setPromptEvalCount(finalRef[0].getPromptEvalCount());
-            merged.setEvalCount(finalRef[0].getEvalCount());
-            merged.setTotalDuration(finalRef[0].getTotalDuration());
-            if (finalRef[0].getModel() != null) {
-                merged.setModel(finalRef[0].getModel());
-            }
-            if (finalRef[0].getMessage() != null) {
-                // Tool calls are emitted complete in the final chunk.
-                message.setToolCalls(finalRef[0].getMessage().getToolCalls());
-            }
+        merged.setDone(finalRef[0] != null);
+        merged.setDoneReason(source.getDoneReason());
+        merged.setPromptEvalCount(source.getPromptEvalCount());
+        merged.setEvalCount(source.getEvalCount());
+        merged.setTotalDuration(source.getTotalDuration());
+        if (source.getModel() != null) {
+            merged.setModel(source.getModel());
+        }
+        if (source.getMessage() != null) {
+            // Tool calls are emitted complete in the final chunk.
+            message.setToolCalls(source.getMessage().getToolCalls());
         }
         merged.setMessage(message);
         return merged;

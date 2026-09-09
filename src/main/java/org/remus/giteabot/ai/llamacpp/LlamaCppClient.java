@@ -86,6 +86,9 @@ public class LlamaCppClient extends AbstractAiClient {
     @Override
     public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
+        if (body == null) {
+            return false;
+        }
         String normalized = body.toLowerCase(Locale.ROOT);
         return normalized.contains("context length")
                 || normalized.contains("too long")
