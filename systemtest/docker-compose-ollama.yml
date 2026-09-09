@@ -7,6 +7,8 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1
     healthcheck:
       test: ["CMD-SHELL", "ollama list || exit 1"]
       interval: 10s
@@ -17,7 +19,7 @@ services:
 
   ollama-pull:
     image: ollama/ollama:latest
-    entrypoint: ["sh", "-c", "sleep 5 && ollama pull ${AI_MODEL:-llama3.2:1b}"]
+    entrypoint: ["sh", "-c", "sleep 5 && ollama pull ${AI_MODEL:-qwen2.5-coder:7b}"]
     environment:
       OLLAMA_HOST: http://ollama:11434
     depends_on:
