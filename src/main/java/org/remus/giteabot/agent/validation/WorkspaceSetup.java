@@ -1,23 +1,25 @@
 package org.remus.giteabot.agent.validation;
 
+import org.remus.giteabot.repository.model.RepositoryCredentials;
+
 import java.nio.file.Path;
 
 /**
- * Lifecycle holder of one workspace attempt: the private temporary parent
- * ({@code workspaceRoot}) and the external git credential-store file created
- * for it.
+ * Lifecycle holder of one workspace attempt, including credentials retained in
+ * memory and authentication files materialized only during remote Git commands.
  *
- * <p>Both resources are created together with {@code WorkspaceSetup} and are
- * cleaned up together via {@link WorkspaceService#cleanupWorkspace} — the
- * credential-file reference can therefore never be dropped by a retry path
- * (such as the branch-clone fallback in
- * {@link WorkspaceService#prepareWorkspace}), even when a directory deletion
- * only partially succeeds.</p>
+ * <p>The private temporary parent and any in-flight files are cleaned together
+ * via {@link WorkspaceService#cleanupWorkspace}.</p>
  */
 class WorkspaceSetup {
 
     private final Path workspaceRoot;
     private Path credentialsFile;
+    private Path sshPrivateKeyFile;
+    private Path sshKnownHostsFile;
+    private String repositoryRemote;
+    private RepositoryCredentials repositoryCredentials;
+    private volatile boolean closed;
 
     WorkspaceSetup(Path workspaceRoot) {
         this.workspaceRoot = workspaceRoot;
@@ -40,5 +42,44 @@ class WorkspaceSetup {
 
     void setCredentialsFile(Path credentialsFile) {
         this.credentialsFile = credentialsFile;
+    }
+
+    Path sshPrivateKeyFile() {
+        return sshPrivateKeyFile;
+    }
+
+    void setSshPrivateKeyFile(Path sshPrivateKeyFile) {
+        this.sshPrivateKeyFile = sshPrivateKeyFile;
+    }
+
+    Path sshKnownHostsFile() {
+        return sshKnownHostsFile;
+    }
+
+    void setSshKnownHostsFile(Path sshKnownHostsFile) {
+        this.sshKnownHostsFile = sshKnownHostsFile;
+    }
+
+    String repositoryRemote() {
+        return repositoryRemote;
+    }
+
+    RepositoryCredentials repositoryCredentials() {
+        return repositoryCredentials;
+    }
+
+    void setAuthentication(String repositoryRemote, RepositoryCredentials repositoryCredentials) {
+        this.repositoryRemote = repositoryRemote;
+        this.repositoryCredentials = repositoryCredentials;
+    }
+
+    boolean closed() {
+        return closed;
+    }
+
+    void close() {
+        closed = true;
+        repositoryRemote = null;
+        repositoryCredentials = null;
     }
 }

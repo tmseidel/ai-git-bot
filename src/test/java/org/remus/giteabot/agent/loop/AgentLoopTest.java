@@ -11,6 +11,7 @@ import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.springframework.http.converter.HttpMessageNotWritableException;
+import org.springframework.web.client.ResourceAccessException;
 
 import java.net.SocketException;
 import java.nio.file.Path;
@@ -31,12 +32,11 @@ class AgentLoopTest {
     @Mock private AiClient aiClient;
     @Mock private AgentSessionService sessionService;
 
-    private AgentSession session;
     private AgentRunContext ctx;
 
     @BeforeEach
     void setUp() {
-        session = new AgentSession("owner", "repo", 42L, "title");
+        AgentSession session = new AgentSession("owner", "repo", 42L, "title");
         session.setId(1L); // persisted session — the loop flushes id-bearing sessions
         ctx = new AgentRunContext(session, "owner", "repo", 42L, Path.of("/tmp/ws"), "main");
         // lenient: the transient-session test below uses its own id-less session.
@@ -136,7 +136,7 @@ class AgentLoopTest {
 
         // First call: empty history, user="kickoff"
         assertThat(historySnapshots.get(0)).isEmpty();
-        assertThat(userMessages.get(0)).isEqualTo("kickoff");
+        assertThat(userMessages.getFirst()).isEqualTo("kickoff");
         // Second call: history contains the kickoff/first-ai pair, user="follow-up-prompt"
         assertThat(historySnapshots.get(1)).hasSize(2);
         assertThat(historySnapshots.get(1).get(0).getRole()).isEqualTo("user");
@@ -214,13 +214,28 @@ class AgentLoopTest {
     }
 
     @Test
-    void transientNetworkWriteFailure_requiresKnownSocketFailure() {
-        assertThat(AgentLoop.isTransientNetworkWriteFailure(
+    void transientNetworkFailure_requiresKnownNetworkFailure() {
+        assertThat(AgentLoop.isTransientNetworkFailure(
                 new RuntimeException(new SocketException("Connection reset by peer")))).isTrue();
-        assertThat(AgentLoop.isTransientNetworkWriteFailure(
+        assertThat(AgentLoop.isTransientNetworkFailure(
                 new RuntimeException(new SocketException("Permission denied")))).isFalse();
-        assertThat(AgentLoop.isTransientNetworkWriteFailure(
+        assertThat(AgentLoop.isTransientNetworkFailure(
                 new RuntimeException("broken pipe"))).isFalse();
+    }
+
+    @Test
+    void transientNetworkFailure_streamingTransportFailuresAreRetried() {
+        // A mid-stream read timeout (per-chunk stall detector) and a malformed
+        // stream line both surface as ResourceAccessException and must be
+        // retried, matching the streaming clients' contract.
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new ResourceAccessException("I/O error on POST request to \"/api/chat\": Read timed out",
+                        new java.net.SocketTimeoutException("Read timed out")))).isTrue();
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new ResourceAccessException("Malformed Ollama stream line: Unexpected token"))).isTrue();
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new ResourceAccessException("I/O error on POST request to \"/completion\": Connection reset",
+                        new java.net.SocketException("Connection reset")))).isTrue();
     }
 
     private static AgentStrategy finishingStrategy() {

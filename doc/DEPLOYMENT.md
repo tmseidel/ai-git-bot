@@ -81,7 +81,7 @@ volumes:
 
 | Variable | Description |
 |----------|-------------|
-| `APP_ENCRYPTION_KEY` | Encryption key for sensitive data (API keys, tokens). Without it, credentials are stored in plain text. |
+| `APP_ENCRYPTION_KEY` | Encryption key for sensitive data (API keys, tokens, SSH private keys). Without it, other credentials are stored in plain text and SSH private keys are rejected. |
 
 ### Required
 

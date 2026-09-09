@@ -98,6 +98,9 @@ public interface AiClient {
      */
     default boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
+        if (body == null) {
+            return false;
+        }
         String normalized = body.toLowerCase(Locale.ROOT);
         String status = String.valueOf(e.getStatusCode().value());
         return normalized.contains("prompt is too long")

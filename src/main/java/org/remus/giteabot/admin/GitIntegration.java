@@ -3,6 +3,8 @@ package org.remus.giteabot.admin;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
+import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
 
@@ -36,7 +38,20 @@ public class GitIntegration {
     private String username;
 
     @Column
+    @ToString.Exclude
     private String token;
+
+    @Column(nullable = false, length = 16)
+    @Enumerated(EnumType.STRING)
+    private GitTransport transport = GitTransport.HTTP;
+
+    @Column(columnDefinition = "TEXT")
+    @ToString.Exclude
+    private String sshPrivateKey;
+
+    @Column(columnDefinition = "TEXT")
+    @ToString.Exclude
+    private String sshKnownHosts;
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)

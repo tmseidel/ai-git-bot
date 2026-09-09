@@ -136,12 +136,12 @@ class WorkspaceServiceTest {
     @Test
     void cleanupWorkspace_setupDeletesCredentialFileAndRootTogether() throws IOException {
         // The holder keeps the credential-file reference even when the file was
-        // never registered in the credentialsByWorkspace map — exactly the
+        // never registered for the workspace — exactly the
         // situation of the first attempt in the branch-clone fallback. Cleanup
         // must remove the file and the private parent together.
         WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", null, "test-token", setup.workspaceDir());
+                "https://git.example.com/owner/repo.git", null, "test-token", setup.workspaceDir());
         assertThat(credentials).isNotNull();
 
         workspaceService.cleanupWorkspace(setup);
@@ -156,6 +156,26 @@ class WorkspaceServiceTest {
         // no exception expected
     }
 
+    @Test
+    void failedCleanupIsRetriedBeforeCreatingAnotherWorkspace() throws IOException {
+        FailOnceCleanupWorkspaceService service = new FailOnceCleanupWorkspaceService();
+        WorkspaceSetup failed = service.createWorkspaceSetup();
+
+        assertThat(service.cleanupWorkspace(failed)).isFalse();
+        assertThat(failed.workspaceRoot()).exists();
+
+        WorkspaceSetup next = service.createWorkspaceSetup();
+        assertThat(failed.workspaceRoot()).doesNotExist();
+        service.cleanupWorkspace(next);
+    }
+
+    @Test
+    void fetchBranch_rejectsWorkspaceWithoutAuthenticationState() {
+        CommandResult result = workspaceService.fetchBranch(tempDir, "main");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.output()).isEqualTo("Workspace authentication is unavailable");
+    }
     @Test
     void prepareWorkspace_returnsFailureWhenProviderResolutionFailsWithoutAllocatingWorkspace() {
         Path workspaceBaseDir = tempDir.resolve("sandbox-workspaces");
@@ -174,11 +194,41 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    void gitCommand_sshUsesIntegrationKeyAndPinnedHostKeys() throws IOException {
+        WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
+        RepositoryCredentials credentials = RepositoryCredentials
+                .of("https://gitea.example.com", "git@gitea.example.com:owner/repo.git", "token")
+                .withSsh("private key", "gitea.example.com ssh-ed25519 host-key");
+        workspaceService.createAuthenticationFiles(credentials.cloneUrl(), credentials, setup);
+
+        Path privateKey = setup.sshPrivateKeyFile();
+        Path knownHosts = setup.sshKnownHostsFile();
+        assertThat(Files.readString(privateKey)).isEqualTo("private key\n");
+        assertThat(Files.readString(knownHosts)).isEqualTo("gitea.example.com ssh-ed25519 host-key\n");
+        assertThat(workspaceService.withGitConfig(
+                workspaceService.gitConfigArgs(setup), "clone", credentials.cloneUrl()))
+                .containsExactly(
+                        "git", "-c",
+                        "core.sshCommand=ssh -F /dev/null -i '" + privateKey.toAbsolutePath() + "'"
+                                + " -o UserKnownHostsFile='" + knownHosts.toAbsolutePath() + "'"
+                                + " -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
+                                + " -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes",
+                         "clone", credentials.cloneUrl());
+
+        workspaceService.clearAuthenticationFiles(setup);
+        assertThat(setup.sshPrivateKeyFile()).isNull();
+        assertThat(setup.sshKnownHostsFile()).isNull();
+        assertThat(privateKey).doesNotExist();
+        assertThat(knownHosts).doesNotExist();
+        workspaceService.cleanupWorkspace(setup);
+    }
+
+    @Test
     void createCredentialsFile_keepsTokenOutsideWorkspaceAndCleanupRemovesIt() throws IOException {
         Path workspace = workspaceService.createWorkspaceDirectory();
 
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", null, "test-token", workspace);
+                "https://git.example.com/owner/repo.git", null, "test-token", workspace);
 
         assertThat(credentials.getParent()).isEqualTo(workspace.getParent());
         assertThat(credentials.getFileName().toString()).startsWith("credentials-");
@@ -193,15 +243,17 @@ class WorkspaceServiceTest {
     }
 
     @Test
-    void createCredentialsFile_preservesConfiguredUsernameWithUppercaseHttpsScheme() throws IOException {
-        Path workspace = workspaceService.createWorkspaceDirectory();
+    void authenticationFile_preservesConfiguredUsernameWithUppercaseScheme() throws IOException {
+        WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
+        RepositoryCredentials credentials = RepositoryCredentials.of(
+                "https://api.bitbucket.org", "HTTPS://bitbucket.org", "alice", "app-password");
 
-        Path credentials = workspaceService.createCredentialsFile(
-                "HTTPS://bitbucket.org/owner/repo.git", "alice", "app-password", workspace);
+        workspaceService.createAuthenticationFiles(
+                "HTTPS://bitbucket.org/owner/repo.git", credentials, setup);
 
-        assertThat(Files.readString(credentials))
+        assertThat(Files.readString(setup.credentialsFile()))
                 .isEqualTo("https://alice:app-password@bitbucket.org\n");
-        workspaceService.cleanupWorkspace(workspace);
+        workspaceService.cleanupWorkspace(setup);
     }
 
     @Test
@@ -226,21 +278,21 @@ class WorkspaceServiceTest {
         Files.createDirectories(unmanagedWorkspace);
 
         assertThatThrownBy(() -> workspaceService.createCredentialsFile(
-                "https://git.example.com", null, "test-token", unmanagedWorkspace))
+                "https://git.example.com/owner/repo.git", null, "test-token", unmanagedWorkspace))
                 .isInstanceOf(IOException.class)
                 .hasMessageContaining("private credential directory");
     }
 
     @Test
-    void credentialConfigForWorkspace_usesExternalCredentialStore() throws IOException {
-        Path workspace = workspaceService.createWorkspaceDirectory();
+    void gitConfigArgs_usesExternalCredentialStore() throws IOException {
+        WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
+        Path workspace = setup.workspaceDir();
         Path credentials = workspaceService.createCredentialsFile(
-                "https://git.example.com", null, "test-token", workspace);
+                "https://git.example.com/owner/repo.git", null, "test-token", workspace);
+        setup.setCredentialsFile(credentials);
 
         try {
-            workspaceService.registerCredentialsFile(workspace, credentials);
-
-            assertThat(workspaceService.credentialConfigForWorkspace(workspace)).containsExactly(
+            assertThat(workspaceService.gitConfigArgs(setup)).containsExactly(
                     "-c", "credential.helper=",
                     "-c", "credential.helper=store --file=" + credentials.toAbsolutePath());
         } finally {
@@ -267,25 +319,46 @@ class WorkspaceServiceTest {
 
     @Test
     void commitAndPush_disablesWorkspaceHooks() throws Exception {
-        initGitRepository(tempDir);
+        Assumptions.assumeTrue(Files.getFileStore(tempDir).supportsFileAttributeView("posix"));
+        WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
+        Path workspace = setup.workspaceDir();
+        Files.createDirectories(workspace);
+        initGitRepository(workspace);
         Path remote = tempDir.resolve("remote");
         Files.createDirectories(remote);
         runGit(remote, "init", "--bare");
-        String branch = runGitCapture(tempDir, "branch", "--show-current");
-        runGit(tempDir, "remote", "add", "origin", remote.toAbsolutePath().toString());
-        runGit(tempDir, "push", "-u", "origin", branch);
+        String branch = runGitCapture(workspace, "branch", "--show-current");
+        runGit(workspace, "remote", "add", "origin", remote.toAbsolutePath().toString());
+        runGit(workspace, "push", "-u", "origin", branch);
+        setup.setAuthentication(remote.toString(),
+                RepositoryCredentials.of("", remote.toString(), ""));
+        workspaceService.registerWorkspace(setup);
 
-        Path hook = tempDir.resolve(".git/hooks/pre-commit");
+        Path hook = workspace.resolve(".git/hooks/pre-commit");
         Files.writeString(hook, "#!/bin/sh\nexit 1\n");
-        Assumptions.assumeTrue(Files.getFileStore(hook).supportsFileAttributeView("posix"));
         Files.setPosixFilePermissions(hook, Set.of(
                 PosixFilePermission.OWNER_READ,
                 PosixFilePermission.OWNER_WRITE,
                 PosixFilePermission.OWNER_EXECUTE));
+        Files.writeString(workspace.resolve("README.md"), "changed");
+
+        try {
+            assertThat(workspaceService.commitAndPush(workspace, branch, "test commit",
+                    "Test User", "test@example.com", false)).isTrue();
+        } finally {
+            workspaceService.cleanupWorkspace(setup);
+        }
+    }
+
+    @Test
+    void commitAndPush_withoutWorkspaceStateDoesNotCreateCommit() throws Exception {
+        initGitRepository(tempDir);
+        String previousHead = runGitCapture(tempDir, "rev-parse", "HEAD");
         Files.writeString(tempDir.resolve("README.md"), "changed");
 
-        assertThat(workspaceService.commitAndPush(tempDir, branch, "test commit",
-                "Test User", "test@example.com", false)).isTrue();
+        assertThat(workspaceService.commitAndPush(tempDir, "main", "test commit",
+                "Test User", "test@example.com", false)).isFalse();
+        assertThat(runGitCapture(tempDir, "rev-parse", "HEAD")).isEqualTo(previousHead);
     }
 
     @Test
@@ -350,5 +423,18 @@ class WorkspaceServiceTest {
                 .start();
         int exitCode = process.waitFor();
         assertThat(exitCode).isZero();
+    }
+
+    private static final class FailOnceCleanupWorkspaceService extends WorkspaceService {
+        private boolean fail = true;
+
+        @Override
+        void deleteDirectory(Path dir) throws IOException {
+            if (fail) {
+                fail = false;
+                throw new IOException("simulated cleanup failure");
+            }
+            super.deleteDirectory(dir);
+        }
     }
 }

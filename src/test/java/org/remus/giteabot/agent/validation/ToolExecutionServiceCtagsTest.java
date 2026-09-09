@@ -25,7 +25,8 @@ class ToolExecutionServiceCtagsTest {
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
-                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+                new org.remus.giteabot.agent.tools.ToolCatalog(config),
+                new WorkspaceService());
     }
 
     // ---------------------------------------------------------------

@@ -168,7 +168,7 @@ volumes:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENCRYPTION_KEY` | *(none)* | Encryption key for credentials. Without it, API keys and tokens are stored in plain text. |
+| `APP_ENCRYPTION_KEY` | *(none)* | Encryption key for credentials. Without it, API keys/tokens use plain-text storage and SSH private keys are rejected. |
 | `APP_PUBLIC_URL` | `http://localhost:8080` | Public base URL of the bot instance. |
 | `DATABASE_URL` | `jdbc:postgresql://db:5432/giteabot` | JDBC connection URL |
 | `DATABASE_USERNAME` | `giteabot` | Database username |

@@ -10,7 +10,8 @@ services:
       DATABASE_URL: jdbc:postgresql://db:5432/giteabot
       DATABASE_USERNAME: ${DATABASE_USERNAME:-giteabot}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-giteabot}
-      # Encryption key for API keys stored in database (optional, but recommended for production)
+      # Encryption key for API keys and SSH private keys stored in the database
+      # (optional for tokens, required for SSH private keys)
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://github-bot.gitbot.eu}
       # Web UI login: native (default) or oauth (OAuth/OIDC discovery).

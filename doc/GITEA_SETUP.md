@@ -56,6 +56,37 @@ The bot authenticates against the Gitea API using a personal access token.
 
 You'll enter this token when creating a **Git Integration** in the bot's web UI.
 
+### Gitea Instances with Git-over-HTTP Disabled
+
+If Gitea uses `[repository] DISABLE_HTTP_GIT = true`, configure SSH for repository
+clone and push operations. The API token above remains required for comments,
+reviews, and repository metadata.
+
+Native and executable-JAR deployments require `ssh` on `PATH`; `ssh-keygen` and
+`ssh-keyscan` are operator preparation tools. The official Docker image installs
+`openssh-client` and already includes these commands.
+
+Configure `APP_ENCRYPTION_KEY` before storing any SSH private key. To use SSH:
+
+1. Generate a dedicated Ed25519 key pair without a passphrase for the bot
+   (`ssh-keygen -t ed25519 -C "ai-git-bot"`).
+2. Register the public key under the bot user's **Settings → SSH / GPG Keys** in Gitea.
+3. Collect the server's host keys (`ssh-keyscan -p <port> gitea.example.com`) and
+   verify every entry against a trusted source before storing it. Custom ports
+   use the `[host]:port` notation.
+4. Edit the Gitea integration, select **SSH** under **Git Transport**, and paste
+   the private key plus the verified `known_hosts` entries. Saving requires
+   `APP_ENCRYPTION_KEY`; the private key is encrypted at rest.
+
+Blank SSH fields keep the stored values; **Clear** removes the local credentials
+and switches the integration back to HTTP. Removing credentials or deleting the
+integration does not revoke the public key in Gitea — revoke it manually there.
+
+When enabled, the bot obtains each repository's exact `ssh_url` from the Gitea
+API and runs SSH non-interactively with the integration's identity, strict
+host-key checking, and no fallback to other identities. The API token remains in
+use for comments, reviews, and repository metadata.
+
 ## 4. Configure Webhooks
 
 Webhooks tell Gitea to notify the bot when pull request events occur. Each bot has a unique webhook URL.
