@@ -528,7 +528,7 @@ docker compose up --build -d
 
 ## 技術的特徴
 
-- 🔒 AES-256-GCM シークレット暗号化
+- 🔒 `APP_ENCRYPTION_KEY` 設定時の AES-256-GCM シークレット暗号化
 - 🤖 マルチプロバイダ AI サポート
 - 🏢 マルチプラットフォーム Git サポート
 - 🧠 ローカル LLM サポート

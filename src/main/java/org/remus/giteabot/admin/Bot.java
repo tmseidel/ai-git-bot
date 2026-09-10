@@ -102,6 +102,18 @@ public class Bot {
     private boolean runOnIssueCreation = false;
 
     /**
+     * Glob pattern (comma-separated list) that allowlists which PR
+     * <em>target</em> branches (base refs) may start a PR workflow — e.g.
+     * {@code releases/*} in a git-flow setup. Empty (the default) or {@code *}
+     * allows every branch/tag. Matching uses gobwas/glob semantics
+     * ({@code *}, {@code ?}, {@code [..]}, {@code {a,b}}, {@code **}) and may use
+     * full ref names such as {@code refs/heads/develop}. See
+     * {@link org.remus.giteabot.util.BranchFilter}.
+     */
+    @Column(name = "branch_filter", length = 1000)
+    private String branchFilter = "";
+
+    /**
      * @deprecated Issue behaviour is no longer dispatched via the bot type.
      * It is resolved from {@link #getIssueWorkflowConfiguration()} (see the
      * {@code issueworkflow} package); PR behaviour from

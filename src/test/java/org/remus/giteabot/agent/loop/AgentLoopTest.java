@@ -10,12 +10,16 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
+import org.springframework.http.converter.HttpMessageNotWritableException;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.net.SocketException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 /**
@@ -28,12 +32,11 @@ class AgentLoopTest {
     @Mock private AiClient aiClient;
     @Mock private AgentSessionService sessionService;
 
-    private AgentSession session;
     private AgentRunContext ctx;
 
     @BeforeEach
     void setUp() {
-        session = new AgentSession("owner", "repo", 42L, "title");
+        AgentSession session = new AgentSession("owner", "repo", 42L, "title");
         session.setId(1L); // persisted session — the loop flushes id-bearing sessions
         ctx = new AgentRunContext(session, "owner", "repo", 42L, Path.of("/tmp/ws"), "main");
         // lenient: the transient-session test below uses its own id-less session.
@@ -133,7 +136,7 @@ class AgentLoopTest {
 
         // First call: empty history, user="kickoff"
         assertThat(historySnapshots.get(0)).isEmpty();
-        assertThat(userMessages.get(0)).isEqualTo("kickoff");
+        assertThat(userMessages.getFirst()).isEqualTo("kickoff");
         // Second call: history contains the kickoff/first-ai pair, user="follow-up-prompt"
         assertThat(historySnapshots.get(1)).hasSize(2);
         assertThat(historySnapshots.get(1).get(0).getRole()).isEqualTo("user");
@@ -175,6 +178,75 @@ class AgentLoopTest {
         assertThat(outcome.selectedBranch()).isEqualTo("dead-branch");
         verify(aiClient, times(2)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
     }
+
+    @Test
+    void run_brokenPipeDuringAiRequest_retriesOnceAndSucceeds() {
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
+        HttpMessageNotWritableException brokenPipe = new HttpMessageNotWritableException(
+                "Could not write JSON", new SocketException("Broken pipe"));
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenThrow(brokenPipe)
+                .thenReturn("ai-final");
+
+        LoopOutcome outcome = loop.run(ctx, "go", finishingStrategy());
+
+        assertThat(outcome.success()).isTrue();
+        verify(aiClient, times(2)).chat(anyList(), eq("go"), eq("sys"), isNull(), eq(8000));
+    }
+
+    @Test
+    void run_nonNetworkSerializationFailure_doesNotRetry() {
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                new AgentBudget(5, 3, 3, 8000,
+                        8_000, 120_000,
+                        200_000, 0.7));
+        HttpMessageNotWritableException serializationFailure =
+                new HttpMessageNotWritableException("Could not write JSON");
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenThrow(serializationFailure);
+
+        assertThatThrownBy(() -> loop.run(ctx, "go", finishingStrategy()))
+                .isSameAs(serializationFailure);
+        verify(aiClient, times(1)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+    }
+
+    @Test
+    void transientNetworkFailure_requiresKnownNetworkFailure() {
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new RuntimeException(new SocketException("Connection reset by peer")))).isTrue();
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new RuntimeException(new SocketException("Permission denied")))).isFalse();
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new RuntimeException("broken pipe"))).isFalse();
+    }
+
+    @Test
+    void transientNetworkFailure_streamingTransportFailuresAreRetried() {
+        // A mid-stream read timeout (per-chunk stall detector) and a malformed
+        // stream line both surface as ResourceAccessException and must be
+        // retried, matching the streaming clients' contract.
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new ResourceAccessException("I/O error on POST request to \"/api/chat\": Read timed out",
+                        new java.net.SocketTimeoutException("Read timed out")))).isTrue();
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new ResourceAccessException("Malformed Ollama stream line: Unexpected token"))).isTrue();
+        assertThat(AgentLoop.isTransientNetworkFailure(
+                new ResourceAccessException("I/O error on POST request to \"/completion\": Connection reset",
+                        new java.net.SocketException("Connection reset")))).isTrue();
+    }
+
+    private static AgentStrategy finishingStrategy() {
+        return new AgentStrategy() {
+            @Override public String systemPrompt() { return "sys"; }
+            @Override public StepDecision step(AgentRunContext c, String r, int round) {
+                return new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), r));
+            }
+            @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) {
+                throw new AssertionError("budget should not be exhausted");
+            }
+        };
+    }
 }
-
-

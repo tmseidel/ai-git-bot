@@ -95,6 +95,20 @@
                                 Model's total context window size. Used for proactive history compaction.
                             </div>
                         </div>
+                        <div class="col-md-6" id="modelFlavorField">
+                            <label for="modelFlavor" class="form-label" th:text="#{label.modelFlavor}">Model flavor</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="modelFlavor" th:field="*{modelFlavor}"/>
+                                <button class="btn btn-outline-secondary dropdown-toggle" type="button"
+                                        id="modelFlavorDropdownBtn" data-bs-toggle="dropdown" aria-expanded="false"
+                                        style="display: none;" th:text="#{button.select}">
+                                    Select
+                                </button>
+                                <ul class="dropdown-menu dropdown-menu-end" id="modelFlavorDropdownMenu">
+                                </ul>
+                            </div>
+                            <div class="form-text" id="modelFlavorHint"></div>
+                        </div>
                         <div class="col-12">
                             <hr/>
                             <h5 class="mb-3">
@@ -172,13 +186,15 @@
             const defaultApiUrls = /*[[${defaultApiUrls}]]*/ {};
             const apiKeyRequirements = /*[[${apiKeyRequirements}]]*/ {};
             const suggestedModels = /*[[${suggestedModels}]]*/ {};
+            const providerFlavors = /*[[${providerFlavors}]]*/ {};
             const isEditMode = /*[[${integration.id != null}]]*/ false;
             const tGoogleHint = /*[[#{help.ai.googleHint}]]*/ 'Google AI uses the Gemini REST API. Use a Gemini API key from Google AI Studio.';
             const tDefaultPrefix = /*[[#{help.ai.defaultPrefix}]]*/ 'Default: ';
-            const tApiKeyRequiredEdit = /*[[#{help.ai.apiKeyRequiredEdit}]]*/ 'API key required. Leave blank only to keep the existing encrypted key.';
-            const tApiKeyRequiredNew = /*[[#{help.ai.apiKeyRequiredNew}]]*/ 'API key required. It will be stored encrypted at rest.';
+            const tApiKeyRequiredEdit = /*[[#{help.ai.apiKeyRequiredEdit}]]*/ 'API key required. Leave blank only to keep the existing stored key.';
+            const tApiKeyRequiredNew = /*[[#{help.ai.apiKeyRequiredNew}]]*/ 'API key required. It will be stored encrypted at rest when APP_ENCRYPTION_KEY is configured.';
             const tApiKeyNotRequired = /*[[#{help.ai.apiKeyNotRequired}]]*/ 'API key not required for this provider.';
             const tSuggestedModels = /*[[#{help.ai.suggestedModels}]]*/ 'Suggested models: ';
+            const tSuggestedFlavors = /*[[#{help.ai.suggestedFlavors}]]*/ 'Available flavors: ';
             const tLocalModel = /*[[#{help.ai.localModel}]]*/ 'Enter the model name configured in your local {0} instance';
             const tApiKeyWillBeRemoved = /*[[#{help.ai.apiKeyWillBeRemoved}]]*/ 'API key will be removed on save';
             const tEnterApiKey = /*[[#{placeholder.enterApiKey}]]*/ 'Enter API key';
@@ -194,6 +210,11 @@
                 const modelDropdownBtn = document.getElementById('modelDropdownBtn');
                 const modelDropdownMenu = document.getElementById('modelDropdownMenu');
                 const modelHint = document.getElementById('modelHint');
+                const modelFlavorField = document.getElementById('modelFlavorField');
+                const modelFlavorInput = document.getElementById('modelFlavor');
+                const modelFlavorDropdownBtn = document.getElementById('modelFlavorDropdownBtn');
+                const modelFlavorDropdownMenu = document.getElementById('modelFlavorDropdownMenu');
+                const modelFlavorHint = document.getElementById('modelFlavorHint');
 
                 function updateProviderDefaults() {
                     const provider = providerSelect.value;
@@ -222,6 +243,35 @@
                             : tApiKeyRequiredNew;
                     } else {
                         apiKeyHint.textContent = tApiKeyNotRequired;
+                    }
+
+                    // Update model flavor dropdown: only providers that offer
+                    // flavors show the field and the "Select" button. The dropdown
+                    // mirrors the model dropdown — each entry sets the text input.
+                    const flavors = providerFlavors[provider] || [];
+                    if (flavors.length > 0) {
+                        modelFlavorField.style.display = '';
+                        modelFlavorDropdownBtn.style.display = 'block';
+                        modelFlavorDropdownMenu.innerHTML = '';
+                        flavors.forEach(function(flavor) {
+                            const li = document.createElement('li');
+                            const a = document.createElement('a');
+                            a.className = 'dropdown-item';
+                            a.href = '#';
+                            a.textContent = flavor.label;
+                            a.title = flavor.description;
+                            a.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                modelFlavorInput.value = flavor.id;
+                            });
+                            li.appendChild(a);
+                            modelFlavorDropdownMenu.appendChild(li);
+                        });
+                        // Show the full list of available flavors, mirroring the model hint.
+                        modelFlavorHint.textContent = tSuggestedFlavors + flavors.map(function(f) { return f.label; }).join(', ');
+                    } else {
+                        modelFlavorField.style.display = 'none';
+                        modelFlavorDropdownBtn.style.display = 'none';
                     }
 
                     // Update model dropdown

@@ -9,7 +9,10 @@ import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -327,22 +330,28 @@ public final class AgentLoop {
     }
 
     /**
-     * Calls the AI with retry-and-compact logic for "prompt too long" errors.
+     * Calls the AI with a bounded retry for recoverable provider failures.
      * When the provider rejects the request because the prompt exceeds its
      * context window, this method aggressively compacts the in-memory history
      * (keeping only the last 2 compaction units) and retries once.
+     * Transient network failures are also retried once without modifying the
+     * conversation: socket write failures (broken pipe, connection reset,
+     * connection aborted) and streaming transport failures wrapped in
+     * {@link ResourceAccessException} (read timeout, mid-stream connection
+     * drop, malformed stream line — see {@link
+     * org.remus.giteabot.ai.StreamingLineReader}).
      *
-     * <p>If the second attempt also fails with a prompt-too-long error, the
-     * exception is re-thrown to the caller.</p>
+     * <p>All other failures, and any failure on the second attempt, are
+     * re-thrown to the caller.</p>
      *
      * @return the {@link ChatTurn} from the successful AI call
-     * @throws HttpClientErrorException if the retry also fails
+     * @throws RuntimeException if the failure is not retryable or the retry fails
      */
     private ChatTurn callAiWithRetry(List<AiMessage> history, String currentMessage,
                                      List<ToolDescriptor> tools, String systemPrompt,
                                      ToolingMode resolvedMode) {
-        int maxRetries = 2;
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        int maxAttempts = 2;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 if (resolvedMode == ToolingMode.NATIVE) {
                     return aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,
@@ -352,19 +361,67 @@ public final class AgentLoop {
                             null, budget.maxTokensPerCall());
                     return ChatTurn.text(text);
                 }
-            } catch (HttpClientErrorException e) {
-                if (!aiClient.isPromptTooLongError(e) || attempt == maxRetries) {
+            } catch (RuntimeException e) {
+                boolean promptTooLong = e instanceof HttpClientErrorException clientError
+                        && aiClient.isPromptTooLongError(clientError);
+                boolean transientNetworkFailure = isTransientNetworkFailure(e);
+
+                if (attempt == maxAttempts || (!promptTooLong && !transientNetworkFailure)) {
                     throw e;
                 }
-                log.warn("AgentLoop: AI call failed with prompt-too-long error on attempt {}/{}. "
-                        + "Aggressively compacting history and retrying. Error: {}",
-                        attempt, maxRetries, e.getMessage());
-                // Aggressive compaction: keep only the last 2 compaction units
-                compactor.compactAggressively(history);
+
+                if (promptTooLong) {
+                    log.warn("AgentLoop: AI call failed with prompt-too-long error on attempt {}/{}. "
+                            + "Aggressively compacting history and retrying. Error: {}",
+                            attempt, maxAttempts, e.getMessage());
+                    // Aggressive compaction: keep only the last 2 compaction units
+                    compactor.compactAggressively(history);
+                } else {
+                    log.warn("AgentLoop: AI call failed with a transient network error on attempt {}/{}. "
+                            + "Retrying without changing history. Error: {}",
+                            attempt, maxAttempts, e.getMessage());
+                }
             }
         }
         // Unreachable, but keeps the compiler happy
         throw new IllegalStateException("callAiWithRetry: exceeded max retries");
     }
-}
 
+    static boolean isTransientNetworkFailure(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            // Streaming transport failures surface as ResourceAccessException
+            // (read timeout / mid-stream drop / malformed line — see
+            // StreamingLineReader); a retry is the intended recovery, so treat
+            // the whole family as transient rather than matching the message.
+            switch (current) {
+                case ResourceAccessException resourceAccessException -> {
+                    return true;
+                }
+                case SocketTimeoutException socketTimeoutException -> {
+                    return true;
+                }
+                case SocketException socketException -> {
+                    String message = current.getMessage();
+                    if (message != null) {
+                        String normalized = message.toLowerCase(Locale.ROOT);
+                        if (normalized.contains("broken pipe")
+                                || normalized.contains("connection reset")
+                                || normalized.contains("connection aborted")) {
+                            return true;
+                        }
+                    }
+                }
+                default -> {
+                }
+            }
+
+            Throwable cause = current.getCause();
+            if (cause == current) {
+                break;
+            }
+            current = cause;
+        }
+        return false;
+    }
+}

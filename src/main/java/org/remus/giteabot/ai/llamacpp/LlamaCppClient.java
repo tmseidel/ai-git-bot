@@ -1,11 +1,17 @@
 package org.remus.giteabot.ai.llamacpp;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
 import org.remus.giteabot.ai.AiMessage;
+import org.remus.giteabot.ai.StreamingLineReader;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
@@ -22,6 +28,8 @@ import java.util.Locale;
 public class LlamaCppClient extends AbstractAiClient {
 
     private final RestClient restClient;
+
+    private final ObjectMapper jackson = AgentJackson.mapper();
 
     /**
      * GBNF grammar for the agent's JSON response format.
@@ -134,7 +142,7 @@ public class LlamaCppClient extends AbstractAiClient {
         LlamaCppRequest.LlamaCppRequestBuilder requestBuilder = LlamaCppRequest.builder()
                 .prompt(prompt)
                 .nPredict(maxTokens)
-                .stream(false)
+                .stream(true)
                 .stop(STOP_SEQUENCES)
                 .temperature(0.7)
                 .topP(0.9)
@@ -160,11 +168,67 @@ public class LlamaCppClient extends AbstractAiClient {
     }
 
     private LlamaCppResponse executeRequest(LlamaCppRequest request) {
-        return restClient.post()
-                .uri("/completion")
-                .body(request)
-                .retrieve()
-                .body(LlamaCppResponse.class);
+        // Stream the SSE chunks and reassemble them into a single response.
+        // llama.cpp /completion with stream:true emits "data: {json}" per chunk
+        // (an optional trailing "data: [DONE]" marker terminates the stream).
+        // Content is concatenated across chunks; tokens_evaluated /
+        // tokens_predicted / stopped_limit / timings come from the final chunk
+        // (stop:true), which is the only one carrying the usage counters — so
+        // audit/usage totals are unchanged from the non-streamed path.
+        StringBuilder content = new StringBuilder();
+        LlamaCppResponse[] finalRef = new LlamaCppResponse[1];
+        LlamaCppResponse[] lastRef = new LlamaCppResponse[1];
+
+        StreamingLineReader.streamLines(restClient, "/completion", request, line -> {
+            // Strip the SSE "data: " framing (the line reader already dropped
+            // line terminators and blank lines).
+            String json = line.startsWith("data:") ? line.substring(5).stripLeading() : line;
+            if (json.isEmpty() || "[DONE]".equals(json)) {
+                return;
+            }
+            LlamaCppResponse chunk;
+            try {
+                chunk = jackson.readValue(json, LlamaCppResponse.class);
+            } catch (JacksonException e) {
+                // A malformed SSE line fails the request (do not silently skip).
+                // Surfaced as an I/O error so AgentLoop.callAiWithRetry retries it
+                // like any transient failure.
+                throw new ResourceAccessException(
+                        "Malformed llama.cpp stream line: " + e.getMessage(), new IOException(e));
+            }
+            lastRef[0] = chunk;
+            if (chunk.getContent() != null) {
+                content.append(chunk.getContent());
+            }
+            // llama.cpp marks the final chunk with stop:true; it also carries the
+            // usage counters and timings.
+            if ("true".equals(chunk.getStop())) {
+                finalRef[0] = chunk;
+            }
+        });
+
+        // 0-chunk stream: reproduce the old empty-response path (body() used to
+        // return null for an empty body), so extractText applies its existing
+        // "Unable to generate ... empty response" fallback.
+        LlamaCppResponse source = finalRef[0] != null ? finalRef[0] : lastRef[0];
+        if (source == null) {
+            return null;
+        }
+
+        LlamaCppResponse merged = new LlamaCppResponse();
+        merged.setContent(!content.isEmpty()
+                ? content.toString()
+                : (source.getContent() != null ? source.getContent() : ""));
+        merged.setModel(source.getModel());
+        merged.setStop(source.getStop());
+        merged.setStoppedEos(source.getStoppedEos());
+        merged.setStoppedLimit(source.getStoppedLimit());
+        merged.setStoppedWord(source.getStoppedWord());
+        merged.setTokensEvaluated(source.getTokensEvaluated());
+        merged.setTokensPredicted(source.getTokensPredicted());
+        merged.setTruncated(source.getTruncated());
+        merged.setTimings(source.getTimings());
+        return merged;
     }
 
     private String extractText(LlamaCppRequest request, LlamaCppResponse response, String context) {

@@ -56,7 +56,7 @@ RUN set -eux; \
     printf 'Acquire::Retries "3";\nAcquire::http::Timeout "120";\nAcquire::https::Timeout "120";\n' > /etc/apt/apt.conf.d/99-docker; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl wget git bash gnupg lsb-release apt-transport-https \
+        ca-certificates curl wget git openssh-client bash gnupg lsb-release apt-transport-https \
         unzip xz-utils tini \
         universal-ctags \
         maven \

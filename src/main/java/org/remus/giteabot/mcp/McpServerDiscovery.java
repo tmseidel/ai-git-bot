@@ -1,14 +1,15 @@
 package org.remus.giteabot.mcp;
 
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
 import java.util.List;
 
+@Component
+@RequiredArgsConstructor
 public class McpServerDiscovery {
 
     private final McpConfigurationParser configurationParser;
-
-    public McpServerDiscovery(McpConfigurationParser configurationParser) {
-        this.configurationParser = configurationParser;
-    }
 
     /**
      * Parses the (already decrypted) MCP configuration JSON into server

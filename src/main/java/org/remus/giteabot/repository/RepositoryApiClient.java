@@ -4,7 +4,9 @@ import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
+import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -21,7 +23,11 @@ import java.util.Map;
  */
 public interface RepositoryApiClient {
 
-    /** Returns the credentials used by this client (base URL, clone URL, username, token). */
+    /**
+     * Returns the credentials used by this client: API base URL, credential-free
+     * HTTP clone base URL, username, and token, plus the selected Git transport
+     * and its SSH material (private key, {@code known_hosts}) when SSH is active.
+     */
     RepositoryCredentials getCredentials();
 
     /** Returns the API base URL of the repository provider (e.g. {@code https://api.github.com}). */
@@ -29,9 +35,42 @@ public interface RepositoryApiClient {
         return getCredentials().baseUrl();
     }
 
-    /** Returns the web/clone URL of the repository provider (e.g. {@code https://github.com}). */
+    /**
+     * Returns the credential-free HTTP clone base URL (e.g. {@code https://github.com}).
+     * This is the HTTP-transport base only; the actual Git remote for clone, fetch,
+     * and push operations is resolved per repository by {@link #getRepositoryRemote},
+     * which providers may override to select SSH.
+     */
     default String getCloneUrl() {
         return getCredentials().cloneUrl();
+    }
+
+    /**
+     * Resolves the complete, credential-free Git remote for one repository.
+     * Providers may override this to select a repository-specific transport.
+     */
+    default String getRepositoryRemote(String owner, String repo) {
+        String cloneBaseUrl = getCloneUrl();
+        if (cloneBaseUrl == null || cloneBaseUrl.isBlank()
+                || owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+            throw new IllegalStateException("Repository remote cannot be resolved");
+        }
+        try {
+            URI base = URI.create(cloneBaseUrl);
+            if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
+                    || base.getHost() == null || base.getUserInfo() != null
+                    || base.getRawQuery() != null || base.getRawFragment() != null) {
+                throw new IllegalStateException("HTTP clone base URL must be credential-free");
+            }
+            cloneBaseUrl = base.getScheme().toLowerCase(Locale.ROOT)
+                    + cloneBaseUrl.substring(base.getScheme().length());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("HTTP clone base URL is invalid", e);
+        }
+        while (cloneBaseUrl.endsWith("/")) {
+            cloneBaseUrl = cloneBaseUrl.substring(0, cloneBaseUrl.length() - 1);
+        }
+        return cloneBaseUrl + "/" + owner + "/" + repo + ".git";
     }
 
     /** Returns the authentication token used by this client. */

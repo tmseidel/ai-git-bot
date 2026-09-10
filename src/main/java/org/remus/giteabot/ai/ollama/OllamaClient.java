@@ -7,14 +7,18 @@ import org.remus.giteabot.ai.AiClientDelegateSupport;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
+import org.remus.giteabot.ai.StreamingLineReader;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.ai.ToolNameSanitizer;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -98,7 +102,7 @@ public class OllamaClient extends AbstractAiClient {
         OllamaRequest request = OllamaRequest.builder()
                 .model(effectiveModel)
                 .messages(messages)
-                .stream(false)
+                .stream(true)
                 .options(OllamaRequest.Options.builder().numPredict(effectiveMaxTokens).build())
                 .tools(toolPayloads)
                 .build();
@@ -113,6 +117,9 @@ public class OllamaClient extends AbstractAiClient {
     @Override
     public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
+        if (body == null) {
+            return false;
+        }
         String normalized = body.toLowerCase(Locale.ROOT);
         return normalized.contains("too long") || normalized.contains("context length");
     }
@@ -247,7 +254,7 @@ public class OllamaClient extends AbstractAiClient {
         OllamaRequest.OllamaRequestBuilder requestBuilder = OllamaRequest.builder()
                 .model(model)
                 .messages(messages)
-                .stream(false)
+                .stream(true)
                 .options(OllamaRequest.Options.builder()
                         .numPredict(maxTokens)
                         .build());
@@ -267,11 +274,69 @@ public class OllamaClient extends AbstractAiClient {
     }
 
     private OllamaResponse executeRequest(OllamaRequest request) {
-        return restClient.post()
-                .uri("/api/chat")
-                .body(request)
-                .retrieve()
-                .body(OllamaResponse.class);
+        // Stream the NDJSON chunks and reassemble them into a single response.
+        // Each line is a complete OllamaResponse-shaped JSON object. Content is
+        // concatenated across chunks; done_reason / prompt_eval_count / eval_count
+        // (and tool_calls) come from the final (done:true) chunk, which is the only
+        // one that carries the usage counters — so audit/usage totals are unchanged
+        // from the non-streamed path. If the stream ends without a done chunk
+        // (e.g. provider/proxy truncation), the last chunk is used as the
+        // metadata fallback, so model metadata is not lost.
+        StringBuilder content = new StringBuilder();
+        OllamaResponse[] finalRef = new OllamaResponse[1];
+        OllamaResponse[] lastRef = new OllamaResponse[1];
+
+        StreamingLineReader.streamLines(restClient, "/api/chat", request, line -> {
+            OllamaResponse chunk;
+            try {
+                chunk = jackson.readValue(line, OllamaResponse.class);
+            } catch (JacksonException e) {
+                // A malformed NDJSON line fails the request (do not silently skip).
+                // Surfaced as an I/O error so AgentLoop.callAiWithRetry retries it
+                // like any transient failure.
+                throw new ResourceAccessException(
+                        "Malformed Ollama stream line: " + e.getMessage(), new IOException(e));
+            }
+            lastRef[0] = chunk;
+            if (chunk.getMessage() != null && chunk.getMessage().getContent() != null) {
+                content.append(chunk.getMessage().getContent());
+            }
+            if (chunk.isDone()) {
+                finalRef[0] = chunk;
+            }
+        });
+
+        // 0-chunk stream: reproduce the old empty-response path (body() used to
+        // return null for an empty body), so extractText / interpret apply their
+        // existing "Unable to generate ... empty response" fallback.
+        OllamaResponse source = finalRef[0] != null ? finalRef[0] : lastRef[0];
+        if (source == null) {
+            return null;
+        }
+
+        OllamaResponse merged = new OllamaResponse();
+        String mergedContent = !content.isEmpty()
+                ? content.toString()
+                : (source.getMessage() != null && source.getMessage().getContent() != null
+                    ? source.getMessage().getContent()
+                    : "");
+        OllamaResponse.Message message = new OllamaResponse.Message();
+        message.setRole("assistant");
+        message.setContent(mergedContent);
+        merged.setDone(finalRef[0] != null);
+        merged.setDoneReason(source.getDoneReason());
+        merged.setPromptEvalCount(source.getPromptEvalCount());
+        merged.setEvalCount(source.getEvalCount());
+        merged.setTotalDuration(source.getTotalDuration());
+        if (source.getModel() != null) {
+            merged.setModel(source.getModel());
+        }
+        if (source.getMessage() != null) {
+            // Tool calls are emitted complete in the final chunk.
+            message.setToolCalls(source.getMessage().getToolCalls());
+        }
+        merged.setMessage(message);
+        return merged;
     }
 
     private String extractText(OllamaRequest request, OllamaResponse response, String context) {

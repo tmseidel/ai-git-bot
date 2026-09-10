@@ -534,7 +534,7 @@ Bug reports are always welcome.
 
 ## Technical Highlights
 
-- 🔒 AES-256-GCM secret encryption
+- 🔒 AES-256-GCM secret encryption when `APP_ENCRYPTION_KEY` is configured
 - 🤖 Multi-provider AI support
 - 🏢 Multi-platform Git support
 - 🧠 Local LLM support

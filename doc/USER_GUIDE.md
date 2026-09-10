@@ -92,9 +92,10 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
      | `llamacpp` | `http://localhost:8081` | *(user-configured)* |
      
    - **API URL**: Pre-filled based on provider; customize for self-hosted or proxy setups
-   - **API Key**: Your API key (encrypted at rest; not needed for Ollama or llama.cpp)
+   - **API Key**: Your API key (encrypted at rest when `APP_ENCRYPTION_KEY` is configured; not needed for Ollama or llama.cpp)
    - **API Version**: API version string (Anthropic only, e.g., `2023-06-01`)
    - **Model**: Select from the dropdown for suggested models, or type a custom model name
+   - **Model Flavor**: OpenAI integrations only. Provider default behavior for the model; the available flavors are listed under the field (see the OpenAI-compatible section below)
    - **Max Tokens**: Maximum tokens per AI response (default: 4096)
    - **Max Diff Chars Per Chunk**: Maximum characters per diff chunk (default: 120000)
    - **Max Diff Chunks**: Maximum number of diff chunks to process (default: 8)
@@ -112,9 +113,10 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 - Requires an API key
 - Compatible with OpenAI API proxies by changing the API URL
 - Suggested models: gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex
+- **Model Flavor** (this provider only): `Standard` sends no extra request fields. `No reasoning effort` sends `reasoning_effort: "none"` — use it when a gateway in front of the model (e.g. for `gpt-5.6-sol`) injects a default `reasoning_effort` and the provider rejects function tools on `/v1/chat/completions`
 
 #### Google AI
-- Requires a Gemini API key from Google AI Studio; the key is stored encrypted at rest
+- Requires a Gemini API key from Google AI Studio; the key is encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 - Uses the Gemini REST API at `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
 - Suggested models: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash
 - Enter model names without the `models/` prefix (for example, `gemini-2.5-flash`) or with the prefix if copied from Google documentation
@@ -145,6 +147,7 @@ Configure OpenAI-compatible providers in **AI Integrations → New Integration**
 | **API Key** | Enter the provider API key. For local tools that do not enforce authentication, enter a placeholder value such as `local` if the server accepts or ignores it. |
 | **API Version** | Leave blank. This field is only used for Anthropic integrations. |
 | **Model** | Enter the provider's exact model identifier, including any provider-specific prefix. |
+| **Model Flavor** | Keep the default `Standard` unless the selected model rejects function tools because of an injected `reasoning_effort` (see Troubleshooting). Select `No reasoning effort` for reasoning models such as `gpt-5.6-sol` used through a gateway that injects a default `reasoning_effort`. The field is only shown for providers that offer flavors (currently the OpenAI integration). |
 | **Max Tokens** and chunk limits | Start with the defaults, then reduce chunk limits if the selected model has a smaller context window. |
 
 Documented examples:
@@ -172,6 +175,7 @@ Troubleshooting:
 - **Model not found**: Copy the exact model identifier from the provider's model list.
 - **Empty or malformed responses**: The provider may not return the expected OpenAI chat completions response format for that model.
 - **Context length or token errors**: Reduce **Max Diff Chars/Chunk**, **Max Diff Chunks**, or **Max Tokens**, or choose a model with a larger context window.
+- **400 "Function tools with reasoning_effort are not supported"**: Your gateway injects a default `reasoning_effort`, which the selected model rejects when function tools are used on `/v1/chat/completions`. In the integration, set **Model Flavor** to `No reasoning effort` (sends `reasoning_effort: "none"`).
 
 #### Ollama
 - No API key required
@@ -185,7 +189,7 @@ Troubleshooting:
 
 ### Editing an AI Integration
 
-Click the **Edit** button on the integration's row. When editing, leave the API Key field blank to keep the existing encrypted value.
+Click the **Edit** button on the integration's row. When editing, leave the API Key field blank to keep the existing stored value.
 
 ### Deleting an AI Integration
 
@@ -223,7 +227,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
-    - **Token**: Your Git API token (encrypted at rest)
+    - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab can use it to approve the merge request or post a request-changes note after each bot review.
 3. Click **Save**
 
@@ -286,6 +290,7 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **Workflow Configuration** *(optional)*: Select which PR workflows should run for this bot. Leave empty to inherit the auto-bootstrapped default configuration, which is **review-only**. Use **Details** next to the dropdown to inspect the selected workflows and any persisted parameters.
    - **Deployment Target** *(optional)*: Select the per-PR preview environment used by workflows that need a live deployment, such as **Full-stack QA** / E2E tests.
    - **Run workflow when PR is opened** *(optional)*: When enabled, the bot executes its configured PR workflows whenever a pull request is created or opened — even if the bot is not assigned as a reviewer. Disabled by default. Useful for mandatory-review bots that must run on every PR. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for details.
+   - **Branch Filter** *(optional)*: A comma-separated list of glob patterns that restricts PR workflows to specific target branches/refs. When a PR's target (base) branch does not match the list, the workflow is **not** started and no PR comment is posted — only an ignore entry is logged. **Blank or `*` ⇒ all branches and tags are allowed** (the historical default). Patterns follow [gobwas/glob](https://pkg.go.dev/github.com/gobwas/glob#Compile) syntax: `*` (any run, including `/`), `?` (single character), `[abc]` / `[a-z]` (character classes), and `{a,b}` (alternation). Use a `refs/heads/` or `refs/tags/` prefix to match full ref names (e.g. `refs/heads/develop`). Useful for branch-based workflows (e.g. git-flow) that should only run on specific target branches — e.g. `releases/*` allows only PRs into a release branch. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for details.
    - **AI Integration**: Select an AI integration from the dropdown
    - **Git Integration**: Select a Git integration from the dropdown
    - **User Whitelist** *(optional)*: Restrict AI-spending interactions to a set of Git usernames. This is recommended for public repositories.
@@ -637,7 +642,7 @@ The migration that adds .NET validation support overwrites the **Default** codin
 
 ### Data Encryption
 
-Sensitive data (API keys, Git tokens) is encrypted at rest using AES-256-GCM encryption. Set the `APP_ENCRYPTION_KEY` environment variable to a secure value for production deployments. If not set, a random key is generated at startup (data won't survive restarts).
+When `APP_ENCRYPTION_KEY` is configured, sensitive data is encrypted at rest using AES-256-GCM. Without it, API keys and Git tokens are stored in plain text, and SSH private keys cannot be stored. Set a stable, secure value before entering production credentials.
 
 ### Authentication
 
@@ -660,7 +665,7 @@ The whitelist is the recommended defence for bots installed on **public reposito
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENCRYPTION_KEY` | *(random)* | Encryption key for sensitive data. Set to a fixed value for persistence across restarts. |
+| `APP_ENCRYPTION_KEY` | *(none)* | Encryption key for sensitive data. Without it, credentials use plain-text storage and SSH private keys are rejected. |
 | `APP_PUBLIC_URL` | `http://localhost:8080` | Public base URL of the bot instance. Used as callback URL for CI deployment workflows and preview environments. Set to the externally reachable URL when running behind a reverse proxy or in CI. |
 | `DATABASE_URL` | H2 in-memory | Database JDBC URL |
 | `DATABASE_USERNAME` | `sa` | Database username |

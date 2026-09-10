@@ -670,7 +670,8 @@ infrastructure:
   fallback.
 - Per-bot tool whitelist (`BotToolConfiguration`).
 - Per-MCP-config tool whitelist (`McpToolSelectionService`).
-- Encryption at rest (`EncryptionService`) for any secret column.
+- Encryption at rest (`EncryptionService`) for any secret column when
+  `APP_ENCRYPTION_KEY` is configured.
 - HMAC-signed callback channel (`/api/workflow-callback/{runId}/{secret}`).
 - Per-provider artifact upload (`attachPullRequestArtifact`) for
   comments containing screenshots / videos / reports.

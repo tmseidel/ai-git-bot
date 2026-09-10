@@ -523,7 +523,7 @@ Bug 报告始终欢迎。
 
 ## 技术亮点
 
-- 🔒 AES-256-GCM 密钥加密
+- 🔒 配置 `APP_ENCRYPTION_KEY` 时进行 AES-256-GCM 密钥加密
 - 🤖 多提供商 AI 支持
 - 🏢 多平台 Git 支持
 - 🧠 本地 LLM 支持

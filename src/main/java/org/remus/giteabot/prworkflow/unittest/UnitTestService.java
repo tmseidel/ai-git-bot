@@ -107,8 +107,7 @@ public class UnitTestService {
         try {
             context.requireActive("before preparing unit-test workspace");
             WorkspaceResult ws = workspaceService.prepareWorkspace(
-                    owner, repo, headBranch,
-                    repositoryClient.getCloneUrl(), repositoryClient.getToken(), null);
+                    repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber,
                         UnitTestSummaryRenderer.renderFailed(prNumber,

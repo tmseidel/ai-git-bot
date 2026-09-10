@@ -83,20 +83,20 @@ class I18nCoverageServiceTest {
 
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.SKIPPED);
         verify(workspaceService, never()).prepareWorkspace(
-                anyString(), anyString(), anyString(), any(), any(), anyLong());
+                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
         verify(repoClient, never()).getDefaultBranch(anyString(), anyString());
     }
 
     @Test
     void headRefInPayload_isUsedForClone() {
-        when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(), any(), any(), anyLong()))
+        when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(), anyString(), anyLong()))
                 .thenReturn(WorkspaceResult.failure("stop here"));
 
         service.run(request(payloadWithHead("feature/login"), SuiteLifecycleMode.COMMIT_TO_PR));
 
         ArgumentCaptor<String> branch = ArgumentCaptor.forClass(String.class);
         verify(workspaceService).prepareWorkspace(
-                eq("acme"), eq("my-repo"), branch.capture(), any(), any(), eq(42L));
+                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L));
         assertThat(branch.getValue()).isEqualTo("feature/login");
     }
 
@@ -105,7 +105,7 @@ class I18nCoverageServiceTest {
         Files.createDirectories(ws.resolve("i18n"));
         Files.writeString(ws.resolve("i18n/messages_en.properties"), "a=1", StandardCharsets.UTF_8);
         Files.writeString(ws.resolve("i18n/messages_de.properties"), "a=1", StandardCharsets.UTF_8);
-        when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(), any(), any(), anyLong()))
+        when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(), anyString(), anyLong()))
                 .thenReturn(WorkspaceResult.success(ws));
 
         I18nCoverageService.Result result = service.run(
@@ -130,7 +130,7 @@ class I18nCoverageServiceTest {
 
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.SKIPPED);
         verify(workspaceService, never()).prepareWorkspace(
-                anyString(), anyString(), anyString(), any(), any(), anyLong());
+                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
     }
 
     /**

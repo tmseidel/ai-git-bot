@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.secret.KeyResolveException;
+import org.remus.giteabot.secret.SecretTemplate;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.springframework.stereotype.Service;
 
@@ -47,11 +49,11 @@ public class McpOrchestrationService {
             List.of(ProtocolVersions.MCP_2024_11_05, ProtocolVersions.MCP_2025_03_26),
             List.of(ProtocolVersions.MCP_2024_11_05));
 
-    private final McpConfigurationParser configurationParser = new McpConfigurationParser();
-    private final McpServerDiscovery serverDiscovery = new McpServerDiscovery(configurationParser);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<CacheKey, McpToolCatalog> toolCache = new ConcurrentHashMap<>();
+    private final McpServerDiscovery serverDiscovery;
     private final EncryptionService encryptionService;
+
 
     /** The MCP configuration JSON is stored encrypted - decrypt before parsing. */
     private String decryptedJson(McpConfiguration configuration) {
@@ -375,17 +377,48 @@ public class McpOrchestrationService {
         return normalized;
     }
 
-    private void applyHeaders(java.net.http.HttpRequest.Builder request, McpServerDefinition server) {
+    void applyHeaders(java.net.http.HttpRequest.Builder request, McpServerDefinition server) {
         if (server.headers() != null) {
-            server.headers().forEach(request::header);
+            server.headers().forEach((name, value) -> setHeader(request, name, expose(value)));
         }
         if (!hasConfiguredHeader(server, "user-agent")) {
             request.header("User-Agent", "ai-git-bot/1.4.0-SNAPSHOT");
         }
-        if (server.authorizationToken() != null && !server.authorizationToken().isBlank()
+        String authorizationToken = expose(server.authorizationToken());
+        if (authorizationToken != null && !authorizationToken.isBlank()
                 && !hasConfiguredHeader(server, "authorization")) {
-            request.header("Authorization", formatAuthorizationHeader(server.authorizationToken()));
+            setHeader(request, "Authorization", formatAuthorizationHeader(authorizationToken));
         }
+    }
+
+    /**
+     * Prevents a header value from reaching the log or a tool result: the {@code IllegalArgumentException}
+     * that jdk.internal.net.http.HttpRequestBuilderImpl#checkNameAndValue(java.lang.String, java.lang.String)
+     * raises for a rejected value quotes that value in its message.
+     */
+    private void setHeader(java.net.http.HttpRequest.Builder request, String name, String value) {
+        try {
+            request.header(name, value);
+        } catch (IllegalArgumentException e) {
+            throw new KeyResolveException(("""
+                    Header '%s' cannot be sent: the configured name, or the value a
+                    secret reference resolved to, is not valid in an HTTP header. Check it for line breaks
+                    or control characters.""").formatted(name));
+        }
+    }
+
+    /**
+     * Resolves the {@code ${type:key}} references of a configured credential. This happens here,
+     * as late as possible, so the plain secret only exists while the request is being built.
+     * <p>
+     * A resolved value arrives already stripped from {@link SecretTemplate}, so a secret that
+     * carries a trailing newline - as one read from a file commonly does - does not reach the
+     * JDK, which would refuse it as a header value.
+     *
+     * @throws KeyResolveException if a reference names an invalid key
+     */
+    private String expose(SecretTemplate template) {
+        return template == null ? null : template.expose();
     }
 
     private boolean hasConfiguredHeader(McpServerDefinition server, String headerName) {

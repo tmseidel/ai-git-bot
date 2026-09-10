@@ -52,10 +52,11 @@ them. `keep-last: 0` prunes all terminal rows after each GC run.
 
 ### Credential storage
 
-Endpoint secrets and Authorization header values are encrypted at rest with
-the same AES-GCM `EncryptionService` used for AI provider API keys. **Set
-`APP_ENCRYPTION_KEY` in production** — without it, values fall back to
-plaintext storage (acceptable for development, warned about at startup).
+When `APP_ENCRYPTION_KEY` is configured, endpoint secrets and Authorization
+header values are encrypted at rest with the same AES-GCM `EncryptionService`
+used for AI provider API keys. **Set `APP_ENCRYPTION_KEY` in production**;
+without it, values fall back to plaintext storage (acceptable for development,
+warned about at startup).
 
 ---
 
@@ -87,7 +88,7 @@ plaintext storage (acceptable for development, warned about at startup).
 
 Both credentials are optional and independent — unsigned+unauthenticated,
 signed-only, auth-only, and signed+authenticated are all valid configurations.
-On edit, leaving a credential field blank keeps the current (encrypted) value.
+On edit, leaving a credential field blank keeps the current stored value.
 
 ### Security notes
 

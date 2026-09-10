@@ -71,6 +71,17 @@ public class AiIntegration {
     private int contextWindowTokens = 200_000;
 
     /**
+     * Provider-specific per-model request preset ("flavor"), e.g.
+     * {@code "no_reasoning"} for an OpenAI reasoning model whose gateway
+     * defaults {@code reasoning_effort} on. Values are provider-defined (see
+     * {@link org.remus.giteabot.ai.AiProviderMetadata#getFlavors()}); the
+     * conventional value {@code "standard"} selects the provider's default
+     * behaviour and is the fallback for unknown ids.
+     */
+    @Column(name = "model_flavor", nullable = false)
+    private String modelFlavor = "standard";
+
+    /**
      * UI-facing inverse of {@link #useLegacyToolCalling}. The admin form
      * binds to this property so the checkbox semantics read positively
      * ("enable experimental native tool calling") while the persisted

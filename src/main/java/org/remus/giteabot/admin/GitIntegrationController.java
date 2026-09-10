@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
 import org.springframework.stereotype.Controller;
@@ -37,7 +38,9 @@ public class GitIntegrationController {
     public String newForm(Model model) {
         model.addAttribute("integration", new GitIntegration());
         model.addAttribute("providerTypes", RepositoryType.values());
+        model.addAttribute("transportTypes", GitTransport.values());
         model.addAttribute("postReviewActions", PostReviewAction.values());
+        model.addAttribute("sshEncryptionEnabled", gitIntegrationService.isEncryptionEnabled());
         model.addAttribute("activeNav", "git-integrations");
         return "git-integrations/form";
     }
@@ -48,7 +51,9 @@ public class GitIntegrationController {
                 .map(integration -> {
                     model.addAttribute("integration", integration);
                     model.addAttribute("providerTypes", RepositoryType.values());
+                    model.addAttribute("transportTypes", GitTransport.values());
                     model.addAttribute("postReviewActions", PostReviewAction.values());
+                    model.addAttribute("sshEncryptionEnabled", gitIntegrationService.isEncryptionEnabled());
                     model.addAttribute("activeNav", "git-integrations");
                     return "git-integrations/form";
                 })
@@ -62,6 +67,9 @@ public class GitIntegrationController {
     public String save(@ModelAttribute GitIntegration integration,
                        @RequestParam(required = false) String token,
                        @RequestParam(required = false, defaultValue = "false") boolean clearToken,
+                       @RequestParam(required = false) String sshPrivateKey,
+                       @RequestParam(required = false) String sshKnownHosts,
+                       @RequestParam(required = false, defaultValue = "false") boolean clearSshCredentials,
                        RedirectAttributes redirectAttributes) {
         try {
             // The token form field is a one-way write: only override when a new
@@ -71,7 +79,20 @@ public class GitIntegrationController {
             if (token != null && !token.isBlank()) {
                 integration.setToken(token);
             }
-            gitIntegrationService.save(integration, clearToken);
+            // SSH credentials follow the same one-way rule and are cleared by
+            // the service whenever the transport leaves SSH.
+            if (integration.getTransport() == GitTransport.SSH) {
+                if (sshPrivateKey != null && !sshPrivateKey.isBlank()) {
+                    integration.setSshPrivateKey(sshPrivateKey);
+                }
+                if (sshKnownHosts != null && !sshKnownHosts.isBlank()) {
+                    integration.setSshKnownHosts(sshKnownHosts);
+                }
+            } else {
+                integration.setSshPrivateKey(null);
+                integration.setSshKnownHosts(null);
+            }
+            gitIntegrationService.save(integration, clearToken, clearSshCredentials);
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.gitSaved", null, LocaleContextHolder.getLocale()));
         } catch (Exception e) {
             log.error("Failed to save Git Integration", e);

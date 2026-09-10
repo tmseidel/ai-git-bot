@@ -172,11 +172,35 @@ class AiUsageServiceTest {
         when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
                 .thenReturn(page);
 
-        service.findUsage(null, null, 0, "evil'); DROP TABLE", false);
+        service.findUsage(null, null, 0, AiUsageService.PAGE_SIZE, "evil'); DROP TABLE", false);
 
         Sort.Order order = captor.getValue().getSort().iterator().next();
         assertEquals("timestamp", order.getProperty());
         assertEquals(Sort.Direction.DESC, order.getDirection());
+        assertEquals(AiUsageService.PAGE_SIZE, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void findUsage_usesRequestedPageSize() {
+        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+                .thenReturn(page);
+
+        service.findUsage(null, null, 0, 100, "timestamp", false);
+
+        assertEquals(100, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void findErrors_usesDefaultPageSizeWhenZero() {
+        Page<AiErrorLog> page = new PageImpl<>(List.of());
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        when(errorRepository.findByTimestampBetween(any(), any(), captor.capture()))
+                .thenReturn(page);
+
+        service.findErrors(null, null, 0, 0, "timestamp", false);
+
         assertEquals(AiUsageService.PAGE_SIZE, captor.getValue().getPageSize());
     }
 
@@ -187,11 +211,47 @@ class AiUsageServiceTest {
         when(errorRepository.findByTimestampBetween(any(), any(), captor.capture()))
                 .thenReturn(page);
 
-        service.findErrors(Instant.EPOCH, Instant.now(), 2, "aiIntegrationName", true);
+        service.findErrors(Instant.EPOCH, Instant.now(), 2, AiUsageService.PAGE_SIZE, "aiIntegrationName", true);
 
         Sort.Order order = captor.getValue().getSort().iterator().next();
         assertEquals("aiIntegrationName", order.getProperty());
         assertEquals(Sort.Direction.ASC, order.getDirection());
         assertEquals(2, captor.getValue().getPageNumber());
+    }
+
+    @Test
+    void findUsage_clampsOversizedPageSizeToMax() {
+        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+                .thenReturn(page);
+
+        service.findUsage(null, null, 0, 1_000_000, "timestamp", false);
+
+        assertEquals(AiUsageService.MAX_PAGE_SIZE, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void findErrors_clampsJustAboveMaxPageSize() {
+        Page<AiErrorLog> page = new PageImpl<>(List.of());
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        when(errorRepository.findByTimestampBetween(any(), any(), captor.capture()))
+                .thenReturn(page);
+
+        service.findErrors(null, null, 0, AiUsageService.MAX_PAGE_SIZE + 1, "timestamp", false);
+
+        assertEquals(AiUsageService.MAX_PAGE_SIZE, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void findUsage_keepsPageSizeAtMaxBoundary() {
+        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
+        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+                .thenReturn(page);
+
+        service.findUsage(null, null, 0, AiUsageService.MAX_PAGE_SIZE, "timestamp", false);
+
+        assertEquals(AiUsageService.MAX_PAGE_SIZE, captor.getValue().getPageSize());
     }
 }

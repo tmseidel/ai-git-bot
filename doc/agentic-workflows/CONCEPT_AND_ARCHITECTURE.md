@@ -167,7 +167,7 @@ erDiagram
     Long id PK
     String name UK
     String strategyType  "WEBHOOK | CI_ACTION | MCP | STATIC"
-    String configJson    "encrypted; webhook URL, secret, branch convention, …"
+    String configJson    "encrypted when APP_ENCRYPTION_KEY is set; webhook URL, secret, branch convention, …"
     String previewUrlTemplate  "https://pr-{prNumber}.preview.example.com"
     int   timeoutSeconds
   }
@@ -213,8 +213,9 @@ Important properties:
 - **`PrTestSuite` lives per PR**, not per repository: the agent may generate
   PR-specific tests without "polluting" the main codebase. Optionally, a suite
   can be merged into the repo via a follow-up PR (see §7.4).
-- **`DeploymentTarget.configJson`** is persisted encrypted via `EncryptionService`
-  just like API keys.
+- **`DeploymentTarget.configJson`** is encrypted via `EncryptionService` when
+  `APP_ENCRYPTION_KEY` is configured, just like API keys. Without it, the value
+  is stored in plain text.
 
 ## 6. Deployment abstraction (`DeploymentTarget`)
 
@@ -400,4 +401,3 @@ Configurable per workflow selection.
   Aider/Sweep, Playwright MCP) provide building blocks, but no complete
   solution with our multi-provider / multi-LLM gateway focus — exactly
   where the added value of this feature lies.
-

@@ -24,15 +24,15 @@ The legacy `/api/webhook` endpoint (without a path variable) has been **removed*
 - **Multi-Bot Support**: Create and configure multiple bots, each with their own webhook URL
 - **AI Integration Management**: Configure multiple AI providers (Anthropic, OpenAI, Ollama, llama.cpp) via UI
 - **Git Integration Management**: Configure Git providers (Gitea, GitHub, GitHub Enterprise) via UI
-- **Encrypted Secrets**: API keys and tokens are encrypted at rest in the database
+- **Encrypted Secrets**: API keys and tokens are encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 - **Admin Authentication**: Secure the management UI with username/password authentication
 - **Per-Bot Statistics**: Track webhook calls, AI token usage, and errors per bot
 
 ## Migration Steps
 
-### 1. Set an Encryption Key
+### 1. Set an Encryption Key (Strongly Recommended)
 
-The new version encrypts sensitive data (API keys, tokens) in the database. You **must** set a persistent encryption key:
+The new version can encrypt sensitive data (API keys, tokens) in the database. To enable encryption, set a persistent encryption key:
 
 ```yaml
 # docker-compose.yml
@@ -42,7 +42,7 @@ services:
       APP_ENCRYPTION_KEY: "your-secure-random-key-here"
 ```
 
-> **Important:** If you don't set this key, a random key is generated at startup and encrypted data will be lost on restart. Generate a strong key, e.g.: `openssl rand -base64 32`
+> **Important:** If you don't set this key, credentials are stored in plain text. Generate a strong, stable key, e.g.: `openssl rand -base64 32`
 
 ### 2. Update Your Docker Compose
 
@@ -116,7 +116,7 @@ The webhook secret is shown in the bot management UI after creating a bot.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_ENCRYPTION_KEY` | (random) | Encryption key for sensitive data. Set this for production! |
+| `APP_ENCRYPTION_KEY` | (none) | Encryption key for sensitive data. Without it, credentials are stored in plain text. |
 
 ## Rollback
 

@@ -7,6 +7,7 @@ import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
@@ -49,6 +50,39 @@ public class GiteaApiClient implements RepositoryApiClient {
     @Override
     public RepositoryCredentials getCredentials() {
         return credentials;
+    }
+
+    @Override
+    public String getRepositoryRemote(String owner, String repo) {
+        if (!credentials.usesSsh()) {
+            return RepositoryApiClient.super.getRepositoryRemote(owner, repo);
+        }
+        Map<String, Object> repoInfo = giteaRestClient.get()
+                .uri("/api/v1/repos/{owner}/{repo}", owner, repo)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return validateSshUrl(repoInfo == null ? null : repoInfo.get("ssh_url"),
+                "Gitea did not provide an SSH clone URL for " + owner + "/" + repo);
+    }
+
+    private String validateSshUrl(Object sshUrl, String missingMessage) {
+        if (!(sshUrl instanceof String url) || url.isBlank()) {
+            throw new IllegalStateException(missingMessage);
+        }
+        SshEndpoint endpoint;
+        try {
+            endpoint = SshEndpoint.parse(url);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("Gitea returned an invalid SSH clone URL", e);
+        }
+        SshEndpoint.fromKnownHosts(credentials.sshKnownHosts()).ifPresent(expected -> {
+            if (!expected.matches(endpoint)) {
+                throw new IllegalStateException("Gitea SSH clone URL endpoint " + endpoint.host() + ":"
+                        + endpoint.port() + " does not match known_hosts endpoint "
+                        + expected.host() + ":" + expected.port());
+            }
+        });
+        return url;
     }
 
     @Override

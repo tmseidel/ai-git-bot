@@ -7,6 +7,7 @@ import org.springframework.web.servlet.LocaleResolver;
 import org.springframework.web.servlet.i18n.LocaleChangeInterceptor;
 
 import java.util.Locale;
+import java.util.ResourceBundle;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -67,6 +68,19 @@ class I18nConfigTest {
         assertEquals(7, I18nConfig.SUPPORTED.size());
         assertEquals("en", I18nConfig.SUPPORTED.get(0).code());
         assertEquals("zh_CN", I18nConfig.SUPPORTED.get(6).code());
+    }
+
+    @Test
+    void textOnlyMessages_containNoMarkupInAnySupportedLocale() {
+        for (I18nConfig.LocaleOption option : I18nConfig.SUPPORTED) {
+            Locale locale = Locale.forLanguageTag(option.code().replace('_', '-'));
+            ResourceBundle messages = ResourceBundle.getBundle("messages", locale);
+            for (String key : new String[]{"help.ai.apiKeyRequiredNew", "help.hook.customHeaders"}) {
+                String message = messages.getString(key);
+                assertFalse(message.contains("<") || message.contains(">"),
+                        () -> option.code() + ": " + key + " contains markup: " + message);
+            }
+        }
     }
 
     @Test

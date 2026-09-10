@@ -179,9 +179,10 @@ uses file-backed H2 by default. Flyway migrations are split by database vendor
 under `src/main/resources/db/migration/` and JPA validates the resulting schema.
 
 Sensitive integration values are encrypted with AES-GCM when
-`APP_ENCRYPTION_KEY` is configured. Without that key, credentials are stored in
-plain text for development convenience; production deployments should always set
-it and preserve it across restarts so existing secrets remain decryptable.
+`APP_ENCRYPTION_KEY` is configured. Without that key, other credentials are
+stored in plain text for development convenience and SSH private keys are
+rejected. Production deployments should always set it and preserve it across
+restarts so existing secrets remain decryptable.
 
 ## MCP and tool integration
 

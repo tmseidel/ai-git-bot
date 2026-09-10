@@ -101,8 +101,8 @@ class IssueTriageServiceTest {
                 new AgentConfigProperties());
         lenient().when(aiClientFactory.getClient(any())).thenReturn(aiClient);
         lenient().when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
-        lenient().when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(),
-                any(), any(), any()))
+        lenient().when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
+                anyString(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/triage-ws")));
         lenient().when(repoClient.getDefaultBranch("owner", "repo")).thenReturn("main");
         lenient().when(repoClient.getRepositoryTree("owner", "repo", "main"))
@@ -327,8 +327,8 @@ class IssueTriageServiceTest {
 
     @Test
     void workspacePreparationFails_postsErrorCommentAndFails() {
-        when(workspaceService.prepareWorkspace(anyString(), anyString(), anyString(),
-                any(), any(), any()))
+        when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
+                anyString(), any()))
                 .thenReturn(WorkspaceResult.failure("disk full"));
 
         assertThrows(TriageRoutingException.class, () -> service.triage(bot, payload, PARAMS));
