@@ -1,4 +1,4 @@
--- V47: Add the per-bot branch/ref allowlist for PR-workflow triggering.
+-- V49: Add the per-bot branch/ref allowlist for PR-workflow triggering.
 -- The filter is a comma-separated list of gobwas/glob-style patterns.
 -- Empty (the default) or '*' allows every branch/tag, so existing bots keep
 -- their current behaviour.
