@@ -161,6 +161,16 @@
                         </div>
 
                         <div class="col-12">
+                            <label for="branchFilter" class="form-label"><span th:text="#{label.branchFilter}">Branch Filter</span> <span class="text-secondary">(<span th:text="#{label.optional}">optional</span>)</span></label>
+                            <input type="text" class="form-control font-monospace" id="branchFilter"
+                                   th:field="*{branchFilter}"
+                                   placeholder="develop,releases/*,refs/heads/*"/>
+                            <div class="form-text" th:utext="#{help.bot.branchFilter}">
+                                Branch (and ref name) allowlist for PR-Workflow execution, specified as a comma-separated list of glob patterns. If empty or *, events for all branches and tags are reported. Use a refs/heads/ or refs/tags/ prefix to match full ref names. See the gobwas/glob Compile documentation for syntax.
+                            </div>
+                        </div>
+
+                        <div class="col-12">
                             <label for="issueWorkflowConfigurationId" class="form-label" th:text="#{label.issueWorkflowConfiguration}">Issue-Assigned Workflow Configuration</label>
                             <div class="input-group">
                                 <select class="form-select" id="issueWorkflowConfigurationId" name="issueWorkflowConfigurationId">

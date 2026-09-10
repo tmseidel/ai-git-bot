@@ -21,6 +21,7 @@ import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.review.CodeReviewService;
+import org.remus.giteabot.util.BranchFilter;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -91,6 +92,10 @@ public class BotWebhookService {
     @Async
     public void reviewPullRequest(Bot bot, WebhookPayload payload) {
         AiAuditContext.setSessionId(auditSessionId(payload));
+
+        if (!prWorkflowAllowedForBranch(bot, payload)) {
+            return;
+        }
         if (!isCallerAllowed(bot, payload)) {
             return;
         }
@@ -100,6 +105,44 @@ public class BotWebhookService {
             log.error("[Bot '{}'] Failed to run PR workflows: {}", bot.getName(), e.getMessage(), e);
             botService.recordError(bot, e.getMessage());
         }
+    }
+
+    /**
+     * Returns {@code true} when the incoming PR's branch/ref is allowed to start a
+     * PR workflow under the bot's configured {@code branchFilter}.
+     *
+     * <p>The ref is taken from the PR's <em>base</em> (the target branch the PR
+     * merges into — e.g. {@code releases/1.2} in a git-flow setup), falling back
+     * to the <em>head</em> source branch when no base ref is present. Full ref
+     * names such as {@code refs/heads/develop} are supported by
+     * {@link BranchFilter}.
+     */
+    private boolean prWorkflowAllowedForBranch(Bot bot, WebhookPayload payload) {
+        String branch = prBranchForFilter(payload);
+        if (BranchFilter.matches(bot.getBranchFilter(), branch)) {
+            return true;
+        }
+        log.info("Ignoring PR workflow for bot '{}': branch '{}' does not match branch filter '{}'",
+                bot.getName(), branch, bot.getBranchFilter());
+        return false;
+    }
+
+    /**
+     * Resolves the branch/ref a PR workflow should be filtered on: the PR base
+     * (target branch) when present, otherwise the head (source) branch.
+     */
+    private String prBranchForFilter(WebhookPayload payload) {
+        if (payload.getPullRequest() == null) {
+            return null;
+        }
+        if (payload.getPullRequest().getBase() != null
+                && payload.getPullRequest().getBase().getRef() != null) {
+            return payload.getPullRequest().getBase().getRef();
+        }
+        if (payload.getPullRequest().getHead() != null) {
+            return payload.getPullRequest().getHead().getRef();
+        }
+        return null;
     }
 
     /**

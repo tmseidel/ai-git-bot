@@ -63,7 +63,7 @@ configuration (or leave **(use default)** to inherit `Default`).
 <a id="trigger-conditions"></a>
 ### 3. Decide when it should run
 
-On the bot form, two settings control automatic triggering on a new pull
+On the bot form, the following settings control automatic triggering on a new pull
 request:
 
 | Setting | Default | Effect |
@@ -71,9 +71,25 @@ request:
 | Bot is requested as reviewer | Always on | Runs when a developer requests the bot as a reviewer on the PR. |
 | **Run workflow when PR is opened** | Off | Runs on every new or reopened PR, no reviewer request needed. |
 | **Run workflow when PR head is updated** | Off | Runs configured workflows on every `synchronized` event (new commits pushed to the PR branch). GitHub and Gitea only. |
+| **Branch Filter** | Blank (all refs allowed) | Restricts triggering to PRs whose target (base) branch matches the comma-separated glob list — e.g. `releases/*` runs workflows only on PRs into a release branch. A non-matching PR is ignored — no workflow, no PR comment — and the skip is logged at `INFO`. |
 
 Turn on **Run workflow when PR is opened** if you want a workflow to run for
 every PR unconditionally.
+
+**Branch Filter** *(optional)* is an allow-list, not a toggle: when it is
+**blank or `*`, every branch and tag is allowed** and triggering behaves exactly
+as before. To restrict workflows to specific branches, enter a comma-separated
+list of [gobwas/glob](https://pkg.go.dev/github.com/gobwas/glob#Compile)
+patterns (e.g. `develop,feature/*,hotfix/*`). `*` matches any run of characters
+**including `/`, so `feature/*` also matches `feature/a/b`; `?` matches a single
+character; `[abc]` / `[a-z]` are character classes; `{a,b}` is alternation. To
+match full ref names, prefix with `refs/heads/` or `refs/tags/` (e.g.
+`refs/heads/develop` or `refs/tags/v*`). This is useful for branch-based
+workflows (e.g. git-flow) where the bot should only act on PRs targeting certain
+branches: the filter is matched against the PR's target (base) branch, falling
+back to the source (head) branch only when no base ref is present. The filter only
+affects whether a PR workflow *starts*; it does not change the workflow's
+behaviour once it runs, and it does not affect issue/agent workflows.
 
 ### 4. (Optional) trigger it by hand
 

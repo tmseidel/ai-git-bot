@@ -303,6 +303,108 @@ class BotWebhookServiceTest {
         verify(giteaClientFactory, never()).getApiClient(any());
     }
 
+    /**
+     * Branch/ref allowlist gate on PR workflows (Issue #374). Verifies the
+     * decision made in {@code BotWebhookService#reviewPullRequest} before the
+     * orchestrator runs: an empty/null and a {@code *} filter are no-ops (the
+     * workflow proceeds, matching the pre-filter behaviour), a matching ref
+     * proceeds, and a non-matching ref short-circuits — the orchestrator and
+     * the AI/git clients are never reached, so no workflow runs and no PR
+     * comment is posted.
+     */
+    @Nested
+    class BranchFilterGate {
+
+        private WebhookPayload prPayloadWithBase(String baseRef) {
+            WebhookPayload payload = new WebhookPayload();
+            WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
+            WebhookPayload.Head base = new WebhookPayload.Head();
+            base.setRef(baseRef);
+            pr.setBase(base);
+            payload.setPullRequest(pr);
+            return payload;
+        }
+
+        private WebhookPayload prPayloadNoBase() {
+            WebhookPayload payload = new WebhookPayload();
+            payload.setPullRequest(new WebhookPayload.PullRequest());
+            return payload;
+        }
+
+        @Test
+        void emptyFilter_proceeds() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("");
+            botWebhookService.reviewPullRequest(bot, prPayloadWithBase("develop"));
+            verify(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+
+        @Test
+        void nullFilter_proceeds() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter(null);
+            botWebhookService.reviewPullRequest(bot, prPayloadWithBase("develop"));
+            verify(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+
+        @Test
+        void wildcardFilter_proceeds() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("*");
+            botWebhookService.reviewPullRequest(bot, prPayloadWithBase("releases/1.2"));
+            verify(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+
+        @Test
+        void matchingTargetBranch_proceeds() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("releases/*");
+            botWebhookService.reviewPullRequest(bot, prPayloadWithBase("releases/1.2"));
+            verify(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+
+        @Test
+        void fullRefFilter_matchesShortTargetBranch_proceeds() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("refs/heads/develop");
+            botWebhookService.reviewPullRequest(bot, prPayloadWithBase("develop"));
+            verify(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+
+        @Test
+        void nonMatchingTargetBranch_skipsWorkflowAndClients() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("releases/*");
+            botWebhookService.reviewPullRequest(bot, prPayloadWithBase("main"));
+            verify(prWorkflowOrchestrator, never()).runAll(any(Bot.class), any(WebhookPayload.class));
+            verify(aiClientFactory, never()).getClient(any());
+            verify(giteaClientFactory, never()).getApiClient(any());
+        }
+
+        @Test
+        void nonMatchingFilter_noBaseRef_skipsWorkflow() {
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("develop");
+            botWebhookService.reviewPullRequest(bot, prPayloadNoBase());
+            verify(prWorkflowOrchestrator, never()).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+
+        @Test
+        void baseRefPreferredOverHeadRef() {
+            // The filter applies to the PR target branch: a PR from feature/x
+            // INTO releases/1.2 matches 'releases/*' even though the head ref
+            // does not.
+            Bot bot = createBot("b", "ai_bot");
+            bot.setBranchFilter("releases/*");
+            WebhookPayload payload = prPayloadWithBase("releases/1.2");
+            WebhookPayload.Head head = new WebhookPayload.Head();
+            head.setRef("feature/x");
+            payload.getPullRequest().setHead(head);
+            botWebhookService.reviewPullRequest(bot, payload);
+            verify(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
+        }
+    }
+
     @Test
     void writerBot_assignedToIssueCreatesImprovedIssueWhenReady() {
         Bot bot = createBot("writer", "writer_bot");
