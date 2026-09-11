@@ -19,6 +19,7 @@ public class GitIntegrationService {
 
     private final GitIntegrationRepository gitIntegrationRepository;
     private final EncryptionService encryptionService;
+    private final BotRepository botRepository;
 
     @Transactional(readOnly = true)
     public List<GitIntegration> findAll() {
@@ -61,6 +62,14 @@ public class GitIntegrationService {
                 : gitIntegrationRepository.findById(integration.getId()).orElse(null);
         validate(integration, existing, clearToken, clearSshCredentials);
 
+        if (existing != null && existing.hasManagedSshKeyTracking()
+                && (integration.getTransport() != GitTransport.SSH || clearSshCredentials || clearToken
+                    || !isBlank(integration.getToken()) || !isBlank(integration.getSshPrivateKey())
+                    || existing.getProviderType() != integration.getProviderType()
+                    || !Objects.equals(existing.getUrl(), integration.getUrl()))) {
+            throw new IllegalStateException("Remove the managed SSH key before changing its credentials");
+        }
+
         GitIntegration current = existing == null ? new GitIntegration() : existing;
         current.setName(integration.getName());
         current.setProviderType(integration.getProviderType());
@@ -100,7 +109,97 @@ public class GitIntegrationService {
     }
 
     public void deleteById(Long id) {
+        validateDelete(id);
+        gitIntegrationRepository.findById(id).ifPresent(integration -> {
+            if (integration.hasManagedSshKeyTracking()) {
+                throw new IllegalStateException("Remove the managed SSH key before deleting the integration");
+            }
+        });
         gitIntegrationRepository.deleteById(id);
+    }
+
+    /** Rejects deletion before remote cleanup if a bot still uses the integration. */
+    @Transactional(readOnly = true)
+    public void validateDelete(Long id) {
+        if (botRepository.existsByGitIntegrationId(id)) {
+            throw new IllegalStateException("Git Integration is still used by a bot");
+        }
+    }
+
+    /** Validates form input before any irreversible remote cleanup. */
+    @Transactional(readOnly = true)
+    public void validateSave(GitIntegration integration, boolean clearToken, boolean clearSshCredentials) {
+        applyProviderDefaults(integration);
+        // Check persistence constraints before revoking a working remote key.
+        if (isBlank(integration.getName()) || integration.getName().length() > 255
+                || integration.getProviderType() == null || isBlank(integration.getUrl())
+                || integration.getUrl().length() > 255 || integration.getPostReviewAction() == null
+                || integration.getUsername() != null && integration.getUsername().length() > 255) {
+            throw new IllegalArgumentException("Invalid Git integration fields");
+        }
+        if (!isBlank(integration.getToken()) && encryptionService.encrypt(integration.getToken()).length() > 255) {
+            throw new IllegalArgumentException("API token exceeds the storage limit");
+        }
+        GitIntegration existing = integration.getId() == null ? null
+                : gitIntegrationRepository.findById(integration.getId()).orElse(null);
+        validate(integration, existing, clearToken, clearSshCredentials);
+    }
+
+    /** Commits HTTP-only state while retaining all remote tracking for retryable cleanup. */
+    public GitIntegration prepareManagedSshKeyRemoval(Long id) {
+        GitIntegration integration = requireIntegration(id);
+        integration.setTransport(GitTransport.HTTP);
+        integration.setSshPrivateKey(null);
+        integration.setSshKnownHosts(null);
+        return gitIntegrationRepository.saveAndFlush(integration);
+    }
+
+    /** Clears tracking only after Gitea has confirmed remote removal. */
+    public GitIntegration finishManagedSshKeyRemoval(Long id) {
+        GitIntegration integration = requireIntegration(id);
+        integration.setSshRemoteKeyId(null);
+        integration.setSshRemoteKeyOwnerId(null);
+        integration.setSshRemoteKeyTitle(null);
+        return gitIntegrationRepository.saveAndFlush(integration);
+    }
+
+    /** Commits an owner/title recovery marker before sending the registration request. */
+    public GitIntegration prepareManagedSshKeyCreation(Long id, Long ownerId, String title) {
+        GitIntegration integration = requireIntegration(id);
+        if (integration.hasManagedSshKeyTracking()) {
+            throw new IllegalStateException("Remove the previous managed SSH key first");
+        }
+        integration.setTransport(GitTransport.HTTP);
+        integration.setSshPrivateKey(null);
+        integration.setSshKnownHosts(null);
+        integration.setSshRemoteKeyOwnerId(ownerId);
+        integration.setSshRemoteKeyTitle(title);
+        return gitIntegrationRepository.saveAndFlush(integration);
+    }
+
+    /** Stores generated SSH credentials after successful Gitea registration. */
+    public GitIntegration configureGeneratedSsh(Long id, String privateKey, String knownHosts,
+                                                Long remoteKeyId, Long ownerId, String title) {
+        if (!encryptionService.isEncryptionEnabled()) {
+            throw new IllegalStateException("Automatic SSH setup requires APP_ENCRYPTION_KEY");
+        }
+        GitIntegration integration = requireIntegration(id);
+        if (integration.getProviderType() != RepositoryType.GITEA || isBlank(privateKey)
+                || isBlank(knownHosts) || remoteKeyId == null || remoteKeyId <= 0
+                || !Objects.equals(ownerId, integration.getSshRemoteKeyOwnerId())
+                || !Objects.equals(title, integration.getSshRemoteKeyTitle())) {
+            throw new IllegalArgumentException("Invalid generated SSH configuration");
+        }
+        integration.setSshPrivateKey(encryptionService.encrypt(privateKey));
+        integration.setSshKnownHosts(knownHosts);
+        integration.setSshRemoteKeyId(remoteKeyId);
+        integration.setTransport(GitTransport.SSH);
+        return gitIntegrationRepository.saveAndFlush(integration);
+    }
+
+    private GitIntegration requireIntegration(Long id) {
+        return gitIntegrationRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Git Integration not found"));
     }
 
     public String decryptToken(GitIntegration integration) {
@@ -128,6 +227,12 @@ public class GitIntegrationService {
 
     private void validate(GitIntegration integration, GitIntegration existing,
                           boolean clearToken, boolean clearSshCredentials) {
+        boolean duplicate = integration.getId() == null
+                ? gitIntegrationRepository.existsByName(integration.getName())
+                : gitIntegrationRepository.existsByNameAndIdNot(integration.getName(), integration.getId());
+        if (duplicate) {
+            throw new IllegalArgumentException("A Git Integration with this name already exists");
+        }
         GitTransport transport = integration.getTransport() == null
                 ? GitTransport.HTTP : integration.getTransport();
         boolean hasNewPrivateKey = !isBlank(integration.getSshPrivateKey());

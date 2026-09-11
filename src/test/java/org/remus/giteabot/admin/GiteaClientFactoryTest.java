@@ -101,6 +101,18 @@ class GiteaClientFactoryTest {
         verify(integrationService, times(2)).decryptSshPrivateKey(integration);
     }
 
+    @Test
+    void replacementTokenClient_isUncachedAndDoesNotDecryptSshSecrets() {
+        GitIntegration integration = integration(7L, "SSH", GitTransport.SSH);
+        var first = factory.createApiClient(integration, "new-token");
+        var second = factory.createApiClient(integration, "new-token");
+        assertThat(first).isNotSameAs(second);
+        assertThat(first.getCredentials().token()).isEqualTo("new-token");
+        assertThat(first.getCredentials().usesSsh()).isFalse();
+        verify(integrationService, never()).decryptToken(any());
+        verify(integrationService, never()).decryptSshPrivateKey(any());
+    }
+
     private GitIntegration integration(long id, String name, GitTransport transport) {
         GitIntegration integration = new GitIntegration();
         integration.setId(id);

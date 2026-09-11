@@ -65,6 +65,20 @@
                             </div>
                         </div>
 
+                        <div class="col-12" th:if="${integration.providerType == T(org.remus.giteabot.repository.RepositoryType).GITEA}">
+                            <div class="alert alert-info" th:text="#{help.git.sshAutomaticSetup}">
+                                Save the URL and API token first. Automatic setup uses the saved configuration.
+                            </div>
+                            <a class="btn btn-outline-primary mb-3"
+                               th:if="${integration.id != null && sshEncryptionEnabled && integration.token != null && !integration.token.isBlank() && integration.transport != T(org.remus.giteabot.repository.GitTransport).SSH}"
+                               th:href="@{/git-integrations/{id}/ssh/setup(id=${integration.id})}"
+                               th:text="#{button.setupSshAutomatically}">Set up SSH automatically</a>
+                            <div class="form-text mb-3" th:if="${integration.hasManagedSshKeyTracking()}"
+                                 th:text="#{help.git.sshManagedKey}">
+                                This integration tracks a managed Gitea key. Credential changes remove it first.
+                            </div>
+                        </div>
+
                         <!-- Username field - shown for Bitbucket only -->
                         <div class="col-md-6" id="usernameField" style="display: none;">
                             <label for="username" class="form-label" th:text="#{label.username}">Username</label>

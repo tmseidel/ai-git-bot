@@ -47,6 +47,13 @@ public class GiteaClientFactory {
     }
 
 
+    /** Creates an uncached HTTP API client with a supplied plaintext replacement token. */
+    public RepositoryApiClient createApiClient(GitIntegration integration, String token) {
+        RepositoryProviderMetadata provider = providerRegistry.getProvider(integration.getProviderType());
+        RestClient restClient = provider.buildRestClient(integration, token);
+        return provider.createClient(restClient, provider.createCredentials(integration, token));
+    }
+
     private CachedClient getCachedClient(GitIntegration integration) {
         CachedClient cached = cache.get(integration.getId());
         long updatedMillis = integration.getUpdatedAt().toEpochMilli();

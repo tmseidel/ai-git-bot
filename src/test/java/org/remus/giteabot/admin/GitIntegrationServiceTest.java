@@ -22,6 +22,9 @@ class GitIntegrationServiceTest {
     @Mock
     private EncryptionService encryptionService;
 
+    @Mock
+    private BotRepository botRepository;
+
     @InjectMocks
     private GitIntegrationService gitIntegrationService;
 
@@ -413,5 +416,92 @@ class GitIntegrationServiceTest {
         assertFalse(toString.contains("secret-token"));
         assertFalse(toString.contains("secret-private-key"));
         assertFalse(toString.contains("secret-host-key"));
+    }
+
+    @Test
+    void managedKey_stagesRetainTrackingUntilExplicitFinish() {
+        GitIntegration integration = new GitIntegration();
+        integration.setTransport(GitTransport.SSH);
+        integration.setToken("stored-token");
+        integration.setSshPrivateKey("stored-key");
+        integration.setSshKnownHosts("stored-hosts");
+        integration.setSshRemoteKeyId(42L);
+        integration.setSshRemoteKeyOwnerId(17L);
+        integration.setSshRemoteKeyTitle("title");
+        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(integration));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+
+        GitIntegration pending = gitIntegrationService.prepareManagedSshKeyRemoval(7L);
+        assertEquals(GitTransport.HTTP, pending.getTransport());
+        assertNull(pending.getSshPrivateKey());
+        assertNull(pending.getSshKnownHosts());
+        assertEquals("stored-token", pending.getToken());
+        assertEquals(42L, pending.getSshRemoteKeyId());
+        assertEquals(17L, pending.getSshRemoteKeyOwnerId());
+        assertEquals("title", pending.getSshRemoteKeyTitle());
+        assertTrue(pending.hasManagedSshKeyTracking());
+        assertFalse(gitIntegrationService.finishManagedSshKeyRemoval(7L).hasManagedSshKeyTracking());
+    }
+
+    @Test
+    void managedKey_creationMarkerPrecedesEncryptedSshConfiguration() {
+        GitIntegration integration = new GitIntegration();
+        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(integration));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        GitIntegration marker = gitIntegrationService.prepareManagedSshKeyCreation(7L, 17L, "title");
+        assertEquals(GitTransport.HTTP, marker.getTransport());
+        assertNull(marker.getSshRemoteKeyId());
+        assertTrue(marker.hasManagedSshKeyTracking());
+        when(encryptionService.isEncryptionEnabled()).thenReturn(true);
+        when(encryptionService.encrypt("private")).thenReturn("encrypted-private");
+        GitIntegration configured = gitIntegrationService.configureGeneratedSsh(7L, "private", "hosts", 42L, 17L, "title");
+        assertEquals(GitTransport.SSH, configured.getTransport());
+        assertEquals("encrypted-private", configured.getSshPrivateKey());
+        assertEquals(42L, configured.getSshRemoteKeyId());
+    }
+
+    @Test
+    void managedKey_trackingCannotBeOverwrittenByFormInput() {
+        GitIntegration input = new GitIntegration();
+        input.setSshRemoteKeyId(42L);
+        input.setSshRemoteKeyOwnerId(17L);
+        input.setSshRemoteKeyTitle("forged");
+        when(gitIntegrationRepository.save(any())).thenAnswer(call -> call.getArgument(0));
+        assertFalse(gitIntegrationService.save(input, false).hasManagedSshKeyTracking());
+    }
+
+    @Test
+    void managedKey_directSaveOrDeleteCannotDiscardTracking() {
+        GitIntegration existing = new GitIntegration();
+        existing.setSshRemoteKeyTitle("recovery-marker");
+        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
+        GitIntegration input = new GitIntegration();
+        input.setId(7L);
+        assertThrows(IllegalStateException.class, () -> gitIntegrationService.save(input, false));
+        assertThrows(IllegalStateException.class, () -> gitIntegrationService.deleteById(7L));
+        assertTrue(existing.hasManagedSshKeyTracking());
+        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void validateDelete_rejectsAssignedIntegration() {
+        when(botRepository.existsByGitIntegrationId(7L)).thenReturn(true);
+        assertThrows(IllegalStateException.class, () -> gitIntegrationService.validateDelete(7L));
+        verify(gitIntegrationRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void trackingPredicate_includesEveryPartialMarker() {
+        GitIntegration integration = new GitIntegration();
+        assertFalse(integration.hasManagedSshKeyTracking());
+        integration.setSshRemoteKeyId(42L);
+        assertTrue(integration.hasManagedSshKeyTracking());
+        integration.setSshRemoteKeyId(null);
+        integration.setSshRemoteKeyOwnerId(17L);
+        assertTrue(integration.hasManagedSshKeyTracking());
+        integration.setSshRemoteKeyOwnerId(null);
+        integration.setSshRemoteKeyTitle("title");
+        assertTrue(integration.hasManagedSshKeyTracking());
     }
 }

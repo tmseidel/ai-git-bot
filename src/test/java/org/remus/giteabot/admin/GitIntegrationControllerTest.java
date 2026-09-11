@@ -1,6 +1,11 @@
 package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
@@ -16,6 +21,8 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Optional;
+import java.util.List;
+import org.remus.giteabot.repository.SshEndpoint;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,6 +50,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         SecurityFilterAutoConfiguration.class
 })
 @ActiveProfiles("test")
+@ExtendWith(OutputCaptureExtension.class)
 class GitIntegrationControllerTest {
 
     @Autowired
@@ -50,6 +58,9 @@ class GitIntegrationControllerTest {
 
     @MockitoBean
     private GitIntegrationService gitIntegrationService;
+
+    @MockitoBean
+    private GiteaSshSetupService giteaSshSetupService;
 
     @MockitoBean
     private AdminUserRepository adminUserRepository;
@@ -185,7 +196,7 @@ class GitIntegrationControllerTest {
     void save_keyOnlyRotation_preservesStoredKnownHosts() throws Exception {
         GitIntegrationRepository repository = mock(GitIntegrationRepository.class);
         EncryptionService encryption = mock(EncryptionService.class);
-        GitIntegrationService service = new GitIntegrationService(repository, encryption);
+        GitIntegrationService service = new GitIntegrationService(repository, encryption, mock(BotRepository.class));
         GitIntegration existing = new GitIntegration();
         existing.setId(7L);
         existing.setUrl("https://gitea.example.com");
@@ -269,5 +280,161 @@ class GitIntegrationControllerTest {
                                 && integration.getSshKnownHosts() == null
                 ),
                 eq(false), eq(false));
+    }
+
+    @Test
+    void preview_rendersConfirmationWithoutStoredSecrets() throws Exception {
+        GitIntegration integration = managedIntegration();
+        var scan = new SshCommandService.HostKeyScan(new SshEndpoint("gitea.example.com", 22),
+                "hosts", List.of(new SshCommandService.HostKeyFingerprint("ssh-ed25519", "SHA256:trusted")), "scan");
+        when(giteaSshSetupService.preview(7L)).thenReturn(new GiteaSshSetupService.SshSetupPreview(
+                integration, "git@gitea.example.com:owner/repo.git", scan));
+        mockMvc.perform(get("/git-integrations/7/ssh/setup").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk()).andExpect(view().name("git-integrations/ssh-setup"))
+                .andExpect(content().string(containsString("SHA256:trusted")))
+                .andExpect(content().string(containsString("name=\"confirmation\" value=\"scan\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("encrypted-key"))))
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("stored-token"))));
+    }
+
+    @Test
+    void confirm_forwardsExplicitConsentAndRequiresCsrf() throws Exception {
+        mockMvc.perform(post("/git-integrations/7/ssh/setup").with(user("admin").roles("ADMIN"))
+                        .param("confirmation", "scan").param("confirmed", "true"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/git-integrations/7/ssh/setup").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("confirmation", "scan").param("confirmed", "true"))
+                .andExpect(redirectedUrl("/git-integrations/7/edit")).andExpect(flash().attributeExists("success"));
+        verify(giteaSshSetupService).setup(7L, "scan", true);
+    }
+
+    @Test
+    void confirm_missingConsentDoesNotDefaultToTrue() throws Exception {
+        org.mockito.Mockito.doThrow(new IllegalArgumentException("confirmation required"))
+                .when(giteaSshSetupService).setup(7L, "scan", false);
+        mockMvc.perform(post("/git-integrations/7/ssh/setup").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("confirmation", "scan"))
+                .andExpect(redirectedUrl("/git-integrations/7/edit")).andExpect(flash().attributeExists("error"));
+    }
+
+    @Test
+    void save_managedKeyRotationPreservesHostTrustAfterOrderedCleanup() throws Exception {
+        GitIntegration existing = managedIntegration();
+        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(giteaSshSetupService.removeManagedKey(existing, null)).thenReturn(true);
+        mockMvc.perform(post("/git-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("id", "7").param("name", "production").param("providerType", "GITEA")
+                        .param("url", existing.getUrl()).param("transport", "SSH").param("sshPrivateKey", "new-private"))
+                .andExpect(flash().attributeExists("success"));
+        var order = org.mockito.Mockito.inOrder(gitIntegrationService, giteaSshSetupService);
+        order.verify(gitIntegrationService).validateSave(any(), eq(false), eq(true));
+        order.verify(gitIntegrationService).prepareManagedSshKeyRemoval(7L);
+        order.verify(giteaSshSetupService).removeManagedKey(existing, null);
+        order.verify(gitIntegrationService).finishManagedSshKeyRemoval(7L);
+        order.verify(gitIntegrationService).save(argThat(input -> input.getTransport() == GitTransport.SSH
+                && "new-private".equals(input.getSshPrivateKey()) && "trusted-hosts".equals(input.getSshKnownHosts())),
+                eq(false), eq(true));
+    }
+
+    @Test
+    void save_failedManagedCleanupDoesNotSaveNewEndpointOrClearTracking() throws Exception {
+        GitIntegration existing = managedIntegration();
+        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        mockMvc.perform(post("/git-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("id", "7").param("name", "production").param("providerType", "GITEA")
+                        .param("url", "https://new.example.com").param("transport", "SSH").param("token", "new-token")
+                        .param("sshPrivateKey", "replacement-key").param("sshKnownHosts", "new-hosts"))
+                .andExpect(flash().attributeExists("error"));
+        verify(giteaSshSetupService).removeManagedKey(existing, null);
+        verify(gitIntegrationService, org.mockito.Mockito.never()).save(any(), anyBoolean(), anyBoolean());
+        verify(gitIntegrationService, org.mockito.Mockito.never()).finishManagedSshKeyRemoval(any());
+    }
+
+    @Test
+    void save_explicitHttpSelectionUsesReplacementTokenForCleanup() throws Exception {
+        GitIntegration existing = managedIntegration();
+        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(giteaSshSetupService.removeManagedKey(existing, "new-token")).thenReturn(true);
+        mockMvc.perform(post("/git-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("id", "7").param("name", "production").param("providerType", "GITEA")
+                        .param("url", existing.getUrl()).param("transport", "HTTP").param("token", "new-token"))
+                .andExpect(flash().attributeExists("success"));
+        verify(gitIntegrationService).save(argThat(input -> input.getTransport() == GitTransport.HTTP
+                && "new-token".equals(input.getToken()) && input.getSshPrivateKey() == null), eq(false), eq(true));
+    }
+
+    @Test
+    void delete_failureRetainsIntegrationAndRetryFinishesCleanupBeforeDeletion() throws Exception {
+        GitIntegration existing = managedIntegration();
+        when(gitIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationService.prepareManagedSshKeyRemoval(7L)).thenReturn(existing);
+        when(giteaSshSetupService.removeManagedKey(existing, null)).thenReturn(false, true);
+        mockMvc.perform(post("/git-integrations/7/delete").with(user("admin").roles("ADMIN")).with(csrf()))
+                .andExpect(flash().attributeExists("error"));
+        verify(gitIntegrationService, org.mockito.Mockito.never()).deleteById(7L);
+        verify(gitIntegrationService, org.mockito.Mockito.never()).finishManagedSshKeyRemoval(7L);
+        mockMvc.perform(post("/git-integrations/7/delete").with(user("admin").roles("ADMIN")).with(csrf()))
+                .andExpect(flash().attributeExists("success"));
+        var order = org.mockito.Mockito.inOrder(gitIntegrationService);
+        order.verify(gitIntegrationService).finishManagedSshKeyRemoval(7L);
+        order.verify(gitIntegrationService).deleteById(7L);
+    }
+
+    @Test
+    void delete_assignedIntegrationDoesNotStartRemoteCleanup() throws Exception {
+        org.mockito.Mockito.doThrow(new IllegalStateException("used by bot"))
+                .when(gitIntegrationService).validateDelete(7L);
+        mockMvc.perform(post("/git-integrations/7/delete").with(user("admin").roles("ADMIN")).with(csrf()))
+                .andExpect(flash().attributeExists("error"));
+        org.mockito.Mockito.verifyNoInteractions(giteaSshSetupService);
+        verify(gitIntegrationService, org.mockito.Mockito.never()).prepareManagedSshKeyRemoval(7L);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"preview", "confirm", "save", "delete"})
+    void upstreamFailureDoesNotExposeResponseBodyOrCause(String operation, CapturedOutput output) throws Exception {
+        String sentinel = "test-only-response-token-sentinel";
+        var upstream = org.springframework.web.client.HttpClientErrorException.create(
+                org.springframework.http.HttpStatus.BAD_REQUEST, "Bad request", null,
+                sentinel.getBytes(java.nio.charset.StandardCharsets.UTF_8), java.nio.charset.StandardCharsets.UTF_8);
+        var failure = new IllegalStateException("upstream failed: " + sentinel, upstream);
+        var request = post("/git-integrations/save");
+        switch (operation) {
+            case "preview" -> {
+                when(giteaSshSetupService.preview(7L)).thenThrow(failure);
+                request = get("/git-integrations/7/ssh/setup");
+            }
+            case "confirm" -> {
+                when(giteaSshSetupService.setup(7L, "scan", true)).thenThrow(failure);
+                request = post("/git-integrations/7/ssh/setup").param("confirmation", "scan").param("confirmed", "true");
+            }
+            case "save" -> when(gitIntegrationService.save(any(), anyBoolean(), anyBoolean())).thenThrow(failure);
+            case "delete" -> {
+                org.mockito.Mockito.doThrow(failure).when(gitIntegrationService).validateDelete(7L);
+                request = post("/git-integrations/7/delete");
+            }
+        }
+        var result = mockMvc.perform(request.with(user("admin").roles("ADMIN")).with(csrf()))
+                .andExpect(status().is3xxRedirection()).andExpect(flash().attributeExists("error")).andReturn();
+        org.junit.jupiter.api.Assertions.assertFalse(result.getFlashMap().toString().contains(sentinel));
+        org.junit.jupiter.api.Assertions.assertFalse(output.getAll().contains(sentinel));
+    }
+
+    private GitIntegration managedIntegration() {
+        GitIntegration integration = new GitIntegration();
+        integration.setId(7L);
+        integration.setName("production");
+        integration.setUrl("https://gitea.example.com");
+        integration.setToken("stored-token");
+        integration.setTransport(GitTransport.SSH);
+        integration.setSshPrivateKey("encrypted-key");
+        integration.setSshKnownHosts("trusted-hosts");
+        integration.setSshRemoteKeyId(42L);
+        integration.setSshRemoteKeyOwnerId(17L);
+        integration.setSshRemoteKeyTitle("unique-title");
+        return integration;
     }
 }

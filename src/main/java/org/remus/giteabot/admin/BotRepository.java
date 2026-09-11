@@ -30,4 +30,6 @@ public interface BotRepository extends JpaRepository<Bot, Long> {
     List<Bot> findByIssueWorkflowConfigurationId(Long issueWorkflowConfigurationId);
 
     boolean existsByName(String name);
+
+    boolean existsByGitIntegrationId(Long gitIntegrationId);
 }
