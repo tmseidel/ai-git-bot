@@ -60,6 +60,9 @@ class SuitePromotionServiceTest {
         when(workspaceService.prepareWorkspace(any(RepositoryApiClient.class),
                 anyString(), anyString(), anyString(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
+        when(workspaceService.prepareWritablePullRequestWorkspace(any(RepositoryApiClient.class),
+                anyString(), anyString(), anyString(), any()))
+                .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean()))
                 .thenReturn(true);
@@ -164,7 +167,7 @@ class SuitePromotionServiceTest {
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.COMMITTED);
         assertThat(out.branch()).isEqualTo("feature/x");
         assertThat(workspace.resolve("tests/e2e/pr-3/smoke.spec.ts")).exists();
-        verify(workspaceService).prepareWorkspace(
+        verify(workspaceService).prepareWritablePullRequestWorkspace(
                 repoClient, "acme", "web", "feature/x", 3L);
         verify(workspaceService).commitAndPush(eq(workspace), eq("feature/x"),
                 anyString(), anyString(), anyString(), eq(false));
@@ -187,6 +190,22 @@ class SuitePromotionServiceTest {
         assertThat(out.followUpPrNumber()).isEqualTo(123L);
         verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void offerAsPr_onAuthoritativeFork_failsBeforePreparingWorkspace() {
+        when(workspaceService.isAuthoritativePullRequestFromFork(
+                repoClient, "acme", "web", "main", 7L)).thenReturn(true);
+        PrTestSuite suite = suite(SuiteLifecycleMode.OFFER_AS_PR, 7L,
+                caseAt("login.spec.ts", "// hi"));
+
+        SuitePromotionService.Outcome out = service.promote(
+                bot(), run(99L), suite, "acme", "web", "main");
+
+        assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(workspaceService, never()).commitAndPush(
+                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -253,6 +272,38 @@ class SuitePromotionServiceTest {
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void targetDirectoryWriteFailure_surfacesAsOutcomeFailure_withoutPush() throws IOException {
+        Files.writeString(workspace.resolve("tests"), "blocks directory creation");
+
+        SuitePromotionService.Outcome out = service.promote(bot(), run(1L),
+                suite(SuiteLifecycleMode.COMMIT_TO_PR, 7L,
+                        caseAt("login.spec.ts", "// hi")),
+                "acme", "web", "feature/x");
+
+        assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
+        assertThat(out.message()).contains("write");
+        verify(workspaceService, never()).commitAndPush(
+                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+    }
+
+    @Test
+    void partialCaseWriteFailure_surfacesAsOutcomeFailure_withoutPush() throws IOException {
+        Path target = Files.createDirectories(workspace.resolve("tests/e2e/pr-7"));
+        Files.writeString(target.resolve("blocked"), "blocks child creation");
+
+        SuitePromotionService.Outcome out = service.promote(bot(), run(1L),
+                suite(SuiteLifecycleMode.COMMIT_TO_PR, 7L,
+                        caseAt("login.spec.ts", "// first"),
+                        caseAt("blocked/checkout.spec.ts", "// second")),
+                "acme", "web", "feature/x");
+
+        assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
+        assertThat(out.message()).contains("write");
+        verify(workspaceService, never()).commitAndPush(
+                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
     }
 
     @Test

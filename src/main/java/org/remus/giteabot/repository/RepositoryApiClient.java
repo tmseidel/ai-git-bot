@@ -1,6 +1,7 @@
 package org.remus.giteabot.repository;
 
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
@@ -216,6 +217,26 @@ public interface RepositoryApiClient {
      */
     default Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
         return Map.of();
+    }
+
+    /**
+     * Returns whether writable PR workspaces must resolve the provider's
+     * authoritative head repository before cloning. Providers returning
+     * {@code true} must implement {@link #getPullRequestHead} and fail closed
+     * when the source repository cannot be determined.
+     */
+    default boolean requiresAuthoritativePullRequestHead() {
+        return false;
+    }
+
+    /**
+     * Resolves the repository and branch that own a pull request head.
+     * Called only when {@link #requiresAuthoritativePullRequestHead()} is true.
+     */
+    default PullRequestHead getPullRequestHead(String owner, String repo, Long pullNumber,
+                                               String expectedBranch) {
+        throw new UnsupportedOperationException(
+                "Authoritative pull-request head resolution is not supported by this provider");
     }
 
     // ---- Repository operations ----

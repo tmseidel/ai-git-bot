@@ -4,7 +4,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
 import org.remus.giteabot.ai.AiMessage;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.StreamingLineReader;
+import org.remus.giteabot.ai.ToolDescriptor;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -12,6 +15,7 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -83,6 +87,46 @@ public class LlamaCppClient extends AbstractAiClient {
         return doRequest(prompt, maxTokens, "chat", grammar);
     }
 
+    /** Returns completion metadata for the legacy JSON-in-prompt transport; native tools remain unsupported. */
+    @Override
+    public ChatTurn chatWithTools(List<AiMessage> conversationHistory, String newUserMessage,
+                                  List<ToolDescriptor> tools, String systemPrompt,
+                                  String modelOverride, Integer maxTokensOverride) {
+        String effectivePrompt = resolvePrompt(systemPrompt);
+        int maxTokens = maxTokensOverride != null && maxTokensOverride > 0
+                ? maxTokensOverride : getMaxTokens();
+        List<AiMessage> messages = new ArrayList<>(conversationHistory);
+        messages.add(AiMessage.builder().role("user")
+                .content(newUserMessage == null ? "" : newUserMessage).build());
+        String grammar = shouldUseJsonGrammar(effectivePrompt) ? AGENT_JSON_GRAMMAR : null;
+        LlamaCppRequest request = buildRequest(buildChatPrompt(effectivePrompt, messages),
+                maxTokens, "chat", grammar);
+        LlamaCppResponse response = executeRequest(request);
+        if (response == null) {
+            return new ChatTurn("", List.of(), StopReason.OTHER, 0L, 0L);
+        }
+
+        long inputTokens = response.getTokensEvaluated() == null ? 0L : response.getTokensEvaluated();
+        long outputTokens = response.getTokensPredicted() == null ? 0L : response.getTokensPredicted();
+        if (response.getTokensEvaluated() != null || response.getTokensPredicted() != null) {
+            reportUsage(inputTokens, outputTokens, 0L, 0L, request, response);
+        }
+        StopReason reason = StopReason.OTHER;
+        if ("true".equals(response.getStop()) && !Boolean.TRUE.equals(response.getTruncated())) {
+            if (Boolean.TRUE.equals(response.getStoppedLimit()) || "limit".equals(response.getStopType())) {
+                reason = StopReason.MAX_TOKENS;
+            } else if (response.getStopType() != null) {
+                reason = switch (response.getStopType()) {
+                    case "eos", "word" -> StopReason.END_TURN;
+                    default -> StopReason.OTHER;
+                };
+            } else if (Boolean.TRUE.equals(response.getStoppedEos()) || Boolean.TRUE.equals(response.getStoppedWord())) {
+                reason = StopReason.END_TURN;
+            }
+        }
+        return new ChatTurn(response.getContent(), List.of(), reason, inputTokens, outputTokens);
+    }
+
     @Override
     public boolean isPromptTooLongError(HttpClientErrorException e) {
         String body = e.getResponseBodyAsString();
@@ -139,6 +183,11 @@ public class LlamaCppClient extends AbstractAiClient {
 
 
     private String doRequest(String prompt, int maxTokens, String context, String grammar) {
+        LlamaCppRequest request = buildRequest(prompt, maxTokens, context, grammar);
+        return extractText(request, executeRequest(request), context);
+    }
+
+    private LlamaCppRequest buildRequest(String prompt, int maxTokens, String context, String grammar) {
         LlamaCppRequest.LlamaCppRequestBuilder requestBuilder = LlamaCppRequest.builder()
                 .prompt(prompt)
                 .nPredict(maxTokens)
@@ -157,14 +206,9 @@ public class LlamaCppClient extends AbstractAiClient {
             log.info("llama.cpp {} request: GBNF grammar enabled for structured JSON output", context);
         }
 
-        LlamaCppRequest request = requestBuilder.build();
-
         log.debug("llama.cpp request to /completion: promptLength={}, maxTokens={}, grammar={}",
                 prompt.length(), maxTokens, grammar != null);
-
-        LlamaCppResponse response = executeRequest(request);
-
-        return extractText(request, response, context);
+        return requestBuilder.build();
     }
 
     private LlamaCppResponse executeRequest(LlamaCppRequest request) {
@@ -178,6 +222,7 @@ public class LlamaCppClient extends AbstractAiClient {
         StringBuilder content = new StringBuilder();
         LlamaCppResponse[] finalRef = new LlamaCppResponse[1];
         LlamaCppResponse[] lastRef = new LlamaCppResponse[1];
+        boolean[] truncated = {false};
 
         StreamingLineReader.streamLines(restClient, "/completion", request, line -> {
             // Strip the SSE "data: " framing (the line reader already dropped
@@ -197,6 +242,7 @@ public class LlamaCppClient extends AbstractAiClient {
                         "Malformed llama.cpp stream line: " + e.getMessage(), new IOException(e));
             }
             lastRef[0] = chunk;
+            truncated[0] |= Boolean.TRUE.equals(chunk.getTruncated());
             if (chunk.getContent() != null) {
                 content.append(chunk.getContent());
             }
@@ -221,12 +267,13 @@ public class LlamaCppClient extends AbstractAiClient {
                 : (source.getContent() != null ? source.getContent() : ""));
         merged.setModel(source.getModel());
         merged.setStop(source.getStop());
+        merged.setStopType(source.getStopType());
         merged.setStoppedEos(source.getStoppedEos());
         merged.setStoppedLimit(source.getStoppedLimit());
         merged.setStoppedWord(source.getStoppedWord());
         merged.setTokensEvaluated(source.getTokensEvaluated());
         merged.setTokensPredicted(source.getTokensPredicted());
-        merged.setTruncated(source.getTruncated());
+        merged.setTruncated(truncated[0] ? Boolean.TRUE : source.getTruncated());
         merged.setTimings(source.getTimings());
         return merged;
     }

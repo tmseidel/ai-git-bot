@@ -119,16 +119,17 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         context.requireActive("before running agentic review");
 
-        boolean reviewed = serviceFactory.create(bot)
+        AgentReviewService.ReviewResult reviewed = serviceFactory.create(bot)
                 .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
                         context.runId(), context.auditToolCallConsumer());
 
-        context.appendStep("agentic-review",
-                reviewed ? "Posted agentic review for PR" : "Skipped — no diff or no review produced");
-
-        return reviewed
-                ? WorkflowResult.success("Agentic review posted")
-                : WorkflowResult.skipped("No diff or no review produced");
+        WorkflowResult result = switch (reviewed) {
+            case POSTED -> WorkflowResult.success("Agentic review posted");
+            case NO_DIFF -> WorkflowResult.skipped("No diff to review");
+            case FAILED -> WorkflowResult.failed("Agentic review failed; no complete review was produced");
+        };
+        context.appendStep("agentic-review", result.summary());
+        return result;
     }
 
     private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion) {
@@ -138,15 +139,16 @@ public class AgentReviewWorkflow implements PrWorkflow {
         Map<String, Object> params = resolveParams(bot);
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
 
-        boolean answered = serviceFactory.create(bot)
+        AgentReviewService.ReviewResult answered = serviceFactory.create(bot)
                 .answerClarification(context.payload(), userQuestion, maxToolRounds);
 
-        context.appendStep("agentic-clarification",
-                answered ? "Posted clarification response" : "Failed to produce clarification");
-
-        return answered
-                ? WorkflowResult.success("Clarification posted")
-                : WorkflowResult.skipped("No clarification produced");
+        WorkflowResult result = switch (answered) {
+            case POSTED -> WorkflowResult.success("Clarification posted");
+            case NO_DIFF -> WorkflowResult.skipped("No diff to answer clarification");
+            case FAILED -> WorkflowResult.failed("No clarification produced");
+        };
+        context.appendStep("agentic-clarification", result.summary());
+        return result;
     }
 
     private Map<String, Object> resolveParams(Bot bot) {

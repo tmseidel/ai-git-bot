@@ -25,13 +25,13 @@ import java.util.List;
  * non-empty {@link #toolDescriptors()}. When the resolved
  * {@link org.remus.giteabot.ai.AiClient AiClient} also supports native tools
  * the loop calls {@code chatWithTools(...)} and forwards the structured
- * {@link ChatTurn} via {@link #step(AgentRunContext, ChatTurn, int)}. By
- * default both knobs report "legacy", so existing strategies keep using the
- * text-based {@code step(...)} path without modification.</p>
+ * {@link ChatTurn} via {@link #step(AgentRunContext, ChatTurn, int)}. Legacy
+ * turns retain their completion metadata through {@link #stepLegacy}, whose
+ * default implementation delegates to the text-based {@code step(...)} path.</p>
  */
 public interface AgentStrategy {
 
-    /** System prompt to send on every {@code aiClient.chat} call. */
+    /** System prompt to send on every provider chat call. */
     String systemPrompt();
 
     /**
@@ -46,6 +46,16 @@ public interface AgentStrategy {
      * @return next decision
      */
     StepDecision step(AgentRunContext ctx, String aiResponse, int round);
+
+    /**
+     * Handles a legacy text-protocol turn with its provider completion metadata.
+     * The default delegates to the existing text handler. Strategies that need
+     * completion validation can override this before parsing the text, without
+     * routing legacy JSON through their native tool handler.
+     */
+    default StepDecision stepLegacy(AgentRunContext ctx, ChatTurn turn, int round) {
+        return step(ctx, turn.assistantText(), round);
+    }
 
     /**
      * Hook called when the loop exhausts {@link AgentBudget#maxRounds()}
@@ -88,4 +98,3 @@ public interface AgentStrategy {
         return step(ctx, turn.assistantText(), round);
     }
 }
-

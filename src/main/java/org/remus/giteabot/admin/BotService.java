@@ -1,5 +1,7 @@
 package org.remus.giteabot.admin;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
@@ -24,6 +26,8 @@ public class BotService {
     private final BotRepository botRepository;
     private final BotToolConfigurationRepository botToolConfigurationRepository;
     private final EncryptionService encryptionService;
+    private final GitIntegrationRepository gitIntegrationRepository;
+    private final EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public List<Bot> findAll() {
@@ -53,6 +57,15 @@ public class BotService {
      * Clear button in the UI).</p>
      */
     public Bot save(Bot bot, boolean clearSigningSecret) {
+        if (bot.getGitIntegration() != null) {
+            GitIntegration integration = gitIntegrationRepository.findByIdForUpdate(bot.getGitIntegration().getId())
+                    .orElseThrow(() -> new IllegalArgumentException("Git Integration not found"));
+            entityManager.refresh(integration, LockModeType.PESSIMISTIC_WRITE);
+            if (integration.isDeletionPending()) {
+                throw new IllegalStateException("Git Integration deletion is pending");
+            }
+            bot.setGitIntegration(integration);
+        }
         if (bot.getWebhookSecret() == null) {
             bot.setWebhookSecret(UUID.randomUUID().toString());
         }
@@ -109,15 +122,46 @@ public class BotService {
     }
 
     public void incrementWebhookCallCount(Bot bot) {
+        // Never merge an old webhook snapshot: it may restore a fenced integration assignment.
+        if (entityManager.contains(bot)) {
+            entityManager.detach(bot);
+        }
+        Instant now = Instant.now();
+        if (!requireSingleRowUpdated("webhook call count", bot.getId(),
+                botRepository.incrementWebhookCallCount(bot.getId(), now))) {
+            return;
+        }
         bot.setWebhookCallCount(bot.getWebhookCallCount() + 1);
-        bot.setLastWebhookAt(Instant.now());
-        botRepository.save(bot);
+        bot.setLastWebhookAt(now);
     }
 
     public void recordError(Bot bot, String errorMessage) {
+        if (entityManager.contains(bot)) {
+            entityManager.detach(bot);
+        }
+        Instant now = Instant.now();
+        if (!requireSingleRowUpdated("last error", bot.getId(),
+                botRepository.recordError(bot.getId(), errorMessage, now))) {
+            return;
+        }
         bot.setLastErrorMessage(errorMessage);
-        bot.setLastErrorAt(Instant.now());
-        botRepository.save(bot);
+        bot.setLastErrorAt(now);
+    }
+
+    /**
+     * Surfaces audit updates that matched no row instead of dropping them
+     * silently. A zero-row result means the persisted bot vanished (or was
+     * replaced) after the caller loaded the stale snapshot the webhook still
+     * holds. Returns {@code false} without touching the in-memory snapshot so
+     * unpersisted state can never be mistaken for recorded state.
+     */
+    private boolean requireSingleRowUpdated(String field, Long botId, int updatedRows) {
+        if (updatedRows != 1) {
+            log.error("Bot {} {} update matched {} rows; the persisted bot may have been deleted "
+                    + "or replaced, so the webhook state was not recorded", botId, field, updatedRows);
+            return false;
+        }
+        return true;
     }
 
     /**

@@ -3,7 +3,6 @@ package org.remus.giteabot.ai.ollama;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
-import org.remus.giteabot.ai.AiClientDelegateSupport;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
@@ -80,34 +79,34 @@ public class OllamaClient extends AbstractAiClient {
                                   String systemPrompt,
                                   String modelOverride,
                                   Integer maxTokensOverride) {
-        if (!supportsNativeTools() || tools == null || tools.isEmpty()) {
-            return AiClientDelegateSupport.delegateToChat(this, conversationHistory,
-                    newUserMessage, systemPrompt, modelOverride, maxTokensOverride);
-        }
+        boolean useNativeTools = supportsNativeTools() && tools != null && !tools.isEmpty();
+        String effectivePrompt = useNativeTools ? systemPrompt : resolvePrompt(systemPrompt);
         String effectiveModel = (modelOverride != null && !modelOverride.isBlank())
                 ? modelOverride : getModel();
         int effectiveMaxTokens = (maxTokensOverride != null && maxTokensOverride > 0)
                 ? maxTokensOverride : getMaxTokens();
 
         List<AiMessage> fullHistory = new ArrayList<>(conversationHistory);
-        if (newUserMessage != null && !newUserMessage.isBlank()) {
-            fullHistory.add(AiMessage.builder().role("user").content(newUserMessage).build());
+        if (!useNativeTools || (newUserMessage != null && !newUserMessage.isBlank())) {
+            fullHistory.add(AiMessage.builder().role("user")
+                    .content(newUserMessage == null ? "" : newUserMessage).build());
         }
 
-        List<OllamaRequest.Message> messages = buildMessages(systemPrompt, fullHistory);
-        List<OllamaRequest.Tool> toolPayloads = tools.stream()
+        List<OllamaRequest.Message> messages = buildMessages(effectivePrompt, fullHistory);
+        List<OllamaRequest.Tool> toolPayloads = useNativeTools ? tools.stream()
                 .map(this::toToolPayload)
-                .toList();
+                .toList() : List.of();
 
         OllamaRequest request = OllamaRequest.builder()
                 .model(effectiveModel)
                 .messages(messages)
                 .stream(true)
                 .options(OllamaRequest.Options.builder().numPredict(effectiveMaxTokens).build())
-                .tools(toolPayloads)
+                .tools(useNativeTools ? toolPayloads : null)
+                .format(!useNativeTools && shouldUseJsonMode(effectivePrompt) ? "json" : null)
                 .build();
 
-        log.info("Ollama chat-with-tools request: model={}, tools={}, history={}",
+        log.info("Ollama chat turn request: model={}, tools={}, history={}",
                 effectiveModel, toolPayloads.size(), messages.size());
 
         OllamaResponse response = executeRequest(request);
@@ -189,7 +188,7 @@ public class OllamaClient extends AbstractAiClient {
     private ChatTurn interpret(OllamaRequest request, OllamaResponse response) {
         if (response == null || response.getMessage() == null) {
             log.warn("Empty response from Ollama tool-call request");
-            return ChatTurn.text("Unable to generate response - empty reply from AI.");
+            return new ChatTurn("", List.of(), StopReason.OTHER, 0L, 0L);
         }
         String text = response.getMessage().getContent() != null ? response.getMessage().getContent() : "";
 
@@ -210,7 +209,8 @@ public class OllamaClient extends AbstractAiClient {
                 calls.add(new ToolCall(originalName + ":" + (idx++), originalName, args));
             }
         }
-        StopReason reason = mapStopReason(response.getDoneReason(), !calls.isEmpty());
+        StopReason reason = response.isDone()
+                ? mapStopReason(response.getDoneReason(), !calls.isEmpty()) : StopReason.OTHER;
         long inputTokens = 0L;
         long outputTokens = 0L;
         if (response.getPromptEvalCount() != null && response.getEvalCount() != null) {
@@ -224,14 +224,11 @@ public class OllamaClient extends AbstractAiClient {
     }
 
     private StopReason mapStopReason(String doneReason, boolean hasToolCalls) {
-        if (hasToolCalls) {
-            return StopReason.TOOL_USE;
-        }
         if (doneReason == null) {
-            return StopReason.END_TURN;
+            return StopReason.OTHER;
         }
         return switch (doneReason) {
-            case "stop", "end_turn" -> StopReason.END_TURN;
+            case "stop", "end_turn" -> hasToolCalls ? StopReason.TOOL_USE : StopReason.END_TURN;
             case "length" -> StopReason.MAX_TOKENS;
             default -> StopReason.OTHER;
         };
@@ -275,14 +272,15 @@ public class OllamaClient extends AbstractAiClient {
 
     private OllamaResponse executeRequest(OllamaRequest request) {
         // Stream the NDJSON chunks and reassemble them into a single response.
-        // Each line is a complete OllamaResponse-shaped JSON object. Content is
-        // concatenated across chunks; done_reason / prompt_eval_count / eval_count
-        // (and tool_calls) come from the final (done:true) chunk, which is the only
+        // Each line is a complete OllamaResponse-shaped JSON object. Content and
+        // tool_calls are accumulated across chunks; done_reason / prompt_eval_count /
+        // eval_count come from the final (done:true) chunk, which is the only
         // one that carries the usage counters — so audit/usage totals are unchanged
         // from the non-streamed path. If the stream ends without a done chunk
         // (e.g. provider/proxy truncation), the last chunk is used as the
         // metadata fallback, so model metadata is not lost.
         StringBuilder content = new StringBuilder();
+        List<OllamaResponse.ToolCallResponse> toolCalls = new ArrayList<>();
         OllamaResponse[] finalRef = new OllamaResponse[1];
         OllamaResponse[] lastRef = new OllamaResponse[1];
 
@@ -301,14 +299,16 @@ public class OllamaClient extends AbstractAiClient {
             if (chunk.getMessage() != null && chunk.getMessage().getContent() != null) {
                 content.append(chunk.getMessage().getContent());
             }
+            if (chunk.getMessage() != null && chunk.getMessage().getToolCalls() != null) {
+                toolCalls.addAll(chunk.getMessage().getToolCalls());
+            }
             if (chunk.isDone()) {
                 finalRef[0] = chunk;
             }
         });
 
-        // 0-chunk stream: reproduce the old empty-response path (body() used to
-        // return null for an empty body), so extractText / interpret apply their
-        // existing "Unable to generate ... empty response" fallback.
+        // Keep an empty transport response distinct from a completed model turn.
+        // The text API retains its legacy fallback; native callers receive OTHER.
         OllamaResponse source = finalRef[0] != null ? finalRef[0] : lastRef[0];
         if (source == null) {
             return null;
@@ -331,10 +331,7 @@ public class OllamaClient extends AbstractAiClient {
         if (source.getModel() != null) {
             merged.setModel(source.getModel());
         }
-        if (source.getMessage() != null) {
-            // Tool calls are emitted complete in the final chunk.
-            message.setToolCalls(source.getMessage().getToolCalls());
-        }
+        message.setToolCalls(toolCalls);
         merged.setMessage(message);
         return merged;
     }
@@ -359,5 +356,3 @@ public class OllamaClient extends AbstractAiClient {
         return result;
     }
 }
-
-

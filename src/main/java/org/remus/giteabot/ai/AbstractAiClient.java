@@ -199,7 +199,8 @@ public abstract class AbstractAiClient implements AiClient {
         return (modelOverride != null && !modelOverride.isBlank()) ? modelOverride : model;
     }
 
-    private String resolvePrompt(String systemPrompt) {
+    /** Applies the default system prompt when a text-only caller omits it. */
+    protected String resolvePrompt(String systemPrompt) {
         return (systemPrompt != null && !systemPrompt.isBlank()) ? systemPrompt : DEFAULT_SYSTEM_PROMPT;
     }
 }

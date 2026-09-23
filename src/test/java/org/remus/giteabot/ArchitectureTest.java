@@ -92,4 +92,23 @@ class ArchitectureTest {
                             BASE + ".github..", BASE + ".gitlab..", BASE + ".bitbucket..",
                             BASE + ".mcp..", BASE + ".prworkflow..", BASE + ".repository..",
                             BASE + ".review..", BASE + ".systemsettings..", BASE + ".webhook..");
+
+    /** Orchestrators own the run's repository coordinates (owner/repo/number),
+     * never the repository API surface — repository side effects belong to a
+     * dedicated component such as {@code notification.WorkflowRetryNotices}. */
+    @ArchTest
+    static final ArchRule orchestrators_do_not_use_repository_clients =
+            noClasses().that().haveSimpleNameEndingWith("Orchestrator")
+                    .should().dependOnClassesThat().resideInAPackage(BASE + ".repository..");
+
+    /** The {@code ai} package (incl. its context thread-locals) stays
+     * repository-agnostic: the AI layer learns about a pull request or issue
+     * only through a sink handed down by the caller, so it never links a
+     * provider client or a repository provider package. */
+    @ArchTest
+    static final ArchRule ai_package_does_not_use_repository_clients =
+            noClasses().that().resideInAPackage(BASE + ".ai..")
+                    .should().dependOnClassesThat()
+                    .resideInAnyPackage(BASE + ".repository..", BASE + ".gitea..",
+                            BASE + ".github..", BASE + ".gitlab..", BASE + ".bitbucket..");
 }

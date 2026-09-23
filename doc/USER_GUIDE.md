@@ -743,3 +743,23 @@ Set `GITEABOT_SECURITY_OAUTH_DEBUG_LOGGING_ENABLED=true` and configure the appli
 | `AGENT_VALIDATION_MAX_RETRIES` | `3` | Max iterations for error correction |
 
 See [Agent Documentation](AGENT.md) for full details on the coding and writer agent workflows.
+
+### AI Provider Overload Retries
+
+Providers occasionally refuse a request because they are overloaded — Google answers with HTTP `503` `{"status": "UNAVAILABLE"}` ("This model is currently experiencing high demand"), Anthropic with HTTP `529` `overloaded_error`, OpenAI-compatible gateways with `503`/`overloaded`. These spikes are temporary, so the bot retries the call instead of failing the workflow.
+
+* **Exponential backoff with jitter.** Defaults: `10s → 20s → 40s → 60s` (±20%) for 5 attempts in total, i.e. roughly two minutes before giving up. A single wait is capped at `AI_RETRY_MAX_DELAY`.
+* **The affected PR or issue is told.** As soon as the first wait starts, the bot posts a comment naming the next attempt ("Next attempt **2 of 5** at 2026-09-18 11:14:21 UTC"). At most one such comment is posted per `AI_RETRY_NOTICE_COOLDOWN` (default 5 minutes) and run, so a long outage never floods the conversation.
+* **Giving up is reported too.** When the attempt budget is exhausted, a second comment states how many attempts ran, the backoff used, the last provider error, and that the next retry only happens when the workflow is triggered again (push an update or mention the bot).
+* **Only provider overloads are retried.** Overload wording in a response body counts only on HTTP `5xx` (`overloaded`, `high demand`, `over capacity`, `temporarily unavailable`, or Google's `"status": "UNAVAILABLE"`); a `4xx` is never retried, even when its body mentions availability — at that status the wording describes the request, the model or the account rather than the provider's capacity. A bare `unavailable` is not overload wording either, on any status. Rate limits (HTTP `429` / `RESOURCE_EXHAUSTED`), authentication failures and prompt-too-long errors are not retried — a quota refusal needs operator attention, and the other two are handled elsewhere (history compaction, error reporting). Transient network failures (read timeouts, connection resets) already have their own single retry inside the agent loop.
+* **Where it applies.** Every AI interaction goes through the same client, so PR reviews, agentic reviews, follow-up clarifications, unit-test generation, README sync, i18n coverage, issue coding/writer/triage and E2E test authoring all benefit without per-workflow configuration.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AI_RETRY_ENABLED` | `true` | Master switch for the provider-overload retry |
+| `AI_RETRY_MAX_ATTEMPTS` | `5` | Total attempts per AI call, including the first one |
+| `AI_RETRY_INITIAL_DELAY` | `10s` | Wait before the second attempt |
+| `AI_RETRY_MULTIPLIER` | `2.0` | Factor applied to the wait after each further failure |
+| `AI_RETRY_MAX_DELAY` | `60s` | Upper bound for a single wait |
+| `AI_RETRY_JITTER` | `0.2` | Relative random spread per wait (`0.2` = ±20%) |
+| `AI_RETRY_NOTICE_COOLDOWN` | `5m` | Minimum gap between two "retry scheduled" comments in one run |

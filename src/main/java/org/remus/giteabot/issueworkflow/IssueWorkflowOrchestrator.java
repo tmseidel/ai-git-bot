@@ -4,10 +4,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.notification.IssueCommentAcknowledgement;
+import org.remus.giteabot.notification.WorkflowRetryNotices;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.springframework.stereotype.Service;
@@ -50,7 +52,8 @@ public class IssueWorkflowOrchestrator {
     private final WorkflowSelectionService workflowSelectionService;
     private final BotService botService;
     private final EventHookPublisher eventHookPublisher;
-    private final GiteaClientFactory giteaClientFactory;
+    private final WorkflowRetryNotices retryNotices;
+    private final IssueCommentAcknowledgement commentAcknowledgement;
 
     /**
      * Runs every issue workflow enabled on the bot's issue-assigned
@@ -59,8 +62,10 @@ public class IssueWorkflowOrchestrator {
      * does not prevent the remaining ones from running.
      */
     public void runAssigned(Bot bot, WebhookPayload payload) {
+        IssueRef issue = issueRef(payload);
         for (IssueWorkflow workflow : resolveWorkflows(bot)) {
             try {
+                retryNotices.installForIssue(bot, workflow.key(), issue.owner(), issue.repo(), issue.number());
                 publishIssueEvent(EventHookEventType.ISSUE_ASSIGNMENT_STARTED, bot, payload, null, true);
                 workflow.onIssueAssigned(context(bot, payload, workflow.key()));
                 publishIssueEvent(EventHookEventType.ISSUE_ASSIGNMENT_COMPLETED, bot, payload, null, false);
@@ -70,6 +75,8 @@ public class IssueWorkflowOrchestrator {
                 botService.recordError(bot, e.getMessage());
                 publishIssueEvent(EventHookEventType.ISSUE_ASSIGNMENT_FAILED, bot, payload,
                         e.getMessage(), false);
+            } finally {
+                AiRetryContext.clear();
             }
         }
     }
@@ -89,37 +96,35 @@ public class IssueWorkflowOrchestrator {
         }
         // Acknowledge immediately with 👀 so the operator knows the bot saw
         // the comment — the same pattern the slash-command handlers use.
-        acknowledgeComment(bot, payload);
+        commentAcknowledgement.acknowledge(bot, payload);
+        IssueRef issue = issueRef(payload);
         for (IssueWorkflow workflow : workflows) {
             try {
+                // Installed inside the guarded region (see runAssigned): clearing it in the
+                // finally below is what keeps the notice off the next task on this thread.
+                retryNotices.installForIssue(bot, workflow.key(), issue.owner(), issue.repo(), issue.number());
                 workflow.onIssueComment(context(bot, payload, workflow.key()));
             } catch (Exception e) {
                 log.error("[Bot '{}'] Issue workflow '{}' failed on issue comment: {}",
                         bot.getName(), workflow.key(), e.getMessage(), e);
                 botService.recordError(bot, e.getMessage());
+            } finally {
+                AiRetryContext.clear();
             }
         }
     }
 
     /**
-     * Best-effort 👀 reaction on the triggering comment. Failures (missing
-     * permission, provider quirks) are logged and never affect the workflow.
+     * Repository coordinates of the issue this payload refers to. Individual
+     * fields stay {@code null} when the payload does not carry them; the
+     * retry-notice component ignores an incomplete target.
      */
-    private void acknowledgeComment(Bot bot, WebhookPayload payload) {
-        if (payload.getComment() == null || payload.getComment().getId() == null) {
-            return;
-        }
-        Long commentId = payload.getComment().getId();
-        try {
-            String owner = payload.getRepository() != null && payload.getRepository().getOwner() != null
-                    ? payload.getRepository().getOwner().getLogin() : null;
-            String repo = payload.getRepository() != null ? payload.getRepository().getName() : null;
-            giteaClientFactory.getApiClient(bot.getGitIntegration())
-                    .addReaction(owner, repo, commentId, "eyes");
-        } catch (Exception e) {
-            log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",
-                    bot.getName(), commentId, e.getMessage());
-        }
+    private static IssueRef issueRef(WebhookPayload payload) {
+        return new IssueRef(
+                payload.getRepository() != null && payload.getRepository().getOwner() != null
+                        ? payload.getRepository().getOwner().getLogin() : null,
+                payload.getRepository() != null ? payload.getRepository().getName() : null,
+                payload.getIssue() != null ? payload.getIssue().getNumber() : null);
     }
 
     /**
@@ -183,5 +188,9 @@ public class IssueWorkflowOrchestrator {
             data.put("error", error);
         }
         eventHookPublisher.publish(type, bot, owner, repo, null, issueNumber, data);
+    }
+
+    /** Repository coordinates of a webhook payload's issue; any field may be {@code null}. */
+    private record IssueRef(String owner, String repo, Long number) {
     }
 }

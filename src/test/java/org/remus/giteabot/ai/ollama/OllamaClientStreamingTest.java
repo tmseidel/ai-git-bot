@@ -8,12 +8,19 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.remus.giteabot.agent.loop.AgentRunContext;
+import org.remus.giteabot.agent.loop.StepDecision;
+import org.remus.giteabot.agent.tools.AgentToolRouter;
+import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.ai.AiAuditRecorder;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AiUsageProperties;
+import org.remus.giteabot.prworkflow.agentreview.ReviewAgentStrategy;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.HttpClientErrorException;
@@ -25,13 +32,21 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * Streaming merge behaviour of {@link OllamaClient}: it now sends
@@ -168,7 +183,7 @@ class OllamaClientStreamingTest {
     }
 
     // -----------------------------------------------------------------
-    // AC 6: tool calls are emitted complete in the final chunk
+    // AC 6: tool calls can arrive before or in the final chunk
     // -----------------------------------------------------------------
 
     @Test
@@ -201,6 +216,108 @@ class OllamaClientStreamingTest {
         assertEquals(StopReason.TOOL_USE, turn.stopReason());
         assertEquals(10L, turn.inputTokens());
         assertEquals(5L, turn.outputTokens());
+    }
+
+    @Test
+    void toolCallBeforeFinalChunkKeepsReviewInExploration() {
+        emitNdjson(
+                "{\"message\":{\"content\":\"CHECKING\"},\"done\":false}",
+                """
+                {"message":{"tool_calls":[{"id":"call-1","function":{"index":0,"name":"cat","arguments":{"path":"Example.java"}}}]},"done":false}
+                """.strip(),
+                "{\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":301,\"eval_count\":74}");
+        OllamaClient client = client();
+        CapturingRecorder recorder = new CapturingRecorder();
+        attachRecorder(client, recorder);
+        ChatTurn turn = client.chatWithTools(List.of(), "Read Example.java",
+                List.of(new ToolDescriptor("cat", "Read a file", null)), "sys", null, null);
+        AgentToolRouter router = mock(AgentToolRouter.class);
+        when(router.execute(eq(AgentToolRouter.Mode.WRITER), any()))
+                .thenReturn(new ToolResult(true, 0, "class Example {}", ""));
+        ReviewAgentStrategy strategy = new ReviewAgentStrategy("sys", router, null, null,
+                Set.of("cat"), null, null, null, 1);
+        AgentRunContext context = new AgentRunContext(null, "owner", "repo", 1L, null, "main");
+
+        StepDecision decision = strategy.step(context, turn, 1);
+
+        assertInstanceOf(StepDecision.ContinueWithToolResults.class, decision);
+        assertEquals(StopReason.TOOL_USE, turn.stopReason());
+        assertEquals("CHECKING", turn.assistantText());
+        assertEquals(1, turn.toolCalls().size());
+        assertEquals("cat", turn.toolCalls().getFirst().name());
+        assertEquals("Example.java", turn.toolCalls().getFirst().args().get("path").asString());
+        assertEquals(301L, turn.inputTokens());
+        assertEquals(74L, turn.outputTokens());
+        assertEquals(1, recorder.invocations);
+        verify(router).execute(eq(AgentToolRouter.Mode.WRITER), any());
+    }
+
+    @Test
+    void toolCallsFromEveryChunkKeepTheirOrderAndDistinctIds() {
+        emitNdjson(
+                """
+                {"message":{"tool_calls":[{"function":{"name":"cat","arguments":{"path":"a.java"}}}]},"done":false}
+                """.strip(),
+                """
+                {"message":{"tool_calls":[{"function":{"name":"cat","arguments":{"path":"a.java"}}}]},"done":false}
+                """.strip(),
+                """
+                {"message":{"tool_calls":[{"function":{"name":"cat","arguments":{"path":"b.java"}}}]},"done":true,"done_reason":"stop","prompt_eval_count":10,"eval_count":5}
+                """.strip());
+
+        ChatTurn turn = client().chatWithTools(List.of(), "Read the files",
+                List.of(new ToolDescriptor("cat", "Read a file", null)), "sys", null, null);
+
+        assertEquals(StopReason.TOOL_USE, turn.stopReason());
+        assertEquals(List.of("cat:0", "cat:1", "cat:2"), turn.toolCalls().stream().map(ToolCall::id).toList());
+        assertEquals(List.of("a.java", "a.java", "b.java"), turn.toolCalls().stream()
+                .map(call -> call.args().get("path").asString()).toList());
+        assertEquals(10L, turn.inputTokens());
+        assertEquals(5L, turn.outputTokens());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"length, MAX_TOKENS", "unknown, OTHER"})
+    void failedCompletionRetainsEarlierToolCallsWithoutExecutingThem(String reason, StopReason expected) {
+        emitNdjson(
+                """
+                {"message":{"content":"CHECKING","tool_calls":[{"function":{"name":"cat","arguments":{"path":"a.java"}}}]},"done":false}
+                """.strip(),
+                "{\"done\":true,\"done_reason\":\"" + reason + "\",\"prompt_eval_count\":10,\"eval_count\":8}");
+
+        ChatTurn turn = client().chatWithTools(List.of(), "Read the file",
+                List.of(new ToolDescriptor("cat", "Read a file", null)), "sys", null, null);
+
+        assertEquals(expected, turn.stopReason());
+        assertEquals(1, turn.toolCalls().size());
+        assertReviewRejected(turn);
+    }
+
+    @Test
+    void nativeStreamWithoutDoneChunkIsNotACompletedToolTurn() {
+        emitNdjson("""
+                {"message":{"content":"partial","tool_calls":[{"function":{"name":"search","arguments":{}}}]},"done":false,"done_reason":"stop"}
+                """.strip(), "{\"message\":{\"content\":\" tail\"},\"done\":false}");
+
+        ChatTurn turn = client().chatWithTools(List.of(), "please search",
+                List.of(new ToolDescriptor("search", "Search the code base", null)), "sys", null, null);
+
+        assertEquals(StopReason.OTHER, turn.stopReason());
+        assertEquals("partial tail", turn.assistantText());
+        assertEquals(1, turn.toolCalls().size());
+        assertReviewRejected(turn);
+    }
+
+    private static void assertReviewRejected(ChatTurn turn) {
+        AgentToolRouter router = mock(AgentToolRouter.class);
+        ReviewAgentStrategy strategy = new ReviewAgentStrategy("sys", router, null, null,
+                Set.of(), null, null, null, 1);
+        AgentRunContext context = new AgentRunContext(null, "owner", "repo", 1L, null, "main");
+
+        StepDecision.Finish decision = assertInstanceOf(StepDecision.Finish.class, strategy.step(context, turn, 1));
+
+        assertFalse(decision.outcome().success());
+        verifyNoInteractions(router);
     }
 
     // -----------------------------------------------------------------

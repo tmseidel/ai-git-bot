@@ -79,6 +79,23 @@ class AuditingAiClientTest {
     }
 
     @Test
+    void textOnlyFallbackCannotClaimACompletedTurn() {
+        AiClient textOnly = new FailingClient() {
+            @Override
+            public String chat(List<AiMessage> history, String message, String system, String model, Integer maxTokens) {
+                return "Text without completion metadata";
+            }
+        };
+        AuditingAiClient client = new AuditingAiClient(textOnly, new RecordingRecorder());
+
+        ChatTurn turn = client.chatWithTools(List.of(), "hi", List.of(), "sys", null, 32);
+
+        assertEquals("Text without completion metadata", turn.assistantText());
+        assertEquals(StopReason.OTHER, turn.stopReason());
+        assertEquals(0L, turn.totalTokens());
+    }
+
+    @Test
     void submitReviewPrompt_delegatesAndDoesNotDoubleAudit() {
         RecordingRecorder recorder = new RecordingRecorder();
         AuditingAiClient client = new AuditingAiClient(new FailingClient(), recorder);

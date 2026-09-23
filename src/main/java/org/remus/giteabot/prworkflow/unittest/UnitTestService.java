@@ -106,8 +106,11 @@ public class UnitTestService {
         Path workspace = null;
         try {
             context.requireActive("before preparing unit-test workspace");
-            WorkspaceResult ws = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
+                    ? workspaceService.prepareWritablePullRequestWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber)
+                    : workspaceService.prepareWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber,
                         UnitTestSummaryRenderer.renderFailed(prNumber,
@@ -162,29 +165,36 @@ public class UnitTestService {
             // them: at this point the working tree only contains the new test
             // files, so the commit stays clean (no build artefacts).
             boolean committed = false;
-            if (request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
-                    && workspaceService.hasUncommittedChanges(workspace)) {
-                context.requireActive("before committing generated unit tests");
-                // Pre-commit guard (defence-in-depth behind the write-time guard):
-                // re-verify every changed file is an allowed test location for the
-                // framework. If anything outside a test location was touched we
-                // must not push it — the workflow's "production code is never
-                // touched" guarantee takes precedence over committing the tests.
-                java.util.List<String> offending = workspaceService.listChangedFiles(workspace).stream()
-                        .filter(p -> !UnitTestPathGuard.isAllowedTestPath(framework, p))
-                        .toList();
-                if (!offending.isEmpty()) {
-                    log.warn("Aborting unit-test commit for PR #{}: changed files outside allowed "
-                            + "test locations for {}: {}", prNumber, framework.key(), offending);
-                    context.appendStep("unit-test-commit",
-                            "Commit aborted — non-test files changed: " + offending);
+            boolean commitFailed = false;
+            if (request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR) {
+                if (!workspaceService.hasUncommittedChanges(workspace)) {
+                    context.appendStep("unit-test-commit", "Commit failed — no workspace changes found");
+                    commitFailed = true;
                 } else {
-                    committed = workspaceService.commitAndPush(workspace, headBranch,
-                            "test: add AI-generated unit tests for PR #" + prNumber,
-                            GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, false);
-                    context.appendStep("unit-test-commit",
-                            committed ? "Committed generated tests to " + headBranch
-                                    : "Commit skipped / failed");
+                    context.requireActive("before committing generated unit tests");
+                    // Pre-commit guard (defence-in-depth behind the write-time guard):
+                    // re-verify every changed file is an allowed test location for the
+                    // framework. If anything outside a test location was touched we
+                    // must not push it — the workflow's "production code is never
+                    // touched" guarantee takes precedence over committing the tests.
+                    java.util.List<String> offending = workspaceService.listChangedFiles(workspace).stream()
+                            .filter(p -> !UnitTestPathGuard.isAllowedTestPath(framework, p))
+                            .toList();
+                    if (!offending.isEmpty()) {
+                        log.warn("Aborting unit-test commit for PR #{}: changed files outside allowed "
+                                + "test locations for {}: {}", prNumber, framework.key(), offending);
+                        context.appendStep("unit-test-commit",
+                                "Commit aborted — non-test files changed: " + offending);
+                        commitFailed = true;
+                    } else {
+                        committed = workspaceService.commitAndPush(workspace, headBranch,
+                                "test: add AI-generated unit tests for PR #" + prNumber,
+                                GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, false);
+                        context.appendStep("unit-test-commit",
+                                committed ? "Committed generated tests to " + headBranch
+                                        : "Commit skipped / failed");
+                        commitFailed = !committed;
+                    }
                 }
             }
 
@@ -196,6 +206,10 @@ public class UnitTestService {
             UnitTestSuite withCases = suiteRepository.findByIdWithCases(suite.getId()).orElse(suite);
             String comment = UnitTestSummaryRenderer.render(withCases, outcome, CoverageResult.unknown());
             postReviewComment(owner, repo, prNumber, comment);
+
+            if (commitFailed) {
+                return Result.failed("Generated tests could not be committed to the PR branch");
+            }
 
             return switch (outcome.status()) {
                 case PASSED -> Result.success(
@@ -385,8 +399,6 @@ public class UnitTestService {
         }
     }
 }
-
-
 
 
 

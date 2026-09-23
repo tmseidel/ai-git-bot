@@ -8,7 +8,12 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.ai.AiAuditRecorder;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
@@ -17,6 +22,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
@@ -218,6 +224,85 @@ class LlamaCppClientStreamingTest {
         assertEquals(19L, recorder.output, "output tokens = final chunk tokens_predicted (not a sum)");
     }
 
+    @Test
+    void typedTurnPreservesTokenLimitAndFinalUsage() {
+        emitSse("""
+                {"content":"Partial ","stop":false,"tokens_evaluated":1,"tokens_predicted":7}
+                """.strip(), """
+                {"content":"review","stop":true,"stopped_limit":true,
+                 "tokens_evaluated":22,"tokens_predicted":19}
+                """.replace("\n", ""));
+        LlamaCppClient client = client();
+        CapturingRecorder recorder = new CapturingRecorder();
+        client.setAuditRecorder(recorder);
+
+        ChatTurn turn = client.chatWithTools(List.of(), "Review this change", List.of(),
+                "You are a reviewer.", null, null);
+
+        assertEquals(StopReason.MAX_TOKENS, turn.stopReason());
+        assertEquals("Partial review", turn.assistantText());
+        assertTrue(turn.toolCalls().isEmpty());
+        assertEquals(22L, turn.inputTokens());
+        assertEquals(19L, turn.outputTokens());
+        assertEquals(22L, recorder.input);
+        assertEquals(19L, recorder.output);
+        assertEquals(1, recorder.invocations);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"limit, MAX_TOKENS", "eos, END_TURN", "word, END_TURN", "none, OTHER", "unknown, OTHER"})
+    void typedTurnRecognizesCurrentStopTypes(String stopType, StopReason expected) {
+        emitSse("""
+                {"content":"Review text","stop":true,"stop_type":"%s","tokens_evaluated":22,"tokens_predicted":19}
+                """.formatted(stopType).strip());
+
+        ChatTurn turn = client().chatWithTools(List.of(), "Review this change", List.of(), "sys", null, null);
+
+        assertEquals(expected, turn.stopReason());
+        assertEquals("Review text", turn.assistantText());
+        assertEquals(22L, turn.inputTokens());
+        assertEquals(19L, turn.outputTokens());
+    }
+
+    @Test
+    void earlierContextTruncationCannotBeClearedByTheFinalChunk() {
+        emitSse("{\"content\":\"Review \",\"stop\":false,\"truncated\":true}",
+                "{\"content\":\"text\",\"stop\":true,\"stop_type\":\"eos\",\"truncated\":false}");
+
+        ChatTurn turn = client().chatWithTools(List.of(), "Review this change", List.of(), "sys", null, null);
+
+        assertEquals(StopReason.OTHER, turn.stopReason());
+        assertEquals("Review text", turn.assistantText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"stopped_eos", "stopped_word"})
+    void typedTurnRecognizesLegacyCompletionFlags(String flag) {
+        emitSse("{\"content\":\"Review text\",\"stop\":true,\"" + flag + "\":true}");
+
+        ChatTurn turn = client().chatWithTools(List.of(), "Review this change", List.of(), "sys", null, null);
+
+        assertEquals(StopReason.END_TURN, turn.stopReason());
+        assertEquals("Review text", turn.assistantText());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "\"stop\":false,\"stop_type\":\"eos\"",
+            "\"stop_type\":\"eos\"",
+            "\"stop\":true",
+            "\"stop\":true,\"stop_type\":\"eos\",\"truncated\":true",
+            "\"stop\":true,\"stop_type\":\"unknown\",\"stopped_eos\":true"
+    })
+    void typedTurnRejectsIncompleteUnknownOrTruncatedCompletion(String metadata) {
+        emitSse("{\"content\":\"Review text\"," + metadata + "}");
+
+        ChatTurn turn = client().chatWithTools(List.of(), "Review this change", List.of(), "sys", null, null);
+
+        assertEquals(StopReason.OTHER, turn.stopReason());
+        assertEquals("Review text", turn.assistantText());
+    }
+
     // -----------------------------------------------------------------
     // edge case: empty stream (0 chunks) -> existing empty-response fallback.
     // -----------------------------------------------------------------
@@ -239,5 +324,9 @@ class LlamaCppClientStreamingTest {
         String out = client().submitReviewPrompt("review", null, "hi");
         assertTrue(out.startsWith("Unable to generate review - empty response"),
                 "expected the historical empty-response fallback, got: " + out);
+
+        ChatTurn turn = client().chatWithTools(List.of(), "hi", List.of(), "review", null, null);
+        assertEquals(StopReason.OTHER, turn.stopReason());
+        assertEquals("", turn.assistantText());
     }
 }

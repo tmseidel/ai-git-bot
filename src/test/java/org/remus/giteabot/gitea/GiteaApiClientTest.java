@@ -5,6 +5,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -41,6 +42,140 @@ class GiteaApiClientTest {
 
         assertEquals("https://gitea.example.com/owner/repo.git",
                 client.getRepositoryRemote("owner", "repo"));
+    }
+
+    @Test
+    void managedSsh_detectsEndpointAndRegistersWritableUserKey() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/repos/search?limit=1&private=true"))
+                .andRespond(withSuccess("{\"data\":[{\"ssh_url\":\"ssh://git@gitea.example.com:2222/owner/repo.git\"}]}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user"))
+                .andRespond(withSuccess("{\"id\":17}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.title").value("unique-title"))
+                .andExpect(jsonPath("$.key").value("ssh-ed25519 public"))
+                .andExpect(jsonPath("$.read_only").value(false))
+                .andRespond(withSuccess("{\"id\":42}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys/42"))
+                .andExpect(method(HttpMethod.DELETE)).andRespond(withSuccess());
+        assertEquals("ssh://git@gitea.example.com:2222/owner/repo.git", client.getAnySshCloneUrl());
+        assertEquals(17L, client.getCurrentUserId());
+        assertEquals(42L, client.createSshKey("unique-title", "ssh-ed25519 public"));
+        client.deleteSshKey(42L);
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"data\":[]}", "{\"data\":[{\"ssh_url\":\"git@-evil:repo.git\"}]}",
+            "{\"data\":[{\"ssh_url\":\"https://host/repo.git\"}]}"})
+    void managedSsh_rejectsMissingOrUnsafeEndpoint(String response) {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/repos/search?limit=1&private=true"))
+                .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
+        assertThrows(IllegalStateException.class, client::getAnySshCloneUrl);
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"id\":0}", "{\"id\":-1}", "{\"id\":\"42\"}"})
+    void managedSsh_rejectsMissingOrInvalidRegistrationId(String response) {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys"))
+                .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
+        assertThrows(IllegalStateException.class, () -> client.createSshKey("title", "public"));
+        server.verify();
+    }
+
+    @Test
+    void managedSsh_titleRecoveryReadsAllPagesEvenWhenServerLimitsPageSize() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys?page=1&limit=50"))
+                .andRespond(withSuccess("[{\"id\":1,\"title\":\"unrelated\"}]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys?page=2&limit=50"))
+                .andRespond(withSuccess("[{\"id\":42,\"title\":\"unique-title\"}]", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys?page=3&limit=50"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+        assertEquals(List.of(42L), client.getSshKeyIdsByTitle("unique-title"));
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "null", "[{\"title\":\"key\"}]", "[{\"id\":42}]"})
+    void managedSsh_ambiguousKeyListIsNotTreatedAsAbsent(String response) {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user/keys?page=1&limit=50"))
+                .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
+        assertThrows(IllegalStateException.class, client::getSshKeyIds);
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_resolvesForkRepositoryAndBranch() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/pulls/7"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"head":{"ref":"main","sha":"abc123","repo":{
+                          "name":"project","full_name":"contributor/project",
+                          "owner":{"login":"contributor"}}}}
+                        """, MediaType.APPLICATION_JSON));
+
+        PullRequestHead head = client.getPullRequestHead("base", "project", 7L, "main");
+
+        assertEquals("contributor", head.owner());
+        assertEquals("project", head.repository());
+        assertEquals("main", head.branch());
+        assertEquals("abc123", head.sha());
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_rejectsBranchMismatch() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/pulls/7"))
+                .andRespond(withSuccess("""
+                        {"head":{"ref":"feature/source","sha":"abc123","repo":{
+                          "name":"project","owner":{"login":"contributor"}}}}
+                        """, MediaType.APPLICATION_JSON));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("base", "project", 7L, "main"));
+
+        assertTrue(error.getMessage().contains("does not match"));
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_rejectsMissingSourceRepository() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/pulls/7"))
+                .andRespond(withSuccess("{" + "\"head\":{\"ref\":\"main\",\"sha\":\"abc123\"}}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("base", "project", 7L, "main"));
+        server.verify();
     }
 
     @Test

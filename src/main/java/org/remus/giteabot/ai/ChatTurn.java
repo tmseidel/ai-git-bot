@@ -3,9 +3,8 @@ package org.remus.giteabot.ai;
 import java.util.List;
 
 /**
- * Result of a single round-trip to the AI provider when using native tool
- * calling (Step 6). {@code assistantText} may be empty when the model only
- * emits tool calls.
+ * Result of a single round-trip to the AI provider, with or without native
+ * tools. {@code assistantText} may be empty for tool-only or incomplete turns.
  *
  * <p>{@code inputTokens} and {@code outputTokens} are populated when the
  * provider returns usage data; they default to 0 when unknown.</p>

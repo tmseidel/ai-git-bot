@@ -1,12 +1,14 @@
 package org.remus.giteabot.admin;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.Instant;
 
 @Repository
 public interface BotRepository extends JpaRepository<Bot, Long> {
@@ -30,4 +32,14 @@ public interface BotRepository extends JpaRepository<Bot, Long> {
     List<Bot> findByIssueWorkflowConfigurationId(Long issueWorkflowConfigurationId);
 
     boolean existsByName(String name);
+
+    boolean existsByGitIntegrationId(Long gitIntegrationId);
+
+    @Modifying
+    @Query("update Bot b set b.webhookCallCount = b.webhookCallCount + 1, b.lastWebhookAt = :at where b.id = :id")
+    int incrementWebhookCallCount(Long id, Instant at);
+
+    @Modifying
+    @Query("update Bot b set b.lastErrorMessage = :message, b.lastErrorAt = :at where b.id = :id")
+    int recordError(Long id, String message, Instant at);
 }

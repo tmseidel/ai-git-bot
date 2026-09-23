@@ -112,9 +112,19 @@ public class ReadmeSyncService {
 
         Path workspace = null;
         try {
+            if (request.lifecycleMode() == SuiteLifecycleMode.OFFER_AS_PR
+                    && workspaceService.isAuthoritativePullRequestFromFork(
+                            repositoryClient, owner, repo, headBranch, prNumber)) {
+                postComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderFailed(prNumber,
+                        "offer-as-pr is not supported for fork pull requests; no branch was pushed."));
+                return Result.failed("offer-as-pr is not supported for fork pull requests");
+            }
             context.requireActive("before preparing readme-sync workspace");
-            WorkspaceResult ws = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
+                    ? workspaceService.prepareWritablePullRequestWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber)
+                    : workspaceService.prepareWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderFailed(prNumber,
                         "failed to prepare workspace: " + ws.error()));
@@ -212,10 +222,14 @@ public class ReadmeSyncService {
                         "Automated documentation sync for PR #" + prNumber + ".", workBranch, headBranch);
             } catch (RuntimeException e) {
                 log.warn("readme-sync: createPullRequest failed for PR #{}: {}", prNumber, e.getMessage());
+                context.appendStep("readme-sync-commit", "follow-up PR creation failed: " + e.getMessage());
+                return Result.failed("follow-up PR creation failed");
             }
-            if (followUp != null) {
-                target = "(follow-up PR #" + followUp + " against `" + headBranch + "`)";
+            if (followUp == null) {
+                context.appendStep("readme-sync-commit", "follow-up PR creation returned no PR number");
+                return Result.failed("follow-up PR creation failed");
             }
+            target = "(follow-up PR #" + followUp + " against `" + headBranch + "`)";
             postReviewComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderCompletion(
                     prNumber, toolContext, true, target, null));
             context.appendStep("readme-sync-commit",

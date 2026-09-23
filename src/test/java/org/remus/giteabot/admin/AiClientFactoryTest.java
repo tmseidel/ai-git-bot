@@ -9,6 +9,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AuditingAiClient;
 import org.remus.giteabot.ai.AiProviderRegistry;
+import org.remus.giteabot.ai.ProviderRetryNotifier;
+import org.remus.giteabot.ai.RetryAiClient;
 import org.remus.giteabot.ai.anthropic.AnthropicAiClient;
 import org.remus.giteabot.ai.anthropic.AnthropicProviderMetadata;
 import org.remus.giteabot.ai.google.GoogleAiClient;
@@ -20,6 +22,7 @@ import org.remus.giteabot.ai.ollama.OllamaProviderMetadata;
 import org.remus.giteabot.ai.openai.OpenAiClient;
 import org.remus.giteabot.ai.openai.OpenAiProviderMetadata;
 import org.remus.giteabot.aiusage.AiUsageService;
+import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
 import org.remus.giteabot.config.AnthropicExtendedThinkingProperties;
 import org.springframework.beans.factory.ObjectProvider;
@@ -52,7 +55,20 @@ class AiClientFactoryTest {
                 new OllamaProviderMetadata(builderProvider()),
                 new LlamaCppProviderMetadata(builderProvider())
         ));
-        aiClientFactory = new AiClientFactory(aiIntegrationService, providerRegistry, aiUsageService, new AiUsageProperties());
+        aiClientFactory = new AiClientFactory(aiIntegrationService, providerRegistry, aiUsageService,
+                new AiUsageProperties(), new AiRetryProperties(), noRetryNotifier());
+    }
+
+    private static ProviderRetryNotifier noRetryNotifier() {
+        return new ProviderRetryNotifier() {
+            @Override
+            public void retryScheduled(Event event) {
+            }
+
+            @Override
+            public void retriesExhausted(Event event) {
+            }
+        };
     }
 
     private static ObjectProvider<RestClient.Builder> builderProvider() {
@@ -114,7 +130,9 @@ class AiClientFactoryTest {
 
     private static AiClient unwrap(AiClient client) {
         assertInstanceOf(AuditingAiClient.class, client);
-        return ((AuditingAiClient) client).getDelegate();
+        AiClient retrying = ((AuditingAiClient) client).getDelegate();
+        assertInstanceOf(RetryAiClient.class, retrying);
+        return ((RetryAiClient) retrying).getDelegate();
     }
 
     @Test

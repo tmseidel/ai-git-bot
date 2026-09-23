@@ -2,6 +2,8 @@ package org.remus.giteabot.prworkflow.agentreview;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
@@ -61,7 +63,7 @@ class AgentReviewWorkflowTest {
         when(serviceFactory.create(any())).thenReturn(service);
         when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
                 any(AgentReviewService.SeverityThresholds.class), anyLong(), any()))
-                .thenReturn(true);
+                .thenReturn(AgentReviewService.ReviewResult.POSTED);
 
         Bot bot = new Bot();
 
@@ -86,7 +88,7 @@ class AgentReviewWorkflowTest {
         when(serviceFactory.create(any())).thenReturn(service);
         lenient().when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
                         any(AgentReviewService.SeverityThresholds.class), anyLong(), any()))
-                .thenReturn(false);
+                .thenReturn(AgentReviewService.ReviewResult.NO_DIFF);
 
         WorkflowResult result = workflow().run(context(bot));
 
@@ -94,6 +96,33 @@ class AgentReviewWorkflowTest {
         verify(service).reviewPullRequest(any(), eq(5), eq(false),
                 eq(AgentReviewWorkflow.DEFAULT_FORMAL_REVIEW_DECISION_PROMPT),
                 eq(new AgentReviewService.SeverityThresholds(null, null, null)), eq(1L), isNull());
+    }
+
+    @Test
+    void run_reportsFailure_whenReviewCannotComplete() {
+        AgentReviewService service = mock(AgentReviewService.class);
+        when(serviceFactory.create(any())).thenReturn(service);
+        when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
+                any(AgentReviewService.SeverityThresholds.class), anyLong(), any()))
+                .thenReturn(AgentReviewService.ReviewResult.FAILED);
+
+        WorkflowResult result = workflow().run(context(new Bot()));
+
+        assertEquals(WorkflowResultStatus.FAILED, result.status());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"POSTED,SUCCESS", "NO_DIFF,SKIPPED", "FAILED,FAILED"})
+    void clarification_mapsServiceResult(AgentReviewService.ReviewResult serviceResult,
+                                         WorkflowResultStatus expected) {
+        AgentReviewService service = mock(AgentReviewService.class);
+        when(serviceFactory.create(any())).thenReturn(service);
+        when(service.answerClarification(any(), anyString(), anyInt())).thenReturn(serviceResult);
+        PrWorkflowContext context = new PrWorkflowContext(new Bot(), new WebhookPayload(), 1L,
+                (name, log) -> { }, () -> false,
+                Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION, "Why was this changed?"), null);
+
+        assertEquals(expected, workflow().run(context).status());
     }
 
     @Test
@@ -116,7 +145,7 @@ class AgentReviewWorkflowTest {
         when(serviceFactory.create(any())).thenReturn(service);
         when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
                 any(AgentReviewService.SeverityThresholds.class), anyLong(), any()))
-                .thenReturn(true);
+                .thenReturn(AgentReviewService.ReviewResult.POSTED);
 
         WorkflowResult result = workflow().run(context(bot));
 
@@ -140,7 +169,7 @@ class AgentReviewWorkflowTest {
         when(serviceFactory.create(any())).thenReturn(service);
         when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
                 any(AgentReviewService.SeverityThresholds.class), anyLong(), any()))
-                .thenReturn(true);
+                .thenReturn(AgentReviewService.ReviewResult.POSTED);
 
         workflow().run(context(bot));
 

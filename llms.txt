@@ -77,7 +77,7 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 ## Important source areas
 
 - `src/main/java/org/remus/giteabot/admin/`: admin UI, bots, integrations, and services.
-- `src/main/java/org/remus/giteabot/ai/`: AI provider abstraction and provider clients.
+- `src/main/java/org/remus/giteabot/ai/`: AI provider abstraction and provider clients, including automatic backoff retries of provider-overload (HTTP 503/529) responses.
 - `src/main/java/org/remus/giteabot/agent/`: agent tools, tool catalog, prompt building, and execution.
 - `src/main/java/org/remus/giteabot/issueworkflow/`: issue-assigned workflow orchestration and coding/writer implementations.
 - `src/main/java/org/remus/giteabot/prworkflow/`: PR workflow orchestration, registry, runs, and shared configuration.
@@ -88,6 +88,7 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 - `src/main/java/org/remus/giteabot/prworkflow/readmesync/`: README sync workflow.
 - `src/main/java/org/remus/giteabot/prworkflow/i18n/`: i18n coverage workflow.
 - `src/main/java/org/remus/giteabot/prworkflow/deployment/`: deployment strategies (STATIC, WEBHOOK, MCP, CI_ACTION) and callbacks.
+- `src/main/java/org/remus/giteabot/notification/`: repository-side notifications for workflow runs (provider-overload retry notices, comment acknowledgement).
 - `src/main/java/org/remus/giteabot/repository/`: Git provider abstractions and API clients.
 - `src/main/java/org/remus/giteabot/review/`: legacy pull-request review orchestration (migrating into prworkflow).
 - `src/main/java/org/remus/giteabot/session/`: conversation/session persistence.

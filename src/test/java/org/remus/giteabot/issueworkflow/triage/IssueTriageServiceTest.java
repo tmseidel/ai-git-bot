@@ -244,15 +244,15 @@ class IssueTriageServiceTest {
     @Test
     void jsonMode_contextRoundThenTerminalJson_assigns() {
         when(aiClient.supportsNativeTools()).thenReturn(false);
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("{\"requestTools\":[{\"id\":\"1\",\"tool\":\"rg\",\"args\":[\"submit\"]}]}")
-                .thenReturn("{\"assignment\":\"Bob\",\"reason\":\"Backend API change\"}");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("{\"requestTools\":[{\"id\":\"1\",\"tool\":\"rg\",\"args\":[\"submit\"]}]}"))
+                .thenReturn(ChatTurn.text("{\"assignment\":\"Bob\",\"reason\":\"Backend API change\"}"));
         when(toolExecutionService.executeContextTool(any(), eq("rg"), anyList()))
                 .thenReturn(new ToolResult(true, 0, "src/api/SubmitEndpoint.java", ""));
 
         service.triage(bot, payload, PARAMS);
 
-        verify(aiClient, times(2)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+        verify(aiClient, times(2)).chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt());
         verify(toolExecutionService).executeContextTool(any(), eq("rg"), anyList());
         verify(repoClient).assignIssue("owner", "repo", 42L, "Bob");
     }
@@ -260,8 +260,8 @@ class IssueTriageServiceTest {
     @Test
     void jsonMode_none_postsReasonWithoutAssigning() {
         when(aiClient.supportsNativeTools()).thenReturn(false);
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("{\"assignment\":\"none\",\"reason\":\"Cannot determine the domain\"}");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("{\"assignment\":\"none\",\"reason\":\"Cannot determine the domain\"}"));
 
         service.triage(bot, payload, PARAMS);
 
@@ -273,8 +273,8 @@ class IssueTriageServiceTest {
     @Test
     void jsonMode_unparseableResponse_isRejectedWithErrorComment() {
         when(aiClient.supportsNativeTools()).thenReturn(false);
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("I have no idea what to do here.");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("I have no idea what to do here."));
 
         assertThrows(TriageRoutingException.class, () -> service.triage(bot, payload, PARAMS));
 
@@ -288,8 +288,8 @@ class IssueTriageServiceTest {
     @Test
     void selfAssignment_isRejectedToPreventLoops() {
         when(aiClient.supportsNativeTools()).thenReturn(false);
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("{\"assignment\":\"triage-bot\",\"reason\":\"I should do it myself\"}");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("{\"assignment\":\"triage-bot\",\"reason\":\"I should do it myself\"}"));
         Map<String, Object> params = Map.of(
                 "systemPrompt", "ROUTING PROMPT", "assignees", "Alice,triage-bot");
 
@@ -300,8 +300,8 @@ class IssueTriageServiceTest {
     @Test
     void multiLineReason_isRejected() {
         when(aiClient.supportsNativeTools()).thenReturn(false);
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("{\"assignment\":\"Alice\",\"reason\":\"line one\\nline two\"}");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("{\"assignment\":\"Alice\",\"reason\":\"line one\\nline two\"}"));
 
         assertThrows(TriageRoutingException.class, () -> service.triage(bot, payload, PARAMS));
         verify(repoClient, never()).assignIssue(anyString(), anyString(), any(), anyString());

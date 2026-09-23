@@ -273,7 +273,7 @@ class E2ETestWorkflowTest {
     }
 
     @Test
-    void promotionFailure_doesNotChangeSuccessfulWorkflowStatus() {
+    void promotionFailure_changesSuccessfulTestRunToWorkflowFailure() {
         TestSuiteRunner passing = new TestSuiteRunner() {
             @Override public E2eTestFramework framework() { return E2eTestFramework.PLAYWRIGHT; }
             @Override public TestSuiteOutcome run(TestSuiteRequest request) {
@@ -302,8 +302,8 @@ class E2ETestWorkflowTest {
 
         WorkflowResult result = w.run(ctx(bot, payload));
 
-        assertThat(result.status()).isEqualTo(WorkflowResultStatus.SUCCESS);
-        assertThat(result.summary()).isEqualTo("all green");
+        assertThat(result.status()).isEqualTo(WorkflowResultStatus.FAILED);
+        assertThat(result.summary()).contains("Suite promotion failed").contains("push failed");
     }
 
     @Test

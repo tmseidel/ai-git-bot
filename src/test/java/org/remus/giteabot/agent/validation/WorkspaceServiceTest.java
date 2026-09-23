@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -131,6 +132,68 @@ class WorkspaceServiceTest {
                     .count())
                     .isZero();
         }
+    }
+
+    @Test
+    void prepareWritablePullRequestWorkspace_pushesForkMainWithoutChangingTargetMain() throws Exception {
+        Path targetRemote = createBareRepository("target", "target content");
+        Path forkRemote = createBareRepository("fork", "fork content");
+        String targetBefore = runGitCapture(targetRemote, "rev-parse", "refs/heads/main");
+        String forkBefore = runGitCapture(forkRemote, "rev-parse", "refs/heads/main");
+
+        when(repositoryClient.requiresAuthoritativePullRequestHead()).thenReturn(true);
+        when(repositoryClient.getPullRequestHead("base", "project", 7L, "main"))
+                .thenReturn(new PullRequestHead("contributor", "project", "main", forkBefore));
+        when(repositoryClient.getRepositoryRemote("contributor", "project"))
+                .thenReturn(forkRemote.toString());
+        when(repositoryClient.getCredentials())
+                .thenReturn(RepositoryCredentials.of("", forkRemote.toString(), "dummy-token"));
+
+        WorkspaceResult result = workspaceService.prepareWritablePullRequestWorkspace(
+                repositoryClient, "base", "project", "main", 7L);
+
+        assertThat(result.success()).isTrue();
+        Files.writeString(result.workspacePath().resolve("README.md"), "bot update");
+        assertThat(workspaceService.commitAndPush(result.workspacePath(), "main", "docs: update",
+                "AI Agent", "ai-agent@bot.local", false)).isTrue();
+
+        assertThat(runGitCapture(targetRemote, "rev-parse", "refs/heads/main")).isEqualTo(targetBefore);
+        assertThat(runGitCapture(forkRemote, "rev-parse", "refs/heads/main")).isNotEqualTo(forkBefore);
+        verify(repositoryClient, never()).getRepositoryRemote("base", "project");
+        workspaceService.cleanupWorkspace(result.workspacePath());
+    }
+
+    @Test
+    void prepareWritablePullRequestWorkspace_authoritativeFailureNeverFallsBackToTarget() {
+        when(repositoryClient.requiresAuthoritativePullRequestHead()).thenReturn(true);
+        when(repositoryClient.getPullRequestHead("base", "project", 7L, "main"))
+                .thenThrow(new IllegalStateException("missing head repository"));
+
+        WorkspaceResult result = workspaceService.prepareWritablePullRequestWorkspace(
+                repositoryClient, "base", "project", "main", 7L);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.error()).contains("missing head repository");
+        verify(repositoryClient, never()).getRepositoryRemote("base", "project");
+        verify(repositoryClient, never()).getCredentials();
+    }
+
+    @Test
+    void prepareWritablePullRequestWorkspace_nonAuthoritativeProviderKeepsPrRefFallback() throws Exception {
+        Path remoteDir = createBareRepository("provider-target", "pr content");
+        runGit(remoteDir, "update-ref", "refs/pull/42/head", "refs/heads/main");
+        when(repositoryClient.requiresAuthoritativePullRequestHead()).thenReturn(false);
+        when(repositoryClient.getRepositoryRemote("base", "project")).thenReturn(remoteDir.toString());
+        when(repositoryClient.getCredentials())
+                .thenReturn(RepositoryCredentials.of("", remoteDir.toString(), "dummy-token"));
+
+        WorkspaceResult result = workspaceService.prepareWritablePullRequestWorkspace(
+                repositoryClient, "base", "project", "missing-branch", 42L);
+
+        assertThat(result.success()).isTrue();
+        assertThat(runGitCapture(result.workspacePath(), "rev-parse", "--abbrev-ref", "HEAD"))
+                .isEqualTo("missing-branch");
+        workspaceService.cleanupWorkspace(result.workspacePath());
     }
 
     @Test
@@ -391,6 +454,24 @@ class WorkspaceServiceTest {
         Files.writeString(dir.resolve("README.md"), "initial");
         runGit(dir, "add", "README.md");
         runGit(dir, "commit", "-m", "initial");
+    }
+
+    private Path createBareRepository(String name, String content) throws IOException, InterruptedException {
+        Path bare = tempDir.resolve(name + "-remote");
+        Files.createDirectories(bare);
+        runGit(bare, "init", "--bare");
+        Path source = tempDir.resolve(name + "-source");
+        Files.createDirectories(source);
+        runGit(source, "init");
+        runGit(source, "config", "user.email", "test@example.com");
+        runGit(source, "config", "user.name", "Test User");
+        runGit(source, "branch", "-M", "main");
+        Files.writeString(source.resolve("README.md"), content);
+        runGit(source, "add", "README.md");
+        runGit(source, "commit", "-m", "initial");
+        runGit(source, "remote", "add", "origin", bare.toString());
+        runGit(source, "push", "origin", "main");
+        return bare;
     }
 
     private RepositoryApiClient repositoryClient(String remote) {

@@ -16,6 +16,7 @@ import org.remus.giteabot.agent.tools.ToolCallContext;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.mcp.McpToolCatalog;
@@ -47,8 +48,9 @@ import java.util.UUID;
  * the client cannot do native function calling the loop falls back to the
  * legacy JSON protocol ({@code requestFiles}/{@code requestTools}/
  * {@code runTools}) parsed via {@link AiResponseParser}. In both cases the loop
- * terminates on the first assistant turn that contains no tool/context request
- * — that text is the final review.</p>
+ * accepts a non-empty final text without tool/context requests. In both modes
+ * its stop reason must also indicate completion. Exhausted budgets and empty
+ * or truncated replies are failures, never fallback reviews.</p>
  */
 @Slf4j
 public final class ReviewAgentStrategy implements AgentStrategy {
@@ -73,9 +75,6 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     /** Read-only context-fetch rounds consumed in legacy mode. */
     private int contextRounds = 0;
-
-    /** Most recent non-blank assistant text, used as a fallback review when the budget is exhausted. */
-    private String lastAssistantText = "";
 
     public ReviewAgentStrategy(String systemPrompt,
                                AgentToolRouter toolRouter,
@@ -115,10 +114,11 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
-        if (turn.assistantText() != null && !turn.assistantText().isBlank()) {
-            lastAssistantText = turn.assistantText();
+        StopReason expected = turn.hasToolCalls() ? StopReason.TOOL_USE : StopReason.END_TURN;
+        if (turn.stopReason() != expected) {
+            return incompleteTurn(ctx, turn.stopReason());
         }
-        // No tool calls -> the assistant text is the final review.
+        // Only a completed, non-empty text turn may become the final review.
         if (!turn.hasToolCalls()) {
             return finish(ctx, turn.assistantText());
         }
@@ -134,11 +134,24 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     }
 
     @Override
-    public StepDecision step(AgentRunContext ctx, String aiResponse, int round) {
-        if (aiResponse != null && !aiResponse.isBlank()) {
-            lastAssistantText = aiResponse;
+    public StepDecision stepLegacy(AgentRunContext ctx, ChatTurn turn, int round) {
+        // Reject any turn carrying tool calls, even with END_TURN: the legacy
+        // JSON protocol has no native-call envelope, so such a mix can only be
+        // provider metadata leaking into a text turn — never accept its text.
+        if (turn.stopReason() != StopReason.END_TURN || turn.hasToolCalls()) {
+            return incompleteTurn(ctx, turn.stopReason());
         }
+        return step(ctx, turn.assistantText(), round);
+    }
 
+    private StepDecision incompleteTurn(AgentRunContext ctx, StopReason reason) {
+        log.warn("Agentic review stopped before completion for PR #{}: {}", ctx.issueNumber(), reason);
+        return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(),
+                "Agentic review stopped before completion: " + reason));
+    }
+
+    @Override
+    public StepDecision step(AgentRunContext ctx, String aiResponse, int round) {
         ImplementationPlan plan = responseParser.parseAiResponse(aiResponse);
 
         // Collect every read-only request the model made: context tools
@@ -176,33 +189,28 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         }
 
         if (wantsContext) {
-            log.info("Agentic review (legacy) hit the context-round cap ({}) for PR #{}; finalizing",
+            log.warn("Agentic review (legacy) hit the context-round cap ({}) for PR #{} before completion",
                     maxContextRounds, ctx.issueNumber());
+            return new StepDecision.Finish(onBudgetExhausted(ctx));
         }
         return finish(ctx, finalReviewText(plan, aiResponse));
     }
 
     @Override
     public LoopOutcome onBudgetExhausted(AgentRunContext ctx) {
-        log.warn("Agentic review loop exhausted its round budget for PR #{}; "
-                + "returning the most recent assistant text as the review", ctx.issueNumber());
-        String text = lastAssistantText;
-        if (text == null || text.isBlank()) {
-            text = "⚠️ *The review loop reached its round budget limit and could not generate a review.*";
-            return LoopOutcome.fail(ctx.baseBranch(), text);
-        }
-        return LoopOutcome.success(ctx.baseBranch(), text);
+        log.warn("Agentic review loop exhausted its round budget for PR #{}", ctx.issueNumber());
+        return LoopOutcome.fail(ctx.baseBranch(),
+                "⚠️ *The review loop reached its round budget limit and could not generate a review.*");
     }
 
     // ---------------------------------------------------------------------
 
     private StepDecision finish(AgentRunContext ctx, String review) {
-        String text = (review == null || review.isBlank()) ? lastAssistantText : review;
-        if (text == null || text.isBlank()) {
-            text = "⚠️ *The review feedback was empty or could not be generated by the agent.*";
-            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(), text));
+        if (review == null || review.isBlank()) {
+            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(),
+                    "⚠️ *The review feedback was empty or could not be generated by the agent.*"));
         }
-        return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), text));
+        return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), review));
     }
 
     /**
@@ -330,10 +338,4 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         return node.isString() ? node.asString() : node.toString();
     }
 }
-
-
-
-
-
-
 

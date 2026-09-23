@@ -14,8 +14,17 @@
 
         <div class="card">
             <div class="card-body">
-                <form th:action="@{/git-integrations/save}" method="post" th:object="${integration}">
+                <form th:if="${integration.deletionPending}"
+                      th:action="@{/git-integrations/{id}/delete/retry(id=${integration.id})}" method="post">
+                    <input type="hidden" name="lockVersion" th:value="${integration.lockVersion}"/>
+                    <p class="alert alert-warning" th:text="#{help.git.deletionRetry}">Deletion is pending. Retry cleanup with an optional replacement token for the same Gitea user. The token is not saved.</p>
+                    <label for="replacementToken" class="form-label" th:text="#{label.token}">API Token</label>
+                    <input type="password" id="replacementToken" name="replacementToken" class="form-control mb-3" autocomplete="new-password"/>
+                    <button type="submit" class="btn btn-danger" th:text="#{button.delete}">Delete</button>
+                </form>
+                <form th:unless="${integration.deletionPending}" th:action="@{/git-integrations/save}" method="post" th:object="${integration}">
                     <input type="hidden" th:if="${integration.id != null}" th:field="*{id}"/>
+                    <input type="hidden" th:if="${integration.id != null}" th:field="*{lockVersion}"/>
 
                     <div class="row g-3">
                         <div class="col-md-6">
@@ -62,6 +71,20 @@
                             <div class="form-text text-warning" th:unless="${sshEncryptionEnabled}"
                                  th:text="#{help.git.sshEncryptionRequired}">
                                 Configure APP_ENCRYPTION_KEY before storing SSH private keys.
+                            </div>
+                        </div>
+
+                        <div class="col-12" th:if="${integration.providerType == T(org.remus.giteabot.repository.RepositoryType).GITEA}">
+                            <div class="alert alert-info" th:text="#{help.git.sshAutomaticSetup}">
+                                Save the URL and API token first. Automatic setup uses the saved configuration.
+                            </div>
+                            <a class="btn btn-outline-primary mb-3"
+                               th:if="${integration.id != null && sshEncryptionEnabled && integration.token != null && !integration.token.isBlank() && integration.transport != T(org.remus.giteabot.repository.GitTransport).SSH}"
+                               th:href="@{/git-integrations/{id}/ssh/setup(id=${integration.id})}"
+                               th:text="#{button.setupSshAutomatically}">Set up SSH automatically</a>
+                            <div class="form-text mb-3" th:if="${integration.hasManagedSshKeyTracking()}"
+                                 th:text="#{help.git.sshManagedKey}">
+                                This integration tracks a managed Gitea key. Credential changes remove it first.
                             </div>
                         </div>
 
@@ -176,6 +199,7 @@
             </div>
         </div>
 
+        <th:block th:unless="${integration.deletionPending}">
         <script th:inline="javascript">
             /*<![CDATA[*/
             const isEditMode = /*[[${integration.id != null}]]*/ false;
@@ -390,6 +414,7 @@
                 });
             });
         </script>
+        </th:block>
 
     </div>
 </body>

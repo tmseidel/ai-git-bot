@@ -22,12 +22,16 @@ public class LlamaCppResponse {
     private String model;
 
     /**
-     * Reason for stopping generation.
+     * Terminal marker for streamed responses.
      */
     private String stop;
 
+    /** Current server completion reason: none, eos, limit or word. */
+    @JsonProperty("stop_type")
+    private String stopType;
+
     /**
-     * Whether generation was stopped due to hitting a stop sequence.
+     * Whether generation stopped at an end-of-sequence token.
      */
     @JsonProperty("stopped_eos")
     private Boolean stoppedEos;
@@ -82,4 +86,3 @@ public class LlamaCppResponse {
         private Double predictedMs;
     }
 }
-

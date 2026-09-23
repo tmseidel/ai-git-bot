@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.util.ProcessSupport;
@@ -180,6 +181,50 @@ public class WorkspaceService {
             cleanupWorkspace(setup);
             throw e;
         }
+    }
+
+    /**
+     * Prepares a workspace that may be pushed back to an existing PR branch.
+     * Providers that require authoritative head resolution are cloned from the
+     * source repository and fail closed; other providers retain the legacy
+     * target-repository and PR-ref fallback behaviour.
+     */
+    public WorkspaceResult prepareWritablePullRequestWorkspace(RepositoryApiClient repositoryClient,
+                                                               String owner, String repo,
+                                                               String branch, Long prNumber) {
+        if (!repositoryClient.requiresAuthoritativePullRequestHead()) {
+            return prepareWorkspace(repositoryClient, owner, repo, branch, prNumber);
+        }
+        final PullRequestHead head;
+        try {
+            head = repositoryClient.getPullRequestHead(owner, repo, prNumber, branch);
+            if (head == null || head.owner() == null || head.owner().isBlank()
+                    || head.repository() == null || head.repository().isBlank()
+                    || head.branch() == null || head.branch().isBlank()) {
+                throw new IllegalStateException("Repository client returned an incomplete pull-request head");
+            }
+        } catch (RuntimeException e) {
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            log.error("Failed to resolve writable pull-request head for {}/{}#{}: {}",
+                    owner, repo, prNumber, message, e);
+            return WorkspaceResult.failure("Failed to resolve writable pull-request head: " + message);
+        }
+        return prepareWorkspace(repositoryClient, head.owner(), head.repository(), head.branch(), null);
+    }
+
+    /**
+     * Returns whether an authoritative PR head belongs to another repository.
+     * Providers without authoritative head resolution retain their existing
+     * offer-as-PR behaviour and return {@code false}.
+     */
+    public boolean isAuthoritativePullRequestFromFork(RepositoryApiClient repositoryClient,
+                                                      String owner, String repo,
+                                                      String branch, Long prNumber) {
+        if (!repositoryClient.requiresAuthoritativePullRequestHead()) {
+            return false;
+        }
+        PullRequestHead head = repositoryClient.getPullRequestHead(owner, repo, prNumber, branch);
+        return !owner.equalsIgnoreCase(head.owner()) || !repo.equalsIgnoreCase(head.repository());
     }
 
     /**

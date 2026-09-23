@@ -48,6 +48,19 @@ services:
       # this the CI_ACTION strategy will only ever see "404 page not found"
       # from GiteaApiClient.dispatchWorkflow / listRecentRuns.
       - GITEA__actions__ENABLED=true
+      # Headless first boot (SQLite + install lock + no open registration) so
+      # the instance is usable without clicking through the web installer.
+      # Only applies when /data is empty; existing volumes are untouched.
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__service__DISABLE_REGISTRATION=true
+      # SSH clone URLs must point at the published host port (222:22 above),
+      # otherwise the bot scans/registers keys against the wrong endpoint.
+      # Override per environment, e.g. GITEA_SSH_DOMAIN=127.0.0.1 where
+      # `localhost` resolves to IPv6 first.
+      - GITEA__server__SSH_DOMAIN=${GITEA_SSH_DOMAIN:-localhost}
+      - GITEA__server__SSH_PORT=${GITEA_SSH_PORT:-222}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: always

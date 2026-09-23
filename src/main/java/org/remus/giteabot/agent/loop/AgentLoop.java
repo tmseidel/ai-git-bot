@@ -30,10 +30,11 @@ import java.util.Locale;
  * {@link ToolingMode#NATIVE} <em>and</em> the resolved
  * {@link AiClient#supportsNativeTools()} returns {@code true} <em>and</em>
  * the strategy supplies non-empty {@link AgentStrategy#toolDescriptors()},
- * the loop calls {@link AiClient#chatWithTools chatWithTools} and forwards
- * the structured {@link ChatTurn} to
- * {@link AgentStrategy#step(AgentRunContext, ChatTurn, int)}. Otherwise the
- * loop transparently falls back to the legacy text path.</p>
+ * the loop forwards the structured {@link ChatTurn} to
+ * {@link AgentStrategy#step(AgentRunContext, ChatTurn, int)}. Otherwise it calls
+ * the same {@link AiClient#chatWithTools chatWithTools} API with no descriptors
+ * and forwards the turn to {@link AgentStrategy#stepLegacy}, preserving
+ * completion metadata for the legacy text protocol.</p>
  */
 @Slf4j
 public final class AgentLoop {
@@ -91,7 +92,7 @@ public final class AgentLoop {
             long started = System.nanoTime();
             ChatTurn turn;
             try {
-                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt, resolvedMode);
+                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt);
             } finally {
                 AgentMetricsHolder.recordLatency(modeTag(resolvedMode), providerTag,
                         Duration.ofNanos(System.nanoTime() - started));
@@ -163,7 +164,9 @@ public final class AgentLoop {
             StepDecision decision;
             long stepStartNanos = System.nanoTime();
             try {
-                decision = strategy.step(ctx, turn, round);
+                decision = resolvedMode == ToolingMode.NATIVE
+                        ? strategy.step(ctx, turn, round)
+                        : strategy.stepLegacy(ctx, turn, round);
             } catch (RuntimeException e) {
                 log.error("AgentLoop round {}/{} for issue #{}: strategy.step threw {}: {}",
                         round, budget.maxRounds(), ctx.issueNumber(),
@@ -348,19 +351,12 @@ public final class AgentLoop {
      * @throws RuntimeException if the failure is not retryable or the retry fails
      */
     private ChatTurn callAiWithRetry(List<AiMessage> history, String currentMessage,
-                                     List<ToolDescriptor> tools, String systemPrompt,
-                                     ToolingMode resolvedMode) {
+                                     List<ToolDescriptor> tools, String systemPrompt) {
         int maxAttempts = 2;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                if (resolvedMode == ToolingMode.NATIVE) {
-                    return aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,
-                            null, budget.maxTokensPerCall());
-                } else {
-                    String text = aiClient.chat(history, currentMessage, systemPrompt,
-                            null, budget.maxTokensPerCall());
-                    return ChatTurn.text(text);
-                }
+                return aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,
+                        null, budget.maxTokensPerCall());
             } catch (RuntimeException e) {
                 boolean promptTooLong = e instanceof HttpClientErrorException clientError
                         && aiClient.isPromptTooLongError(clientError);

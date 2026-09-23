@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.agent.loop.AgentRunContext;
+import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.audit.ActorType;
 import org.remus.giteabot.audit.AuditEventType;
 import org.remus.giteabot.audit.PrAuditEvent;
@@ -11,6 +12,7 @@ import org.remus.giteabot.audit.PrAuditEventService;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.notification.WorkflowRetryNotices;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.springframework.stereotype.Service;
@@ -35,6 +37,7 @@ public class PrWorkflowOrchestrator {
     private final WorkflowSelectionService workflowSelectionService;
     private final PrAuditEventService auditService;
     private final EventHookPublisher eventHookPublisher;
+    private final WorkflowRetryNotices retryNotices;
 
     public List<PrWorkflowRun> runAll(Bot bot, WebhookPayload payload) {
         if (bot == null) throw new IllegalArgumentException("bot must not be null");
@@ -131,6 +134,7 @@ public class PrWorkflowOrchestrator {
                 toolCallConsumer);
 
         try {
+            retryNotices.installForPullRequest(bot, workflow.key(), owner, repoName, prNumber);
             WorkflowResult result = workflow.run(context);
             if (result == null) {
                 throw new IllegalStateException("PrWorkflow '" + workflow.key() + "' returned null");
@@ -233,6 +237,8 @@ public class PrWorkflowOrchestrator {
             publishRunEvent(EventHookEventType.PR_WORKFLOW_FAILED, bot, owner, repoName, prNumber, failedData);
             log.error("[Workflow '{}'] Run id={} FAILED", workflow.key(), run.getId(), e);
             throw e;
+        } finally {
+            AiRetryContext.clear();
         }
     }
 

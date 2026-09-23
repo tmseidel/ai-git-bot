@@ -9,7 +9,10 @@ import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.AiProviderRegistry;
 import org.remus.giteabot.ai.AuditingAiClient;
+import org.remus.giteabot.ai.ProviderRetryNotifier;
+import org.remus.giteabot.ai.RetryAiClient;
 import org.remus.giteabot.aiusage.AiUsageService;
+import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
@@ -32,6 +35,8 @@ public class AiClientFactory {
     private final AiProviderRegistry providerRegistry;
     private final AiUsageService aiUsageService;
     private final AiUsageProperties usageProperties;
+    private final AiRetryProperties retryProperties;
+    private final ProviderRetryNotifier retryNotifier;
 
     /** Cache key = integrationId, value = (updatedAt-millis, client). */
     private final ConcurrentMap<Long, CachedClient> cache = new ConcurrentHashMap<>();
@@ -71,7 +76,8 @@ public class AiClientFactory {
             abstractClient.setAuditRecorder(recorder);
             abstractClient.setUsageProperties(usageProperties);
         }
-        return new AuditingAiClient(client, recorder);
+        AiClient retrying = new RetryAiClient(client, retryProperties, retryNotifier);
+        return new AuditingAiClient(retrying, recorder);
     }
 
     /**

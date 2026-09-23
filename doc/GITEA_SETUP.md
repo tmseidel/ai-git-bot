@@ -62,11 +62,61 @@ If Gitea uses `[repository] DISABLE_HTTP_GIT = true`, configure SSH for reposito
 clone and push operations. The API token above remains required for comments,
 reviews, and repository metadata.
 
-Native and executable-JAR deployments require `ssh` on `PATH`; `ssh-keygen` and
-`ssh-keyscan` are operator preparation tools. The official Docker image installs
+Native and executable-JAR deployments require `ssh` on `PATH`; automatic setup
+also requires `ssh-keygen` and `ssh-keyscan`. The official Docker image installs
 `openssh-client` and already includes these commands.
 
-Configure `APP_ENCRYPTION_KEY` before storing any SSH private key. To use SSH:
+Configure `APP_ENCRYPTION_KEY` before storing any SSH private key.
+
+#### Automatic Setup
+
+1. Save the Gitea integration's URL and API token using HTTP transport. The token
+   needs `write:user` for user-key registration/removal and access to at least one
+   repository so the bot can discover Gitea's SSH endpoint.
+2. Reopen the integration and select **Set up SSH automatically**. This uses the
+   saved configuration, not unsaved form edits.
+3. Compare **every** displayed SHA-256 host-key fingerprint with a trusted value
+   from your Gitea administrator. A network scan alone does not establish trust.
+4. Confirm verification and select **Generate and register key**. A fresh scan
+   must match the preview before the bot generates an Ed25519 key, registers the
+   public key on the token's user account, and stores the encrypted private key.
+
+To replace an automatically configured key, switch to HTTP and save first, then
+run automatic setup again. If you keep SSH selected during a change that removes
+the managed key, provide a replacement private key. Incomplete SSH replacements
+are rejected before the old key is revoked; the transport is not silently changed
+to HTTP. Clearing credentials, changing the endpoint or token,
+replacing the private key, and deleting an integration remove its managed public
+key from Gitea first. The bot commits HTTP-only state before remote cleanup. If
+cleanup fails, it keeps the old endpoint, token, and key tracking, does not save
+the other requested changes, and allows cleanup to be retried by saving again.
+The same applies to registration with an ambiguous response: a persisted unique
+title and owner ID allow the next attempt to recover and remove the remote key.
+
+A replacement token can recover cleanup after an expired token only at the same
+endpoint and for the recorded Gitea user. A title/ID mismatch is not treated as
+successful cleanup. Do not rename managed keys in Gitea. Integrations referenced
+by bots must be unassigned before deletion.
+
+Edit and SSH confirmation forms carry a version; reload stale forms before retrying.
+Deletion commits a fence that blocks edits, SSH setup, and new bot assignments.
+For expired-token cleanup during deletion, reopen **Edit** and retry deletion with
+a replacement token for the recorded Gitea user. This cleanup-only token is neither
+stored nor used to change the endpoint or reactivate SSH.
+
+An undispatched setup cancels only its own owner/title marker, even if deletion
+has started. Before deleting title-discovered keys, cleanup commits verification
+evidence so a successful remote deletion followed by a failed local commit remains
+retryable. An uncertain POST with no observed key remains fenced: absence alone
+does not prove that the request cannot still complete. If it never resolves, an
+operator must first establish that no upstream registration can still complete,
+verify the saved endpoint, owner and exact title, and reconcile only that marker
+under the integration row lock with a current version check. Do not clear other
+markers or lift the deletion fence as a shortcut.
+
+#### Manual Setup
+
+To use an externally managed key:
 
 1. Generate a dedicated Ed25519 key pair without a passphrase for the bot
    (`ssh-keygen -t ed25519 -C "ai-git-bot"`).
@@ -80,7 +130,10 @@ Configure `APP_ENCRYPTION_KEY` before storing any SSH private key. To use SSH:
 
 Blank SSH fields keep the stored values; **Clear** removes the local credentials
 and switches the integration back to HTTP. Removing credentials or deleting the
-integration does not revoke the public key in Gitea — revoke it manually there.
+integration does not revoke a manually registered public key in Gitea; revoke it
+manually there. A key-only rotation at the same endpoint retains the stored host
+trust and API token. Changing the URL while keeping SSH selected requires a new
+API token and newly verified `known_hosts` entries.
 
 When enabled, the bot obtains each repository's exact `ssh_url` from the Gitea
 API and runs SSH non-interactively with the integration's identity, strict

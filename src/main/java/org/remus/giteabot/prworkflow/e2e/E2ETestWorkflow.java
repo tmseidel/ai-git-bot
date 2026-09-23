@@ -337,10 +337,12 @@ public class E2ETestWorkflow implements PrWorkflow {
         int promotionThreshold = clamp(
                 intParam(params, E2eTestParam.PROMOTION_THRESHOLD_PERCENT, DEFAULT_PROMOTION_THRESHOLD_PERCENT),
                 0, 100);
+        SuitePromotionService.Outcome promotion = null;
         if (meetsPromotionThreshold(outcome, promotionThreshold)
                 && (lifecycleMode == SuiteLifecycleMode.OFFER_AS_PR
                     || lifecycleMode == SuiteLifecycleMode.COMMIT_TO_PR)) {
-            promoteIfRequested(bot, payload, suite, context, lifecycleMode, outcome, promotionThreshold);
+            promotion = promoteIfRequested(
+                    bot, payload, suite, context, lifecycleMode, outcome, promotionThreshold);
         } else if (outcome.status() == TestSuiteOutcomeStatus.FAILED
                 && (lifecycleMode == SuiteLifecycleMode.OFFER_AS_PR
                     || lifecycleMode == SuiteLifecycleMode.COMMIT_TO_PR)) {
@@ -348,6 +350,10 @@ public class E2ETestWorkflow implements PrWorkflow {
             context.appendStep("e2e-promotion",
                     lifecycleMode.key() + " — skipped: pass-rate " + passRate
                             + "% below threshold " + promotionThreshold + "%");
+        }
+
+        if (promotion != null && promotion.kind() == SuitePromotionService.Outcome.Kind.FAILED) {
+            return WorkflowResult.failed("Suite promotion failed: " + promotion.message());
         }
 
         return mapOutcome(outcome);
@@ -395,19 +401,19 @@ public class E2ETestWorkflow implements PrWorkflow {
 
     /**
      * M7 entry point invoked immediately after a successful run for the
-     * "promote now" lifecycle modes. Best-effort: failures are logged +
-     * surfaced as a PR comment but never alter the workflow's terminal
-     * status.
+     * "promote now" lifecycle modes. Promotion failures are returned to the
+     * caller so a requested write cannot finish with a successful workflow.
      */
-    private void promoteIfRequested(Bot bot, WebhookPayload payload, PrTestSuite suite,
-                                    PrWorkflowContext context, SuiteLifecycleMode mode,
-                                    TestSuiteOutcome outcome, int thresholdPercent) {
+    private SuitePromotionService.Outcome promoteIfRequested(
+            Bot bot, WebhookPayload payload, PrTestSuite suite,
+            PrWorkflowContext context, SuiteLifecycleMode mode,
+            TestSuiteOutcome outcome, int thresholdPercent) {
         if (payload.getRepository() == null
                 || payload.getRepository().getOwner() == null
                 || payload.getPullRequest() == null
                 || payload.getPullRequest().getHead() == null) {
             log.warn("[Workflow '{}'] Cannot promote — payload missing repo / PR head", KEY);
-            return;
+            return SuitePromotionService.Outcome.failure("payload missing repository or pull-request head");
         }
         String owner = payload.getRepository().getOwner().getLogin();
         String repoName = payload.getRepository().getName();
@@ -415,7 +421,7 @@ public class E2ETestWorkflow implements PrWorkflow {
         PrWorkflowRun run = runRepository.findById(context.runId()).orElse(null);
         if (run == null) {
             log.warn("[Workflow '{}'] Cannot promote — run id {} not found", KEY, context.runId());
-            return;
+            return SuitePromotionService.Outcome.failure("workflow run was not found");
         }
         int passRate = passRatePercent(outcome.attempted(), outcome.failed());
         log.info("[Workflow '{}'] Promoting suite id={} mode={} status={} passRate={}% threshold={}%",
@@ -426,6 +432,7 @@ public class E2ETestWorkflow implements PrWorkflow {
                 out.message() == null ? "" : (": " + out.message())));
         postPrComment(bot, payload, suite.getPrNumber(),
                 E2eTestSummaryRenderer.renderPromotion(mode, out));
+        return out;
     }
 
     private WorkflowResult mapOutcome(TestSuiteOutcome outcome) {
@@ -552,7 +559,6 @@ public class E2ETestWorkflow implements PrWorkflow {
         return 0L;
     }
 }
-
 
 
 

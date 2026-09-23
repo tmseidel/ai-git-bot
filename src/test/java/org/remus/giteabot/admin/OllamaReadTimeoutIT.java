@@ -5,7 +5,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.ai.AiProviderRegistry;
+import org.remus.giteabot.ai.ProviderRetryNotifier;
 import org.remus.giteabot.aiusage.AiUsageService;
+import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -91,7 +93,15 @@ class OllamaReadTimeoutIT {
         integration.setUpdatedAt(java.time.Instant.now());
 
         AiClientFactory factory = new AiClientFactory(aiIntegrationService, providerRegistry,
-                aiUsageService, usageProperties);
+                aiUsageService, usageProperties, new AiRetryProperties(), new ProviderRetryNotifier() {
+                    @Override
+                    public void retryScheduled(Event event) {
+                    }
+
+                    @Override
+                    public void retriesExhausted(Event event) {
+                    }
+                });
 
         long start = System.nanoTime();
         ResourceAccessException ex = assertThrows(ResourceAccessException.class,

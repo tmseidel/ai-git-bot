@@ -63,6 +63,9 @@ class IssueImplementationServiceTest {
 
     @BeforeEach
     void setUp() {
+        // This legacy-only fixture keeps its String scripts through the default typed fallback.
+        lenient().when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenCallRealMethod();
         AgentConfigProperties agentConfig = new AgentConfigProperties();
         agentConfig.setEnabled(true);
         agentConfig.setMaxFiles(10);

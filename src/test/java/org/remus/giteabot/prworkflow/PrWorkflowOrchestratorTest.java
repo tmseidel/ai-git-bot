@@ -1,5 +1,6 @@
 package org.remus.giteabot.prworkflow;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -7,10 +8,12 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.audit.PrAuditEventService;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.notification.WorkflowRetryNotices;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 
 import java.util.List;
@@ -18,10 +21,12 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,6 +38,7 @@ class PrWorkflowOrchestratorTest {
     @Mock private PrWorkflowMetrics metrics;
     @Mock private PrAuditEventService auditService;
     @Mock private EventHookPublisher eventHookPublisher;
+    @Mock private WorkflowRetryNotices retryNotices;
 
     private final PrWorkflowRunLockManager lockManager = new PrWorkflowRunLockManager();
 
@@ -41,10 +47,24 @@ class PrWorkflowOrchestratorTest {
         lenient().when(runService.isActive(anyLong())).thenReturn(true);
     }
 
+    @AfterEach
+    void clearRetryContext() {
+        AiRetryContext.clear();
+    }
+
     private PrWorkflowOrchestrator newOrchestrator(PrWorkflow... workflows) {
         PrWorkflowRegistry registry = new PrWorkflowRegistry(List.of(workflows));
         return new PrWorkflowOrchestrator(registry, runService, metrics, lockManager,
-                org.mockito.Mockito.mock(WorkflowSelectionService.class), auditService, eventHookPublisher);
+                org.mockito.Mockito.mock(WorkflowSelectionService.class), auditService,
+                eventHookPublisher, retryNotices);
+    }
+
+    /** Makes the mocked notice component install a real notice, as production does. */
+    private void stubNoticeInstallation() {
+        doAnswer(invocation -> {
+            AiRetryContext.install(new AiRetryContext.Notice("test-wf", body -> { }));
+            return null;
+        }).when(retryNotices).installForPullRequest(any(), any(), any(), any(), any());
     }
 
     private static WebhookPayload payloadFor(String owner, String repo, long prNumber) {
@@ -139,6 +159,7 @@ class PrWorkflowOrchestratorTest {
     void runCapturesExceptionAsFailedAndRethrows() {
         when(runService.start(anyLong(), any(), any(), anyLong(), any()))
                 .thenReturn(runWithId(3L));
+        stubNoticeInstallation();
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(
                 throwingWorkflow(new IllegalStateException("boom")));
@@ -147,6 +168,56 @@ class PrWorkflowOrchestratorTest {
 
         assertThrows(IllegalStateException.class, () ->
                 orchestrator.run(bot, payloadFor("o", "r", 3), "test-wf"));
+
+        assertNull(AiRetryContext.notice(), "retry-notice context must not leak into the next task");
+    }
+
+    @Test
+    void runPointsRetryNoticesAtThePullRequestAndClearsThemAfterwards() {
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(7L));
+        when(runService.complete(anyLong(), any(), any()))
+                .thenReturn(runWithIdAndStatus(7L, PrWorkflowRunStatus.SUCCESS));
+        stubNoticeInstallation();
+
+        AtomicReference<AiRetryContext.Notice> duringRun = new AtomicReference<>();
+        PrWorkflow capturing = new PrWorkflow() {
+            @Override public String key() { return "test-wf"; }
+            @Override public String displayName() { return "Test"; }
+            @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
+            @Override public WorkflowResult run(PrWorkflowContext ctx) {
+                duringRun.set(AiRetryContext.notice());
+                return new WorkflowResult(WorkflowResultStatus.SUCCESS, "done");
+            }
+        };
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(capturing);
+        Bot bot = new Bot();
+        bot.setId(1L);
+
+        orchestrator.run(bot, payloadFor("o", "r", 7), "test-wf");
+
+        verify(retryNotices).installForPullRequest(bot, "test-wf", "o", "r", 7L);
+        assertNotNull(duringRun.get(), "the notice must be installed before the workflow runs");
+        assertNull(AiRetryContext.notice());
+    }
+
+    @Test
+    void runNoticeInstallationFailureStillClearsTheRetryContext() {
+        when(runService.start(anyLong(), any(), any(), anyLong(), any()))
+                .thenReturn(runWithId(11L));
+        doAnswer(invocation -> {
+            AiRetryContext.install(new AiRetryContext.Notice("test-wf", body -> { }));
+            throw new IllegalStateException("notice target blew up");
+        }).when(retryNotices).installForPullRequest(any(), any(), any(), any(), any());
+
+        PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
+        Bot bot = new Bot();
+        bot.setId(1L);
+
+        assertThrows(IllegalStateException.class, () ->
+                orchestrator.run(bot, payloadFor("o", "r", 11), "test-wf"));
+
+        assertNull(AiRetryContext.notice(), "retry-notice context must not leak into the next task");
     }
 
     @Test

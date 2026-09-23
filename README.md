@@ -542,6 +542,7 @@ Bug reports are always welcome.
 - 🧪 System-tested workflows
 - 🐳 Docker-first deployment
 - 🌍 Self-hostable end-to-end
+- ♻️ Automatic retry with backoff when the AI provider reports itself overloaded (HTTP 503) — the affected PR or issue is told when the next attempt starts
 ---
 ## Community
 * ⭐ >100 GitHub stars

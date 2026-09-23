@@ -105,6 +105,11 @@ public class AgentReviewService {
     public record SeverityClassification(int blocker, int medium, int low) {
     }
 
+    /** Distinguishes a posted review or clarification from a no-op and a failed attempt. */
+    public enum ReviewResult {
+        POSTED, NO_DIFF, FAILED
+    }
+
     private final AgentReviewContext context;
     private final Bot bot;
     private final EventHookPublisher eventHookPublisher;
@@ -163,14 +168,13 @@ public class AgentReviewService {
      *                              classification
      * @param severityThresholds    optional per-severity thresholds used to
      *                              compute the final review action
-     * @return {@code true} when a non-empty review was produced and posted;
-     *         {@code false} when there was nothing to review or the agent failed
+     * @return whether a review was posted, no diff was available, or the review failed
      */
-    public boolean reviewPullRequest(WebhookPayload payload, int maxToolRounds,
-                                     boolean enableFormalDecision, String decisionPrompt,
-                                     SeverityThresholds severityThresholds,
-                                     Long runId,
-                                     Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+    public ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds,
+                                         boolean enableFormalDecision, String decisionPrompt,
+                                         SeverityThresholds severityThresholds,
+                                         Long runId,
+                                         Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -183,7 +187,7 @@ public class AgentReviewService {
         String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
         if (diff == null || diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
-            return false;
+            return ReviewResult.NO_DIFF;
         }
 
         DiffSummary diffSummary = DiffSummary.parse(diff);
@@ -193,7 +197,7 @@ public class AgentReviewService {
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
-            return false;
+            return ReviewResult.FAILED;
         }
 
         Path workspaceDir = null;
@@ -205,7 +209,7 @@ public class AgentReviewService {
                         prNumber, wsResult.error());
                 repositoryClient.postPullRequestComment(owner, repo, prNumber,
                         "⚠️ **AI Agent (Review)**: Failed to prepare workspace: " + wsResult.error());
-                return false;
+                return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
 
@@ -218,10 +222,15 @@ public class AgentReviewService {
                     workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
                     runId, toolCallConsumer);
 
+            if (!outcome.success()) {
+                log.warn("Agentic review for PR #{} failed; no review will be published", prNumber);
+                return ReviewResult.FAILED;
+            }
+
             String review = outcome.payload() instanceof String s ? s : null;
             if (review == null || review.isBlank()) {
                 log.warn("Agentic review for PR #{} produced no review text", prNumber);
-                return false;
+                return ReviewResult.FAILED;
             }
 
             ParseResult parsed = enableFormalDecision
@@ -249,14 +258,14 @@ public class AgentReviewService {
             publishFindingEvents(eventHookPublisher, bot, parsed, owner, repo, prNumber);
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
                     prNumber, owner, repo, action);
-            return outcome.success();
+            return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
             postErrorComment(owner, repo, prNumber, "Agentic Review",
                     "The review could not be completed because of an error. "
                             + "This is usually a transient issue with the AI provider. "
                             + "Please try again later.", e);
-            return false;
+            return ReviewResult.FAILED;
         } finally {
             if (workspaceDir != null) {
                 workspaceService.cleanupWorkspace(workspaceDir);
@@ -268,7 +277,7 @@ public class AgentReviewService {
      * Answers a clarification question about a previously-reviewed PR by running
      * a conversational agent loop. Formal review decisions are not applicable here.
      */
-    public boolean answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds) {
+    public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -281,7 +290,7 @@ public class AgentReviewService {
         String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
         if (diff == null || diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — cannot answer clarification", prNumber, owner, repo);
-            return false;
+            return ReviewResult.NO_DIFF;
         }
 
         DiffSummary diffSummary = DiffSummary.parse(diff);
@@ -291,7 +300,7 @@ public class AgentReviewService {
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — cannot answer clarification "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
-            return false;
+            return ReviewResult.FAILED;
         }
 
         Path workspaceDir = null;
@@ -303,7 +312,7 @@ public class AgentReviewService {
                         prNumber, wsResult.error());
                 repositoryClient.postPullRequestComment(owner, repo, prNumber,
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
-                return false;
+                return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
 
@@ -317,22 +326,27 @@ public class AgentReviewService {
                     workspaceDir, headBranch, systemPrompt, userMessage,
                     maxToolRounds, diffSummary, null, null);
 
+            if (!outcome.success()) {
+                log.warn("Clarification for PR #{} failed; no answer will be published", prNumber);
+                return ReviewResult.FAILED;
+            }
+
             String answer = outcome.payload() instanceof String s ? s : null;
             if (answer == null || answer.isBlank()) {
                 log.warn("Clarification for PR #{} produced no answer", prNumber);
-                return false;
+                return ReviewResult.FAILED;
             }
 
             repositoryClient.postPullRequestComment(owner, repo, prNumber, formatClarification(answer));
             log.info("Clarification answered for PR #{} in {}/{}", prNumber, owner, repo);
-            return outcome.success();
+            return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Clarification failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
             postErrorComment(owner, repo, prNumber, "Clarification",
                     "The clarification could not be completed because of an error. "
                             + "This is usually a transient issue with the AI provider. "
                             + "Please try again later.", e);
-            return false;
+            return ReviewResult.FAILED;
         } finally {
             if (workspaceDir != null) {
                 workspaceService.cleanupWorkspace(workspaceDir);

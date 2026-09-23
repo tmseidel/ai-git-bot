@@ -56,6 +56,7 @@ public class OllamaRequest {
     @Data
     @Builder
     public static class Options {
+        @JsonProperty("num_predict")
         private Integer numPredict;
     }
 
@@ -93,4 +94,3 @@ public class OllamaRequest {
         private Map<String, Object> arguments;
     }
 }
-

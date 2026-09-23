@@ -104,9 +104,19 @@ public class I18nCoverageService {
 
         Path workspace = null;
         try {
+            if (request.lifecycleMode() == SuiteLifecycleMode.OFFER_AS_PR
+                    && workspaceService.isAuthoritativePullRequestFromFork(
+                            repositoryClient, owner, repo, headBranch, prNumber)) {
+                postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderFailed(prNumber,
+                        "offer-as-pr is not supported for fork pull requests; no branch was pushed."));
+                return Result.failed("offer-as-pr is not supported for fork pull requests");
+            }
             context.requireActive("before preparing i18n-coverage workspace");
-            WorkspaceResult ws = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
+                    ? workspaceService.prepareWritablePullRequestWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber)
+                    : workspaceService.prepareWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderFailed(prNumber,
                         "failed to prepare workspace: " + ws.error()));
@@ -222,10 +232,14 @@ public class I18nCoverageService {
                         "Automated i18n coverage sync for PR #" + prNumber + ".", workBranch, headBranch);
             } catch (RuntimeException e) {
                 log.warn("i18n-coverage: createPullRequest failed for PR #{}: {}", prNumber, e.getMessage());
+                context.appendStep("i18n-coverage-commit", "follow-up PR creation failed: " + e.getMessage());
+                return Result.failed("follow-up PR creation failed");
             }
-            if (followUp != null) {
-                target = "(follow-up PR #" + followUp + " against `" + headBranch + "`)";
+            if (followUp == null) {
+                context.appendStep("i18n-coverage-commit", "follow-up PR creation returned no PR number");
+                return Result.failed("follow-up PR creation failed");
             }
+            target = "(follow-up PR #" + followUp + " against `" + headBranch + "`)";
             postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
                     prNumber, toolContext, report, true, target, null));
             context.appendStep("i18n-coverage-commit",

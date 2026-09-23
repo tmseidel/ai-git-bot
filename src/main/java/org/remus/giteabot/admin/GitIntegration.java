@@ -20,6 +20,16 @@ public class GitIntegration {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    @Column(nullable = false)
+    private Long lockVersion;
+
+    @Column(nullable = false)
+    private boolean deletionPending;
+
+    @Column(nullable = false)
+    private boolean sshCleanupVerified;
+
     @Column(nullable = false, unique = true)
     private String name;
 
@@ -52,6 +62,20 @@ public class GitIntegration {
     @Column(columnDefinition = "TEXT")
     @ToString.Exclude
     private String sshKnownHosts;
+
+    @Column
+    private Long sshRemoteKeyId;
+
+    @Column
+    private Long sshRemoteKeyOwnerId;
+
+    @Column
+    private String sshRemoteKeyTitle;
+
+    /** Includes incomplete registration markers so ambiguous failures remain recoverable. */
+    public boolean hasManagedSshKeyTracking() {
+        return sshRemoteKeyId != null || sshRemoteKeyOwnerId != null || sshRemoteKeyTitle != null;
+    }
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)

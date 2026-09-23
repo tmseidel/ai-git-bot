@@ -1,0 +1,78 @@
+name: E2E Gitea SSH
+
+# Live end-to-end test for managed Gitea SSH keys (setup, SSH clone via the
+# bot workspace, cleanup) against a local Gitea from
+# systemtest/docker-compose-local-gitea.yml. Runs only for changes that can
+# affect the SSH paths; the regular suite (without a live Gitea) stays in CI.
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - .github/workflows/e2e-gitea-ssh.yml
+      - systemtest/docker-compose-local-gitea.yml
+      - pom.xml
+      - src/main/java/org/remus/giteabot/admin/**
+      - src/main/java/org/remus/giteabot/gitea/**
+      - src/main/java/org/remus/giteabot/agent/validation/**
+      - src/main/java/org/remus/giteabot/repository/**
+      - src/test/java/org/remus/giteabot/admin/GiteaSshEndToEndTest.java
+
+permissions:
+  contents: read
+
+jobs:
+  gitea-ssh:
+    name: Managed SSH end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Start local Gitea
+        run: docker compose -f systemtest/docker-compose-local-gitea.yml up -d server
+        env:
+          # Force IPv4 loopback so host-key scans never hit an IPv6-only socket.
+          GITEA_SSH_DOMAIN: 127.0.0.1
+
+      - name: Wait for Gitea
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/api/v1/version && break
+            sleep 2
+          done
+          curl -sf http://localhost:3000/api/v1/version
+
+      - name: Seed Gitea admin and API token
+        run: |
+          docker compose -f systemtest/docker-compose-local-gitea.yml exec -T --user git server \
+            gitea admin user create --admin --username e2e \
+            --password "E2ETest-Password-123" --email e2e@example.com --must-change-password=false
+          TOKEN=$(docker compose -f systemtest/docker-compose-local-gitea.yml exec -T --user git server \
+            gitea admin user generate-access-token --username e2e --token-name ci --scopes all --raw \
+            | tail -n 1 | tr -d '\r\n ')
+          test -n "$TOKEN"
+          echo "GITEA_E2E_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Run managed SSH end-to-end test
+        run: mvn --batch-mode -Dtest=GiteaSshEndToEndTest -DfailIfNoTests=false test
+        env:
+          GITEA_E2E_URL: http://localhost:3000
+          GITEA_E2E_TOKEN: ${{ env.GITEA_E2E_TOKEN }}
+
+      - name: Upload surefire reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports

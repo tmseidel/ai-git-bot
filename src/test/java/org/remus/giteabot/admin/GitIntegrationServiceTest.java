@@ -22,6 +22,11 @@ class GitIntegrationServiceTest {
     @Mock
     private EncryptionService encryptionService;
 
+    @Mock
+    private BotRepository botRepository;
+
+    @Mock private jakarta.persistence.EntityManager entityManager;
+
     @InjectMocks
     private GitIntegrationService gitIntegrationService;
 
@@ -31,7 +36,7 @@ class GitIntegrationServiceTest {
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken("plain-token");
         when(encryptionService.encrypt("plain-token")).thenReturn("encrypted-value");
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false);
 
@@ -40,15 +45,51 @@ class GitIntegrationServiceTest {
     }
 
     @Test
+    void validateSave_rejectsKnownHostsWithoutSingleEndpoint() {
+        GitIntegration integration =
+                sshIntegration("|1|abcdefghijklmnop|qrstuvwxyz012345 ssh-ed25519 AAAA");
+        when(encryptionService.isEncryptionEnabled()).thenReturn(true);
+        when(encryptionService.encrypt("token")).thenReturn("encrypted");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> gitIntegrationService.validateSave(integration, false, false));
+        assertTrue(ex.getMessage().contains("known_hosts"));
+    }
+
+    @Test
+    void validateSave_acceptsSingleEndpointKnownHosts() {
+        GitIntegration integration =
+                sshIntegration("[gitea.example.com]:2222 ssh-ed25519 AQID\n");
+        when(encryptionService.isEncryptionEnabled()).thenReturn(true);
+        when(encryptionService.encrypt("token")).thenReturn("encrypted");
+
+        assertDoesNotThrow(() -> gitIntegrationService.validateSave(integration, false, false));
+    }
+
+    private GitIntegration sshIntegration(String knownHosts) {
+        GitIntegration integration = new GitIntegration();
+        integration.setName("gitea");
+        integration.setProviderType(RepositoryType.GITEA);
+        integration.setUrl("https://gitea.example.com");
+        integration.setTransport(GitTransport.SSH);
+        integration.setToken("token");
+        integration.setSshPrivateKey("private");
+        integration.setSshKnownHosts(knownHosts);
+        return integration;
+    }
+
+    @Test
     void save_blankTokenOnUpdate_keepsStoredTokenWithoutReEncrypting() {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken("");
         GitIntegration existing = new GitIntegration();
         existing.setToken("stored-encrypted-token");
-        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false);
 
@@ -60,9 +101,14 @@ class GitIntegrationServiceTest {
     void save_clearToken_removesStoredToken() {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken("");
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        GitIntegration existing = new GitIntegration();
+        existing.setLockVersion(0L);
+        existing.setToken("stored-token");
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, true);
 
@@ -75,7 +121,7 @@ class GitIntegrationServiceTest {
         GitIntegration integration = new GitIntegration();
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken(null);
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false);
 
@@ -94,7 +140,7 @@ class GitIntegrationServiceTest {
         when(encryptionService.isEncryptionEnabled()).thenReturn(true);
         when(encryptionService.encrypt("plain-token")).thenReturn("encrypted-token");
         when(encryptionService.encrypt("plain-private-key")).thenReturn("encrypted-private-key");
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false, false);
 
@@ -110,7 +156,7 @@ class GitIntegrationServiceTest {
         integration.setTransport(GitTransport.HTTP);
         integration.setSshPrivateKey("hidden-private-key");
         integration.setSshKnownHosts("hidden-host-key");
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false, false);
 
@@ -123,6 +169,7 @@ class GitIntegrationServiceTest {
     void save_blankSshFieldsOnUpdate_keepsStoredValuesWithoutReEncrypting() {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
         integration.setTransport(GitTransport.SSH);
         integration.setSshPrivateKey("");
@@ -132,8 +179,9 @@ class GitIntegrationServiceTest {
         existing.setSshKnownHosts("stored-host-key");
         existing.setToken("stored-encrypted-token");
         when(encryptionService.isEncryptionEnabled()).thenReturn(true);
-        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false, false);
 
@@ -155,13 +203,14 @@ class GitIntegrationServiceTest {
                 () -> gitIntegrationService.save(integration, false, false));
 
         assertEquals("SSH private key and known_hosts are required for SSH transport", error.getMessage());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
     }
 
     @Test
     void save_replacingPrivateKeyWithoutKnownHosts_keepsStoredTrust() {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
         integration.setUrl("https://gitea.example.com");
         integration.setTransport(GitTransport.SSH);
@@ -176,9 +225,10 @@ class GitIntegrationServiceTest {
         existing.setSshKnownHosts("stored-host-key");
         existing.setToken("stored-encrypted-token");
         when(encryptionService.isEncryptionEnabled()).thenReturn(true);
-        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
         when(encryptionService.encrypt("new-private-key")).thenReturn("encrypted-new-private-key");
-        when(gitIntegrationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false, false);
 
@@ -194,6 +244,7 @@ class GitIntegrationServiceTest {
     void save_keyRotationCannotReuseClearedOrMissingKnownHosts() {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(0L);
         integration.setTransport(GitTransport.SSH);
         integration.setSshPrivateKey("new-private-key");
         GitIntegration existing = new GitIntegration();
@@ -202,7 +253,8 @@ class GitIntegrationServiceTest {
         existing.setSshKnownHosts("stored-host-key");
         existing.setToken("stored-encrypted-token");
         when(encryptionService.isEncryptionEnabled()).thenReturn(true);
-        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
 
         assertThrows(IllegalArgumentException.class,
                 () -> gitIntegrationService.save(integration, false, true));
@@ -214,7 +266,7 @@ class GitIntegrationServiceTest {
                 () -> gitIntegrationService.save(integration, false, false));
         assertEquals("stored-encrypted-private-key", existing.getSshPrivateKey());
         verify(encryptionService, never()).encrypt(anyString());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -228,9 +280,11 @@ class GitIntegrationServiceTest {
         existing.setSshKnownHosts("old-host-key");
         GitIntegration input = new GitIntegration();
         input.setId(7L);
+        input.setLockVersion(0L);
         input.setUrl("https://new.example.com");
         input.setTransport(GitTransport.SSH);
-        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
 
         assertThrows(IllegalArgumentException.class,
                 () -> gitIntegrationService.save(input, false, false));
@@ -243,11 +297,11 @@ class GitIntegrationServiceTest {
         assertEquals(GitTransport.SSH, existing.getTransport());
         assertEquals("stored-encrypted-key", existing.getSshPrivateKey());
         assertEquals("old-host-key", existing.getSshKnownHosts());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
 
         input.setSshKnownHosts("new.example.com ssh-ed25519 verified-key");
         when(encryptionService.encrypt("new-token")).thenReturn("encrypted-new-token");
-        when(gitIntegrationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
         GitIntegration result = gitIntegrationService.save(input, false, false);
 
         assertEquals(GitTransport.SSH, result.getTransport());
@@ -261,19 +315,21 @@ class GitIntegrationServiceTest {
     void save_changedEndpointRequiresNewToken() {
         GitIntegration integration = new GitIntegration();
         integration.setId(7L);
+        integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
         integration.setUrl("https://new-gitea.example.com");
         GitIntegration existing = new GitIntegration();
         existing.setProviderType(RepositoryType.GITEA);
         existing.setUrl("https://old-gitea.example.com");
         existing.setToken("stored-token");
-        when(gitIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> gitIntegrationService.save(integration, false));
 
         assertEquals("A new API token is required when changing the provider or URL", error.getMessage());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -290,7 +346,7 @@ class GitIntegrationServiceTest {
                 () -> gitIntegrationService.save(integration, false, false));
 
         assertEquals("SSH private keys require APP_ENCRYPTION_KEY", error.getMessage());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -307,7 +363,7 @@ class GitIntegrationServiceTest {
                 () -> gitIntegrationService.save(integration, false, false));
 
         assertEquals("SSH transport is currently supported for Gitea integrations only", error.getMessage());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -323,7 +379,7 @@ class GitIntegrationServiceTest {
                 () -> gitIntegrationService.save(integration, false, false));
 
         assertEquals("API token is required for SSH transport", error.getMessage());
-        verify(gitIntegrationRepository, never()).save(any());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
     }
 
     @Test
@@ -332,7 +388,7 @@ class GitIntegrationServiceTest {
         integration.setProviderType(RepositoryType.GITHUB);
         integration.setToken("gh-token");
         when(encryptionService.encrypt("gh-token")).thenReturn("encrypted");
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false);
 
@@ -345,7 +401,7 @@ class GitIntegrationServiceTest {
         integration.setProviderType(RepositoryType.BITBUCKET);
         integration.setToken("bb-token");
         when(encryptionService.encrypt("bb-token")).thenReturn("encrypted");
-        when(gitIntegrationRepository.save(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         GitIntegration result = gitIntegrationService.save(integration, false);
 
@@ -395,10 +451,11 @@ class GitIntegrationServiceTest {
     }
 
     @Test
-    void deleteById_delegatesToRepository() {
+    void deleteById_missingIntegrationIsIdempotent() {
         gitIntegrationService.deleteById(1L);
 
-        verify(gitIntegrationRepository).deleteById(1L);
+        verify(gitIntegrationRepository).findByIdForUpdate(1L);
+        verify(gitIntegrationRepository, never()).delete(any());
     }
 
     @Test
@@ -413,5 +470,97 @@ class GitIntegrationServiceTest {
         assertFalse(toString.contains("secret-token"));
         assertFalse(toString.contains("secret-private-key"));
         assertFalse(toString.contains("secret-host-key"));
+    }
+
+    @Test
+    void managedKey_stagesRetainTrackingUntilExplicitFinish() {
+        GitIntegration integration = new GitIntegration();
+        integration.setTransport(GitTransport.SSH);
+        integration.setToken("stored-token");
+        integration.setSshPrivateKey("stored-key");
+        integration.setSshKnownHosts("stored-hosts");
+        integration.setSshRemoteKeyId(42L);
+        integration.setSshRemoteKeyOwnerId(17L);
+        integration.setSshRemoteKeyTitle("title");
+        integration.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(integration));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+
+        GitIntegration pending = gitIntegrationService.prepareManagedSshKeyRemoval(7L, 0L);
+        assertEquals(GitTransport.HTTP, pending.getTransport());
+        assertNull(pending.getSshPrivateKey());
+        assertNull(pending.getSshKnownHosts());
+        assertEquals("stored-token", pending.getToken());
+        assertEquals(42L, pending.getSshRemoteKeyId());
+        assertEquals(17L, pending.getSshRemoteKeyOwnerId());
+        assertEquals("title", pending.getSshRemoteKeyTitle());
+        assertTrue(pending.hasManagedSshKeyTracking());
+        assertFalse(gitIntegrationService.finishManagedSshKeyRemoval(7L, 0L).hasManagedSshKeyTracking());
+    }
+
+    @Test
+    void managedKey_creationMarkerPrecedesEncryptedSshConfiguration() {
+        GitIntegration integration = new GitIntegration();
+        integration.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(integration));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        GitIntegration marker = gitIntegrationService.prepareManagedSshKeyCreation(7L, 0L, 17L, "title");
+        assertEquals(GitTransport.HTTP, marker.getTransport());
+        assertNull(marker.getSshRemoteKeyId());
+        assertTrue(marker.hasManagedSshKeyTracking());
+        when(encryptionService.isEncryptionEnabled()).thenReturn(true);
+        when(encryptionService.encrypt("private")).thenReturn("encrypted-private");
+        GitIntegration configured = gitIntegrationService.configureGeneratedSsh(7L, 0L, "private", "hosts", 42L, 17L, "title");
+        assertEquals(GitTransport.SSH, configured.getTransport());
+        assertEquals("encrypted-private", configured.getSshPrivateKey());
+        assertEquals(42L, configured.getSshRemoteKeyId());
+    }
+
+    @Test
+    void managedKey_trackingCannotBeOverwrittenByFormInput() {
+        GitIntegration input = new GitIntegration();
+        input.setSshRemoteKeyId(42L);
+        input.setSshRemoteKeyOwnerId(17L);
+        input.setSshRemoteKeyTitle("forged");
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        assertFalse(gitIntegrationService.save(input, false).hasManagedSshKeyTracking());
+    }
+
+    @Test
+    void managedKey_directSaveOrDeleteCannotDiscardTracking() {
+        GitIntegration existing = new GitIntegration();
+        existing.setSshRemoteKeyTitle("recovery-marker");
+        existing.setLockVersion(0L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
+        when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
+        GitIntegration input = new GitIntegration();
+        input.setId(7L);
+        input.setLockVersion(0L);
+        assertThrows(IllegalStateException.class, () -> gitIntegrationService.save(input, false));
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
+        assertThrows(IllegalStateException.class, () -> gitIntegrationService.deleteById(7L));
+        assertTrue(existing.hasManagedSshKeyTracking());
+        verify(gitIntegrationRepository, never()).delete(any());
+    }
+
+    @Test
+    void validateDelete_rejectsAssignedIntegration() {
+        when(botRepository.existsByGitIntegrationId(7L)).thenReturn(true);
+        assertThrows(IllegalStateException.class, () -> gitIntegrationService.validateDelete(7L));
+        verify(gitIntegrationRepository, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void trackingPredicate_includesEveryPartialMarker() {
+        GitIntegration integration = new GitIntegration();
+        assertFalse(integration.hasManagedSshKeyTracking());
+        integration.setSshRemoteKeyId(42L);
+        assertTrue(integration.hasManagedSshKeyTracking());
+        integration.setSshRemoteKeyId(null);
+        integration.setSshRemoteKeyOwnerId(17L);
+        assertTrue(integration.hasManagedSshKeyTracking());
+        integration.setSshRemoteKeyOwnerId(null);
+        integration.setSshRemoteKeyTitle("title");
+        assertTrue(integration.hasManagedSshKeyTracking());
     }
 }

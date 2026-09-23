@@ -10,6 +10,8 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
 import org.springframework.http.converter.HttpMessageNotWritableException;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -49,8 +51,8 @@ class AgentLoopTest {
                 new AgentBudget(5, 3, 3, 8000,
                         8_000, 120_000,
                         200_000, 0.7));
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), eq(8000)))
-                .thenReturn("ai-final");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), eq(8000)))
+                .thenReturn(new ChatTurn("ai-final", List.of(), StopReason.END_TURN, 100, 7));
 
         AgentStrategy strategy = new AgentStrategy() {
             @Override public String systemPrompt() { return "sys"; }
@@ -67,12 +69,13 @@ class AgentLoopTest {
 
         assertThat(outcome.success()).isTrue();
         assertThat(outcome.payload()).isEqualTo("payload");
-        verify(aiClient, times(1)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+        verify(aiClient).chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt());
+        verify(aiClient, never()).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
         // The round is flushed once with both the initial user message and the
         // assistant response, instead of one transaction per message.
         verify(sessionService).flushMessages(any(), eq(List.of(
                 new PendingMessage("user", "go"),
-                new PendingMessage("assistant", "ai-final"))), anyLong(), anyLong());
+                new PendingMessage("assistant", "ai-final"))), eq(100L), eq(7L));
     }
 
     @Test
@@ -86,8 +89,8 @@ class AgentLoopTest {
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
                 new AgentBudget(5, 3, 3, 8000, 8_000, 120_000, 200_000, 0.7));
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("review-text");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("review-text"));
 
         AgentStrategy strategy = new AgentStrategy() {
             @Override public String systemPrompt() { return "sys"; }
@@ -114,11 +117,11 @@ class AgentLoopTest {
         // Snapshot the history list passed to each call (Mockito captures a live reference).
         java.util.List<java.util.List<AiMessage>> historySnapshots = new java.util.ArrayList<>();
         java.util.List<String> userMessages = new java.util.ArrayList<>();
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
                 .thenAnswer(inv -> {
                     historySnapshots.add(java.util.List.copyOf(inv.getArgument(0)));
                     userMessages.add(inv.getArgument(1));
-                    return historySnapshots.size() == 1 ? "first-ai" : "second-ai";
+                    return ChatTurn.text(historySnapshots.size() == 1 ? "first-ai" : "second-ai");
                 });
 
         AtomicInteger calls = new AtomicInteger();
@@ -159,8 +162,8 @@ class AgentLoopTest {
                 new AgentBudget(2, 3, 3, 8000,
                         8_000, 120_000,
                         200_000, 0.7));
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
-                .thenReturn("a", "b");
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("a"), ChatTurn.text("b"));
 
         AgentStrategy strategy = new AgentStrategy() {
             @Override public String systemPrompt() { return "sys"; }
@@ -176,7 +179,7 @@ class AgentLoopTest {
 
         assertThat(outcome.success()).isFalse();
         assertThat(outcome.selectedBranch()).isEqualTo("dead-branch");
-        verify(aiClient, times(2)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+        verify(aiClient, times(2)).chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt());
     }
 
     @Test
@@ -187,14 +190,14 @@ class AgentLoopTest {
                         200_000, 0.7));
         HttpMessageNotWritableException brokenPipe = new HttpMessageNotWritableException(
                 "Could not write JSON", new SocketException("Broken pipe"));
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
                 .thenThrow(brokenPipe)
-                .thenReturn("ai-final");
+                .thenReturn(ChatTurn.text("ai-final"));
 
         LoopOutcome outcome = loop.run(ctx, "go", finishingStrategy());
 
         assertThat(outcome.success()).isTrue();
-        verify(aiClient, times(2)).chat(anyList(), eq("go"), eq("sys"), isNull(), eq(8000));
+        verify(aiClient, times(2)).chatWithTools(anyList(), eq("go"), eq(List.of()), eq("sys"), isNull(), eq(8000));
     }
 
     @Test
@@ -205,12 +208,12 @@ class AgentLoopTest {
                         200_000, 0.7));
         HttpMessageNotWritableException serializationFailure =
                 new HttpMessageNotWritableException("Could not write JSON");
-        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
                 .thenThrow(serializationFailure);
 
         assertThatThrownBy(() -> loop.run(ctx, "go", finishingStrategy()))
                 .isSameAs(serializationFailure);
-        verify(aiClient, times(1)).chat(anyList(), anyString(), anyString(), isNull(), anyInt());
+        verify(aiClient).chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt());
     }
 
     @Test

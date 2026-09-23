@@ -3,7 +3,6 @@ package org.remus.giteabot.ai.anthropic;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
-import org.remus.giteabot.ai.AiClientDelegateSupport;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
@@ -176,10 +175,8 @@ public class AnthropicAiClient extends AbstractAiClient {
                                   String systemPrompt,
                                   String modelOverride,
                                   Integer maxTokensOverride) {
-        if (!supportsNativeTools() || tools == null || tools.isEmpty()) {
-            return AiClientDelegateSupport.delegateToChat(this, conversationHistory,
-                    newUserMessage, systemPrompt, modelOverride, maxTokensOverride);
-        }
+        boolean useNativeTools = supportsNativeTools() && tools != null && !tools.isEmpty();
+        String effectivePrompt = useNativeTools ? systemPrompt : resolvePrompt(systemPrompt);
 
         String effectiveModel = (modelOverride != null && !modelOverride.isBlank())
                 ? modelOverride : getModel();
@@ -187,36 +184,38 @@ public class AnthropicAiClient extends AbstractAiClient {
                 ? maxTokensOverride : getMaxTokens();
 
         List<AiMessage> fullHistory = new ArrayList<>(conversationHistory);
-        if (newUserMessage != null && !newUserMessage.isBlank()) {
-            fullHistory.add(AiMessage.builder().role("user").content(newUserMessage).build());
+        if (!useNativeTools || (newUserMessage != null && !newUserMessage.isBlank())) {
+            fullHistory.add(AiMessage.builder().role("user")
+                    .content(newUserMessage == null ? "" : newUserMessage).build());
         }
 
-        List<AnthropicRequest.Message> messages = buildToolMessages(fullHistory);
+        List<AnthropicRequest.Message> messages = useNativeTools ? buildToolMessages(fullHistory)
+                : fullHistory.stream().map(this::toLegacyMessage).toList();
 
         // Tool definitions sit at the very front of the rendered prefix
         // (tools -> system -> messages), so a non-deterministic tool order
         // would silently invalidate every cache entry. Sort by name to keep
         // the prefix byte-stable across requests.
-        List<AnthropicRequest.Tool> toolPayloads = tools.stream()
+        List<AnthropicRequest.Tool> toolPayloads = useNativeTools ? tools.stream()
                 .sorted(Comparator.comparing(ToolDescriptor::name))
                 .map(this::toToolPayload)
-                .toList();
+                .toList() : List.of();
 
-        if (promptCachingEnabled) {
+        if (useNativeTools && promptCachingEnabled) {
             applyCacheBreakpoints(messages);
         }
 
         AnthropicRequest request = AnthropicRequest.builder()
                 .model(effectiveModel)
                 .maxTokens(effectiveMaxTokens)
-                .system(toSystemBlocks(systemPrompt))
+                .system(toSystemBlocks(effectivePrompt))
                 .thinking(thinking())
                 .outputConfig(outputConfig())
                 .messages(messages)
-                .tools(toolPayloads)
+                .tools(useNativeTools ? toolPayloads : null)
                 .build();
 
-        log.info("Anthropic chat-with-tools request: model={}, tools={}, history={}",
+        log.info("Anthropic chat turn request: model={}, tools={}, history={}",
                 effectiveModel, toolPayloads.size(), messages.size());
 
         AnthropicResponse response = executeRequest(request);
@@ -472,14 +471,15 @@ public class AnthropicAiClient extends AbstractAiClient {
     }
 
     private ChatTurn interpret(AnthropicRequest request, AnthropicResponse response) {
-        if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
+        if (response == null) {
             log.warn("Empty response from Anthropic tool-call request");
-            return ChatTurn.text("Unable to generate response - empty reply from AI.");
+            return new ChatTurn("", List.of(), StopReason.OTHER, 0L, 0L);
         }
 
         StringBuilder text = new StringBuilder();
         List<ToolCall> calls = new ArrayList<>();
-        for (AnthropicResponse.ContentBlock block : response.getContent()) {
+        List<AnthropicResponse.ContentBlock> content = response.getContent() == null ? List.of() : response.getContent();
+        for (AnthropicResponse.ContentBlock block : content) {
             if ("text".equals(block.getType()) && block.getText() != null) {
                 text.append(block.getText());
             } else if ("tool_use".equals(block.getType())) {
@@ -491,7 +491,7 @@ public class AnthropicAiClient extends AbstractAiClient {
             }
         }
         StopReason reason = mapStopReason(response.getStopReason());
-        if (!calls.isEmpty()) {
+        if (!calls.isEmpty() && reason == StopReason.END_TURN) {
             reason = StopReason.TOOL_USE;
         }
         long inputTokens = 0L;
@@ -594,4 +594,3 @@ public class AnthropicAiClient extends AbstractAiClient {
         return List.of(block.build());
     }
 }
-

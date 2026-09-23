@@ -3,7 +3,6 @@ package org.remus.giteabot.ai.openai;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AbstractAiClient;
-import org.remus.giteabot.ai.AiClientDelegateSupport;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
@@ -72,34 +71,33 @@ public class OpenAiClient extends AbstractAiClient {
                                   String systemPrompt,
                                   String modelOverride,
                                   Integer maxTokensOverride) {
-        if (!supportsNativeTools() || tools == null || tools.isEmpty()) {
-            return AiClientDelegateSupport.delegateToChat(this, conversationHistory,
-                    newUserMessage, systemPrompt, modelOverride, maxTokensOverride);
-        }
+        boolean useNativeTools = supportsNativeTools() && tools != null && !tools.isEmpty();
+        String effectivePrompt = useNativeTools ? systemPrompt : resolvePrompt(systemPrompt);
         String effectiveModel = (modelOverride != null && !modelOverride.isBlank())
                 ? modelOverride : getModel();
         int effectiveMaxTokens = (maxTokensOverride != null && maxTokensOverride > 0)
                 ? maxTokensOverride : getMaxTokens();
 
         List<AiMessage> fullHistory = new ArrayList<>(conversationHistory);
-        if (newUserMessage != null && !newUserMessage.isBlank()) {
-            fullHistory.add(AiMessage.builder().role("user").content(newUserMessage).build());
+        if (!useNativeTools || (newUserMessage != null && !newUserMessage.isBlank())) {
+            fullHistory.add(AiMessage.builder().role("user")
+                    .content(newUserMessage == null ? "" : newUserMessage).build());
         }
 
-        List<OpenAiRequest.Message> messages = buildMessages(systemPrompt, fullHistory);
-        List<OpenAiRequest.Tool> toolPayloads = tools.stream()
+        List<OpenAiRequest.Message> messages = buildMessages(effectivePrompt, fullHistory);
+        List<OpenAiRequest.Tool> toolPayloads = useNativeTools ? tools.stream()
                 .map(this::toToolPayload)
-                .toList();
+                .toList() : List.of();
 
         OpenAiRequest request = OpenAiRequest.builder()
                 .model(effectiveModel)
                 .maxTokens(effectiveMaxTokens)
                 .reasoningEffort(flavor.reasoningEffort())
                 .messages(messages)
-                .tools(toolPayloads)
+                .tools(useNativeTools ? toolPayloads : null)
                 .build();
 
-        log.info("OpenAI chat-with-tools request: model={}, flavor={}, tools={}, history={}",
+        log.info("OpenAI chat turn request: model={}, flavor={}, tools={}, history={}",
                 effectiveModel, flavor.getId(), toolPayloads.size(), messages.size());
 
         OpenAiResponse response = executeRequest(request);
@@ -174,14 +172,15 @@ public class OpenAiClient extends AbstractAiClient {
     }
 
     private ChatTurn interpret(OpenAiRequest request, OpenAiResponse response) {
-        if (response == null || response.getChoices() == null || response.getChoices().isEmpty()) {
+        if (response == null) {
             log.warn("Empty response from OpenAI tool-call request");
-            return ChatTurn.text("Unable to generate response - empty reply from AI.");
+            return new ChatTurn("", List.of(), StopReason.OTHER, 0L, 0L);
         }
-        OpenAiResponse.Choice choice = response.getChoices().getFirst();
-        OpenAiResponse.Message message = choice.getMessage();
+        OpenAiResponse.Choice choice = response.getChoices() == null || response.getChoices().isEmpty()
+                ? null : response.getChoices().getFirst();
+        OpenAiResponse.Message message = choice == null ? null : choice.getMessage();
         String text = message != null && message.getContent() != null ? message.getContent() : "";
-        StopReason reason = mapStopReason(choice.getFinishReason());
+        StopReason reason = mapStopReason(choice == null ? null : choice.getFinishReason());
 
         List<ToolCall> calls = new ArrayList<>();
         if (message != null && message.getToolCalls() != null) {
@@ -203,7 +202,7 @@ public class OpenAiClient extends AbstractAiClient {
                 calls.add(new ToolCall(tcr.getId(),
                         ToolNameSanitizer.desanitize(tcr.getFunction().getName()), args));
             }
-            if (!calls.isEmpty()) {
+            if (!calls.isEmpty() && reason == StopReason.END_TURN) {
                 reason = StopReason.TOOL_USE;
             }
         }
@@ -299,5 +298,3 @@ public class OpenAiClient extends AbstractAiClient {
         return content;
     }
 }
-
-

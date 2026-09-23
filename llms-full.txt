@@ -169,7 +169,7 @@ Supported AI/provider styles include:
 Typical source locations:
 
 - `src/main/java/org/remus/giteabot/admin/`: admin UI controllers/services/entities for bots, integrations, dashboard, and setup.
-- `src/main/java/org/remus/giteabot/ai/`: AI abstraction and provider implementations.
+- `src/main/java/org/remus/giteabot/ai/`: AI provider abstraction, provider clients, and automatic backoff retries of provider-overload (HTTP 503/529) responses.
 - `src/main/java/org/remus/giteabot/agent/`: agent tools, tool catalog, prompt building, validation, and notification behavior.
 - `src/main/java/org/remus/giteabot/aiusage/`: AI usage and error logging.
 - `src/main/java/org/remus/giteabot/audit/`: tamper-evident workflow audit events.
@@ -182,6 +182,7 @@ Typical source locations:
 - `src/main/java/org/remus/giteabot/issueworkflow/`: issue-assigned workflow orchestration and coding/writer implementations.
 - `src/main/java/org/remus/giteabot/mcp/`: MCP server discovery, tool catalog, and integration.
 - `src/main/java/org/remus/giteabot/metrics/`: Prometheus metrics registration.
+- `src/main/java/org/remus/giteabot/notification/`: repository-side notifications for workflow runs (provider-overload retry notices, comment acknowledgement).
 - `src/main/java/org/remus/giteabot/prworkflow/`: PR workflow orchestration, registry, runs, and shared configuration.
 - `src/main/java/org/remus/giteabot/prworkflow/review/`: default PR review workflow.
 - `src/main/java/org/remus/giteabot/prworkflow/agentreview/`: agentic PR review workflow.

@@ -106,6 +106,11 @@ public class SuitePromotionService {
         }
 
         long prNumber = suite.getPrNumber();
+        if (mode == SuiteLifecycleMode.OFFER_AS_PR
+                && workspaceService.isAuthoritativePullRequestFromFork(
+                        client, repoOwner, repoName, featureBranch, prNumber)) {
+            return Outcome.failure("offer-as-pr is not supported for fork pull requests; no branch was pushed.");
+        }
         String baseBranch = switch (mode) {
             case PROMOTE_ON_MERGE -> client.getDefaultBranch(repoOwner, repoName);
             case OFFER_AS_PR, COMMIT_TO_PR -> featureBranch;
@@ -131,17 +136,25 @@ public class SuitePromotionService {
             case EPHEMERAL        -> throw new IllegalStateException("EPHEMERAL rejected above");
         };
 
-        WorkspaceResult ws = workspaceService.prepareWorkspace(
-                client, repoOwner, repoName, baseBranch,
-                mode == SuiteLifecycleMode.PROMOTE_ON_MERGE ? null : prNumber);
+        WorkspaceResult ws = mode == SuiteLifecycleMode.COMMIT_TO_PR
+                ? workspaceService.prepareWritablePullRequestWorkspace(
+                        client, repoOwner, repoName, baseBranch, prNumber)
+                : workspaceService.prepareWorkspace(
+                        client, repoOwner, repoName, baseBranch,
+                        mode == SuiteLifecycleMode.PROMOTE_ON_MERGE ? null : prNumber);
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());
         }
         Path workspace = ws.workspacePath();
         try {
-            List<String> writtenPaths = writeCases(workspace, targetDir, suite.getCases());
+            final List<String> writtenPaths;
+            try {
+                writtenPaths = writeCases(workspace, targetDir, suite.getCases());
+            } catch (IOException e) {
+                return Outcome.failure("Failed to write E2E test cases: " + e.getMessage());
+            }
             if (writtenPaths.isEmpty()) {
-                return Outcome.skipped("No files written.");
+                return Outcome.failure("Failed to write E2E test cases: no files were written.");
             }
 
             boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
@@ -183,14 +196,10 @@ public class SuitePromotionService {
         }
     }
 
-    private List<String> writeCases(Path workspace, String targetDir, List<PrTestCase> cases) {
+    private List<String> writeCases(Path workspace, String targetDir,
+                                    List<PrTestCase> cases) throws IOException {
         Path baseDir = workspace.resolve(targetDir);
-        try {
-            Files.createDirectories(baseDir);
-        } catch (IOException e) {
-            log.warn("Could not create target dir {}: {}", baseDir, e.getMessage());
-            return List.of();
-        }
+        Files.createDirectories(baseDir);
 
         Set<String> used = new HashSet<>();
         List<String> written = new ArrayList<>();
@@ -199,14 +208,10 @@ public class SuitePromotionService {
             String chosen = resolveConflict(baseDir, original, used);
             used.add(chosen);
             Path destination = baseDir.resolve(chosen);
-            try {
-                Files.createDirectories(destination.getParent());
-                Files.writeString(destination,
-                        tc.getContent() == null ? "" : tc.getContent());
-                written.add(targetDir + "/" + chosen);
-            } catch (IOException e) {
-                log.warn("Failed to write test case {}: {}", destination, e.getMessage());
-            }
+            Files.createDirectories(destination.getParent());
+            Files.writeString(destination,
+                    tc.getContent() == null ? "" : tc.getContent());
+            written.add(targetDir + "/" + chosen);
         }
         return written;
     }
