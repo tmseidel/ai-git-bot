@@ -1,7 +1,7 @@
 # Using AI-Git-Bot from your Git platform
 
 This guide is for developers whose team administrator already connected
-AI-Git-Bot to Gitea, GitHub, GitLab, or Bitbucket Cloud.
+AI-Git-Bot to Gitea, GitHub, GitLab, Bitbucket Cloud, or Azure DevOps.
 
 You do not need access to the bot's admin UI. You use the bot from the
 same pull requests, merge requests, issues, and comments you already use
@@ -178,7 +178,7 @@ Use the writer bot when an issue needs:
 - fewer ambiguous requirements.
 
 Writer bots are for issue-assignment workflows on providers that support them
-(Gitea, GitHub, and GitLab). Bitbucket Cloud is PR-review only.
+(Gitea, GitHub, and GitLab). Bitbucket Cloud and Azure DevOps are PR-review only.
 
 ## What the unit-test workflow posts on your PR
 

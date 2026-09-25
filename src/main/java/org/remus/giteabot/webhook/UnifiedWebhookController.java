@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
+import org.remus.giteabot.azuredevops.AzureDevopsWebhookHandler;
 import org.remus.giteabot.bitbucket.BitbucketWebhookHandler;
 import org.remus.giteabot.gitea.GiteaWebhookHandler;
 import org.remus.giteabot.github.GitHubWebhookHandler;
@@ -28,6 +29,7 @@ import java.util.Map;
  *   <li>{@link RepositoryType#GITHUB} → {@link GitHubWebhookHandler}</li>
  *   <li>{@link RepositoryType#BITBUCKET} → {@link BitbucketWebhookHandler}</li>
  *   <li>{@link RepositoryType#GITLAB} → {@link GitLabWebhookHandler}</li>
+ *   <li>{@link RepositoryType#AZURE_DEVOPS} → {@link AzureDevopsWebhookHandler}</li>
  * </ul>
  */
 @Slf4j
@@ -41,6 +43,7 @@ public class UnifiedWebhookController {
     private final GitHubWebhookHandler gitHubHandler;
     private final BitbucketWebhookHandler bitbucketHandler;
     private final GitLabWebhookHandler gitLabHandler;
+    private final AzureDevopsWebhookHandler azureDevopsHandler;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -117,6 +120,7 @@ public class UnifiedWebhookController {
             case GITHUB -> gitHubHandler.handleWebhook(bot, xGitHubEvent, payload);
             case BITBUCKET -> bitbucketHandler.handleWebhook(bot, xEventKey, payload);
             case GITLAB -> gitLabHandler.handleWebhook(bot, xGitLabEvent, payload);
+            case AZURE_DEVOPS -> azureDevopsHandler.handleWebhook(bot, payload);
         };
     }
 }

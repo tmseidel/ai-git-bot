@@ -86,7 +86,7 @@ agent workflows.
 
 Try to reduce the report to one scenario:
 
-- Git provider: Gitea, GitHub, GitHub Enterprise, GitLab, or Bitbucket Cloud.
+- Git provider: Gitea, GitHub, GitHub Enterprise, GitLab, Bitbucket Cloud, or Azure DevOps.
 - Provider version, especially for self-hosted Gitea/GitHub Enterprise/GitLab.
 - AI provider and model, including whether it is local Ollama or llama.cpp.
 - Workflow: PR review, interactive Q&A, coding agent, writer agent, AI Unit
@@ -118,5 +118,6 @@ Relevant log excerpt:
 - [`PR_WORKFLOWS_UNIT_TEST.md`](PR_WORKFLOWS_UNIT_TEST.md) explains AI Unit Tests.
 - [`MCP_SERVER_HANDLING.md`](MCP_SERVER_HANDLING.md) explains MCP setup.
 - [`GITEA_SETUP.md`](GITEA_SETUP.md), [`GITHUB_SETUP.md`](GITHUB_SETUP.md),
-  [`GITLAB_SETUP.md`](GITLAB_SETUP.md), and [`BITBUCKET_SETUP.md`](BITBUCKET_SETUP.md)
+  [`GITLAB_SETUP.md`](GITLAB_SETUP.md), [`BITBUCKET_SETUP.md`](BITBUCKET_SETUP.md), and
+  [`AZURE_DEVOPS_SETUP.md`](AZURE_DEVOPS_SETUP.md)
   cover provider-specific sandbox configuration.

@@ -46,10 +46,9 @@ import java.util.Optional;
  * {@link org.remus.giteabot.admin.BotWebhookService} with the bot's own
  * {@link AiClient} and {@link RepositoryApiClient}.
  * <p>
- * All file changes (create, patch, delete) are now performed via tool requests
+ * All file changes (create, patch, delete) are performed via tool requests
  * inside the cloned workspace.  After successful validation the workspace is
- * committed and pushed — no separate {@code createOrUpdateFile} API calls are
- * needed.
+ * committed and pushed with git.
  */
 @Slf4j
 public class IssueImplementationService {

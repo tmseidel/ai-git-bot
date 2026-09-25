@@ -11,6 +11,7 @@ This guide covers deploying the AI-Git-Bot Gateway using Docker Compose.
   - GitHub / GitHub Enterprise: See [GitHub Setup](GITHUB_SETUP.md)
   - GitLab / GitLab CE/EE: See [GitLab Setup](GITLAB_SETUP.md)
   - Bitbucket Cloud: See [Bitbucket Setup](BITBUCKET_SETUP.md)
+  - Azure DevOps: See [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md)
 - API credentials for your chosen AI provider (Anthropic, OpenAI) or a local Ollama/llama.cpp instance
 
 ## Quick Start
@@ -27,7 +28,7 @@ Then:
 1. Navigate to `http://localhost:8080` to complete initial setup
 2. Create your admin account
 3. Configure AI and Git integrations via the web UI
-4. Create a bot and configure webhooks in your Git provider (Gitea, GitHub, GitLab, or Bitbucket)
+4. Create a bot and configure webhooks in your Git provider (Gitea, GitHub, GitLab, Bitbucket, or Azure DevOps)
 
 See the [User Guide](USER_GUIDE.md) for detailed instructions.
 
@@ -264,6 +265,7 @@ All AI provider and Git configuration is managed through the web interface:
    - **GitHub**: github.com or GitHub Enterprise Server — see [GitHub Setup](GITHUB_SETUP.md)
    - **GitLab**: gitlab.com or self-managed GitLab — see [GitLab Setup](GITLAB_SETUP.md)
    - **Bitbucket Cloud**: bitbucket.org — see [Bitbucket Setup](BITBUCKET_SETUP.md)
+   - **Azure DevOps**: dev.azure.com or Azure DevOps Server (collection in the URL is optional) — see [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md)
    - Tokens are encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 
 3. **Bots**: Create bots that combine an AI integration with a Git integration

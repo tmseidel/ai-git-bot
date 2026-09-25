@@ -154,8 +154,6 @@ class IssueImplementationServiceTest {
         // PR created
         verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"));
-        // No createOrUpdateFile calls (old API approach)
-        verify(repositoryClient, never()).createOrUpdateFile(any(), any(), any(), any(), any(), any(), any());
         // workspace cleaned up
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
         // at least 2 comments posted

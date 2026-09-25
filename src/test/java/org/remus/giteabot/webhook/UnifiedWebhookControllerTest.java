@@ -2,6 +2,7 @@ package org.remus.giteabot.webhook;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.*;
+import org.remus.giteabot.azuredevops.AzureDevopsWebhookHandler;
 import org.remus.giteabot.bitbucket.BitbucketWebhookHandler;
 import org.remus.giteabot.gitea.GiteaWebhookHandler;
 import org.remus.giteabot.github.GitHubWebhookHandler;
@@ -48,6 +49,9 @@ class UnifiedWebhookControllerTest {
 
     @MockitoBean
     private GitLabWebhookHandler gitLabHandler;
+
+    @MockitoBean
+    private AzureDevopsWebhookHandler azureDevopsHandler;
 
     @Test
     void handleWebhook_giteaBot_delegatesToGiteaHandler() throws Exception {

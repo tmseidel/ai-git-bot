@@ -426,7 +426,6 @@ class PrWorkflowToolExecutorTest {
         @Override public String getDefaultBranch(String o, String r) { return "main"; }
         @Override public List<Map<String, Object>> getRepositoryTree(String o, String r, String ref) { return List.of(); }
         @Override public String getFileContent(String o, String r, String p, String ref) { return ""; }
-        @Override public void createOrUpdateFile(String o, String r, String p, String c, String m, String b, String s) { }
         @Override public Long createPullRequest(String o, String r, String t, String b, String h, String base) { return 0L; }
     }
 }

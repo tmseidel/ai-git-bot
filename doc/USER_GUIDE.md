@@ -2,7 +2,7 @@
 
 ## Overview
 
-AI-Git-Bot is a **Gateway application** that provides a web-based management interface for creating and managing AI-powered code review bots. Each bot connects an AI provider (Anthropic, OpenAI, Google AI, Ollama, or llama.cpp) with a Git provider (Gitea, GitHub, GitHub Enterprise, GitLab, or Bitbucket Cloud) and has its own unique webhook URL. The Gateway architecture allows you to manage multiple bots with different configurations across different Git platforms — all from a single dashboard.
+AI-Git-Bot is a **Gateway application** that provides a web-based management interface for creating and managing AI-powered code review bots. Each bot connects an AI provider (Anthropic, OpenAI, Google AI, Ollama, or llama.cpp) with a Git provider (Gitea, GitHub, GitHub Enterprise, GitLab, Bitbucket Cloud, or Azure DevOps) and has its own unique webhook URL. The Gateway architecture allows you to manage multiple bots with different configurations across different Git platforms — all from a single dashboard.
 
 Besides classic pull-request review bots, AI-Git-Bot also supports **issue-based agent workflows** and **opt-in PR workflows**:
 
@@ -207,6 +207,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 | **GitHub** | github.com or GitHub Enterprise Server | [GitHub Setup](GITHUB_SETUP.md) |
 | **GitLab** | gitlab.com or self-managed GitLab CE/EE | [GitLab Setup](GITLAB_SETUP.md) |
 | **Bitbucket Cloud** | bitbucket.org | [Bitbucket Setup](BITBUCKET_SETUP.md) |
+| **Azure DevOps** | dev.azure.com, the legacy `*.visualstudio.com` hosts, and Azure DevOps Server (collection in the URL optional) | [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md) |
 
 ### Creating a Git Integration
 
@@ -221,14 +222,16 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `github` | `https://github.com` | Personal Access Token (PAT) |
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
      | `bitbucket` | `https://bitbucket.org` | App Password / API Token |
+     | `azure_devops` | `https://dev.azure.com` | Personal Access Token (PAT) |
      
     - **URL**: The Git server URL:
      - For Gitea: `https://gitea.example.com`
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
+     - For Azure DevOps: `https://dev.azure.com` (Services), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
-    - **Post-review Action**: defaults to **None**. Currently GitLab can use it to approve the merge request or post a request-changes note after each bot review.
+    - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.
 3. Click **Save**
 
 ### Provider-Specific Notes
@@ -268,6 +271,16 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 - API endpoint is at `api.bitbucket.org/2.0`
 - Issue-based agent workflows (coding and writer) are not available
 - See [Bitbucket Setup](BITBUCKET_SETUP.md) for token creation instructions
+
+#### Azure DevOps
+
+- Uses Basic authentication with an empty username and the PAT as the password
+- Repositories are addressed as organization + `Project/Repository`, because Azure DevOps has three
+  address levels where the other providers have two
+- Webhooks are Service Hooks, which carry no body signature; the bot verifies a shared secret in an
+  `X-AiGitBot-Token` header instead
+- Work Items and Azure Pipelines (and therefore the `CI_ACTION` deployment target) are not supported
+- See [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md) for PAT and Service Hook instructions
 
 ### Managing Git Integrations
 

@@ -300,6 +300,19 @@
                     tokenLabel.textContent = /*[[#{label.appPassword}]]*/ 'App Password';
                     tokenDescription.textContent = /*[[#{help.git.bitbucketToken}]]*/ 'A Bitbucket App Password with repository read/write permissions. Create one at Bitbucket Settings → App passwords.';
                     reviewTriggerNotice.style.display = 'block';
+                } else if (providerType === 'AZURE_DEVOPS') {
+                    // Azure DevOps: URL + Personal Access Token. No username - PATs authenticate
+                    // as HTTP Basic with an empty username; the organization lives in the repo address.
+                    urlField.style.display = 'block';
+                    urlInput.required = true;
+                    urlInput.placeholder = 'e.g. https://dev.azure.com or https://tfs.example.com/tfs';
+                    urlDescription.textContent = /*[[#{help.git.azureDevopsUrl}]]*/ 'https://dev.azure.com for Azure DevOps Services (without your organization), or your Azure DevOps Server URL, e.g. https://tfs.example.com/tfs. On Azure DevOps Server the collection is optional: without it one integration serves every collection, with it (…/tfs/DefaultCollection) only that one.';
+                    usernameField.style.display = 'none';
+                    usernameInput.required = false;
+                    tokenLabel.textContent = /*[[#{label.personalAccessToken}]]*/ 'Personal Access Token';
+                    tokenDescription.textContent = /*[[#{help.git.azureDevopsToken}]]*/ 'An Azure DevOps Personal Access Token with Code (read & write) and Pull Request Threads (read & write) scopes. Create one under User settings → Personal access tokens.';
+                    reviewTriggerNotice.style.display = 'block';
+                    postReviewActionField.style.display = 'block';
                 } else {
                     // Default / no selection
                     urlField.style.display = 'block';

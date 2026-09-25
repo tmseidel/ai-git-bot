@@ -129,7 +129,7 @@ AI-Git-Bot turns those activities into repeatable workflows triggered by events 
 | **OpenAI** (+ OpenAI-compatible APIs) | **GitHub** / **GitHub Enterprise** |
 | **Google AI / Gemini** | **GitLab** (gitlab.com & self-managed) |
 | **Ollama** (local LLMs) | **Bitbucket Cloud** |
-| **llama.cpp** (local GGUF models) | |
+| **llama.cpp** (local GGUF models) | **Azure DevOps** (Services & Server) |
 
 Unlike most AI coding tools, AI-Git-Bot is not tied to a specific Git platform or AI provider.
 
@@ -151,6 +151,7 @@ AI-Git-Bot lives where your developers already work:
 - Gitea
 - GitLab
 - Bitbucket Cloud
+- Azure DevOps
 
 1. Assign it a review.
 2. Assign it an issue.
@@ -521,6 +522,7 @@ The documentation is organized by audience in the **[Documentation Hub](doc/READ
 ### 🧪 Community feedback welcome- 
 * GitLab
 * Bitbucket Cloud
+* Azure DevOps
 
 ### Experimental Workflows
 
@@ -548,7 +550,7 @@ Bug reports are always welcome.
 * ⭐ >100 GitHub stars
 * 🚀 >15 releases
 * 🐳 Docker image available
-* 🌍 Users across GitHub, Gitea, GitLab and Bitbucket
+* 🌍 Users across GitHub, Gitea, GitLab, Bitbucket and Azure DevOps
 
 ## Get started
 

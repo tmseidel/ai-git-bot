@@ -47,15 +47,30 @@ public interface RepositoryApiClient {
     }
 
     /**
-     * Resolves the complete, credential-free Git remote for one repository.
-     * Providers may override this to select a repository-specific transport.
+     * Validates an HTTP clone base URL and returns it normalized: lower-case scheme, no
+     * trailing slash.
+     * <p>
+     * The remote this feeds is handed to {@code git} as a command-line argument and is
+     * echoed back in git's own error output, so it must never carry a secret. A base URL
+     * with userinfo would both leak the credential there and corrupt the credential-store
+     * host {@code WorkspaceService} derives from the remote. Query and fragment are
+     * rejected for the same reason: neither is meaningful in a Git remote, and both would
+     * survive into the concatenated URL.
+     * <p>
+     * Exposed as a static helper rather than being inlined into
+     * {@link #getRepositoryRemote} so that providers overriding that method to build a
+     * provider-specific path — Azure DevOps addresses repositories as
+     * {@code /{org}/{project}/_git/{name}} — keep the same guarantee instead of
+     * reimplementing (and quietly dropping) it.
+     *
+     * @throws IllegalStateException when the URL is missing, unparseable, not HTTP(S), or
+     *                               carries userinfo, a query or a fragment
      */
-    default String getRepositoryRemote(String owner, String repo) {
-        String cloneBaseUrl = getCloneUrl();
-        if (cloneBaseUrl == null || cloneBaseUrl.isBlank()
-                || owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+    static String validatedCloneBaseUrl(String cloneBaseUrl) {
+        if (cloneBaseUrl == null || cloneBaseUrl.isBlank()) {
             throw new IllegalStateException("Repository remote cannot be resolved");
         }
+        String normalized;
         try {
             URI base = URI.create(cloneBaseUrl);
             if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
@@ -63,15 +78,38 @@ public interface RepositoryApiClient {
                     || base.getRawQuery() != null || base.getRawFragment() != null) {
                 throw new IllegalStateException("HTTP clone base URL must be credential-free");
             }
-            cloneBaseUrl = base.getScheme().toLowerCase(Locale.ROOT)
+            normalized = base.getScheme().toLowerCase(Locale.ROOT)
                     + cloneBaseUrl.substring(base.getScheme().length());
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException("HTTP clone base URL is invalid", e);
         }
-        while (cloneBaseUrl.endsWith("/")) {
-            cloneBaseUrl = cloneBaseUrl.substring(0, cloneBaseUrl.length() - 1);
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
         }
-        return cloneBaseUrl + "/" + owner + "/" + repo + ".git";
+        return normalized;
+    }
+
+    /**
+     * Resolves the complete, credential-free Git remote for one repository.
+     * Providers may override this to select a repository-specific transport; an override
+     * that still builds an HTTP remote must run its base URL through
+     * {@link #validatedCloneBaseUrl}.
+     */
+    default String getRepositoryRemote(String owner, String repo) {
+        if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+            throw new IllegalStateException("Repository remote cannot be resolved");
+        }
+        return validatedCloneBaseUrl(getCloneUrl()) + "/" + owner + "/" + repo + ".git";
+    }
+
+    /**
+     * Returns whether HTTP Git operations must authenticate with a pre-emptive
+     * {@code Authorization: Basic} header instead of a credential helper.
+     * Needed for providers (e.g. Azure DevOps) whose remotes reject the
+     * credential-store challenge/response flow.
+     */
+    default boolean usesGitAuthorizationHeader() {
+        return false;
     }
 
     /** Returns the authentication token used by this client. */
@@ -247,9 +285,6 @@ public interface RepositoryApiClient {
 
     String getFileContent(String owner, String repo, String path, String ref);
 
-
-    void createOrUpdateFile(String owner, String repo, String path, String content,
-                            String message, String branch, String sha);
 
     Long createPullRequest(String owner, String repo, String title, String body,
                            String head, String base);
