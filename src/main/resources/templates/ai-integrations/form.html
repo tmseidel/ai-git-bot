@@ -36,6 +36,7 @@
                         <div class="col-md-6">
                             <label for="apiUrl" class="form-label" th:text="#{label.apiUrl}">API URL</label>
                             <input type="url" class="form-control" id="apiUrl" th:field="*{apiUrl}"
+                                   th:readonly="${integration.providerType == 'openrouter'}"
                                    th:placeholder="#{placeholder.aiBaseUrl}" placeholder="e.g. https://api.openai.com" required/>
                             <div class="form-text" id="apiUrlHint"></div>
                         </div>
@@ -59,6 +60,36 @@
                             <div class="form-text text-warning" id="apiKeyClearPendingHint" style="display: none;">
                                 <i class="bi bi-exclamation-triangle"></i> <span th:text="#{help.ai.apiKeyRemoved}">The stored API key will be removed on save.</span>
                             </div>
+                        </div>
+
+                        <div class="col-12" id="openRouterSettings" th:hidden="${integration.providerType != 'openrouter'}">
+                            <fieldset class="row g-3">
+                                <legend class="h5" th:text="#{label.ai.openRouter.routing}">Routing and privacy</legend>
+                                <div class="col-md-4">
+                                    <label for="openRouterRegion" class="form-label" th:text="#{label.ai.openRouter.region}">Region</label>
+                                    <select class="form-select" th:field="*{openRouterRegion}">
+                                        <option th:each="region : ${openRouterRegions}" th:value="${region}"
+                                                th:attr="data-api-root=${region.apiRoot}"
+                                                th:text="${#messages.msg('label.ai.openRouter.region.' + region.name())}"></option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label for="openRouterDataCollection" class="form-label" th:text="#{label.ai.openRouter.dataCollection}">Provider data collection</label>
+                                    <select class="form-select" th:field="*{openRouterDataCollection}">
+                                        <option th:each="policy : ${openRouterDataCollections}" th:value="${policy}"
+                                                th:text="${#messages.msg('label.ai.openRouter.dataCollection.' + policy.name())}"></option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 d-flex align-items-center">
+                                    <div class="form-check">
+                                        <input type="checkbox" class="form-check-input" id="openRouterZdr" th:field="*{openRouterZdr}"/>
+                                        <label for="openRouterZdr" class="form-check-label" th:text="#{label.ai.openRouter.zdr}">Require zero data retention (ZDR)</label>
+                                    </div>
+                                </div>
+                                <div class="col-12 form-text" th:text="#{help.ai.openRouter.routing}">
+                                    EU/US require an eligible Enterprise account. The key and region are checked on save. Requested parameters are required; provider fallbacks are disabled.
+                                </div>
+                            </fieldset>
                         </div>
 
                         <div class="col-md-6">
@@ -188,7 +219,12 @@
             const suggestedModels = /*[[${suggestedModels}]]*/ {};
             const providerFlavors = /*[[${providerFlavors}]]*/ {};
             const isEditMode = /*[[${integration.id != null}]]*/ false;
+            const hasStoredKey = /*[[${!#strings.isEmpty(integration.apiKey)}]]*/ false;
+            const initialProvider = /*[[${integration.providerType}]]*/ '';
+            const initialApiUrl = /*[[${integration.apiUrl}]]*/ '';
             const tGoogleHint = /*[[#{help.ai.googleHint}]]*/ 'Google AI uses the Gemini REST API. Use a Gemini API key from Google AI Studio.';
+            const tOpenRouterHint = /*[[#{help.ai.openRouter.hint}]]*/ 'Use an inference API key and enter the model ID manually. The API URL is determined by the selected region.';
+            const tProviderKeyChange = /*[[#{help.ai.providerKeyChange}]]*/ 'Changing providers requires a new API key or explicitly clearing the stored key.';
             const tDefaultPrefix = /*[[#{help.ai.defaultPrefix}]]*/ 'Default: ';
             const tApiKeyRequiredEdit = /*[[#{help.ai.apiKeyRequiredEdit}]]*/ 'API key required. Leave blank only to keep the existing stored key.';
             const tApiKeyRequiredNew = /*[[#{help.ai.apiKeyRequiredNew}]]*/ 'API key required. It will be stored encrypted at rest when APP_ENCRYPTION_KEY is configured.';
@@ -215,20 +251,37 @@
                 const modelFlavorDropdownBtn = document.getElementById('modelFlavorDropdownBtn');
                 const modelFlavorDropdownMenu = document.getElementById('modelFlavorDropdownMenu');
                 const modelFlavorHint = document.getElementById('modelFlavorHint');
+                const openRouterSettings = document.getElementById('openRouterSettings');
+                const openRouterRegion = document.getElementById('openRouterRegion');
+                const clearApiKeyInput = document.getElementById('clearApiKey');
+                const apiKeyKeepHint = document.getElementById('apiKeyKeepHint');
 
                 function updateProviderDefaults() {
                     const provider = providerSelect.value;
+                    const isOpenRouter = provider === 'openrouter';
+                    const changedProvider = isEditMode && provider !== initialProvider;
+                    const clearRequested = clearApiKeyInput.value === 'true';
+                    openRouterSettings.hidden = !isOpenRouter;
+                    apiUrlInput.readOnly = isOpenRouter;
 
                     if (provider === 'google') {
                         providerHint.textContent = tGoogleHint;
+                    } else if (isOpenRouter) {
+                        providerHint.textContent = tOpenRouterHint;
                     } else {
                         providerHint.textContent = '';
                     }
 
+                    // Restore the original URL when switching back, so a retained key cannot follow a different provider's default.
+                    if (isOpenRouter) {
+                        apiUrlInput.value = openRouterRegion.selectedOptions[0].dataset.apiRoot;
+                    } else if (providerSelect.dataset.previousValue && providerSelect.dataset.previousValue !== provider) {
+                        apiUrlInput.value = provider === initialProvider ? initialApiUrl : (defaultApiUrls[provider] || '');
+                    }
                     // Update API URL hint and set default if empty (only for new integrations)
                     if (defaultApiUrls[provider]) {
-                        apiUrlHint.textContent = tDefaultPrefix + defaultApiUrls[provider];
-                        if (!isEditMode && (!apiUrlInput.value || apiUrlInput.value === defaultApiUrls[providerSelect.dataset.previousValue])) {
+                        apiUrlHint.textContent = isOpenRouter ? '' : tDefaultPrefix + defaultApiUrls[provider];
+                        if (!isOpenRouter && !isEditMode && (!apiUrlInput.value || apiUrlInput.value === defaultApiUrls[providerSelect.dataset.previousValue])) {
                             apiUrlInput.value = defaultApiUrls[provider];
                         }
                     } else {
@@ -236,9 +289,12 @@
                     }
 
                     const requiresApiKey = apiKeyRequirements[provider] === true;
-                    apiKeyInput.required = requiresApiKey && !isEditMode;
-                    if (requiresApiKey) {
-                        apiKeyHint.textContent = isEditMode
+                    apiKeyInput.required = (requiresApiKey && !hasStoredKey || changedProvider) && !clearRequested;
+                    if (apiKeyKeepHint) apiKeyKeepHint.hidden = !hasStoredKey || changedProvider || clearRequested;
+                    if (changedProvider) {
+                        apiKeyHint.textContent = tProviderKeyChange;
+                    } else if (requiresApiKey) {
+                        apiKeyHint.textContent = hasStoredKey
                             ? tApiKeyRequiredEdit
                             : tApiKeyRequiredNew;
                     } else {
@@ -307,6 +363,7 @@
                 }
 
                 providerSelect.addEventListener('change', updateProviderDefaults);
+                openRouterRegion.addEventListener('change', updateProviderDefaults);
 
                 // Initialize on page load
                 if (providerSelect.value) {
@@ -318,8 +375,6 @@
                 // save (an empty field alone means "keep the stored value", so
                 // we need an explicit marker). ----
                 const clearApiKeyBtn = document.getElementById('clearApiKeyBtn');
-                const clearApiKeyInput = document.getElementById('clearApiKey');
-                const apiKeyKeepHint = document.getElementById('apiKeyKeepHint');
                 const apiKeyClearPendingHint = document.getElementById('apiKeyClearPendingHint');
                 const defaultApiKeyPlaceholder = tEnterApiKey;
 
@@ -334,6 +389,7 @@
                         if (apiKeyKeepHint) apiKeyKeepHint.style.display = 'block';
                         apiKeyClearPendingHint.style.display = 'none';
                     }
+                    updateProviderDefaults();
                 }
 
                 if (clearApiKeyBtn) {

@@ -3,6 +3,7 @@ package org.remus.giteabot.agent.loop;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ToolCall;
+import org.remus.giteabot.agent.shared.AgentJackson;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -15,6 +16,23 @@ import static org.junit.jupiter.api.Assertions.*;
  * responses must be kept or dropped atomically.
  */
 class HistoryCompactorTest {
+
+    @Test
+    void opaqueReasoningCountsTowardTheBudgetAndIsDroppedWithItsToolPair() {
+        var reasoning = List.of(AgentJackson.mapper().readTree("{\"data\":\"" + "x".repeat(500) + "\"}"));
+        var assistant = AiMessage.builder().role("assistant").content("")
+                .toolCalls(List.of(new ToolCall("old", "lookup", null))).reasoningDetails(reasoning).build();
+        var recent = AiMessage.builder().role("assistant").content("Recent").build();
+        List<AiMessage> history = new ArrayList<>(List.of(assistant,
+                AiMessage.builder().role("tool").toolCallId("old").toolResult("Read").build(),
+                AiMessage.builder().role("user").content("Continue").build(), recent));
+
+        assertTrue(new HistoryCompactor(100, 2).compact(history) >= 500);
+        assertEquals(3, history.size());
+        assertEquals(recent, history.getLast());
+        assertTrue(history.stream().noneMatch(message -> message.getReasoningDetails() != null
+                || message.getToolCallId() != null));
+    }
 
     @Test
     void groupIntoUnits_singleMessages_noToolCalls() {
