@@ -143,7 +143,7 @@ dialects (`V1__init_schema.sql:84`, extended by `V5__technical_writer_agent.sql`
 both dialects currently end at V51):
 
 ```sql
--- V53__agent_session_answered_status.sql  (h2 + postgresql, CRLF)
+-- V52__agent_session_answered_status.sql  (h2 + postgresql, CRLF)
 ALTER TABLE agent_sessions DROP CONSTRAINT IF EXISTS chk_agent_sessions_status;
 ALTER TABLE agent_sessions DROP CONSTRAINT IF EXISTS agent_sessions_status_check;
 ALTER TABLE agent_sessions ADD CONSTRAINT chk_agent_sessions_status
@@ -264,7 +264,7 @@ Migration gate test: `AgentSessionAnsweredMigrationTest` (see 4.6).
 
 ## 11. Implementation order
 
-1. `V53__agent_session_answered_status.sql` in `db/migration/h2/` and `.../postgresql/` +
+1. `V52__agent_session_answered_status.sql` in `db/migration/h2/` and `.../postgresql/` +
    `AgentSessionAnsweredMigrationTest`.
 2. `AgentSession.AgentSessionStatus.ANSWERED`.
 3. `LoopOutcome.AgentAnswer` + `LoopOutcome.answered(...)`.
