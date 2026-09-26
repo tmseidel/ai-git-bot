@@ -30,6 +30,7 @@ class PrometheusEndpointIntegrationTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("giteabot_findings")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("giteabot_ai_errors")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("giteabot_audit_tool_calls")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("giteabot_agent_sessions")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("giteabot_ai_usage_input_tokens")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("giteabot_ai_usage_output_tokens")));
     }

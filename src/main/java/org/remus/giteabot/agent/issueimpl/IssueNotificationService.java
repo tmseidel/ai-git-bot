@@ -215,9 +215,16 @@ public class IssueNotificationService {
     }
 
     /**
-     * Builds and posts the terminal comment of an answer-only run: the issue
-     * required no repository change, so the model's answer is published instead
+     * Builds and posts the terminal comment of an answer-only run: the run ended by
+     * answering instead of changing code, so the model's reply is published instead
      * of a pull request.
+     *
+     * <p>The wording reports what the agent did, not what the issue needs. A weak
+     * model can talk itself out of the work after the nudge and still get its
+     * answer published, so a comment claiming "no code changes are needed" would
+     * be the bot asserting something it cannot verify; the human stays the judge of
+     * whether the answer suffices. Operators watch that case through the session
+     * status and the {@code giteabot.agent_sessions} metric rather than the text.</p>
      *
      * <p>Like the other terminal comments this does not swallow API errors — a
      * silent failure here would leave a run whose only output is the comment
@@ -230,12 +237,12 @@ public class IssueNotificationService {
                 ? "(the agent produced no answer text)"
                 : answerText.strip();
         String comment = String.format("""
-                🤖 **AI Agent**: No code changes are needed for this issue — here is my answer:
+                🤖 **AI Agent**: I did not make any code changes — here is my response to this issue:
 
                 %s
 
                 ---
-                *No pull request was opened. Reply with what should be changed and I will implement it.*""",
+                *No pull request was opened. If this issue does need a change, reply with what you want changed and I will implement it.*""",
                 answer);
         repositoryClient.postIssueComment(owner, repo, issueNumber, comment);
     }

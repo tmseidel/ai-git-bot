@@ -848,6 +848,10 @@ class IssueImplementationServiceTest {
         assertThat(comments.getAllValues()).anySatisfy(comment -> {
             assertThat(comment).contains(answer);
             assertThat(comment).contains("No pull request was opened");
+            // The wording reports what the agent did, never that the issue needs no
+            // change: a weak model can give up after the nudge and still be published.
+            assertThat(comment).contains("I did not make any code changes");
+            assertThat(comment.toLowerCase()).doesNotContain("no code changes are needed");
         });
         verify(sessionService).setStatus(any(), eq(AgentSession.AgentSessionStatus.ANSWERED));
         verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
@@ -888,6 +892,7 @@ class IssueImplementationServiceTest {
         assertThat(comments.getAllValues()).anySatisfy(comment -> {
             assertThat(comment).contains(answer);
             assertThat(comment).contains("No pull request was opened");
+            assertThat(comment).contains("I did not make any code changes");
         });
         // An answer to a follow-up question must not erase the open-PR state.
         verify(sessionService).setStatus(eq(session), eq(AgentSession.AgentSessionStatus.PR_CREATED));

@@ -9,7 +9,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * End-to-end proof that the V53 {@code ANSWERED} status survives a real write/read cycle on the
+ * End-to-end proof that the {@code ANSWERED} status survives a real write/read cycle on the
  * default (H2) schema: before the migration the CHECK constraint rejected the value, so a run
  * that answered an issue without touching the repository could not have been recorded.
  */

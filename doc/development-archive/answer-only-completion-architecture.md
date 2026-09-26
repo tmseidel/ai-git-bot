@@ -2,7 +2,7 @@
 
 **Status:** Implemented — see [#418](https://github.com/tmseidel/ai-git-bot/issues/418)
 **Scope:** Coding agent (`CodingAgentStrategy`) in **NATIVE** tool mode only. One new session
-status (migration V53, `h2` + `postgresql`). No new configuration, no new budget knob.
+status (migration V52, `h2` + `postgresql`). No new configuration, no new budget knob.
 **Settled decisions:** default-on, no feature flag; NATIVE only (legacy keeps its hard-fail);
 new `ANSWERED` session status instead of reusing `IN_PROGRESS`.
 **Origin:** bug report against `tmseidel/ai-git-bot:latest`, mode NATIVE, qwen3.6-35B-A3B,
@@ -66,7 +66,7 @@ that branch.
 | # | condition | decision |
 |---|-----------|----------|
 | R1 | workspace has uncommitted changes | unchanged: `Finish(success)` -> commit + PR |
-| R2 | clean, `answerNudges == 0` | record answer candidate; `answerNudges++`; `Continue(native two-way nudge)` |
+| R2 | clean, `answerNudges == 0` | `answerNudges++`; `Continue(native two-way nudge)` — records nothing: a pre-nudge turn is not yet an answer |
 | R3 | clean, `answerNudges >= 1`, `!implementationAttempted`, candidate != null | `Finish(LoopOutcome.answered(branch, candidate))` |
 | R4 | anything else — blank text, truncated-only, or an implementation was attempted and produced nothing | `Finish(fail)` |
 
@@ -85,11 +85,20 @@ R4 is also where the missing budget guard (root cause 2) lands: the branch can n
 
 ### 4.3 Answer candidate selection
 
-The candidate is the **longest prose turn seen while the workspace was clean whose
-`stopReason` is `END_TURN`**.
+The candidate is the **longest prose turn *after the nudge* whose `stopReason` is `END_TURN`**,
+seen while the workspace was clean.
 
+- *Post-nudge only*: the nudge is what offers the answer exit, so anything the model wrote
+  before it is narration ("let me look into the Docker setup, then decide what to change").
+  Recording it would let a blank or truncated post-nudge turn fall back to that narration and
+  publish it as the answer to an issue the model never actually concluded anything about.
+  Cost: a model that *did* answer pre-nudge and then replies "see above" after the nudge gets
+  that one-liner published instead of the good text. Accepted — the nudge asks for "your
+  complete final answer", so a complying model restates it, and a short answer is a much smaller
+  miss than a published false claim about the issue.
 - *Longest, not last*: a model that answers well and then replies "Understood, nothing needed"
-  still yields the good text, and no arbitrary minimum-length constant is needed.
+  still yields the good text, and no arbitrary minimum-length constant is needed. Lengths are
+  compared on the stripped text — the same form that gets posted.
 - *`END_TURN` only*: a `MAX_TOKENS` turn is truncated, so a half sentence is never posted.
 - *Clean workspace only*: a prose turn with a dirty workspace is the existing "I'm done" signal
   (R1) and must not be collected as an answer.
@@ -151,9 +160,17 @@ ALTER TABLE agent_sessions ADD CONSTRAINT chk_agent_sessions_status
                       'ISSUE_CREATED', 'ANSWERED'));
 ```
 
-Gate: a standalone Flyway/H2 probe in the style of `IssueWorkflowMigrationTest` (scratch DB at
-`filesystem:src/main/resources/db/migration/h2`, `target("51")`, then migrate to latest; assert a
-session row with status `ANSWERED` persists and that an unknown status is still rejected).
+Gate: `AgentSessionAnsweredStatusTest` (`@SpringBootTest`) writes and reads back a session with
+status `ANSWERED` — the `CHECK` constraint is what rejects that value before the migration, so a
+green round trip proves it was extended. A DDL-level probe that pinned the migration version by
+number was dropped: it broke every time this file was renumbered, and the round trip covers the
+same ground.
+
+**Number hazard:** migration 52 is also claimed by `V52__model_routing_configurations.sql` on the
+unreleased `feature/model-routing-deepseek` branch. Flyway picks one of two same-numbered files
+per ref and skips the other **silently**; for a `CHECK`-constraint migration that surfaces only as
+a runtime `23513` violation on `agent_sessions.status`. Whoever merges second renumbers — and
+never `Flyway.repair()`s the collision away (`repair` rewrites checksums and hides the skip).
 
 Rejected: reusing `IN_PROGRESS` (what the writer sets when it posts clarifying questions) — it
 saves the migration but leaves a coding session with no PR looking permanently stuck.
@@ -165,6 +182,12 @@ New `IssueNotificationService#postAnswerComment(owner, repo, issueNumber, text)`
 was opened** and that a reply can trigger an implementation. Posted by the caller, not by the
 strategy — `LoopOutcome`'s contract already says the caller performs the agent-specific final
 action. The answer path also logs one line (issue number, answer length) for operators.
+
+The wording reports what the agent **did** ("I did not make any code changes — here is my response
+to this issue"), never what the issue **needs**: a weak local model can talk itself out of the work
+after a single nudge, and a comment claiming the issue required no change would be the bot
+asserting something it cannot verify. The human stays the judge of whether the answer suffices —
+operators alert on `giteabot.agent_sessions{status="answered"}` instead (`doc/DEPLOYMENT.md`).
 
 ### 4.8 Prompt contract and nudge (prerequisite)
 
@@ -214,10 +237,13 @@ repository tree in the first user message).
 * rewrite `step_nativeTextOnlyTurnWithoutChanges_nudgesInsteadOfFailing` — it currently asserts
   only `Continue`; pin that the nudge names both exits.
 * answer after the nudge -> `Finish` with an `AgentAnswer` payload carrying the prose.
-* longest-turn-wins: a short follow-up does not replace a substantial earlier answer.
+* only the post-nudge turn is published: a pre-nudge narration is ignored, and a blank post-nudge
+  turn fails instead of falling back to it.
+* longest-turn-wins among eligible turns: a short follow-up does not replace a substantial
+  earlier *post-nudge* answer.
 * prose rounds do not consume the retry budget (a real tool round after prose still executes).
 * `MAX_TOKENS`-only run -> fail, nothing posted.
-* blank prose after the nudge -> fail.
+* blank prose after the nudge -> fail (the earlier narration is not published).
 * implementation attempted, then prose, no diff -> fail (not an answer).
 
 `IssueImplementationServiceTest`
@@ -229,7 +255,7 @@ repository tree in the first user message).
 
 `AgentPromptBuilderTest`: the native feedback names both exits; the legacy feedback is unchanged.
 
-Migration gate test: `AgentSessionAnsweredMigrationTest` (see 4.6).
+Migration gate test: `AgentSessionAnsweredStatusTest` (see 4.6).
 
 ## 8. Non-goals
 
@@ -238,19 +264,21 @@ Migration gate test: `AgentSessionAnsweredMigrationTest` (see 4.6).
   keeps its hard-fail; the gap is documented.
 * **Triage/routing.** No new issue classification: the coding agent absorbs the read-only case,
   which is cheaper and safer than changing who gets assigned.
-* Compaction, metrics and the remaining report follow-ups (see §10).
+* Compaction and the remaining report follow-ups (see §10); the answer outcome itself is
+  metered (see 4.7).
 
 ## 9. Trade-offs and risks
 
 * An issue that genuinely needs work can now end as an answer comment if the model gives up after
   the nudge. Bounded by R3's "no implementation was ever attempted" gate: a run that tried still
   reports `FAILED`; a run that never tried reports what the model said. Monitoring that alerts on
-  `FAILED` will therefore not fire for "model talked instead of working" — the comment and the
-  session status are the signal.
+  `FAILED` will therefore not fire for "model talked instead of working" — alert on
+  `giteabot.agent_sessions{status="answered"}` and on the deliberately neutral comment wording.
 * Every read-only task now costs one extra round (~12K prompt tokens locally). That is the price
   of distinguishing "let me think first" from an answer, and it replaces a 30-round burn.
-* Answer quality is model-dependent. The longest-complete-turn rule prevents a vague one-liner
-  from replacing a better earlier answer, but it cannot make a small local model answer well.
+* Answer quality is model-dependent. The post-nudge/longest-complete-turn rule keeps a vague
+  one-liner or pre-work narration from standing in for an answer, but it cannot make a small local
+  model answer well.
 
 ## 10. Follow-ups (not in this change)
 
@@ -265,7 +293,7 @@ Migration gate test: `AgentSessionAnsweredMigrationTest` (see 4.6).
 ## 11. Implementation order
 
 1. `V52__agent_session_answered_status.sql` in `db/migration/h2/` and `.../postgresql/` +
-   `AgentSessionAnsweredMigrationTest`.
+   `AgentSessionAnsweredStatusTest`.
 2. `AgentSession.AgentSessionStatus.ANSWERED`.
 3. `LoopOutcome.AgentAnswer` + `LoopOutcome.answered(...)`.
 4. `prompts/native/issue-agent-tool-protocol.md` section +

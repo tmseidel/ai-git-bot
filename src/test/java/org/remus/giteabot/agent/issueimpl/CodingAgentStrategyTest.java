@@ -236,20 +236,42 @@ class CodingAgentStrategyTest {
     }
 
     @Test
-    void step_nativeAnswerAfterNudge_keepsTheLongestCompleteTurn() {
-        // A vague follow-up ("understood, nothing needed") must not replace the
-        // substantial answer the model already produced.
+    void step_nativeAnswerAfterNudge_publishesThePostNudgeTurn() {
+        // Only a turn that follows the nudge can be an answer: the nudge is what
+        // offers that exit, so a pre-nudge turn is narration however it reads.
         when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
         ctx.setToolingMode(ToolingMode.NATIVE);
         CodingAgentStrategy strategy = newStrategy();
-        String substantial = "docker-compose.yaml declares the ollama, gitea and postgres services;"
-                + " the first lines are version, services, then the ollama image.";
+        String narration = "Let me look into how the Docker setup works and then decide what to change.";
 
-        strategy.step(ctx, textTurn(substantial, StopReason.END_TURN), 1);
-        StepDecision second = strategy.step(ctx, textTurn("Understood, nothing needed.", StopReason.END_TURN), 2);
+        assertThat(strategy.step(ctx, textTurn(narration, StopReason.END_TURN), 1))
+                .isInstanceOf(StepDecision.Continue.class);
+
+        StepDecision second = strategy.step(ctx,
+                textTurn("Nothing to change in the repository.", StopReason.END_TURN), 2);
 
         assertThat(((LoopOutcome.AgentAnswer) ((StepDecision.Finish) second).outcome().payload()).text())
-                .isEqualTo(substantial);
+                .isEqualTo("Nothing to change in the repository.");
+    }
+
+    @Test
+    void step_nativeNarrationFollowedByBlankTurn_failsWithoutPublishingTheNarration() {
+        // The reviewer case: a substantial-looking pre-nudge turn must not become
+        // the answer when the post-nudge turn is unusable — the run fails instead of
+        // claiming the issue needs no change on the strength of earlier narration.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        strategy.step(ctx, textTurn(
+                "Let me look into how the Docker setup works and then decide what to change.",
+                StopReason.END_TURN), 1);
+        StepDecision second = strategy.step(ctx, textTurn("", StopReason.END_TURN), 2);
+
+        assertThat(second).isInstanceOf(StepDecision.Finish.class);
+        LoopOutcome outcome = ((StepDecision.Finish) second).outcome();
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.payload()).isNull();
     }
 
     @Test
@@ -269,17 +291,6 @@ class CodingAgentStrategyTest {
         assertThat(outcome.payload()).isNull();
     }
 
-    @Test
-    void step_nativeBlankTurnAfterNudge_fails() {
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
-        ctx.setToolingMode(ToolingMode.NATIVE);
-        CodingAgentStrategy strategy = newStrategy();
-
-        strategy.step(ctx, textTurn("   ", StopReason.END_TURN), 1);
-        StepDecision second = strategy.step(ctx, textTurn("", StopReason.END_TURN), 2);
-
-        assertThat(((StepDecision.Finish) second).outcome().success()).isFalse();
-    }
 
     @Test
     void step_proseTurnDoesNotConsumeTheToolRoundBudget() {

@@ -78,10 +78,16 @@ public final class CodingAgentStrategy implements AgentStrategy {
     private int answerNudges = 0;
 
     /**
-     * Longest plain-language turn whose stop reason was {@link StopReason#END_TURN}
-     * while the workspace was clean — the candidate posted as the issue answer.
-     * Longest (not last) so a vague follow-up cannot replace a real answer, and
-     * {@code END_TURN} only so a truncated turn is never posted as one.
+     * Longest plain-language turn recorded <em>after</em> the nudge whose stop
+     * reason was {@link StopReason#END_TURN}, while the workspace stayed clean —
+     * the candidate posted as the issue answer.
+     *
+     * <p>Post-nudge only: a turn from before the nudge is narration ("let me look
+     * into the Docker setup, then decide what to change"), and publishing it would
+     * assert the issue needs no change on the strength of a sentence the model
+     * wrote before it was ever offered that exit. Longest (not last) so a vague
+     * follow-up cannot replace a real answer, and {@code END_TURN} only so a
+     * truncated turn is never posted as one.</p>
      */
     private String bestCompleteAnswer;
 
@@ -179,7 +185,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
             // Non-JSON text. In NATIVE mode this is how the model signals it is
             // done narrating or answering — do NOT feed it to the JSON parser
             // (which would hard-fail the whole run and never open a PR). The
-            // completion policy lives in {@link #nativeTextOnlyStep}. In LEGACY
+            // completion policy lives in nativeTextOnlyStep(). In LEGACY
             // mode the model is contractually expected to return JSON, so an
             // unparseable response is a genuine failure and keeps the legacy
             // hard-fail behaviour.
@@ -302,10 +308,11 @@ public final class CodingAgentStrategy implements AgentStrategy {
      * <ol>
      *     <li>workspace changed — the run is done; finish on the unchanged PR path;</li>
      *     <li>clean workspace, no nudge spent — nudge once, naming both exits
-     *         (call tools, or answer without tools);</li>
+     *         (call tools, or answer without tools); nothing is recorded, because a
+     *         turn that precedes the nudge is not yet an answer;</li>
      *     <li>clean workspace, nudge spent, no implementation attempted yet — finish
-     *         with the model's best complete answer; the caller posts it as an issue
-     *         comment and opens no pull request;</li>
+     *         with the best complete <em>post-nudge</em> answer; the caller posts it
+     *         as an issue comment and opens no pull request;</li>
      *     <li>otherwise — fail. This is also the branch's budget guard: it can
      *         return {@code Continue} at most once, so a model that neither works
      *         nor answers can no longer run the loop to its round cap.</li>
@@ -325,13 +332,15 @@ public final class CodingAgentStrategy implements AgentStrategy {
             return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
         }
 
-        recordAnswerCandidate(turn);
         if (answerNudges == 0) {
             answerNudges++;
             log.info("Native turn for issue #{} carried no tool calls and no workspace change; "
                     + "asking for tools or a final answer", ctx.issueNumber());
             return new StepDecision.Continue(promptBuilder.buildNativeNoToolCallFeedback());
         }
+        // Recorded only past this point: the nudge is what offers the answer exit,
+        // so whatever came before it is narration rather than a conclusion.
+        recordAnswerCandidate(turn);
         if (!implementationAttempted && bestCompleteAnswer != null) {
             log.info("Coding agent answered issue #{} without repository changes ({} chars, stopReason={})",
                     ctx.issueNumber(), bestCompleteAnswer.length(), turn.stopReason());
@@ -353,8 +362,9 @@ public final class CodingAgentStrategy implements AgentStrategy {
         if (turn.stopReason() != StopReason.END_TURN || text == null || text.isBlank()) {
             return;
         }
-        if (bestCompleteAnswer == null || text.length() > bestCompleteAnswer.length()) {
-            bestCompleteAnswer = text.strip();
+        String candidate = text.strip();
+        if (bestCompleteAnswer == null || candidate.length() > bestCompleteAnswer.length()) {
+            bestCompleteAnswer = candidate;
         }
     }
 
