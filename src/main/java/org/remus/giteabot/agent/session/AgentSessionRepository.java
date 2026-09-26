@@ -35,4 +35,11 @@ public interface AgentSessionRepository extends JpaRepository<AgentSession, Long
             @Param("prNumber") Long prNumber);
 
     void deleteByRepoOwnerAndRepoNameAndIssueNumber(String repoOwner, String repoName, Long issueNumber);
+
+    /**
+     * Number of sessions in the given status, exposed as the
+     * {@code giteabot.agent_sessions} Prometheus gauge. {@code ANSWERED} and
+     * {@code FAILED} are terminal, so these counts only grow.
+     */
+    long countByStatus(AgentSession.AgentSessionStatus status);
 }

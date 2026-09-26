@@ -360,6 +360,36 @@ public class AgentPromptBuilder {
 
     /**
      * Feedback message used by the native-tooling strategy when the model
+     * returned a plain-language turn without any tool call, and the workspace
+     * carries no changes yet.
+     *
+     * <p>{@link #buildMissingToolFeedback()} cannot be reused here: it asks for a
+     * JSON {@code runTools} envelope, which contradicts the function-calling
+     * protocol the NATIVE loop actually speaks, and it offers the model no way
+     * to complete a task that needs no repository change. Naming both exits is
+     * what lets a read-only issue finish with a posted answer instead of
+     * looping until the round cap (see
+     * {@code doc/development-archive/answer-only-completion-architecture.md}).</p>
+     */
+    public String buildNativeNoToolCallFeedback() {
+        return """
+                ## No Tool Calls Received
+
+                Your last reply contained no tool calls, so nothing was executed.
+
+                If this issue requires repository changes, call the tools for them now: write or \
+                patch the files, then run the project's build or test tool to validate the change.
+
+                If this issue requires no repository change (a question, an analysis, or an \
+                explicitly read-only request), do not call any tool — reply with your complete \
+                final answer as plain text. It is posted as a comment on the issue and no pull \
+                request is opened.
+
+                A reply that neither calls tools nor answers the issue ends the run as a failure.""";
+    }
+
+    /**
+     * Feedback message used by the native-tooling strategy when the model
      * mutated files but did not call a build/test tool in the same round.
      * Validation is mandatory: the agent must run the project's own build to
      * prove the change compiles and tests still pass before we open the PR.

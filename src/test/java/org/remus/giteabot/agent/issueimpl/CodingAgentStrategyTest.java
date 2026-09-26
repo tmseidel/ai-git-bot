@@ -6,7 +6,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.loop.AgentRunContext;
+import org.remus.giteabot.agent.loop.LoopOutcome;
 import org.remus.giteabot.agent.loop.StepDecision;
+import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.shared.BranchSwitcher;
@@ -15,18 +17,25 @@ import org.remus.giteabot.agent.tools.ToolCallContext;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
+import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import tools.jackson.databind.node.JsonNodeFactory;
 
 import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,6 +77,9 @@ class CodingAgentStrategyTest {
         responseParser = new AiResponseParser();
         AgentSession session = new AgentSession("o", "r", 1L, "t");
         ctx = new AgentRunContext(session, "o", "r", 1L, Path.of("/tmp/ws"), "main");
+        // The native tool path consults the branch switcher on every round.
+        lenient().when(branchSwitcher.apply(any(), anyString(), anyList(), any()))
+                .thenAnswer(inv -> new BranchSwitcher.Result("main", "main", inv.getArgument(2)));
     }
 
     private CodingAgentStrategy newStrategy() {
@@ -75,6 +87,24 @@ class CodingAgentStrategyTest {
                 sessionService, branchSwitcher, toolRouter, toolCatalog,
                 workspaceService, agentConfig, null, McpToolCatalog.empty(), null,
                 (owner, repo, branch, files, tools, ws) -> "fetched-context");
+    }
+
+    private static ChatTurn textTurn(String text, StopReason reason) {
+        return new ChatTurn(text, List.of(), reason, 0L, 0L);
+    }
+
+    /** A native round that writes a file and runs the project build. */
+    private static ChatTurn nativeWriteAndValidateTurn() {
+        JsonNodeFactory nodes = JsonNodeFactory.instance;
+        var writeArgs = nodes.objectNode();
+        writeArgs.put("path", "src/X.java");
+        writeArgs.put("content", "class X {}");
+        var validationArgs = nodes.objectNode();
+        validationArgs.set("args", nodes.arrayNode().add("compile"));
+        return new ChatTurn("", List.of(
+                new ToolCall("call-1", "write-file", writeArgs),
+                new ToolCall("call-2", "mvn", validationArgs)),
+                StopReason.TOOL_USE, 0L, 0L);
     }
 
     @Test
@@ -159,18 +189,152 @@ class CodingAgentStrategyTest {
     }
 
     @Test
-    void step_nativeTextOnlyTurnWithoutChanges_nudgesInsteadOfFailing() {
+    void step_nativeTextOnlyTurnWithoutChanges_nudgesOnceWithBothExits() {
         // A plain-language turn before any work is done (no tool_calls, no
-        // workspace changes) must not fail the run — nudge the model to use tools.
+        // workspace changes) must not fail the run, and must not loop either:
+        // one nudge names both exits — call tools, or answer without tools.
         when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
-        ctx.setToolingMode(org.remus.giteabot.agent.loop.ToolingMode.NATIVE);
-        org.remus.giteabot.ai.ChatTurn textOnly = new org.remus.giteabot.ai.ChatTurn(
-                "Let me think about how to approach this.",
-                List.of(), org.remus.giteabot.ai.StopReason.END_TURN, 0L, 0L);
+        ctx.setToolingMode(ToolingMode.NATIVE);
 
-        StepDecision d = newStrategy().step(ctx, textOnly, 1);
+        StepDecision d = newStrategy().step(ctx,
+                textTurn("Let me think about how to approach this.", StopReason.END_TURN), 1);
 
         assertThat(d).isInstanceOf(StepDecision.Continue.class);
+        String nudge = ((StepDecision.Continue) d).nextUserMessage();
+        assertThat(nudge).contains("call the tools");
+        assertThat(nudge).contains("plain text");
+        assertThat(nudge).contains("no pull request is opened");
+        // The legacy JSON-envelope instruction must not leak into NATIVE mode.
+        assertThat(nudge).doesNotContain("runTools");
+    }
+
+    @Test
+    void step_nativeAnswerAfterNudge_finishesWithAnswerPayload() {
+        // The reported bug: the model answers a read-only issue and the run must
+        // end by publishing that answer instead of nudging until the round cap.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+        String answer = """
+                The first 10 lines of docker-compose.yaml are:
+
+                services:
+                  ollama:
+                    image: ollama/ollama
+                """;
+
+        assertThat(strategy.step(ctx, textTurn(answer, StopReason.END_TURN), 1))
+                .isInstanceOf(StepDecision.Continue.class);
+
+        StepDecision second = strategy.step(ctx, textTurn(answer, StopReason.END_TURN), 2);
+
+        assertThat(second).isInstanceOf(StepDecision.Finish.class);
+        LoopOutcome outcome = ((StepDecision.Finish) second).outcome();
+        assertThat(outcome.success()).isTrue();
+        assertThat(outcome.payload()).isInstanceOf(LoopOutcome.AgentAnswer.class);
+        assertThat(((LoopOutcome.AgentAnswer) outcome.payload()).text()).isEqualTo(answer.strip());
+    }
+
+    @Test
+    void step_nativeAnswerAfterNudge_publishesThePostNudgeTurn() {
+        // Only a turn that follows the nudge can be an answer: the nudge is what
+        // offers that exit, so a pre-nudge turn is narration however it reads.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+        String narration = "Let me look into how the Docker setup works and then decide what to change.";
+
+        assertThat(strategy.step(ctx, textTurn(narration, StopReason.END_TURN), 1))
+                .isInstanceOf(StepDecision.Continue.class);
+
+        StepDecision second = strategy.step(ctx,
+                textTurn("Nothing to change in the repository.", StopReason.END_TURN), 2);
+
+        assertThat(((LoopOutcome.AgentAnswer) ((StepDecision.Finish) second).outcome().payload()).text())
+                .isEqualTo("Nothing to change in the repository.");
+    }
+
+    @Test
+    void step_nativeNarrationFollowedByBlankTurn_failsWithoutPublishingTheNarration() {
+        // The reviewer case: a substantial-looking pre-nudge turn must not become
+        // the answer when the post-nudge turn is unusable — the run fails instead of
+        // claiming the issue needs no change on the strength of earlier narration.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        strategy.step(ctx, textTurn(
+                "Let me look into how the Docker setup works and then decide what to change.",
+                StopReason.END_TURN), 1);
+        StepDecision second = strategy.step(ctx, textTurn("", StopReason.END_TURN), 2);
+
+        assertThat(second).isInstanceOf(StepDecision.Finish.class);
+        LoopOutcome outcome = ((StepDecision.Finish) second).outcome();
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.payload()).isNull();
+    }
+
+    @Test
+    void step_nativeTruncatedTurnAfterNudge_failsWithoutPublishingAnAnswer() {
+        // A MAX_TOKENS turn is truncated, so it must never be posted as the answer.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        strategy.step(ctx, textTurn("The first lines are version, services, ollama, image, ports", StopReason.MAX_TOKENS), 1);
+        StepDecision second = strategy.step(ctx,
+                textTurn("The first lines are version, services, ollama, image, ports", StopReason.MAX_TOKENS), 2);
+
+        assertThat(second).isInstanceOf(StepDecision.Finish.class);
+        LoopOutcome outcome = ((StepDecision.Finish) second).outcome();
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.payload()).isNull();
+    }
+
+
+    @Test
+    void step_proseTurnDoesNotConsumeTheToolRoundBudget() {
+        // `attempt` is the validation retry budget. A prose turn used to increment
+        // it, so with a single retry configured the next real tool round was
+        // rejected by `attempt > maxRetries` before executing anything.
+        agentConfig.getBudget().setMaxValidationRetries(1);
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false, true);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "ok", ""))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        assertThat(strategy.step(ctx, textTurn("Let me think about this first.", StopReason.END_TURN), 1))
+                .isInstanceOf(StepDecision.Continue.class);
+
+        StepDecision tools = strategy.step(ctx, nativeWriteAndValidateTurn(), 2);
+
+        verify(toolRouter, times(2)).execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class));
+        assertThat(((StepDecision.Finish) tools).outcome().success()).isTrue();
+    }
+
+    @Test
+    void step_proseAfterAttemptedImplementationWithoutDiff_failsInsteadOfAnswering() {
+        // An implementation attempt that leaves no diff must keep reporting failure:
+        // answering "no changes needed" after trying to change files would hide it.
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "ok", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        assertThat(strategy.step(ctx, nativeWriteAndValidateTurn(), 1))
+                .isInstanceOf(StepDecision.ContinueWithToolResults.class);
+        assertThat(strategy.step(ctx, textTurn("I am not sure how to proceed.", StopReason.END_TURN), 2))
+                .isInstanceOf(StepDecision.Continue.class);
+
+        StepDecision third = strategy.step(ctx, textTurn("Still nothing to change.", StopReason.END_TURN), 3);
+
+        assertThat(third).isInstanceOf(StepDecision.Finish.class);
+        LoopOutcome outcome = ((StepDecision.Finish) third).outcome();
+        assertThat(outcome.success()).isFalse();
+        assertThat(outcome.payload()).isNull();
     }
 
     @Test

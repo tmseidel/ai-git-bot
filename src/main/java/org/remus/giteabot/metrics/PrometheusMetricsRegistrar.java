@@ -5,6 +5,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.session.AgentSession;
+import org.remus.giteabot.agent.session.AgentSessionRepository;
 import org.remus.giteabot.aiusage.AiErrorLogRepository;
 import org.remus.giteabot.aiusage.AiUsageLogRepository;
 import org.remus.giteabot.audit.AuditEventType;
@@ -33,6 +35,7 @@ public class PrometheusMetricsRegistrar {
     private final PrAuditEventRepository auditRepository;
     private final AiUsageLogRepository usageRepository;
     private final AiErrorLogRepository errorRepository;
+    private final AgentSessionRepository sessionRepository;
 
     @PostConstruct
     void registerGauges() {
@@ -40,6 +43,7 @@ public class PrometheusMetricsRegistrar {
         registerAiUsageGauges();
         registerAiErrorGauge();
         registerAuditToolCallGauge();
+        registerAgentSessionStatusGauges();
         log.info("Registered Prometheus DB-derived gauges");
     }
 
@@ -93,6 +97,22 @@ public class PrometheusMetricsRegistrar {
                         r -> r.countByEventType(AuditEventType.TOOL_CALL_EXECUTED))
                 .description("Total tool calls recorded in the audit trail")
                 .register(meterRegistry);
+    }
+
+    /**
+     * Session counts per status. An answer-only run ends as {@code ANSWERED} instead
+     * of {@code FAILED}, so this is what to alert on when a weak model starts
+     * "answering" instead of working: the comment wording stays neutral and the
+     * status carries the signal.
+     */
+    private void registerAgentSessionStatusGauges() {
+        for (AgentSession.AgentSessionStatus status : AgentSession.AgentSessionStatus.values()) {
+            Gauge.builder("giteabot.agent_sessions", sessionRepository,
+                            r -> safeLong(() -> r.countByStatus(status)))
+                    .description("Agent sessions per status")
+                    .tag("status", status.name().toLowerCase(Locale.ROOT))
+                    .register(meterRegistry);
+        }
     }
 
     private static String normalise(String value) {

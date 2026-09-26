@@ -5,6 +5,8 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.session.AgentSession;
+import org.remus.giteabot.agent.session.AgentSessionRepository;
 import org.remus.giteabot.aiusage.AiErrorLogRepository;
 import org.remus.giteabot.aiusage.AiUsageLogRepository;
 import org.remus.giteabot.audit.AuditEventType;
@@ -22,6 +24,7 @@ class PrometheusMetricsRegistrarTest {
     private PrAuditEventRepository auditRepository;
     private AiUsageLogRepository usageRepository;
     private AiErrorLogRepository errorRepository;
+    private AgentSessionRepository sessionRepository;
     private PrometheusMetricsRegistrar registrar;
 
     @BeforeEach
@@ -30,7 +33,9 @@ class PrometheusMetricsRegistrarTest {
         auditRepository = mock(PrAuditEventRepository.class);
         usageRepository = mock(AiUsageLogRepository.class);
         errorRepository = mock(AiErrorLogRepository.class);
-        registrar = new PrometheusMetricsRegistrar(registry, auditRepository, usageRepository, errorRepository);
+        sessionRepository = mock(AgentSessionRepository.class);
+        registrar = new PrometheusMetricsRegistrar(registry, auditRepository, usageRepository, errorRepository,
+                sessionRepository);
     }
 
     @Test
@@ -101,6 +106,24 @@ class PrometheusMetricsRegistrarTest {
         registrar.registerGauges();
 
         assertThat(gaugeValue("giteabot.audit.tool_calls")).isEqualTo(42.0);
+    }
+
+    @Test
+    void registersAgentSessionGaugesPerStatus() {
+        when(auditRepository.countByEventType(AuditEventType.REVIEW_COMPLETED)).thenReturn(0L);
+        when(auditRepository.countByEventType(AuditEventType.FINDING_POSTED)).thenReturn(0L);
+        when(usageRepository.findDistinctAiIntegrationNames()).thenReturn(List.of());
+        when(errorRepository.count()).thenReturn(0L);
+        // An answer-only run ends as ANSWERED, not FAILED — the gauge is the signal
+        // operators alert on instead of the (deliberately neutral) issue comment.
+        when(sessionRepository.countByStatus(AgentSession.AgentSessionStatus.ANSWERED)).thenReturn(3L);
+        when(sessionRepository.countByStatus(AgentSession.AgentSessionStatus.FAILED)).thenReturn(1L);
+
+        registrar.registerGauges();
+
+        assertThat(gaugeValue("giteabot.agent_sessions", "status", "answered")).isEqualTo(3.0);
+        assertThat(gaugeValue("giteabot.agent_sessions", "status", "failed")).isEqualTo(1.0);
+        assertThat(gaugeValue("giteabot.agent_sessions", "status", "in_progress")).isEqualTo(0.0);
     }
 
     private double gaugeValue(String name, String... tags) {

@@ -25,6 +25,10 @@ The format is inspired by [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 - Added Maven project metadata for repository URL, SCM, license, issue tracker, and maintainer attribution.
 - Added README discovery keywords and references to LLM/security/changelog metadata.
 
+### Fixed
+
+- Fixed the **coding agent looping until its round budget was exhausted on issues that need no code change** (an explicitly read-only or question-only issue). A plain-language turn without tool calls and without a workspace change used to fall into an unbounded nudge loop: `attempt` was incremented on that path but never checked, so the run burned all 32 rounds (~20 minutes and ~370k prompt tokens on a CPU-only host) and ended with *"I was unable to produce a valid implementation"* — although the model had already answered correctly. The agent now asks once for either tool calls or a final answer, then either publishes that answer as an issue comment (new **`ANSWERED`** session status, Flyway **`V52`**, no branch and no PR) or fails fast. Prose-only turns no longer consume the validation retry budget, the NATIVE nudge no longer asks for a legacy JSON `runTools` envelope, and an implementation attempt that leaves no diff still reports failure. Reported in [#417](https://github.com/tmseidel/ai-git-bot/issues/417), fixed by [#418](https://github.com/tmseidel/ai-git-bot/issues/418); design in [`doc/development-archive/answer-only-completion-architecture.md`](doc/development-archive/answer-only-completion-architecture.md).
+
 ## [1.6.0]
 
 ### Notes

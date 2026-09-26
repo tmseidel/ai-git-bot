@@ -217,6 +217,12 @@ public class AgentSession {
         ISSUE_CREATED,
 
         /**
+         * Coding agent answered the issue without opening a pull request
+         * (the issue required no repository change).
+         */
+        ANSWERED,
+
+        /**
          * Agent failed to implement the issue.
          */
         FAILED
