@@ -1,10 +1,13 @@
 package org.remus.giteabot.admin;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.AiProviderRegistry;
 
 import java.util.Optional;
 
@@ -20,8 +23,16 @@ class AiIntegrationServiceTest {
     @Mock
     private EncryptionService encryptionService;
 
+    @Mock private AiProviderRegistry providerRegistry;
+    @Mock private AiProviderMetadata provider;
+
     @InjectMocks
     private AiIntegrationService aiIntegrationService;
+
+    @BeforeEach
+    void providers() {
+        lenient().when(providerRegistry.getProviderOrThrow(any())).thenReturn(provider);
+    }
 
     @Test
     void save_encryptsApiKey() {
@@ -63,6 +74,38 @@ class AiIntegrationServiceTest {
 
         assertEquals("stored-encrypted-key", result.getApiKey());
         verify(encryptionService, never()).encrypt(anyString());
+    }
+
+    @Test
+    void save_providerChangeCannotReuseAStoredKey() {
+        AiIntegration existing = new AiIntegration();
+        existing.setProviderType("openai");
+        existing.setApiKey("stored-encrypted-key");
+        when(aiIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
+        AiIntegration changed = new AiIntegration();
+        changed.setId(7L);
+        changed.setProviderType("openrouter");
+
+        assertThrows(IllegalArgumentException.class, () -> aiIntegrationService.save(changed));
+
+        verifyNoInteractions(encryptionService);
+        verify(aiIntegrationRepository, never()).save(any());
+    }
+
+    @Test
+    void save_replacementKeyWinsOverClearAndDoesNotReadTheOldProviderKey() {
+        AiIntegration integration = new AiIntegration();
+        integration.setId(7L);
+        integration.setProviderType("openrouter");
+        integration.setApiKey("new-provider-key");
+        when(encryptionService.encrypt("new-provider-key")).thenReturn("new-ciphertext");
+        when(aiIntegrationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertEquals("new-ciphertext", aiIntegrationService.save(integration, true).getApiKey());
+
+        verify(provider).validateConfiguration(integration, "new-provider-key");
+        verify(aiIntegrationRepository, never()).findById(anyLong());
+        verify(encryptionService, never()).decrypt(any());
     }
 
     @Test

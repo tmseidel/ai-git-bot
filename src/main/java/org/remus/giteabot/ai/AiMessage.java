@@ -1,6 +1,9 @@
 package org.remus.giteabot.ai;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Builder;
 import lombok.Data;
+import lombok.ToString;
+import tools.jackson.databind.JsonNode;
 import java.util.List;
 /**
  * Provider-agnostic chat message. The optional tool-related fields are only
@@ -28,4 +31,8 @@ public class AiMessage {
     private String toolCallId;
     /** Populated on a {@code tool}-role message: the textual result. */
     private String toolResult;
+    /** Opaque provider reasoning blocks, retained in-memory for exact tool-roundtrip replay. */
+    @JsonIgnore
+    @ToString.Exclude
+    private List<JsonNode> reasoningDetails;
 }

@@ -193,6 +193,7 @@ public final class HistoryCompactor {
         int total = 0;
         if (msg.getContent() != null) total += msg.getContent().length();
         if (msg.getToolResult() != null) total += msg.getToolResult().length();
+        if (msg.getReasoningDetails() != null) total += msg.getReasoningDetails().toString().length();
         return total;
     }
 

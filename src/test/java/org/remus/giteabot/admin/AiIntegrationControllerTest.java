@@ -18,6 +18,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verify;
@@ -71,6 +72,24 @@ class AiIntegrationControllerTest {
                 .andExpect(content().string(containsString("gemini-2.5-flash")))
                 .andExpect(content().string(containsString("Google AI uses the Gemini REST API")))
                 .andExpect(content().string(containsString("API key required")));
+    }
+
+    @Test
+    void editForm_showsOpenRouterSettingsWithoutEchoingTheKey() throws Exception {
+        AiIntegration integration = new AiIntegration();
+        integration.setId(7L);
+        integration.setProviderType("openrouter");
+        integration.setApiUrl("https://openrouter.ai/api");
+        integration.setApiKey("private-stored-ciphertext");
+        when(aiIntegrationService.findById(7L)).thenReturn(Optional.of(integration));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of("openrouter"));
+        when(providerRegistry.getDisplayNames()).thenReturn(Map.of("openrouter", "OpenRouter"));
+
+        mockMvc.perform(get("/ai-integrations/7/edit").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("OpenRouter")))
+                .andExpect(content().string(containsString("readonly=\"readonly\"")))
+                .andExpect(content().string(not(containsString("private-stored-ciphertext"))));
     }
 
     @Test
