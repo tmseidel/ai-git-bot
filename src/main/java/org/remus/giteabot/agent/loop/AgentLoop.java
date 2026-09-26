@@ -177,8 +177,8 @@ public final class AgentLoop {
             if (ctx.auditToolCallConsumer() != null
                     && decision instanceof StepDecision.ContinueWithToolResults(
                             List<StepDecision.ToolCallResult> results, String follow)) {
-                Long inTokens = turn.inputTokens() > 0 ? turn.inputTokens() : null;
-                Long outTokens = turn.outputTokens() > 0 ? turn.outputTokens() : null;
+                Long inTokens = turn.inputTokensReported() ? turn.inputTokens() : null;
+                Long outTokens = turn.outputTokensReported() ? turn.outputTokens() : null;
                 var toolCalls = turn.toolCalls();
                 for (int i = 0; i < Math.min(results.size(), toolCalls.size()); i++) {
                     var tc = toolCalls.get(i);

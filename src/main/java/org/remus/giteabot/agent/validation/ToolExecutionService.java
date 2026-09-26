@@ -551,7 +551,7 @@ public class ToolExecutionService {
         String output = matches.isEmpty()
                 ? "No matches found for pattern: " + patternText
                 : String.join("\n", matches);
-        return new ToolResult(true, 0, truncateOutput(output), "");
+        return outputResult(true, 0, output, false);
     }
 
     private Pattern compileSearchPattern(String patternText, SearchRequest searchRequest) {
@@ -698,7 +698,7 @@ public class ToolExecutionService {
             String output = matches.isEmpty()
                     ? "No files found for pattern: " + globPattern
                     : String.join("\n", matches);
-            return new ToolResult(true, 0, truncateOutput(output), "");
+            return outputResult(true, 0, output, false);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "find failed: " + e.getMessage());
         }
@@ -813,7 +813,7 @@ public class ToolExecutionService {
             if (output.isEmpty()) {
                 output.append("No content in requested line range.");
             }
-            return new ToolResult(true, 0, truncateOutput(output.toString().stripTrailing()), "");
+            return outputResult(true, 0, output.toString().stripTrailing(), false);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "cat failed: " + e.getMessage());
         }
@@ -901,7 +901,7 @@ public class ToolExecutionService {
                     .sorted(Comparator.naturalOrder())
                     .map(path -> formatTreeEntry(basePath, path))
                     .toList();
-            return new ToolResult(true, 0, truncateOutput(String.join("\n", lines)), "");
+            return outputResult(true, 0, String.join("\n", lines), false);
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "tree failed: " + e.getMessage());
         }
@@ -1304,7 +1304,7 @@ public class ToolExecutionService {
             log.info("Tool {} with exit code {}",
                     success ? "succeeded" : "failed", exitCode);
 
-            return new ToolResult(success, exitCode, truncateOutput(result.output()), "");
+            return outputResult(success, exitCode, result.output(), result.outputTruncated());
 
         } catch (IOException e) {
             log.error("Failed to execute tool: {}", e.getMessage());
@@ -1325,5 +1325,10 @@ public class ToolExecutionService {
             return output;
         }
         return output.substring(0, MAX_TOOL_OUTPUT_CHARS) + "\n... (output truncated)";
+    }
+
+    private ToolResult outputResult(boolean success, int exitCode, String output, boolean alreadyTruncated) {
+        boolean truncated = alreadyTruncated || output != null && output.length() > MAX_TOOL_OUTPUT_CHARS;
+        return new ToolResult(success, exitCode, truncateOutput(output), "", truncated);
     }
 }
