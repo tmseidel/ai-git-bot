@@ -679,7 +679,7 @@ public class WorkspaceService {
                 "fetch", "origin", "refs/heads/" + branch + ":refs/remotes/origin/" + branch);
     }
 
-    private CommandResult runRemoteCommand(WorkspaceSetup setup, File workDir, int timeoutSeconds,
+    CommandResult runRemoteCommand(WorkspaceSetup setup, File workDir, int timeoutSeconds,
                                            String... gitArgs) {
         if (setup == null) {
             return new CommandResult(false, "Workspace authentication is unavailable");
@@ -747,7 +747,7 @@ public class WorkspaceService {
         }
     }
 
-    private CommandResult runCommand(File workDir, String[] command, int timeoutSeconds) {
+    CommandResult runCommand(File workDir, String[] command, int timeoutSeconds) {
         return runCommand(workDir, command, timeoutSeconds, Map.of());
     }
 
