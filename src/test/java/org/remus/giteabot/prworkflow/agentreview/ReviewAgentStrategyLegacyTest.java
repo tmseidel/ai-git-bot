@@ -83,6 +83,19 @@ class ReviewAgentStrategyLegacyTest {
         return new AgentRunContext(null, "octo", "repo", 1L, Path.of("/tmp/ws"), "main");
     }
 
+    @Test
+    void legacyBranchRequestGoesThroughReviewRouterWithoutSwitchingRevision() {
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.REVIEW), any()))
+                .thenReturn(new org.remus.giteabot.agent.validation.ToolResult(false, -1, "", "Denied"));
+        var context = ctx();
+        var decision = strategy().step(context,
+                "{\"runTools\":[{\"tool\":\"branch-switcher\",\"args\":[\"other\"]}]}", 1);
+        assertInstanceOf(StepDecision.Continue.class, decision);
+        assertEquals("main", context.baseBranch());
+        verifyNoInteractions(toolExecutionService);
+        verify(toolRouter).execute(eq(AgentToolRouter.Mode.REVIEW), any());
+    }
+
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"length", "unknown", "tool_calls"})
