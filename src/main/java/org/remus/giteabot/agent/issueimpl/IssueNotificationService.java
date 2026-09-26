@@ -215,6 +215,32 @@ public class IssueNotificationService {
     }
 
     /**
+     * Builds and posts the terminal comment of an answer-only run: the issue
+     * required no repository change, so the model's answer is published instead
+     * of a pull request.
+     *
+     * <p>Like the other terminal comments this does not swallow API errors — a
+     * silent failure here would leave a run whose only output is the comment
+     * looking successful-but-empty.</p>
+     *
+     * @param answerText the model's final answer, posted verbatim
+     */
+    public void postAnswerComment(String owner, String repo, Long issueNumber, String answerText) {
+        String answer = answerText == null || answerText.isBlank()
+                ? "(the agent produced no answer text)"
+                : answerText.strip();
+        String comment = String.format("""
+                🤖 **AI Agent**: No code changes are needed for this issue — here is my answer:
+
+                %s
+
+                ---
+                *No pull request was opened. Reply with what should be changed and I will implement it.*""",
+                answer);
+        repositoryClient.postIssueComment(owner, repo, issueNumber, comment);
+    }
+
+    /**
      * Builds and posts a follow-up success comment after additional changes.
      */
     public void postFollowUpSuccessComment(String owner, String repo, Long issueNumber,

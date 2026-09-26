@@ -14,6 +14,8 @@ import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
+import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
@@ -37,6 +39,7 @@ import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.contains;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.isNull;
 import static org.mockito.Mockito.lenient;
@@ -814,6 +817,81 @@ class IssueImplementationServiceTest {
 
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
                 anyString(), anyString(), anyString(), eq(false));
+    }
+
+    // ---- answer-only completion (issue #418) ----
+
+    @Test
+    void handleIssueAssigned_nativeAnswerWithoutChanges_postsAnswerAndOpensNoPr() {
+        WebhookPayload payload = createIssuePayload();
+
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main")).thenReturn(List.of());
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), any(), any(), any(), any()))
+                .thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        // NATIVE mode: the model never calls a tool and answers in prose.
+        when(aiClient.supportsNativeTools()).thenReturn(true);
+        String answer = "docker-compose.yaml starts with version, services, then the ollama service.";
+        // doReturn/when (not when/…/thenReturn): chatWithTools is a *default* method,
+        // and the legacy lenient stub in setUp matches the placeholder call Mockito
+        // evaluates first — it would then bind thenReturn(ChatTurn) to chat().
+        doReturn(new ChatTurn(answer, List.of(), StopReason.END_TURN, 100L, 20L))
+                .when(aiClient).chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt());
+
+        service.handleIssueAssigned(payload);
+
+        ArgumentCaptor<String> comments = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient, atLeastOnce()).postIssueComment(eq("testowner"), eq("testrepo"),
+                any(), comments.capture());
+        assertThat(comments.getAllValues()).anySatisfy(comment -> {
+            assertThat(comment).contains(answer);
+            assertThat(comment).contains("No pull request was opened");
+        });
+        verify(sessionService).setStatus(any(), eq(AgentSession.AgentSessionStatus.ANSWERED));
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
+        verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void handleIssueComment_nativeAnswerOnIssueWithPr_keepsPrStatusAndPostsAnswer() {
+        WebhookPayload payload = createCommentPayload("What does the docker-compose file declare?");
+
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L)).thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L)).thenReturn(List.of());
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(new ArrayList<>());
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), isNull())).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(aiClient.supportsNativeTools()).thenReturn(true);
+        String answer = "The compose file declares ollama, gitea and postgres.";
+        // doReturn/when (not when/…/thenReturn): chatWithTools is a *default* method,
+        // and the legacy lenient stub in setUp matches the placeholder call Mockito
+        // evaluates first — it would then bind thenReturn(ChatTurn) to chat().
+        doReturn(new ChatTurn(answer, List.of(), StopReason.END_TURN, 100L, 20L))
+                .when(aiClient).chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt());
+
+        service.handleIssueComment(payload);
+
+        ArgumentCaptor<String> comments = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient, atLeastOnce()).postIssueComment(eq("testowner"), eq("testrepo"),
+                any(), comments.capture());
+        assertThat(comments.getAllValues()).anySatisfy(comment -> {
+            assertThat(comment).contains(answer);
+            assertThat(comment).contains("No pull request was opened");
+        });
+        // An answer to a follow-up question must not erase the open-PR state.
+        verify(sessionService).setStatus(eq(session), eq(AgentSession.AgentSessionStatus.PR_CREATED));
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
     }
 
     // ---- helpers ----

@@ -16,6 +16,7 @@ import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.ChatTurn;
+import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
@@ -67,6 +68,30 @@ public final class CodingAgentStrategy implements AgentStrategy {
     private int fileRequestRounds = 0;
     private int toolRounds = 0;
     private int attempt = 1;
+
+    /**
+     * Prose-only rounds already spent asking the model to either call tools or
+     * answer. Bounded at 1 by construction: one nudge is enough to tell intent
+     * apart from pre-work narration, and a second one would only duplicate the
+     * prompt cost.
+     */
+    private int answerNudges = 0;
+
+    /**
+     * Longest plain-language turn whose stop reason was {@link StopReason#END_TURN}
+     * while the workspace was clean — the candidate posted as the issue answer.
+     * Longest (not last) so a vague follow-up cannot replace a real answer, and
+     * {@code END_TURN} only so a truncated turn is never posted as one.
+     */
+    private String bestCompleteAnswer;
+
+    /**
+     * {@code true} once a round actually ran a mutation or validation tool, i.e.
+     * the agent tried to implement something. Deliberately not derived from
+     * {@link #attempt}: that counter is also incremented by no-diff tool rounds
+     * and validation retries, so it does not mean "an implementation was tried".
+     */
+    private boolean implementationAttempted = false;
 
     /** Functional hook so the strategy stays decoupled from the surrounding service's helpers. */
     @FunctionalInterface
@@ -152,24 +177,14 @@ public final class CodingAgentStrategy implements AgentStrategy {
                 return step(ctx, turn.assistantText(), round);
             }
             // Non-JSON text. In NATIVE mode this is how the model signals it is
-            // done narrating — do NOT feed it to the JSON parser (which would
-            // hard-fail the whole run and never open a PR). If the agent already
-            // produced workspace changes, finish successfully; otherwise nudge it
-            // to actually call tools. In LEGACY mode the model is contractually
-            // expected to return JSON, so an unparseable response is a genuine
-            // failure and keeps the legacy hard-fail behaviour.
+            // done narrating or answering — do NOT feed it to the JSON parser
+            // (which would hard-fail the whole run and never open a PR). The
+            // completion policy lives in {@link #nativeTextOnlyStep}. In LEGACY
+            // mode the model is contractually expected to return JSON, so an
+            // unparseable response is a genuine failure and keeps the legacy
+            // hard-fail behaviour.
             if (ctx.toolingMode() == ToolingMode.NATIVE) {
-                if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
-                    ImplementationPlan plan = ImplementationPlan.builder()
-                            .summary(turn.assistantText() == null || turn.assistantText().isBlank()
-                                    ? "Implementation produced workspace changes."
-                                    : turn.assistantText())
-                            .build();
-                    sessionService.recordPlan(ctx.session(), plan.getSummary(), turn.assistantText());
-                    return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
-                }
-                attempt++;
-                return new StepDecision.Continue(promptBuilder.buildMissingToolFeedback());
+                return nativeTextOnlyStep(ctx, turn);
             }
             return step(ctx, turn.assistantText(), round);
         }
@@ -201,6 +216,9 @@ public final class CodingAgentStrategy implements AgentStrategy {
 
         // 2) Distinguish context-only rounds (cat/rg/find/...) from mutation/validation rounds.
         boolean hasMutationOrValidation = remaining.stream().anyMatch(this::isMutationOrValidation);
+        if (hasMutationOrValidation) {
+            implementationAttempted = true;
+        }
         if (!hasMutationOrValidation && fileRequestRounds < maxContextRounds && !remaining.isEmpty()) {
             fileRequestRounds++;
             log.info("AI requested native context tools (round {}/{}, {} call(s))",
@@ -272,6 +290,72 @@ public final class CodingAgentStrategy implements AgentStrategy {
         }
         attempt++;
         return new StepDecision.ContinueWithToolResults(packaged, null);
+    }
+
+    /**
+     * Native-mode turn without tool calls and without a JSON envelope. Such a
+     * turn is either an answer to a task that needs no repository change or
+     * pre-work narration, and the two are only told apart by giving the model
+     * one explicit chance to choose.
+     *
+     * <p>Policy (see {@code doc/development-archive/answer-only-completion-architecture.md}):</p>
+     * <ol>
+     *     <li>workspace changed — the run is done; finish on the unchanged PR path;</li>
+     *     <li>clean workspace, no nudge spent — nudge once, naming both exits
+     *         (call tools, or answer without tools);</li>
+     *     <li>clean workspace, nudge spent, no implementation attempted yet — finish
+     *         with the model's best complete answer; the caller posts it as an issue
+     *         comment and opens no pull request;</li>
+     *     <li>otherwise — fail. This is also the branch's budget guard: it can
+     *         return {@code Continue} at most once, so a model that neither works
+     *         nor answers can no longer run the loop to its round cap.</li>
+     * </ol>
+     *
+     * <p>Prose turns never touch {@link #attempt}: a chatty model must not be able
+     * to exhaust the validation budget of a later, genuine tool round.</p>
+     */
+    private StepDecision nativeTextOnlyStep(AgentRunContext ctx, ChatTurn turn) {
+        if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+            ImplementationPlan plan = ImplementationPlan.builder()
+                    .summary(turn.assistantText() == null || turn.assistantText().isBlank()
+                            ? "Implementation produced workspace changes."
+                            : turn.assistantText())
+                    .build();
+            sessionService.recordPlan(ctx.session(), plan.getSummary(), turn.assistantText());
+            return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
+        }
+
+        recordAnswerCandidate(turn);
+        if (answerNudges == 0) {
+            answerNudges++;
+            log.info("Native turn for issue #{} carried no tool calls and no workspace change; "
+                    + "asking for tools or a final answer", ctx.issueNumber());
+            return new StepDecision.Continue(promptBuilder.buildNativeNoToolCallFeedback());
+        }
+        if (!implementationAttempted && bestCompleteAnswer != null) {
+            log.info("Coding agent answered issue #{} without repository changes ({} chars, stopReason={})",
+                    ctx.issueNumber(), bestCompleteAnswer.length(), turn.stopReason());
+            return new StepDecision.Finish(LoopOutcome.answered(ctx.baseBranch(), bestCompleteAnswer));
+        }
+        log.warn("Native turn for issue #{} stayed without tool calls and without a usable answer "
+                        + "(nudges={}, implementationAttempted={}, stopReason={}); failing the run",
+                ctx.issueNumber(), answerNudges, implementationAttempted, turn.stopReason());
+        return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()));
+    }
+
+    /**
+     * Remembers the longest complete plain-language turn as the answer candidate.
+     * Incomplete turns ({@link StopReason#MAX_TOKENS}) and blank text are ignored,
+     * so a truncated or empty reply is never posted as the issue's answer.
+     */
+    private void recordAnswerCandidate(ChatTurn turn) {
+        String text = turn.assistantText();
+        if (turn.stopReason() != StopReason.END_TURN || text == null || text.isBlank()) {
+            return;
+        }
+        if (bestCompleteAnswer == null || text.length() > bestCompleteAnswer.length()) {
+            bestCompleteAnswer = text.strip();
+        }
     }
 
     /** Convert a single native {@link ToolCall} into a positional-args
@@ -429,6 +513,9 @@ public final class CodingAgentStrategy implements AgentStrategy {
 
         // 4) Execute the requested tools.
         List<ImplementationPlan.ToolRequest> requests = plan.getEffectiveToolRequests();
+        if (requests.stream().anyMatch(this::isMutationOrValidation)) {
+            implementationAttempted = true;
+        }
         List<ToolResult> results = executeAllTools(ctx.workspaceDir(), requests);
         boolean hasValidationTools = hasValidationTools(requests);
         boolean validationPassed = !hasValidationTools || allValidationToolsPassed(requests, results);

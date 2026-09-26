@@ -197,6 +197,17 @@ public class IssueImplementationService {
             boolean implementationSucceeded = implementationResult.success();
             baseBranch = implementationResult.selectedBranch();
 
+            // Answer-only run: the issue needed no repository change. Publish the
+            // model's answer and stop — no commit, no push, no PR, and no critic
+            // (there is no diff to reflect on).
+            if (implementationResult.answer() != null) {
+                sessionService.setStatus(session, AgentSession.AgentSessionStatus.ANSWERED);
+                notificationService.postAnswerComment(owner, repo, issueNumber,
+                        implementationResult.answer().text());
+                log.info("Issue #{} answered without repository changes; no PR opened", issueNumber);
+                return;
+            }
+
             if (!implementationSucceeded) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -325,7 +336,10 @@ public class IssueImplementationService {
         // Read it from here rather than from the (detached) session object, whose
         // in-memory state is no longer mutated by the persistence layer.
         ImplementationPlan plan = outcome.payload() instanceof ImplementationPlan p ? p : null;
-        return new ToolImplementationLoopResult(outcome.success(), outcome.selectedBranch(), plan);
+        // An answer-only run carries LoopOutcome.AgentAnswer instead of a plan: the
+        // issue needed no repository change, so the caller posts the text.
+        LoopOutcome.AgentAnswer answer = outcome.payload() instanceof LoopOutcome.AgentAnswer a ? a : null;
+        return new ToolImplementationLoopResult(outcome.success(), outcome.selectedBranch(), plan, answer);
     }
 
     /**
@@ -397,6 +411,19 @@ public class IssueImplementationService {
                     session, userMessage, systemPrompt, workspaceDir, owner, repo, issueNumber, workingBranch);
             boolean success = implementationResult.success();
             String selectedContextBranch = implementationResult.selectedBranch();
+
+            // Answer-only follow-up. The session keeps PR_CREATED when it already
+            // has a pull request: an answer to a question must not erase that state.
+            if (implementationResult.answer() != null) {
+                sessionService.setStatus(session, session.getPrNumber() != null
+                        ? AgentSession.AgentSessionStatus.PR_CREATED
+                        : AgentSession.AgentSessionStatus.ANSWERED);
+                notificationService.postAnswerComment(owner, repo, issueNumber,
+                        implementationResult.answer().text());
+                log.info("Answered follow-up on issue #{} without repository changes", issueNumber);
+                return;
+            }
+
             if (!success) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -643,11 +670,14 @@ public class IssueImplementationService {
 
     /**
      * Result of the implementation loop: success flag, the final branch used for
-     * context lookups, and the final {@link ImplementationPlan} produced by the
-     * agent (may be {@code null} on failure).
+     * context lookups, the final {@link ImplementationPlan} produced by the agent
+     * (may be {@code null} on failure) and — for an answer-only run — the
+     * {@link LoopOutcome.AgentAnswer} the caller must publish as a comment
+     * instead of committing and opening a pull request.
      */
     private record ToolImplementationLoopResult(boolean success, String selectedBranch,
-                                                ImplementationPlan plan) {
+                                                ImplementationPlan plan,
+                                                LoopOutcome.AgentAnswer answer) {
     }
 
 }
