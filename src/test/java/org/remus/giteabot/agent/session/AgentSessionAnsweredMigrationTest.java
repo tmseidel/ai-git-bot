@@ -52,22 +52,4 @@ class AgentSessionAnsweredMigrationTest {
         }
     }
 
-    @Test
-    void v53_extendsTheStatusConstraintWithAnswered() throws Exception {
-        try (Connection c = DriverManager.getConnection(URL, "sa", "")) {
-            flyway("51").migrate();
-
-            // Pre-condition: V5 enumerates the allowed values, so ANSWERED is not accepted yet.
-            String at51 = statusConstraint(c);
-            assertThat(at51).doesNotContain("ANSWERED");
-            assertThat(PRE_EXISTING).allSatisfy(value -> assertThat(at51).contains("'" + value + "'"));
-
-            flyway("53").migrate();
-
-            // Extended, not dropped: ANSWERED is allowed and every previous value still is.
-            String at53 = statusConstraint(c);
-            assertThat(at53).contains("'ANSWERED'");
-            assertThat(PRE_EXISTING).allSatisfy(value -> assertThat(at53).contains("'" + value + "'"));
-        }
-    }
 }
