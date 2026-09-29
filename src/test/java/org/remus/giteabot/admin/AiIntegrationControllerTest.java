@@ -2,6 +2,8 @@ package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.ai.AiProviderRegistry;
+import org.remus.giteabot.ai.openrouter.OpenRouterRegion;
+import org.remus.giteabot.ai.openrouter.OpenRouterDataCollection;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -18,10 +20,12 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -71,6 +75,54 @@ class AiIntegrationControllerTest {
                 .andExpect(content().string(containsString("gemini-2.5-flash")))
                 .andExpect(content().string(containsString("Google AI uses the Gemini REST API")))
                 .andExpect(content().string(containsString("API key required")));
+    }
+
+    @Test
+    void editForm_showsOpenRouterSettingsWithoutEchoingTheKey() throws Exception {
+        AiIntegration integration = new AiIntegration();
+        integration.setId(7L);
+        integration.setProviderType("openrouter");
+        integration.setApiUrl("https://eu.openrouter.ai/api");
+        integration.setApiKey("private-stored-ciphertext");
+        integration.setOpenRouterRegion(OpenRouterRegion.EU);
+        when(aiIntegrationService.findById(7L)).thenReturn(Optional.of(integration));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of("openrouter"));
+        when(providerRegistry.getDisplayNames()).thenReturn(Map.of("openrouter", "OpenRouter"));
+
+        mockMvc.perform(get("/ai-integrations/7/edit").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("OpenRouter")))
+                .andExpect(content().string(containsString("readonly=\"readonly\"")))
+                .andExpect(content().string(containsString("id=\"openRouterRegion\"")))
+                .andExpect(content().string(containsString("id=\"openRouterDataCollection\"")))
+                .andExpect(content().string(containsString("id=\"openRouterZdr\"")))
+                .andExpect(content().string(containsString("Enterprise in-region routing")))
+                .andExpect(content().string(not(containsString("private-stored-ciphertext"))));
+    }
+
+    @Test
+    void save_bindsOpenRouterPrivacySettings() throws Exception {
+        mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "openrouter").param("name", "OpenRouter")
+                        .param("model", "author/model").param("apiKey", "new-key")
+                        .param("openRouterRegion", "US").param("openRouterDataCollection", "ALLOW")
+                        .param("openRouterZdr", "true"))
+                .andExpect(redirectedUrl("/ai-integrations"));
+
+        verify(aiIntegrationService).save(argThat(integration -> integration.getOpenRouterRegion() == OpenRouterRegion.US
+                && integration.getOpenRouterDataCollection() == OpenRouterDataCollection.ALLOW
+                && integration.isOpenRouterZdr()), eq(false));
+    }
+
+    @Test
+    void save_rejectsUnknownOpenRouterRegionBeforeCallingTheService() throws Exception {
+        mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "openrouter").param("apiKey", "private-new-key")
+                        .param("openRouterRegion", "https://untrusted.example"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(not(containsString("private-new-key"))));
+
+        verifyNoInteractions(aiIntegrationService);
     }
 
     @Test

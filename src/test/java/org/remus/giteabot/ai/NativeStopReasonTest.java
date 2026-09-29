@@ -7,6 +7,7 @@ import org.remus.giteabot.ai.google.GoogleAiClient;
 import org.remus.giteabot.ai.ollama.OllamaClient;
 import org.remus.giteabot.ai.openai.OpenAiClient;
 import org.remus.giteabot.ai.openai.OpenAiFlavor;
+import org.remus.giteabot.ai.openrouter.OpenRouterClient;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -108,6 +109,17 @@ class NativeStopReasonTest {
         return Stream.of(
                 new Provider("OpenAI-compatible", "/v1/chat/completions",
                         http -> new OpenAiClient(http, "test-model", 32, true, OpenAiFlavor.STANDARD),
+                        "length", "stop", """
+                        {"choices":[{"finish_reason":%s,"message":{"role":"assistant","content":"",
+                          "tool_calls":[{"id":"call-1","type":"function",
+                            "function":{"name":"lookup","arguments":"{}"}}]}}],
+                         "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
+                        """, """
+                        {"choices":[{"finish_reason":"length","message":{"content":""}}],
+                         "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
+                        """),
+                new Provider("OpenRouter", "/v1/chat/completions",
+                        http -> new OpenRouterClient(http, "test-model", 32, true),
                         "length", "stop", """
                         {"choices":[{"finish_reason":%s,"message":{"role":"assistant","content":"",
                           "tool_calls":[{"id":"call-1","type":"function",

@@ -1,6 +1,8 @@
 package org.remus.giteabot.ai;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.util.List;
+import tools.jackson.databind.JsonNode;
 
 /**
  * Result of a single round-trip to the AI provider, with or without native
@@ -13,9 +15,19 @@ public record ChatTurn(String assistantText,
                        List<ToolCall> toolCalls,
                        StopReason stopReason,
                        long inputTokens,
-                       long outputTokens) {
+                       long outputTokens,
+                       @JsonIgnore List<JsonNode> reasoningDetails) {
+
+    /** Compatibility constructor for providers without opaque reasoning metadata. */
+    public ChatTurn(String assistantText, List<ToolCall> toolCalls, StopReason stopReason,
+                    long inputTokens, long outputTokens) {
+        this(assistantText, toolCalls, stopReason, inputTokens, outputTokens, null);
+    }
 
     public ChatTurn {
+        if (reasoningDetails != null) {
+            reasoningDetails = List.copyOf(reasoningDetails);
+        }
         if (toolCalls == null) {
             toolCalls = List.of();
         }
@@ -40,5 +52,19 @@ public record ChatTurn(String assistantText,
     /** Total tokens (input + output) for this turn. */
     public long totalTokens() {
         return inputTokens + outputTokens;
+    }
+
+    /** Preserves the complete assistant turn for the next in-memory provider request. */
+    public AiMessage toAssistantMessage() {
+        return AiMessage.builder().role("assistant").content(assistantText)
+                .toolCalls(toolCalls.isEmpty() ? null : toolCalls)
+                .reasoningDetails(reasoningDetails).build();
+    }
+
+    /** Diagnostics deliberately exclude opaque provider reasoning. */
+    @Override
+    public String toString() {
+        return "ChatTurn[stopReason=%s, inputTokens=%d, outputTokens=%d, toolCalls=%d]"
+                .formatted(stopReason, inputTokens, outputTokens, toolCalls.size());
     }
 }

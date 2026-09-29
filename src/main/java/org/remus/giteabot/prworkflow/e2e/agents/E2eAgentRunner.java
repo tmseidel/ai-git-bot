@@ -235,11 +235,7 @@ public final class E2eAgentRunner {
             if (currentMessage != null && !currentMessage.isEmpty()) {
                 history.add(AiMessage.builder().role("user").content(currentMessage).build());
             }
-            history.add(AiMessage.builder()
-                    .role("assistant")
-                    .content(lastAssistantText)
-                    .toolCalls(turn.toolCalls())
-                    .build());
+            history.add(turn.toAssistantMessage());
 
             // Dispatch every tool call to the executor and feed results back.
             for (ToolCall call : turn.toolCalls()) {

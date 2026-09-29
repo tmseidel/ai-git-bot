@@ -8,6 +8,7 @@ import org.remus.giteabot.ai.google.GoogleAiClient;
 import org.remus.giteabot.ai.ollama.OllamaClient;
 import org.remus.giteabot.ai.openai.OpenAiClient;
 import org.remus.giteabot.ai.openai.OpenAiFlavor;
+import org.remus.giteabot.ai.openrouter.OpenRouterClient;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -127,6 +128,20 @@ class TextTurnMetadataTest {
                          "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
                         """, """
                         {"model":"override-model","max_completion_tokens":64,
+                         "messages":[{"role":"system","content":"Output JSON"},
+                          {"role":"assistant","content":"Checking","tool_calls":[{"id":"lookup-1",
+                           "type":"function","function":{"name":"lookup","arguments":"{}"}}]},
+                          {"role":"tool","tool_call_id":"lookup-1","content":"Read context"},
+                          {"role":"user","content":"Continue"}]}
+                        """),
+                new Provider("OpenRouter", "/v1/chat/completions",
+                        (http, nativeTools) -> new OpenRouterClient(http, "test-model", 32, nativeTools),
+                        "length", "stop", """
+                        {"choices":[{"finish_reason":"%s","message":{"content":"Review text"}}],
+                         "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
+                        """, """
+                        {"model":"override-model","max_tokens":64,
+                         "provider":{"require_parameters":true,"allow_fallbacks":false,"data_collection":"deny","zdr":false},
                          "messages":[{"role":"system","content":"Output JSON"},
                           {"role":"assistant","content":"Checking","tool_calls":[{"id":"lookup-1",
                            "type":"function","function":{"name":"lookup","arguments":"{}"}}]},
