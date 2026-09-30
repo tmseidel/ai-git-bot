@@ -497,16 +497,14 @@ public class AnthropicAiClient extends AbstractAiClient {
         if (!calls.isEmpty() && reason == StopReason.END_TURN) {
             reason = StopReason.TOOL_USE;
         }
-        long inputTokens = 0L;
-        long outputTokens = 0L;
+        Long inputTokens = null;
+        Integer outputTokens = null;
         if (response.getUsage() != null) {
             AnthropicResponse.Usage usage = response.getUsage();
             // With prompt caching, input_tokens only counts the uncached
             // remainder; the total prompt size (what the context window and
             // compaction threshold care about) is the sum of all three.
-            inputTokens = usage.getInputTokens()
-                    + usage.getCacheCreationInputTokens()
-                    + usage.getCacheReadInputTokens();
+            inputTokens = usage.totalInputTokens();
             outputTokens = usage.getOutputTokens();
             log.info("Anthropic chat-with-tools: {} input tokens ({} uncached, {} cache write, "
                             + "{} cache read), {} output tokens, {} tool_use block(s)",
@@ -516,7 +514,7 @@ public class AnthropicAiClient extends AbstractAiClient {
                     usage.getCacheCreationInputTokens(), usage.getCacheReadInputTokens(),
                     request, response);
         }
-        return new ChatTurn(text.toString(), calls, reason, inputTokens, outputTokens);
+        return ChatTurn.withReportedUsage(text.toString(), calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String stopReason) {
@@ -554,8 +552,7 @@ public class AnthropicAiClient extends AbstractAiClient {
 
         if (response.getUsage() != null) {
             AnthropicResponse.Usage usage = response.getUsage();
-            long totalInput = usage.getInputTokens() + usage.getCacheCreationInputTokens()
-                    + usage.getCacheReadInputTokens();
+            Long totalInput = usage.totalInputTokens();
             log.info("Anthropic {} response: {} input tokens ({} uncached, {} cache write, "
                             + "{} cache read), {} output tokens",
                     context,

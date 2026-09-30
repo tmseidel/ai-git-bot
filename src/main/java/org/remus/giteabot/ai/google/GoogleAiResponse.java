@@ -64,13 +64,22 @@ public class GoogleAiResponse {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class UsageMetadata {
         @JsonProperty("promptTokenCount")
-        private int promptTokenCount;
+        private Integer promptTokenCount;
 
         @JsonProperty("candidatesTokenCount")
-        private int candidatesTokenCount;
+        private Integer candidatesTokenCount;
+
+        @JsonProperty("thoughtsTokenCount")
+        private Integer thoughtsTokenCount;
+
+        /** Candidate output and thinking are disjoint Google counters. */
+        public Long outputTokens() {
+            if (candidatesTokenCount == null || candidatesTokenCount < 0
+                    || thoughtsTokenCount != null && thoughtsTokenCount < 0) return null;
+            return (long) candidatesTokenCount + (thoughtsTokenCount == null ? 0 : thoughtsTokenCount);
+        }
 
         @JsonProperty("totalTokenCount")
         private int totalTokenCount;
     }
 }
-

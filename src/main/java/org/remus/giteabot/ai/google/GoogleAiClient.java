@@ -289,16 +289,16 @@ public class GoogleAiClient extends AbstractAiClient {
         if (!calls.isEmpty() && reason == StopReason.END_TURN) {
             reason = StopReason.TOOL_USE;
         }
-        long inputTokens = 0L;
-        long outputTokens = 0L;
+        Integer inputTokens = null;
+        Long outputTokens = null;
         if (response.getUsageMetadata() != null) {
             inputTokens = response.getUsageMetadata().getPromptTokenCount();
-            outputTokens = response.getUsageMetadata().getCandidatesTokenCount();
+            outputTokens = response.getUsageMetadata().outputTokens();
             log.info("Google AI chat-with-tools: {} prompt tokens, {} candidate tokens, {} functionCall(s)",
                     inputTokens, outputTokens, calls.size());
             reportUsage(inputTokens, outputTokens, 0L, 0L, request, response);
         }
-        return new ChatTurn(text.toString(), calls, reason, inputTokens, outputTokens);
+        return ChatTurn.withReportedUsage(text.toString(), calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String finishReason) {
@@ -374,7 +374,7 @@ public class GoogleAiClient extends AbstractAiClient {
                     response.getUsageMetadata().getPromptTokenCount(),
                     response.getUsageMetadata().getCandidatesTokenCount());
             reportUsage(response.getUsageMetadata().getPromptTokenCount(),
-                    response.getUsageMetadata().getCandidatesTokenCount(), 0L, 0L, request, response);
+                    response.getUsageMetadata().outputTokens(), 0L, 0L, request, response);
         }
 
         return result;

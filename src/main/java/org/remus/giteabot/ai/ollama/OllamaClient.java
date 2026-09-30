@@ -211,16 +211,14 @@ public class OllamaClient extends AbstractAiClient {
         }
         StopReason reason = response.isDone()
                 ? mapStopReason(response.getDoneReason(), !calls.isEmpty()) : StopReason.OTHER;
-        long inputTokens = 0L;
-        long outputTokens = 0L;
-        if (response.getPromptEvalCount() != null && response.getEvalCount() != null) {
-            inputTokens = response.getPromptEvalCount();
-            outputTokens = response.getEvalCount();
+        Integer inputTokens = response.getPromptEvalCount();
+        Integer outputTokens = response.getEvalCount();
+        if (inputTokens != null || outputTokens != null) {
             log.info("Ollama chat-with-tools: {} prompt tokens, {} eval tokens, {} tool_call(s)",
                     inputTokens, outputTokens, calls.size());
             reportUsage(inputTokens, outputTokens, 0L, 0L, request, response);
         }
-        return new ChatTurn(text, calls, reason, inputTokens, outputTokens);
+        return ChatTurn.withReportedUsage(text, calls, reason, inputTokens, outputTokens);
     }
 
     private StopReason mapStopReason(String doneReason, boolean hasToolCalls) {

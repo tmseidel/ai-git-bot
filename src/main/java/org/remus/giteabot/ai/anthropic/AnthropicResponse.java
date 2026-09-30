@@ -35,12 +35,20 @@ public class AnthropicResponse {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Usage {
         @JsonProperty("input_tokens")
-        private int inputTokens;
+        private Integer inputTokens;
         @JsonProperty("output_tokens")
-        private int outputTokens;
+        private Integer outputTokens;
         @JsonProperty("cache_creation_input_tokens")
         private int cacheCreationInputTokens;
         @JsonProperty("cache_read_input_tokens")
         private int cacheReadInputTokens;
+
+        /** Anthropic excludes cache reads/writes from input_tokens; add each exactly once. */
+        public Long totalInputTokens() {
+            if (inputTokens == null || inputTokens < 0 || cacheCreationInputTokens < 0 || cacheReadInputTokens < 0) {
+                return null;
+            }
+            return (long) inputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+        }
     }
 }

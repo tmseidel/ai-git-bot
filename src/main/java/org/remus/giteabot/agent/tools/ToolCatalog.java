@@ -50,7 +50,15 @@ public class ToolCatalog {
      * {@link ToolKind#PR_WORKFLOW} and trigger a workflow-internal call inside
      * the bot rather than being general-purpose repository tools.</p>
      */
-    public enum Role { CODING, WRITER, PR_WORKFLOW }
+    public enum Role { CODING, WRITER, REVIEW, PR_WORKFLOW }
+
+    /** Explicit review allowlist: new context tools do not automatically gain review access. */
+    public Set<String> reviewToolNames(Set<String> allowed) {
+        Set<String> readOnly = Set.of("rg", "find", "cat", "git-log", "git-blame", "tree",
+                "ctags-signatures", "ctags-deps", "pr-diff", "get-issue", "search-issues");
+        return allowed == null ? Set.of() : allowed.stream().filter(readOnly::contains)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
 
     /** Internal record per built-in (non-validation) tool. */
     private record Entry(String name, ToolKind kind, Set<Role> roles,
@@ -437,6 +445,9 @@ public class ToolCatalog {
      */
     public List<ToolDescriptor> nativeDescriptors(Role role, McpToolCatalog mcpCatalog,
                                                   Set<String> allowedBuiltinTools) {
+        if (role == Role.REVIEW) {
+            return nativeDescriptors(Role.WRITER, mcpCatalog, reviewToolNames(allowedBuiltinTools));
+        }
         List<ToolDescriptor> out = new ArrayList<>();
         for (Entry e : STATIC_TOOLS) {
             if (e.schema() == null) {                 // silent alias — never advertised

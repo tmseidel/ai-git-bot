@@ -106,8 +106,8 @@ public class LlamaCppClient extends AbstractAiClient {
             return new ChatTurn("", List.of(), StopReason.OTHER, 0L, 0L);
         }
 
-        long inputTokens = response.getTokensEvaluated() == null ? 0L : response.getTokensEvaluated();
-        long outputTokens = response.getTokensPredicted() == null ? 0L : response.getTokensPredicted();
+        Integer inputTokens = response.getTokensEvaluated();
+        Integer outputTokens = response.getTokensPredicted();
         if (response.getTokensEvaluated() != null || response.getTokensPredicted() != null) {
             reportUsage(inputTokens, outputTokens, 0L, 0L, request, response);
         }
@@ -124,7 +124,7 @@ public class LlamaCppClient extends AbstractAiClient {
                 reason = StopReason.END_TURN;
             }
         }
-        return new ChatTurn(response.getContent(), List.of(), reason, inputTokens, outputTokens);
+        return ChatTurn.withReportedUsage(response.getContent(), List.of(), reason, inputTokens, outputTokens);
     }
 
     @Override
