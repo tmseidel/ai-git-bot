@@ -148,8 +148,7 @@ public final class AgentLoop {
                 // Include toolResult (not just content) and tool descriptors
                 // in the estimation — these are part of every API call.
                 int historyChars = history.stream()
-                        .mapToInt(m -> (m.getContent() == null ? 0 : m.getContent().length())
-                                + (m.getToolResult() == null ? 0 : m.getToolResult().length()))
+                        .mapToInt(HistoryCompactor::messageChars)
                         .sum();
                 int systemPromptChars = systemPrompt != null ? systemPrompt.length() : 0;
                 int currentMessageChars = currentMessage != null ? currentMessage.length() : 0;
@@ -216,11 +215,7 @@ public final class AgentLoop {
             if (currentMessage != null && !currentMessage.isEmpty()) {
                 history.add(AiMessage.builder().role("user").content(currentMessage).build());
             }
-            history.add(AiMessage.builder()
-                    .role("assistant")
-                    .content(aiResponse)
-                    .toolCalls(turn.toolCalls().isEmpty() ? null : turn.toolCalls())
-                    .build());
+            history.add(turn.toAssistantMessage());
 
             if (decision instanceof StepDecision.ContinueWithToolResults(
                     List<StepDecision.ToolCallResult> results, String follow
@@ -314,11 +309,10 @@ public final class AgentLoop {
         return mode == ToolingMode.NATIVE ? "native" : "legacy";
     }
 
-    /** Sums content + toolResult character counts for all history messages. */
+    /** Sums visible content, tool results and opaque reasoning for all history messages. */
     private static int historyMessageChars(List<AiMessage> history) {
         return history.stream()
-                .mapToInt(m -> (m.getContent() == null ? 0 : m.getContent().length())
-                        + (m.getToolResult() == null ? 0 : m.getToolResult().length()))
+                .mapToInt(HistoryCompactor::messageChars)
                 .sum();
     }
 

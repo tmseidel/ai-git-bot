@@ -54,6 +54,14 @@ public interface AiProviderMetadata {
     boolean requiresApiKey();
 
     /**
+     * Validates provider-specific settings and the resolved plaintext key before
+     * saving. Providers may canonicalize derived settings such as their API URL.
+     * A null key denotes an explicitly cleared or not yet configured credential.
+     */
+    default void validateConfiguration(AiIntegration integration, String apiKey) {
+    }
+
+    /**
      * Builds a configured RestClient for this provider.
      *
      * @param integration the AI integration configuration

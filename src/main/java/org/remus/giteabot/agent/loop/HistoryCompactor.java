@@ -193,6 +193,9 @@ public final class HistoryCompactor {
         int total = 0;
         if (msg.getContent() != null) total += msg.getContent().length();
         if (msg.getToolResult() != null) total += msg.getToolResult().length();
+        // Opaque reasoning blobs also consume context; counting their serialized size is conservative.
+        // Recompute per estimate because messages/blobs are mutable; a cached size could become stale.
+        if (msg.getReasoningDetails() != null) total += msg.getReasoningDetails().toString().length();
         return total;
     }
 
