@@ -9,6 +9,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -150,6 +151,16 @@ class GitIntegrationControllerTest {
                                 && PostReviewAction.NONE.equals(integration.getPostReviewAction())
                 ),
                 eq(false), eq(false));
+    }
+
+    @Test
+    void newForm_rendersGitAuthorFieldsWithDefaults() throws Exception {
+        mockMvc.perform(get("/git-integrations/new").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(
+                        "name=\"gitAuthorName\" value=\"" + GitAuthor.DEFAULT_NAME + "\"")))
+                .andExpect(content().string(containsString(
+                        "name=\"gitAuthorEmail\" value=\"" + GitAuthor.DEFAULT_EMAIL + "\"")));
     }
 
     @Test

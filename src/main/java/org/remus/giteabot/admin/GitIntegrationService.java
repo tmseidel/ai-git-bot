@@ -22,6 +22,9 @@ import java.util.function.Function;
 @RequiredArgsConstructor
 public class GitIntegrationService {
 
+    /** Column length of {@code git_integrations.git_author_name} / {@code git_author_email}. */
+    static final int MAX_GIT_AUTHOR_LENGTH = 255;
+
     private final GitIntegrationRepository gitIntegrationRepository;
     private final EncryptionService encryptionService;
     private final BotRepository botRepository;
@@ -84,6 +87,8 @@ public class GitIntegrationService {
         current.setProviderType(integration.getProviderType());
         current.setUrl(integration.getUrl());
         current.setUsername(integration.getUsername());
+        current.setGitAuthorName(integration.getGitAuthorName());
+        current.setGitAuthorEmail(integration.getGitAuthorEmail());
         current.setTransport(integration.getTransport());
         current.setPostReviewAction(integration.getPostReviewAction());
 
@@ -320,6 +325,8 @@ public class GitIntegrationService {
         if (isBlank(integration.getUsername())) {
             throw new IllegalArgumentException("A username is required");
         }
+        requireGitAuthorPart(integration.getGitAuthorName(), "Git author name");
+        requireGitAuthorPart(integration.getGitAuthorEmail(), "Git author e-mail");
         boolean duplicate = integration.getId() == null
                 ? gitIntegrationRepository.existsByName(integration.getName())
                 : gitIntegrationRepository.existsByNameAndIdNot(integration.getName(), integration.getId());
@@ -371,6 +378,20 @@ public class GitIntegrationService {
         }
     }
 
+    /**
+     * The Git author is required and limited to the column length; a longer value is
+     * rejected rather than truncated, so commits never carry a partial identity.
+     */
+    private void requireGitAuthorPart(String value, String label) {
+        if (isBlank(value)) {
+            throw new IllegalArgumentException(label + " must not be blank");
+        }
+        if (value.length() > MAX_GIT_AUTHOR_LENGTH) {
+            throw new IllegalArgumentException(
+                    label + " must be at most " + MAX_GIT_AUTHOR_LENGTH + " characters");
+        }
+    }
+
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
@@ -379,6 +400,12 @@ public class GitIntegrationService {
         // The username identifies the bot in webhook payloads, so surrounding whitespace would break matching.
         if (integration.getUsername() != null) {
             integration.setUsername(integration.getUsername().trim());
+        }
+        if (integration.getGitAuthorName() != null) {
+            integration.setGitAuthorName(integration.getGitAuthorName().trim());
+        }
+        if (integration.getGitAuthorEmail() != null) {
+            integration.setGitAuthorEmail(integration.getGitAuthorEmail().trim());
         }
         if (integration.getProviderType() == RepositoryType.GITHUB) {
             integration.setUrl("https://github.com");

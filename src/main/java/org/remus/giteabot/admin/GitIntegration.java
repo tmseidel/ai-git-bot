@@ -7,6 +7,7 @@ import lombok.ToString;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.GitAuthor;
 
 import java.time.Instant;
 
@@ -48,6 +49,20 @@ public class GitIntegration {
     @Column(nullable = false)
     private String username;
 
+    /**
+     * Git author name for commits that bots using this integration push.
+     * New integrations start with {@link GitAuthor#DEFAULT_NAME}.
+     */
+    @Column(name = "git_author_name", nullable = false)
+    private String gitAuthorName = GitAuthor.DEFAULT_NAME;
+
+    /**
+     * Git author e-mail for commits that bots using this integration push.
+     * New integrations start with {@link GitAuthor#DEFAULT_EMAIL}.
+     */
+    @Column(name = "git_author_email", nullable = false)
+    private String gitAuthorEmail = GitAuthor.DEFAULT_EMAIL;
+
     @Column(length = 1000)
     @ToString.Exclude
     private String token;
@@ -72,6 +87,11 @@ public class GitIntegration {
 
     @Column
     private String sshRemoteKeyTitle;
+
+    /** Resolves the Git author identity for commits pushed through this integration. */
+    public GitAuthor gitAuthor() {
+        return new GitAuthor(gitAuthorName, gitAuthorEmail);
+    }
 
     /** Includes incomplete registration markers so ambiguous failures remain recoverable. */
     public boolean hasManagedSshKeyTracking() {

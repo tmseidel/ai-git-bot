@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
@@ -64,6 +65,7 @@ class IssueImplementationServiceTest {
     private IssueImplementationService service;
 
     private static final Path FAKE_WORKSPACE = Path.of("/tmp/test-workspace");
+    private static final GitAuthor GIT_AUTHOR = new GitAuthor("Agent Bot", "agent-bot@example.com");
 
     @BeforeEach
     void setUp() {
@@ -78,7 +80,7 @@ class IssueImplementationServiceTest {
         // TES is mocked only for execution methods.
         toolCatalog = new org.remus.giteabot.agent.tools.ToolCatalog(agentConfig);
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, null, null, null, McpToolCatalog.empty(), null, 200_000);
+                repositoryClient, aiClient, null, null, null, null, McpToolCatalog.empty(), null, 200_000, GIT_AUTHOR);
         service = new IssueImplementationService(context, collaborators(agentConfig));
 
         lenient().when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
@@ -136,7 +138,7 @@ class IssueImplementationServiceTest {
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
 
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
@@ -152,9 +154,9 @@ class IssueImplementationServiceTest {
         // mvn compile executed
         verify(toolExecutionService).executeTool(eq(FAKE_WORKSPACE), eq("mvn"),
                 eq(List.of("compile", "-q", "-B")));
-        // Committed and pushed
+        // Committed and pushed as the context's Git author
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true));
+                anyString(), eq(GIT_AUTHOR), eq(true));
         // PR created
         verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"));
@@ -205,7 +207,7 @@ class IssueImplementationServiceTest {
         when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
@@ -263,7 +265,7 @@ class IssueImplementationServiceTest {
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
 
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
@@ -275,7 +277,7 @@ class IssueImplementationServiceTest {
         verify(toolExecutionService).executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"),
                 eq(List.of("README.md", "updated")));
         verify(workspaceService, times(1)).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true));
+                anyString(), any(), eq(true));
         verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"));
     }
@@ -363,7 +365,7 @@ class IssueImplementationServiceTest {
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
 
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("develop"))).thenReturn(1L);
@@ -420,7 +422,7 @@ class IssueImplementationServiceTest {
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
 
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
@@ -472,7 +474,7 @@ class IssueImplementationServiceTest {
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
 
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("release/1.x"))).thenReturn(1L);
@@ -501,7 +503,7 @@ class IssueImplementationServiceTest {
         service.handleIssueAssigned(payload);
 
         verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
-        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), anyBoolean());
     }
 
     @Test
@@ -533,7 +535,7 @@ class IssueImplementationServiceTest {
         when(toolExecutionService.executeTool(any(), any(), any()))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
         // Commit fails
-        when(workspaceService.commitAndPush(any(), any(), any(), any(), any(), anyBoolean()))
+        when(workspaceService.commitAndPush(any(), any(), any(), any(), anyBoolean()))
                 .thenReturn(false);
 
         service.handleIssueAssigned(payload);
@@ -583,7 +585,7 @@ class IssueImplementationServiceTest {
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
 
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true)))
+                anyString(), any(), eq(true)))
                 .thenReturn(true);
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
@@ -591,7 +593,7 @@ class IssueImplementationServiceTest {
         serviceWithMcp.handleIssueAssigned(payload);
 
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(true));
+                anyString(), any(), eq(true));
         verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"));
     }
@@ -658,7 +660,7 @@ class IssueImplementationServiceTest {
         when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(false)))
+                anyString(), any(), eq(false)))
                 .thenReturn(true);
 
         service.handleIssueComment(payload);
@@ -668,7 +670,7 @@ class IssueImplementationServiceTest {
         verify(toolExecutionService).executeFileTool(eq(FAKE_WORKSPACE), eq("patch-file"),
                 eq(List.of("src/Config.java", "old", "new")));
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(false));
+                anyString(), any(), eq(false));
         verify(workspaceService).cleanupWorkspace(FAKE_WORKSPACE);
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(aiClient, times(2)).chat(anyList(), promptCaptor.capture(), anyString(), isNull(), anyInt());
@@ -728,7 +730,7 @@ class IssueImplementationServiceTest {
         when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(false)))
+                anyString(), any(), eq(false)))
                 .thenReturn(true);
 
         service.handleIssueComment(payload);
@@ -811,13 +813,13 @@ class IssueImplementationServiceTest {
         when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
         when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(false)))
+                anyString(), any(), eq(false)))
                 .thenReturn(true);
 
         serviceWithMcp.handleIssueComment(payload);
 
         verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
-                anyString(), anyString(), anyString(), eq(false));
+                anyString(), any(), eq(false));
     }
 
     // ---- answer-only completion (issue #418) ----
@@ -855,7 +857,7 @@ class IssueImplementationServiceTest {
             assertThat(comment.toLowerCase()).doesNotContain("no code changes are needed");
         });
         verify(sessionService).setStatus(any(), eq(AgentSession.AgentSessionStatus.ANSWERED));
-        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), anyBoolean());
         verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
     }
 
@@ -897,7 +899,7 @@ class IssueImplementationServiceTest {
         });
         // An answer to a follow-up question must not erase the open-PR state.
         verify(sessionService).setStatus(eq(session), eq(AgentSession.AgentSessionStatus.PR_CREATED));
-        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), anyBoolean());
     }
 
     /**
@@ -924,7 +926,7 @@ class IssueImplementationServiceTest {
         });
         assertThat(postedComments()).noneSatisfy(comment -> assertThat(comment).contains(answer));
         verify(sessionService).setStatus(any(), eq(AgentSession.AgentSessionStatus.ANSWERED));
-        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), anyBoolean());
         verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
         // The cat round really ran against the workspace.
         verify(toolExecutionService).executeContextTool(eq(FAKE_WORKSPACE), eq("cat"),
@@ -952,7 +954,7 @@ class IssueImplementationServiceTest {
             assertThat(comment).contains(answer);
         });
         verify(sessionService).setStatus(any(), eq(AgentSession.AgentSessionStatus.ANSWERED));
-        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), any(), anyBoolean());
+        verify(workspaceService, never()).commitAndPush(any(), any(), any(), any(), anyBoolean());
         verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
     }
 
@@ -1057,7 +1059,7 @@ class IssueImplementationServiceTest {
                 "mcp:github:list_issues"
         )));
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, null, mcpOrchestrationService, null, catalog, null, 200_000);
+                repositoryClient, aiClient, null, null, mcpOrchestrationService, null, catalog, null, 200_000, GitAuthor.DEFAULT);
         return new IssueImplementationService(context, collaborators(agentConfig));
     }
 
@@ -1067,7 +1069,7 @@ class IssueImplementationServiceTest {
         agentConfig.setMaxFiles(10);
         agentConfig.setBranchPrefix("ai-agent/");
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty(), null, 200_000);
+                repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty(), null, 200_000, GitAuthor.DEFAULT);
         return new IssueImplementationService(context, collaborators(agentConfig));
     }
 

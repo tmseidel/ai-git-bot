@@ -7,6 +7,7 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -42,6 +43,8 @@ import static org.mockito.Mockito.when;
  */
 class SuitePromotionServiceTest {
 
+    private static final GitAuthor GIT_AUTHOR = new GitAuthor("E2E Bot", "e2e-bot@example.com");
+
     private WorkspaceService workspaceService;
     private RepositoryApiClient repoClient;
     private SuitePromotionService service;
@@ -66,7 +69,7 @@ class SuitePromotionServiceTest {
                 eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(),
-                anyString(), anyString(), anyBoolean()))
+                any(), anyBoolean()))
                 .thenReturn(true);
         lenient().when(runRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -108,7 +111,7 @@ class SuitePromotionServiceTest {
         verify(workspaceService).prepareWorkspace(
                 repoClient, "acme", "web", "feature/login", 7L);
         verify(workspaceService).commitAndPush(eq(workspace), eq(expectedBranch),
-                anyString(), anyString(), anyString(), eq(true));
+                anyString(), any(), eq(true));
     }
 
     @Test
@@ -173,7 +176,7 @@ class SuitePromotionServiceTest {
                 repoClient, "acme", "web", "feature/x", 3L,
                 PullRequestWorkspaceMode.PUSH_BACK);
         verify(workspaceService).commitAndPush(eq(workspace), eq("feature/x"),
-                anyString(), anyString(), anyString(), eq(false));
+                anyString(), eq(GIT_AUTHOR), eq(false));
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
         // Idempotency: COMMIT_TO_PR records parent prNumber so a re-run no-ops.
         assertThat(run.getFollowUpPrNumber()).isEqualTo(3L);
@@ -208,7 +211,7 @@ class SuitePromotionServiceTest {
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
         verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+                any(), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -266,7 +269,7 @@ class SuitePromotionServiceTest {
     @Test
     void pushFailure_surfacesAsOutcomeFailure_andDoesNotOpenPr() {
         when(workspaceService.commitAndPush(any(), anyString(), anyString(),
-                anyString(), anyString(), anyBoolean())).thenReturn(false);
+                any(), anyBoolean())).thenReturn(false);
 
         PrTestSuite suite = suite(SuiteLifecycleMode.OFFER_AS_PR, 7L,
                 caseAt("login.spec.ts", "// hi"));
@@ -289,7 +292,7 @@ class SuitePromotionServiceTest {
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         assertThat(out.message()).contains("write");
         verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+                any(), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -306,7 +309,7 @@ class SuitePromotionServiceTest {
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         assertThat(out.message()).contains("write");
         verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+                any(), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -351,7 +354,10 @@ class SuitePromotionServiceTest {
         Bot b = new Bot();
         b.setId(1L);
         b.setName("test");
-        b.setGitIntegration(new GitIntegration());
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setGitAuthorName(GIT_AUTHOR.name());
+        gitIntegration.setGitAuthorEmail(GIT_AUTHOR.email());
+        b.setGitIntegration(gitIntegration);
         return b;
     }
 
