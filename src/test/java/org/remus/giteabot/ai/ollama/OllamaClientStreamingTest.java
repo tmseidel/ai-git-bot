@@ -232,7 +232,7 @@ class OllamaClientStreamingTest {
         ChatTurn turn = client.chatWithTools(List.of(), "Read Example.java",
                 List.of(new ToolDescriptor("cat", "Read a file", null)), "sys", null, null);
         AgentToolRouter router = mock(AgentToolRouter.class);
-        when(router.execute(eq(AgentToolRouter.Mode.WRITER), any()))
+        when(router.execute(eq(AgentToolRouter.Mode.REVIEW), any()))
                 .thenReturn(new ToolResult(true, 0, "class Example {}", ""));
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("sys", router, null, null,
                 Set.of("cat"), null, null, null, 1);
@@ -249,7 +249,7 @@ class OllamaClientStreamingTest {
         assertEquals(301L, turn.inputTokens());
         assertEquals(74L, turn.outputTokens());
         assertEquals(1, recorder.invocations);
-        verify(router).execute(eq(AgentToolRouter.Mode.WRITER), any());
+        verify(router).execute(eq(AgentToolRouter.Mode.REVIEW), any());
     }
 
     @Test
