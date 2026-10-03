@@ -18,13 +18,14 @@ import java.util.Set;
 /**
  * Per-bot router that decides which executor handles a given AI tool request.
  * <p>
- * Two modes are supported:
+ * Agent modes are supported:
  * <ul>
  *     <li>{@link Mode#CODING} — file → MCP → context → generic validation tool,
  *     mirroring the historic {@code IssueImplementationService.executeAllTools}.</li>
  *     <li>{@link Mode#WRITER} — get-issue / search-issues → MCP → context, with a
  *     curated repository payload for issue lookups, mirroring
  *     {@code WriterAgentService.executeTools}.</li>
+ *     <li>{@link Mode#REVIEW} — explicit read-only built-ins and selected qualified MCP names.</li>
  * </ul>
  * Behaviour is deliberately byte-equivalent to the previous in-line dispatch;
  * the abstraction exists so future steps can introduce tracing, retries and
@@ -34,7 +35,7 @@ import java.util.Set;
 @Slf4j
 public class AgentToolRouter {
 
-    public enum Mode { CODING, WRITER }
+    public enum Mode { CODING, WRITER, REVIEW }
 
     private final ToolExecutionService toolExecutionService;
     private final ToolCatalog catalog;
@@ -75,6 +76,10 @@ public class AgentToolRouter {
         if (tool.isBlank()) {
             return new ToolResult(false, -1, "", "Empty tool name");
         }
+        if (mode == Mode.REVIEW && !catalog.reviewToolNames(allowedBuiltinTools).contains(tool)
+                && mcpToolCatalog.tools().stream().noneMatch(selected -> selected.qualifiedName().equals(tool))) {
+            return new ToolResult(false, -1, "", "Tool is not enabled for read-only review: " + tool);
+        }
         ToolResult denied = enforceWhitelist(tool);
         if (denied != null) {
             return denied;
@@ -83,6 +88,7 @@ public class AgentToolRouter {
             return switch (mode) {
                 case CODING -> executeCoding(context);
                 case WRITER -> executeWriter(context);
+                case REVIEW -> executeWriter(context);
             };
         } catch (Exception e) {
             return new ToolResult(false, -1, "", e.getMessage());
@@ -249,4 +255,3 @@ public class AgentToolRouter {
         }
     }
 }
-
