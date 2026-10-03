@@ -2,11 +2,11 @@ package org.remus.giteabot.prworkflow.i18n;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.remus.giteabot.agent.shared.BranchRefs;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
@@ -18,7 +18,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Core business logic of the i18n-coverage workflow. Not a Spring singleton —
@@ -80,7 +79,7 @@ public class I18nCoverageService {
         WebhookPayload payload = context.payload();
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
-        long prNumber = resolvePrNumber(payload);
+        long prNumber = PrPayloadHydrator.resolvePrNumberOrZero(payload);
         String prTitle = payload.getPullRequest() == null ? null : payload.getPullRequest().getTitle();
         String prBody = payload.getPullRequest() == null ? null : payload.getPullRequest().getBody();
 
@@ -90,7 +89,7 @@ public class I18nCoverageService {
             return Result.skipped("No include patterns configured");
         }
 
-        String headBranch = resolveHeadBranch(payload, owner, repo, prNumber);
+        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo, prNumber);
         if (headBranch == null) {
             // Never fall back to the default branch: this workflow clones the head
             // branch and (in commit/offer modes) pushes to it.
@@ -380,50 +379,6 @@ public class I18nCoverageService {
             sb.append("    (could not read file: ").append(e.getMessage()).append(")\n");
             return budget;
         }
-    }
-
-    /**
-     * Resolves the PR head branch to clone/commit against. Prefers the webhook
-     * payload; when the head ref is missing it re-fetches it from the provider
-     * API. Returns {@code null} when the head branch cannot be determined —
-     * callers MUST skip rather than substitute the repository default branch.
-     */
-    private String resolveHeadBranch(WebhookPayload payload, String owner, String repo, long prNumber) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getHead() != null
-                && payload.getPullRequest().getHead().getRef() != null
-                && !payload.getPullRequest().getHead().getRef().isBlank()) {
-            return BranchRefs.normalize(payload.getPullRequest().getHead().getRef());
-        }
-        return fetchHeadBranchFromApi(owner, repo, prNumber);
-    }
-
-    @SuppressWarnings("unchecked")
-    private String fetchHeadBranchFromApi(String owner, String repo, long prNumber) {
-        if (prNumber <= 0) {
-            return null;
-        }
-        try {
-            Map<String, Object> pr = repositoryClient.getPullRequestDetails(owner, repo, prNumber);
-            if (pr != null && pr.get("head") instanceof Map<?, ?> head
-                    && ((Map<String, Object>) head).get("ref") instanceof String ref
-                    && !ref.isBlank()) {
-                return BranchRefs.normalize(ref);
-            }
-        } catch (RuntimeException e) {
-            log.debug("i18n-coverage: getPullRequestDetails failed for {}/{}#{}: {}",
-                    owner, repo, prNumber, e.getMessage());
-        }
-        return null;
-    }
-
-    private long resolvePrNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
-            return payload.getPullRequest().getNumber();
-        }
-        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
-            return payload.getIssue().getNumber();
-        }
-        return payload.getNumber() == null ? 0L : payload.getNumber();
     }
 
     private void postComment(String owner, String repo, long prNumber, String body) {

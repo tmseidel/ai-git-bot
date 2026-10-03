@@ -2,7 +2,9 @@ package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -68,6 +70,48 @@ class BitbucketApiClientTest {
         BitbucketApiClient client = new BitbucketApiClient(null, credsWithUsername());
         assertEquals("myuser", client.getCredentials().username());
         assertTrue(client.getCredentials().hasUsername());
+    }
+
+    @Test
+    void getRepositoryTree_mapsCommitFileAndDirectoryEntries() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+
+        server.expect(requestTo(
+                        "https://api.bitbucket.org/2.0/repositories/workspace/repo/src/main/?max_depth=100&pagelen=100"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"pagelen":100,"page":1,"values":[
+                          {"type":"commit_directory","path":"src","commit":{"hash":"abc"}},
+                          {"type":"commit_file","path":"src/App.java","size":42,"mimetype":"text/x-java"}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        List<RepositoryTreeEntry> tree = client.getRepositoryTree("workspace", "repo", "main");
+
+        server.verify();
+        assertEquals(List.of(
+                new RepositoryTreeEntry("src", RepositoryTreeEntry.Type.DIRECTORY),
+                new RepositoryTreeEntry("src/App.java", RepositoryTreeEntry.Type.FILE)), tree);
+    }
+
+    @Test
+    void getPullRequestCommits_mapsHashAndMessage() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/7/commits"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"pagelen":10,"values":[{"type":"commit","hash":"abc1234567890","message":"Fix bug\\n",
+                          "author":{"raw":"Jane <jane@example.com>"}}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        List<PullRequestCommit> commits = client.getPullRequestCommits("workspace", "repo", 7L);
+
+        server.verify();
+        assertEquals(List.of(new PullRequestCommit("abc1234567890", "Fix bug\n")), commits);
     }
 
     @Test

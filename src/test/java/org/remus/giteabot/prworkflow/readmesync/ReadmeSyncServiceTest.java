@@ -11,10 +11,11 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -79,7 +80,7 @@ class ReadmeSyncServiceTest {
 
     @Test
     void missingHeadRef_andApiCannotResolve_skipsWithoutCommitting() {
-        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Map.of());
+        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Optional.empty());
 
         ReadmeSyncService.Result result = service.run(
                 request(payloadWithoutHeadRef(), SuiteLifecycleMode.COMMIT_TO_PR));
@@ -99,7 +100,7 @@ class ReadmeSyncServiceTest {
     @Test
     void missingHeadRef_butApiResolvesIt_clonesThatBranch() {
         when(repoClient.getPullRequestDetails("acme", "my-repo", 42L))
-                .thenReturn(Map.of("head", Map.of("ref", "feature/login")));
+                .thenReturn(Optional.of(new PullRequestDetails(null, null, null, "feature/login", null, null, null)));
         // Fail the workspace prep so the run stops right after resolution — we only
         // assert which branch it tried to clone.
         when(workspaceService.prepareWritablePullRequestWorkspace(

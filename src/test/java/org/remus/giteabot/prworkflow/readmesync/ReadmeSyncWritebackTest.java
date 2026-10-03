@@ -13,6 +13,8 @@ import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
@@ -20,7 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -62,7 +64,7 @@ class ReadmeSyncWritebackTest {
         when(client.getCredentials()).thenReturn(RepositoryCredentials.of("", remote.toString(), ""));
         when(client.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff --git a/x b/x\n+changed");
         when(client.getPullRequestDetails("acme", "repo", 42L))
-                .thenReturn(Map.of("state", "open", "merged", false));
+                .thenReturn(Optional.of(details(PullRequestState.OPEN)));
         doReturn(43L).when(client).createPullRequest(eq("acme"), eq("repo"), anyString(), anyString(), anyString(),
                 eq("feature/docs"));
         ReadmeSyncAgent agent = mock(ReadmeSyncAgent.class);
@@ -88,7 +90,7 @@ class ReadmeSyncWritebackTest {
         when(client.getPullRequestDetails("acme", "repo", 42L)).thenAnswer(invocation -> {
             assertThat(git(checkout.get(), "log", "-1", "--format=%s")).startsWith("docs: sync");
             git(remote, "update-ref", "-d", "refs/heads/feature/docs");
-            return Map.of("state", "closed", "merged", true);
+            return Optional.of(details(PullRequestState.MERGED));
         });
 
         ReadmeSyncService.Result result = service.run(request(mode));
@@ -122,7 +124,7 @@ class ReadmeSyncWritebackTest {
     @Test
     void largeDiff_hasExplicitTruncationNoticeAndFitsOneComment() throws Exception {
         generatedText = "完整文档\n".repeat(100_000);
-        when(client.getPullRequestDetails("acme", "repo", 42L)).thenReturn(Map.of());
+        when(client.getPullRequestDetails("acme", "repo", 42L)).thenReturn(Optional.empty());
 
         ReadmeSyncService.Result result = service.run(request(SuiteLifecycleMode.COMMIT_TO_PR));
 
@@ -150,7 +152,7 @@ class ReadmeSyncWritebackTest {
     @Test
     void offerClosedAfterPush_doesNotCreateFollowUpAndCommentsWithDiff() throws Exception {
         when(client.getPullRequestDetails("acme", "repo", 42L))
-                .thenReturn(Map.of("state", "open", "merged", false), Map.of("state", "closed", "merged", true));
+                .thenReturn(Optional.of(details(PullRequestState.OPEN)), Optional.of(details(PullRequestState.MERGED)));
 
         ReadmeSyncService.Result result = service.run(request(SuiteLifecycleMode.OFFER_AS_PR));
 
@@ -164,7 +166,7 @@ class ReadmeSyncWritebackTest {
     void cancelledDuringStateLookup_stopsPush() throws Exception {
         when(client.getPullRequestDetails("acme", "repo", 42L)).thenAnswer(invocation -> {
             cancelled.set(true);
-            return Map.of("state", "open", "merged", false);
+            return Optional.of(details(PullRequestState.OPEN));
         });
 
         assertThatThrownBy(() -> service.run(request(SuiteLifecycleMode.COMMIT_TO_PR)))
@@ -205,6 +207,10 @@ class ReadmeSyncWritebackTest {
         payload.setPullRequest(pr);
         return new ReadmeSyncService.Request(new PrWorkflowContext(new Bot(), payload, 7L,
                 (label, message) -> { }, cancelled::get), List.of("*.md"), 12, mode, null);
+    }
+
+    private static PullRequestDetails details(PullRequestState state) {
+        return new PullRequestDetails(null, null, state, null, null, null, null);
     }
 
     private String git(Path directory, String... args) throws Exception {

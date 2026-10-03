@@ -1,8 +1,11 @@
 package org.remus.giteabot.gitea;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.gitea.model.GiteaCommit;
+import org.remus.giteabot.gitea.model.GiteaPullRequest;
 import org.remus.giteabot.gitea.model.GiteaReview;
 import org.remus.giteabot.gitea.model.GiteaReviewComment;
+import org.remus.giteabot.gitea.model.GiteaTree;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
@@ -11,6 +14,9 @@ import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -27,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Gitea-specific implementation of {@link RepositoryApiClient}.
@@ -60,31 +67,27 @@ public class GiteaApiClient implements RepositoryApiClient {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public PullRequestHead getPullRequestHead(String owner, String repo, Long pullNumber,
                                               String expectedBranch) {
-        Map<String, Object> details = getPullRequestDetails(owner, repo, pullNumber);
-        if (!(details.get("head") instanceof Map<?, ?> rawHead)) {
+        GiteaPullRequest pr = fetchPullRequest(owner, repo, pullNumber);
+        GiteaPullRequest.GiteaBranch head = pr != null ? pr.getHead() : null;
+        if (head == null) {
             throw new IllegalStateException("Gitea pull request did not provide a head object");
         }
-        Map<String, Object> head = (Map<String, Object>) rawHead;
-        String branch = requiredString(head.get("ref"), "Gitea pull request head ref is missing");
+        String branch = requiredString(head.getRef(), "Gitea pull request head ref is missing");
         String expected = normalizeBranch(expectedBranch);
         String actual = normalizeBranch(branch);
         if (expected == null || !Objects.equals(actual, expected)) {
             throw new IllegalStateException("Gitea pull request head branch '" + actual
                     + "' does not match expected branch '" + expected + "'");
         }
-        if (!(head.get("repo") instanceof Map<?, ?> rawRepository)) {
+        GiteaPullRequest.GiteaRepository repository = head.getRepo();
+        if (repository == null) {
             throw new IllegalStateException("Gitea pull request head repository is missing");
         }
-        Map<String, Object> repository = (Map<String, Object>) rawRepository;
-        String repositoryName = stringValue(repository.get("name"));
-        String sourceOwner = null;
-        if (repository.get("owner") instanceof Map<?, ?> rawOwner) {
-            sourceOwner = stringValue(((Map<String, Object>) rawOwner).get("login"));
-        }
-        String fullName = stringValue(repository.get("full_name"));
+        String repositoryName = nonBlank(repository.getName());
+        String sourceOwner = repository.getOwner() != null ? nonBlank(repository.getOwner().getLogin()) : null;
+        String fullName = nonBlank(repository.getFullName());
         if ((sourceOwner == null || repositoryName == null) && fullName != null) {
             int separator = fullName.indexOf('/');
             if (separator > 0 && separator < fullName.length() - 1) {
@@ -95,20 +98,19 @@ public class GiteaApiClient implements RepositoryApiClient {
         if (sourceOwner == null || repositoryName == null) {
             throw new IllegalStateException("Gitea pull request head repository coordinates are incomplete");
         }
-        return new PullRequestHead(sourceOwner, repositoryName, actual,
-                stringValue(head.get("sha")));
+        return new PullRequestHead(sourceOwner, repositoryName, actual, nonBlank(head.getSha()));
     }
 
-    private String requiredString(Object value, String message) {
-        String resolved = stringValue(value);
+    private String requiredString(String value, String message) {
+        String resolved = nonBlank(value);
         if (resolved == null) {
             throw new IllegalStateException(message);
         }
         return resolved;
     }
 
-    private String stringValue(Object value) {
-        return value instanceof String string && !string.isBlank() ? string : null;
+    private String nonBlank(String value) {
+        return value != null && !value.isBlank() ? value : null;
     }
 
     private String normalizeBranch(String branch) {
@@ -214,13 +216,17 @@ public class GiteaApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+    public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        return Optional.ofNullable(fetchPullRequest(owner, repo, pullNumber))
+                .map(GiteaPullRequest::toPullRequestDetails);
+    }
+
+    private GiteaPullRequest fetchPullRequest(String owner, String repo, Long pullNumber) {
         log.info("Fetching pull-request #{} details in {}/{}", pullNumber, owner, repo);
-        Map<String, Object> pr = giteaRestClient.get()
+        return giteaRestClient.get()
                 .uri("/api/v1/repos/{owner}/{repo}/pulls/{index}", owner, repo, pullNumber)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        return pr != null ? pr : Map.of();
+                .body(GiteaPullRequest.class);
     }
 
     private String validateSshUrl(Object sshUrl, String missingMessage) {
@@ -520,13 +526,15 @@ public class GiteaApiClient implements RepositoryApiClient {
     // ---- PR context enrichment ----
 
     @Override
-    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+    public List<PullRequestCommit> getPullRequestCommits(String owner, String repo, Long pullNumber) {
         log.info("Fetching commits for PR #{} in {}/{}", pullNumber, owner, repo);
-        List<Map<String, Object>> commits = giteaRestClient.get()
+        List<GiteaCommit> commits = giteaRestClient.get()
                 .uri("/api/v1/repos/{owner}/{repo}/pulls/{index}/commits", owner, repo, pullNumber)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-        return commits != null ? commits : List.of();
+        return commits != null
+                ? commits.stream().map(GiteaCommit::toPullRequestCommit).toList()
+                : List.of();
     }
 
     @Override
@@ -569,17 +577,16 @@ public class GiteaApiClient implements RepositoryApiClient {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> getRepositoryTree(String owner, String repo, String ref) {
+    public List<RepositoryTreeEntry> getRepositoryTree(String owner, String repo, String ref) {
         log.info("Fetching repository tree for {}/{} at ref={}", owner, repo, ref);
-        Map<String, Object> result = giteaRestClient.get()
+        GiteaTree result = giteaRestClient.get()
                 .uri("/api/v1/repos/{owner}/{repo}/git/trees/{ref}?recursive=true", owner, repo, ref)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("tree")) {
-            return (List<Map<String, Object>>) result.get("tree");
+                .body(GiteaTree.class);
+        if (result == null || result.getTree() == null) {
+            return List.of();
         }
-        return List.of();
+        return result.getTree().stream().map(GiteaTree.Entry::toRepositoryTreeEntry).toList();
     }
 
     @Override
