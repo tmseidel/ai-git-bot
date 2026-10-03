@@ -29,6 +29,45 @@ import static org.mockito.Mockito.when;
  */
 class AgentToolRouterWhitelistTest {
 
+    @Test
+    void reviewDeniesMutationsUnknownToolsAndUnselectedMcpBeforeDispatch() {
+        ToolExecutionService executor = mock(ToolExecutionService.class);
+        McpOrchestrationService mcp = mock(McpOrchestrationService.class);
+        var router = newRouter(executor, Set.of("cat", "branch-switcher", "write-file", "unknown"),
+                McpToolCatalog.empty(), mcp);
+        for (String tool : List.of("branch-switcher", "write-file", "unknown", "server.delete")) {
+            assertThat(router.execute(AgentToolRouter.Mode.REVIEW, ctx(tool, List.of())).success()).isFalse();
+        }
+        org.mockito.Mockito.verifyNoInteractions(executor, mcp);
+        assertThat(catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, McpToolCatalog.empty(),
+                Set.of("cat", "branch-switcher", "write-file"))).extracting(d -> d.name()).containsExactly("cat");
+        assertThat(catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, McpToolCatalog.empty(), null)).isEmpty();
+    }
+
+    @Test
+    void reviewAllowsConfiguredReadOnlyTool() {
+        ToolExecutionService executor = mock(ToolExecutionService.class);
+        when(executor.executeContextTool(any(), any(), any())).thenReturn(new ToolResult(true, 0, "read", ""));
+        var router = newRouter(executor, Set.of("cat"), McpToolCatalog.empty(), null);
+        assertThat(router.execute(AgentToolRouter.Mode.REVIEW, ctx("cat", List.of("README.md"))).success()).isTrue();
+        verify(executor).executeContextTool(any(), eqStr("cat"), eqArgs("README.md"));
+    }
+
+    @Test
+    void reviewAllowsOnlyTheExplicitlySelectedQualifiedMcpName() {
+        var executor = mock(ToolExecutionService.class);
+        var orchestration = mock(McpOrchestrationService.class);
+        var selected = new McpToolCatalog(List.of(new McpToolDefinition(
+                "srv", "read", "Read", "read", Map.of(), "srv.read")));
+        when(orchestration.isMcpTool(any(), any())).thenReturn(true);
+        when(orchestration.executeTool(any(), any(), any(), any())).thenReturn(new ToolResult(true, 0, "read", ""));
+        var router = newRouter(executor, Set.of(), selected, orchestration);
+        assertThat(router.execute(AgentToolRouter.Mode.REVIEW, ctx("read", List.of())).success()).isFalse();
+        assertThat(router.execute(AgentToolRouter.Mode.REVIEW, ctx("srv.read", List.of())).success()).isTrue();
+        verify(orchestration).executeTool(any(), any(), eqStr("srv.read"), any());
+        org.mockito.Mockito.verifyNoInteractions(executor);
+    }
+
     private final AgentConfigProperties agentConfig = new AgentConfigProperties();
     private final ToolCatalog catalog = new ToolCatalog(agentConfig);
 
@@ -126,6 +165,4 @@ class AgentToolRouterWhitelistTest {
         return org.mockito.ArgumentMatchers.argThat(actual -> actual != null && actual.equals(exp));
     }
 }
-
-
 
