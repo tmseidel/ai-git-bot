@@ -35,7 +35,11 @@ public final class ProcessSupport {
     }
 
     /** Captured result of a process whose combined output was drained asynchronously. */
-    public record CommandResult(boolean finished, int exitCode, String output) {
+    public record CommandResult(boolean finished, int exitCode, String output, boolean outputTruncated) {
+        /** Compatibility constructor for callers supplying complete output. */
+        public CommandResult(boolean finished, int exitCode, String output) {
+            this(finished, exitCode, output, false);
+        }
     }
 
     /** Replaces a child process environment with the minimal toolchain allowlist. */
@@ -140,7 +144,8 @@ public final class ProcessSupport {
             captureDescendants(process, descendants);
             descendantTracker = startDescendantTracker(process, descendants);
         }
-        Thread reader = startOutputReader(process, output, Math.max(0, maxOutputBytes));
+        var truncated = new java.util.concurrent.atomic.AtomicBoolean();
+        Thread reader = startOutputReader(process, output, Math.max(0, maxOutputBytes), truncated);
         try {
             boolean finished = process.waitFor(timeout, unit);
             if (finished) {
@@ -165,7 +170,7 @@ public final class ProcessSupport {
             }
             synchronized (output) {
                 return new CommandResult(finished, finished ? process.exitValue() : -1,
-                        decodeUtf8(output.toByteArray()));
+                        decodeUtf8(output.toByteArray()), truncated.get());
             }
         } catch (InterruptedException e) {
             processGroupCleanup.run();
@@ -292,7 +297,8 @@ public final class ProcessSupport {
         }
     }
 
-    private static Thread startOutputReader(Process process, ByteArrayOutputStream output, int maxOutputBytes) {
+    private static Thread startOutputReader(Process process, ByteArrayOutputStream output, int maxOutputBytes,
+                                           java.util.concurrent.atomic.AtomicBoolean truncated) {
         Thread reader = new Thread(() -> {
             byte[] buffer = new byte[OUTPUT_BUFFER_SIZE];
             try (InputStream input = process.getInputStream()) {
@@ -300,6 +306,7 @@ public final class ProcessSupport {
                 while ((read = input.read(buffer)) != -1) {
                     synchronized (output) {
                         int remaining = maxOutputBytes - output.size();
+                        if (read > remaining) truncated.set(true);
                         if (remaining > 0) {
                             output.write(buffer, 0, Math.min(read, remaining));
                         }

@@ -206,8 +206,8 @@ public class OpenAiClient extends AbstractAiClient {
                 reason = StopReason.TOOL_USE;
             }
         }
-        long inputTokens = 0L;
-        long outputTokens = 0L;
+        Integer inputTokens = null;
+        Integer outputTokens = null;
         if (response.getUsage() != null) {
             inputTokens = response.getUsage().getPromptTokens();
             outputTokens = response.getUsage().getCompletionTokens();
@@ -215,7 +215,9 @@ public class OpenAiClient extends AbstractAiClient {
                     inputTokens, outputTokens, calls.size());
             reportUsage(inputTokens, outputTokens, 0L, 0L, request, response);
         }
-        return new ChatTurn(text, calls, reason, inputTokens, outputTokens);
+        return ChatTurn.withReportedUsage(text, calls, reason,
+                inputTokens == null ? null : inputTokens.longValue(),
+                outputTokens == null ? null : outputTokens.longValue());
     }
 
     private StopReason mapStopReason(String finishReason) {

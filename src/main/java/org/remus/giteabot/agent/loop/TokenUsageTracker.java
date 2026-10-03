@@ -71,13 +71,13 @@ public final class TokenUsageTracker {
         long inputTokens;
         long outputTokens;
 
-        if (turn.inputTokens() > 0) {
+        if (turn.inputTokensReported()) {
             inputTokens = turn.inputTokens();
         } else {
             inputTokens = estimateTokens(promptChars);
         }
 
-        if (turn.outputTokens() > 0) {
+        if (turn.outputTokensReported()) {
             outputTokens = turn.outputTokens();
         } else {
             outputTokens = estimateTokens(turn.assistantText() == null ? 0 : turn.assistantText().length());

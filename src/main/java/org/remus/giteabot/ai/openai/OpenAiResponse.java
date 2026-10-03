@@ -63,10 +63,10 @@ public class OpenAiResponse {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Usage {
         @JsonProperty("prompt_tokens")
-        private int promptTokens;
+        private Integer promptTokens;
 
         @JsonProperty("completion_tokens")
-        private int completionTokens;
+        private Integer completionTokens;
 
         @JsonProperty("total_tokens")
         private int totalTokens;
