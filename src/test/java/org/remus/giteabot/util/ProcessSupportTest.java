@@ -1,6 +1,8 @@
 package org.remus.giteabot.util;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +42,7 @@ class ProcessSupportTest {
     }
 
     @Test
+    @EnabledOnOs(value = OS.LINUX, disabledReason = "Process-group isolation requires Linux")
     void waitFor_terminatesBackgroundChildAfterSuccessfulParentExit(
             @org.junit.jupiter.api.io.TempDir Path tempDir) throws Exception {
         String executable = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
@@ -61,6 +64,7 @@ class ProcessSupportTest {
     }
 
     @Test
+    @EnabledOnOs(value = OS.LINUX, disabledReason = "Process-group isolation requires Linux")
     void runInNewProcessGroup_terminatesBackgroundChildOnTimeout(
             @org.junit.jupiter.api.io.TempDir Path tempDir) throws Exception {
         String executable = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
@@ -85,6 +89,8 @@ class ProcessSupportTest {
         String executable = System.getProperty("os.name").startsWith("Windows") ? "java.exe" : "java";
         Process process = new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", executable).toString(),
+                // Without this the child writes in the platform encoding, which is not UTF-8 on Windows.
+                "-Dstdout.encoding=UTF-8",
                 "-cp", System.getProperty("java.class.path"), UnicodeOutputProcess.class.getName())
                 .redirectErrorStream(true)
                 .start();

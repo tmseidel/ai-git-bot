@@ -11,8 +11,13 @@ permissions:
 
 jobs:
   verify:
-    name: Build and verify
-    runs-on: ubuntu-latest
+    name: Build and verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Report every OS even when one fails, so platform-specific failures are visible.
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
 
     steps:
       - name: Checkout repository

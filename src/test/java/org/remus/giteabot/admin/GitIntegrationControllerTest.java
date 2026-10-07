@@ -364,13 +364,14 @@ class GitIntegrationControllerTest {
     void confirm_staleVersionReportsReloadAndRetry() throws Exception {
         org.mockito.Mockito.doThrow(new jakarta.persistence.OptimisticLockException("stale"))
                 .when(giteaSshSetupService).setup(7L, 3L, "scan", true);
-        var result = mockMvc.perform(post("/git-integrations/7/ssh/setup")
+        // Pin the request locale so the result does not depend on the JVM default.
+        var result = mockMvc.perform(post("/git-integrations/7/ssh/setup").locale(java.util.Locale.GERMAN)
                         .with(user("admin").roles("ADMIN")).with(csrf())
                         .param("lockVersion", "3").param("confirmation", "scan").param("confirmed", "true"))
                 .andExpect(redirectedUrl("/git-integrations/7/edit")).andReturn();
         org.junit.jupiter.api.Assertions.assertEquals(
                 messageSource.getMessage("flash.staleIntegration", null,
-                        org.springframework.context.i18n.LocaleContextHolder.getLocale()),
+                        java.util.Locale.GERMAN),
                 result.getFlashMap().get("error"));
     }
 
@@ -378,14 +379,14 @@ class GitIntegrationControllerTest {
     void save_staleVersionReportsReloadAndRetry() throws Exception {
         org.mockito.Mockito.doThrow(new jakarta.persistence.OptimisticLockException("stale"))
                 .when(gitIntegrationService).save(any(), anyBoolean(), anyBoolean());
-        var result = mockMvc.perform(post("/git-integrations/save")
+        var result = mockMvc.perform(post("/git-integrations/save").locale(java.util.Locale.GERMAN)
                         .with(user("admin").roles("ADMIN")).with(csrf())
                         .param("id", "7").param("name", "production").param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com").param("transport", "HTTP"))
                 .andExpect(flash().attributeExists("error")).andReturn();
         org.junit.jupiter.api.Assertions.assertEquals(
                 messageSource.getMessage("flash.staleIntegration", null,
-                        org.springframework.context.i18n.LocaleContextHolder.getLocale()),
+                        java.util.Locale.GERMAN),
                 result.getFlashMap().get("error"));
     }
 

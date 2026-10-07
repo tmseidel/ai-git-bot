@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.util.TestSymlinks;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -197,7 +198,7 @@ class ToolExecutionServiceTest {
         Files.createDirectories(workspace);
         Files.createDirectories(outside);
         Files.writeString(outside.resolve("secret.txt"), "should-not-be-visible");
-        Files.createSymbolicLink(workspace.resolve("linked"), outside);
+        TestSymlinks.createOrSkip(workspace.resolve("linked"), outside);
 
         ToolResult result = service.executeContextTool(workspace, "cat", List.of("linked/secret.txt"));
 
@@ -212,7 +213,7 @@ class ToolExecutionServiceTest {
         Files.createDirectories(workspace);
         Files.createDirectories(outside);
         Files.writeString(outside.resolve("secret.txt"), "host-only-secret");
-        Files.createSymbolicLink(workspace.resolve("linked-secret.txt"), outside.resolve("secret.txt"));
+        TestSymlinks.createOrSkip(workspace.resolve("linked-secret.txt"), outside.resolve("secret.txt"));
 
         ToolResult searchResult = service.executeContextTool(workspace, "rg", List.of("host-only-secret", "."));
         ToolResult findResult = service.executeContextTool(workspace, "find", List.of("*", "."));

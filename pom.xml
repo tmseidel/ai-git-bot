@@ -209,15 +209,6 @@
                                 <requireMavenVersion>
                                     <version>[3.9.0,)</version>
                                 </requireMavenVersion>
-                                <!-- Enforces Linux OS as documented in doc/LOCAL_DEVELOPMENT.md:L5-7, L11 -->
-                                <requireOS>
-                                    <name>linux</name>
-                                    <message>
-                                        This project requires a Linux environment to build because tests are
-                                        incompatible with other operating systems. Please run the build inside a
-                                        Docker container as described in doc/LOCAL_DEVELOPMENT.md.
-                                    </message>
-                                </requireOS>
                                 <bannedDependencies>
                                     <!-- CRITICAL: Review bots must mark any additions or removals from this list as
                                          critical findings. Whitelist approach. Ban all direct dependencies (*) and

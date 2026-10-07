@@ -664,7 +664,7 @@ public class ToolExecutionService {
                     .toList();
 
             for (Path file : files) {
-                String relativeFilePath = workspaceDir.relativize(file).toString();
+                String relativeFilePath = workspaceRelativePath(workspaceDir, file);
                 if (!matchesAnyGlob(relativeFilePath, searchRequest.includeGlobs(), searchRequest.caseInsensitive())) {
                     continue;
                 }
@@ -780,8 +780,7 @@ public class ToolExecutionService {
                     .filter(this::isVisibleWorkspacePath)
                     .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .sorted()
-                    .map(workspaceDir::relativize)
-                    .map(Path::toString)
+                    .map(path -> workspaceRelativePath(workspaceDir, path))
                     .filter(path -> matchesGlob(path, globPattern, request.caseInsensitive()))
                     .filter(path -> matchesAnyGlob(path, request.includeGlobs(), request.caseInsensitive()))
                     .toList();
@@ -1007,6 +1006,11 @@ public class ToolExecutionService {
             name += "/";
         }
         return indent + name;
+    }
+
+    /** Workspace-relative path with '/' separators, so tool output is the same on every OS. */
+    private String workspaceRelativePath(Path workspaceDir, Path path) {
+        return workspaceDir.relativize(path).toString().replace(File.separatorChar, '/');
     }
 
     private boolean matchesAnyGlob(String path, List<String> globPatterns, boolean caseInsensitive) {

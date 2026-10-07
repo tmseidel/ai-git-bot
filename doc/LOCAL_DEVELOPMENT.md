@@ -10,6 +10,7 @@ This guide covers building, testing, and running AI-Git-Bot locally for developm
 - **OpenSSH client tools** (`ssh`, `ssh-keygen`, and `ssh-keyscan`) on `PATH`
   when using SSH Git transport in native or executable-JAR runs. The official
   Docker image includes them through `openssh-client`.
+- **Git** in an up-to-date version
 
 ## Build & Test
 

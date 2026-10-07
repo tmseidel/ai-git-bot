@@ -58,7 +58,7 @@ class WorkspacePathsTest {
         Path outside = root.resolve("outside");
         Files.createDirectories(workspace);
         Files.createDirectories(outside);
-        Files.createSymbolicLink(workspace.resolve("linked"), outside);
+        TestSymlinks.createOrSkip(workspace.resolve("linked"), outside);
 
         assertThatThrownBy(() -> WorkspacePaths.resolveInsideWorkspace(workspace, "linked/secret.txt"))
                 .isInstanceOf(IllegalArgumentException.class)

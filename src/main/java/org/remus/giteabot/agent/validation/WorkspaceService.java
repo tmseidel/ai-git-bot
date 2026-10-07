@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -20,6 +21,7 @@ import java.nio.file.attribute.AclEntry;
 import java.nio.file.attribute.AclEntryPermission;
 import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -634,7 +636,8 @@ public class WorkspaceService {
             args.add("-c");
             args.add("credential.helper=");
             args.add("-c");
-            args.add("credential.helper=store --file=" + setup.credentialsFile().toAbsolutePath());
+            // Git runs the helper through a shell: quote so Windows backslashes survive.
+            args.add("credential.helper=store --file=" + shellQuote(setup.credentialsFile()));
         }
         if (setup != null && setup.sshPrivateKeyFile() != null && setup.sshKnownHostsFile() != null) {
             String sshCommand = "ssh -F /dev/null -i " + shellQuote(setup.sshPrivateKeyFile())
@@ -854,7 +857,7 @@ public class WorkspaceService {
         IOException failure = null;
         for (Path path : paths) {
             try {
-                Files.delete(path);
+                deletePath(path);
             } catch (IOException e) {
                 log.warn("Failed to delete {}: {}", path, e.getMessage());
                 if (failure == null) {
@@ -866,6 +869,24 @@ public class WorkspaceService {
         }
         if (failure != null) {
             throw failure;
+        }
+    }
+
+    /**
+     * Deletes one path. Windows refuses to delete read-only files, and Git writes
+     * its object files read-only, so clear the DOS read-only attribute and retry.
+     */
+    private void deletePath(Path path) throws IOException {
+        try {
+            Files.delete(path);
+        } catch (AccessDeniedException e) {
+            DosFileAttributeView dosView = Files.getFileAttributeView(
+                    path, DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+            if (dosView == null || !dosView.readAttributes().isReadOnly()) {
+                throw e;
+            }
+            dosView.setReadOnly(false);
+            Files.delete(path);
         }
     }
 }

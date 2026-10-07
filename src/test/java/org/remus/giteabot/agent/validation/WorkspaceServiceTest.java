@@ -421,10 +421,24 @@ class WorkspaceServiceTest {
         try {
             assertThat(workspaceService.gitConfigArgs(setup)).containsExactly(
                     "-c", "credential.helper=",
-                    "-c", "credential.helper=store --file=" + credentials.toAbsolutePath());
+                    "-c", "credential.helper=store --file='"
+                            + credentials.toAbsolutePath().normalize() + "'");
         } finally {
             workspaceService.cleanupWorkspace(workspace);
         }
+    }
+
+    @Test
+    void deleteDirectory_removesReadOnlyFiles() throws IOException {
+        // Git writes object files read-only, which Windows refuses to delete as-is.
+        Path dir = tempDir.resolve("read-only-tree");
+        Path objects = Files.createDirectories(dir.resolve(".git").resolve("objects").resolve("ab"));
+        Path object = Files.writeString(objects.resolve("cdef"), "blob");
+        assertThat(object.toFile().setReadOnly()).isTrue();
+
+        workspaceService.deleteDirectory(dir);
+
+        assertThat(dir).doesNotExist();
     }
 
     @Test
