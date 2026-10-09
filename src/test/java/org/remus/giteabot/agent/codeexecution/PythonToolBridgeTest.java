@@ -1,6 +1,8 @@
 package org.remus.giteabot.agent.codeexecution;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.ai.ToolDescriptor;
 import tools.jackson.databind.JsonNode;
@@ -139,9 +141,29 @@ class PythonToolBridgeTest {
         PythonToolBridge bridge = bridge(advertised("cat"), returns(ok("x".repeat(100))),
                 limits(50, 10));
 
-        String output = bridge.handle(call("cat")).path("result").path("output").asString();
+        JsonNode result = bridge.handle(call("cat")).path("result");
+        String output = result.path("output").asString();
 
         assertThat(output).startsWith("x".repeat(10)).contains("truncated at 10 chars");
+        assertThat(result.path("outputTruncated").asBoolean()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void nestedResultsPreserveUpstreamTruncationWithoutWarningForCompleteOutput(boolean truncated) {
+        PythonToolBridge bridge = bridge(advertised("cat"),
+                returns(new ToolResult(true, 0, "captured prefix", "", truncated)), limits());
+
+        JsonNode result = bridge.handle(call("cat")).path("result");
+
+        assertThat(result.has("outputTruncated")).isTrue();
+        assertThat(result.path("outputTruncated").asBoolean()).isEqualTo(truncated);
+        if (truncated) {
+            assertThat(result.path("output").asString()).startsWith("captured prefix")
+                    .contains("not complete evidence");
+        } else {
+            assertThat(result.path("output").asString()).isEqualTo("captured prefix");
+        }
     }
 
     @Test
