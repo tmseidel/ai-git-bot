@@ -290,6 +290,30 @@ class BotWebhookServiceTest {
         assertTrue(botWebhookService.isReviewAgainRequestFromPullRequestAuthor(payload, "@ai_bot"));
     }
 
+    @Test
+    void isReviewAgainRequest_ignoresReviewKeywordInBotAlias() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setBody("@AI_Review_Bot can you repeat that explanation?");
+        payload.setComment(comment);
+
+        assertFalse(botWebhookService.isReviewAgainRequest(payload, "@AI_Review_Bot"));
+    }
+
+    @Test
+    void isReviewAgainRequest_usernameAliasNeedsReviewKeywordOutsideAlias() {
+        // GitLab aliases are "@" + bot username; "review" inside the username no longer counts
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setBody("@reviewbot again");
+        payload.setComment(comment);
+
+        assertFalse(botWebhookService.isReviewAgainRequest(payload, "@reviewbot"));
+
+        comment.setBody("@reviewbot please review this again");
+        assertTrue(botWebhookService.isReviewAgainRequest(payload, "@reviewbot"));
+    }
+
     // ---- handlePrComment routing tests ----
 
     @Test

@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
@@ -221,8 +222,7 @@ public class GiteaWebhookHandler {
         if (payload.getComment() != null && payload.getComment().getPath() != null
                 && !payload.getComment().getPath().isBlank()) {
             if ("created".equals(payload.getAction())
-                    && payload.getComment().getBody() != null
-                    && payload.getComment().getBody().contains(botAlias)) {
+                    && BotMention.isMentioned(payload.getComment().getBody(), botAlias)) {
                 botWebhookService.handleInlineComment(bot, payload);
                 return ResponseEntity.ok("inline comment response triggered");
             }
@@ -239,7 +239,7 @@ public class GiteaWebhookHandler {
                 return ResponseEntity.ok("ignored");
             }
             String body = payload.getComment().getBody();
-            if (body == null || !body.contains(botAlias)) {
+            if (!BotMention.isMentioned(body, botAlias)) {
                 log.debug("Issue comment {} does not mention bot alias '{}', ignoring",
                         payload.getComment().getId(), botAlias);
                 return ResponseEntity.ok("ignored");

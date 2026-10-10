@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
@@ -96,7 +97,7 @@ public class GitHubWebhookHandler {
             return ResponseEntity.ok("ignored");
         }
         String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (body == null || !body.contains(botAlias)) {
+        if (!BotMention.isMentioned(body, botAlias)) {
             return ResponseEntity.ok("ignored");
         }
         // Check if the comment is on a PR (issue with pull_request link)
@@ -123,8 +124,8 @@ public class GitHubWebhookHandler {
         if (!"created".equals(payload.getAction())) {
             return ResponseEntity.ok("ignored");
         }
-        if (payload.getComment() != null && payload.getComment().getBody() != null
-                && payload.getComment().getBody().contains(botAlias)) {
+        if (payload.getComment() != null
+                && BotMention.isMentioned(payload.getComment().getBody(), botAlias)) {
             botWebhookService.handleInlineComment(bot, payload);
             return ResponseEntity.ok("inline comment response triggered");
         }

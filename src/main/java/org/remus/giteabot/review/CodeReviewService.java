@@ -12,6 +12,7 @@ import org.remus.giteabot.repository.model.ReviewComment;
 import org.remus.giteabot.review.enrichment.PrContextEnricher;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.session.SessionService;
+import org.remus.giteabot.util.BotMention;
 import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.ArrayList;
@@ -421,7 +422,7 @@ public class CodeReviewService {
             // Filter for comments that mention the bot, excluding the bot's own comments
             String botAlias = (botUsername != null && !botUsername.isBlank()) ? "@" + botUsername : "";
             List<ReviewComment> botMentionComments = comments.stream()
-                    .filter(c -> c.getBody() != null && c.getBody().contains(botAlias))
+                    .filter(c -> BotMention.isMentioned(c.getBody(), botAlias))
                     .filter(c -> !isBotComment(c, botUsername))
                     .toList();
 

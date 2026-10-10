@@ -22,6 +22,7 @@ import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.review.CodeReviewService;
+import org.remus.giteabot.util.BotMention;
 import org.remus.giteabot.util.BranchFilter;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -414,7 +415,7 @@ public class BotWebhookService {
             try {
                 if (agenticEnabled) {
                     String question = extractReviewBody(payload);
-                    if (!mentionsBot(bot, question)) {
+                    if (!BotMention.isMentioned(question, getBotAlias(bot))) {
                         log.debug("[Bot '{}'] Submitted review does not mention the bot — ignoring (agentic-review only responds when addressed)",
                                 bot.getName());
                         return;
@@ -828,19 +829,6 @@ public class BotWebhookService {
         return "@" + username;
     }
 
-    /**
-     * Returns {@code true} when {@code text} @-mentions the bot. Used to gate
-     * agentic responses so the bot only reacts when it is explicitly addressed,
-     * never on unrelated activity (e.g. another reviewer's approval or comment).
-     */
-    private boolean mentionsBot(Bot bot, String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        String alias = getBotAlias(bot);
-        return !alias.isEmpty() && text.contains(alias);
-    }
-
     public boolean isPullRequestAuthor(WebhookPayload payload) {
         String author = null;
         if (payload.getPullRequest() != null && payload.getPullRequest().getUser() != null) {
@@ -868,10 +856,11 @@ public class BotWebhookService {
 
     public boolean isReviewAgainRequest(WebhookPayload payload, String botAlias) {
         String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (body == null || botAlias == null || !body.contains(botAlias)) {
+        if (!BotMention.isMentioned(body, botAlias)) {
             return false;
         }
-        String normalized = body.toLowerCase();
+        // Ignore the alias itself, so a bot named e.g. @reviewbot does not count as asking for a review
+        String normalized = BotMention.replaceMention(body, botAlias, " ").toLowerCase();
         return normalized.contains("review")
                 && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
     }
