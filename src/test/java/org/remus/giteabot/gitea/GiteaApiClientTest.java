@@ -5,8 +5,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -175,6 +179,69 @@ class GiteaApiClientTest {
 
         assertThrows(IllegalStateException.class,
                 () -> client.getPullRequestHead("base", "project", 7L, "main"));
+        server.verify();
+    }
+
+    @Test
+    void getRepositoryTree_mapsBlobAndTreeEntries() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/git/trees/main?recursive=true"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"sha":"abc","truncated":false,"page":1,"total_count":2,"tree":[
+                          {"path":"src","mode":"040000","type":"tree","sha":"t1"},
+                          {"path":"src/App.java","mode":"100644","type":"blob","sha":"b1","size":42}]}
+                        """, MediaType.APPLICATION_JSON));
+
+        List<RepositoryTreeEntry> tree = client.getRepositoryTree("base", "project", "main");
+
+        server.verify();
+        assertEquals(List.of(
+                new RepositoryTreeEntry("src", RepositoryTreeEntry.Type.DIRECTORY),
+                new RepositoryTreeEntry("src/App.java", RepositoryTreeEntry.Type.FILE)), tree);
+    }
+
+    @Test
+    void getPullRequestCommits_mapsShaAndNestedMessage() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/pulls/7/commits"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        [{"sha":"abc1234567890","commit":{"message":"Add login","author":{"name":"Jane"}},
+                          "html_url":"https://gitea.example.com/base/project/commit/abc1234567890"}]
+                        """, MediaType.APPLICATION_JSON));
+
+        List<PullRequestCommit> commits = client.getPullRequestCommits("base", "project", 7L);
+
+        server.verify();
+        assertEquals(List.of(new PullRequestCommit("abc1234567890", "Add login")), commits);
+    }
+
+    @Test
+    void getPullRequestDetails_mapsTitleBodyAndHead() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/pulls/7"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"number":7,"state":"open","merged":false,"title":"Add login","body":"Adds the login page",
+                         "head":{"ref":"feature/login","sha":"abc123","label":"feature/login"},
+                         "base":{"ref":"main","sha":"def456"}}
+                        """, MediaType.APPLICATION_JSON));
+
+        PullRequestDetails details = client.getPullRequestDetails("base", "project", 7L).orElseThrow();
+
+        assertEquals(new PullRequestDetails("Add login", "Adds the login page", PullRequestState.OPEN,
+                "feature/login", "abc123", "main", "def456"),
+                details);
         server.verify();
     }
 

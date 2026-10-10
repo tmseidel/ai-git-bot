@@ -33,6 +33,7 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
 import java.nio.file.Path;
@@ -174,7 +175,7 @@ public class IssueImplementationService {
             workspaceDir = wsResult.workspacePath();
 
             // Fetch repository tree for context
-            List<Map<String, Object>> tree = repositoryClient.getRepositoryTree(owner, repo, baseBranch);
+            List<RepositoryTreeEntry> tree = repositoryClient.getRepositoryTree(owner, repo, baseBranch);
             String treeContext  = promptBuilder.buildTreeContext(tree);
             String systemPrompt = resolveAgentSystemPrompt();
 

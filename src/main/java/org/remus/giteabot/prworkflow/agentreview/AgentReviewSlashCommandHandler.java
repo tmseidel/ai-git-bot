@@ -6,6 +6,7 @@ import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
@@ -104,12 +105,7 @@ public class AgentReviewSlashCommandHandler {
 
         // Hydrate PR details when the webhook only carries an issue block
         // (GitHub issue_comment events lack the pull_request object).
-        try {
-            hydratePullRequest(bot, payload);
-        } catch (RuntimeException e) {
-            log.warn("[Bot '{}'] Could not hydrate PR details for clarification: {}",
-                    bot.getName(), e.getMessage());
-        }
+        PrPayloadHydrator.hydrate(payload, () -> repositoryClientFactory.getApiClient(bot.getGitIntegration()));
 
         try {
             var hints = Map.of(
@@ -159,7 +155,7 @@ public class AgentReviewSlashCommandHandler {
         if (payload.getRepository() == null || payload.getRepository().getOwner() == null) {
             return;
         }
-        Long prNumber = resolvePrNumber(payload);
+        Long prNumber = PrPayloadHydrator.resolvePrNumber(payload);
         if (prNumber == null) {
             return;
         }
@@ -177,69 +173,6 @@ public class AgentReviewSlashCommandHandler {
             log.warn("[Bot '{}'] Failed to post internal-error comment on PR #{}: {}",
                     bot.getName(), prNumber, postError.getMessage());
         }
-    }
-
-    private Long resolvePrNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
-            return payload.getPullRequest().getNumber();
-        }
-        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
-            return payload.getIssue().getNumber();
-        }
-        return payload.getNumber();
-    }
-
-    @SuppressWarnings("unchecked")
-    private void hydratePullRequest(Bot bot, WebhookPayload payload) {
-        if (payload.getPullRequest() != null
-                && payload.getPullRequest().getHead() != null
-                && payload.getPullRequest().getHead().getRef() != null
-                && !payload.getPullRequest().getHead().getRef().isBlank()) {
-            return; // already complete
-        }
-        if (payload.getRepository() == null || payload.getRepository().getOwner() == null) {
-            return;
-        }
-        Long prNumber = resolvePrNumber(payload);
-        if (prNumber == null || prNumber <= 0) {
-            return;
-        }
-        String owner = payload.getRepository().getOwner().getLogin();
-        String repo = payload.getRepository().getName();
-        RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
-        Map<String, Object> pr = client.getPullRequestDetails(owner, repo, prNumber);
-        if (pr == null || pr.isEmpty()) {
-            log.debug("[Bot '{}'] getPullRequestDetails returned empty for {}/{}#{} — "
-                    + "provider may not support hydration",
-                    bot.getName(), owner, repo, prNumber);
-            return;
-        }
-        WebhookPayload.PullRequest target = payload.getPullRequest();
-        if (target == null) {
-            target = new WebhookPayload.PullRequest();
-            payload.setPullRequest(target);
-        }
-        target.setNumber(prNumber);
-        if (pr.get("title") instanceof String t) target.setTitle(t);
-        if (pr.get("body") instanceof String b) target.setBody(b);
-        if (pr.get("state") instanceof String s) target.setState(s);
-        Map<String, Object> head = pr.get("head") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
-        if (head != null) {
-            WebhookPayload.Head h = new WebhookPayload.Head();
-            if (head.get("ref") instanceof String r) h.setRef(r);
-            if (head.get("sha") instanceof String s) h.setSha(s);
-            target.setHead(h);
-        }
-        Map<String, Object> base = pr.get("base") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
-        if (base != null) {
-            WebhookPayload.Head b = new WebhookPayload.Head();
-            if (base.get("ref") instanceof String r) b.setRef(r);
-            if (base.get("sha") instanceof String s) b.setSha(s);
-            target.setBase(b);
-        }
-        log.info("[Bot '{}'] Hydrated PR #{} for {}/{} — head={}",
-                bot.getName(), prNumber, owner, repo,
-                target.getHead() == null ? null : target.getHead().getRef());
     }
 
     private static @NonNull String abbreviate(String s, int max) {

@@ -3,9 +3,9 @@ package org.remus.giteabot.review.enrichment;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestCommit;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * Enriches PR context with commit messages from the pull request.
@@ -26,21 +26,21 @@ public class CommitMessagesEnricher implements ContextEnricher {
     @Override
     public String enrich(EnrichmentContext context) {
         try {
-            List<Map<String, Object>> commits = repositoryClient.getPullRequestCommits(
+            List<PullRequestCommit> commits = repositoryClient.getPullRequestCommits(
                     context.owner(), context.repo(), context.prNumber());
-            if (commits == null || commits.isEmpty()) {
+            if (commits.isEmpty()) {
                 return "";
             }
 
             StringBuilder sb = new StringBuilder("**Commit messages:**\n");
             int count = 0;
-            for (Map<String, Object> commit : commits) {
+            for (PullRequestCommit commit : commits) {
                 if (count >= config.getMaxCommitMessages()) {
                     sb.append("... (").append(commits.size() - count).append(" more commits)\n");
                     break;
                 }
-                String message = extractCommitMessage(commit);
-                String sha = extractCommitSha(commit);
+                String message = commit.message();
+                String sha = commit.sha();
                 if (message != null && !message.isBlank()) {
                     sb.append("- ");
                     if (sha != null && sha.length() >= 7) {
@@ -58,32 +58,6 @@ public class CommitMessagesEnricher implements ContextEnricher {
                     context.prNumber(), context.owner(), context.repo(), e.getMessage());
             return "";
         }
-    }
-
-    /**
-     * Extracts the commit message from a commit map.
-     * Handles different API response formats (GitHub/Gitea nest message under "commit").
-     */
-    @SuppressWarnings("unchecked")
-    private String extractCommitMessage(Map<String, Object> commit) {
-        if (commit.containsKey("commit") && commit.get("commit") instanceof Map) {
-            Map<String, Object> inner = (Map<String, Object>) commit.get("commit");
-            return (String) inner.get("message");
-        }
-        return (String) commit.get("message");
-    }
-
-    /**
-     * Extracts the commit SHA from a commit map.
-     */
-    private String extractCommitSha(Map<String, Object> commit) {
-        if (commit.containsKey("sha")) {
-            return (String) commit.get("sha");
-        }
-        if (commit.containsKey("id")) {
-            return (String) commit.get("id");
-        }
-        return null;
     }
 }
 

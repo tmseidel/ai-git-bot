@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflow;
 import org.remus.giteabot.prworkflow.PrWorkflowCategory;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
@@ -190,7 +191,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     public WorkflowResult run(PrWorkflowContext context) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
-        long prNumber = resolvePrNumber(payload);
+        long prNumber = PrPayloadHydrator.resolvePrNumberOrZero(payload);
 
         Map<String, Object> params = bot.getWorkflowConfiguration() == null
                 ? Map.of()
@@ -538,25 +539,6 @@ public class E2ETestWorkflow implements PrWorkflow {
             return null;
         }
         return payload.getPullRequest().getHead().getSha();
-    }
-
-    /**
-     * Resolves the pull-request number using the same fallback chain as
-     * {@code PrWorkflowOrchestrator.resolvePrNumber}: PR object first,
-     * then issue (for GitHub {@code issue_comment} events that lack the
-     * pull-request block), then the top-level {@code number} field.
-     */
-    private long resolvePrNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
-            return payload.getPullRequest().getNumber();
-        }
-        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
-            return payload.getIssue().getNumber();
-        }
-        if (payload.getNumber() != null) {
-            return payload.getNumber();
-        }
-        return 0L;
     }
 }
 
