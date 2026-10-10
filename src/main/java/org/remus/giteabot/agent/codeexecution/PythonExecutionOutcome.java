@@ -8,13 +8,32 @@ package org.remus.giteabot.agent.codeexecution;
  * success and carries {@code exit code N} or the timeout notice otherwise — the tool result
  * exposes both, so the model can tell a crashed program from a quiet one.</p>
  */
-public record PythonExecutionOutcome(boolean success, int exitCode, String output, String error) {
+public record PythonExecutionOutcome(boolean success, int exitCode, String output, String error,
+                                     boolean outputTruncated) {
 
-    public static PythonExecutionOutcome success(String output) {
-        return new PythonExecutionOutcome(true, 0, output, "");
+    /** Compatibility constructor for results without known output truncation. */
+    public PythonExecutionOutcome(boolean success, int exitCode, String output, String error) {
+        this(success, exitCode, output, error, false);
     }
 
+    /** Successful execution without known output truncation. */
+    public static PythonExecutionOutcome success(String output) {
+        return success(output, false);
+    }
+
+    /** Successful execution retaining capture or presentation truncation metadata. */
+    public static PythonExecutionOutcome success(String output, boolean outputTruncated) {
+        return new PythonExecutionOutcome(true, 0, output, "", outputTruncated);
+    }
+
+    /** Failed execution without known output truncation. */
     public static PythonExecutionOutcome failed(int exitCode, String output, String error) {
-        return new PythonExecutionOutcome(false, exitCode, output, error);
+        return failed(exitCode, output, error, false);
+    }
+
+    /** Failed execution retaining capture or presentation truncation metadata. */
+    public static PythonExecutionOutcome failed(int exitCode, String output, String error,
+                                              boolean outputTruncated) {
+        return new PythonExecutionOutcome(false, exitCode, output, error, outputTruncated);
     }
 }

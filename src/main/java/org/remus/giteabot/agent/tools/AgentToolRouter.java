@@ -241,7 +241,8 @@ public class AgentToolRouter {
                 (System.nanoTime() - started) / 1_000_000, outcome.success(), outcome.exitCode(),
                 outcome.output() == null ? 0 : outcome.output().length(),
                 outcome.error() == null || outcome.error().isBlank() ? "" : ", error=" + outcome.error());
-        return new ToolResult(outcome.success(), outcome.exitCode(), outcome.output(), outcome.error());
+        return new ToolResult(outcome.success(), outcome.exitCode(), outcome.output(), outcome.error(),
+                outcome.outputTruncated());
     }
 
     /**

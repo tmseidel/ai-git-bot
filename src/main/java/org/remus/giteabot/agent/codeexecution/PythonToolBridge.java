@@ -153,7 +153,14 @@ final class PythonToolBridge {
         ObjectNode payload = response.putObject("result");
         payload.put("success", result.success());
         payload.put("exitCode", result.exitCode());
-        payload.put("output", truncate(result.output()));
+        String output = truncate(result.output());
+        boolean truncated = result.outputTruncated()
+                || result.output() != null && result.output().length() > maxNestedResultChars;
+        if (result.outputTruncated()) {
+            output += "\n" + ToolResult.TRUNCATED_OUTPUT_WARNING;
+        }
+        payload.put("output", output);
+        payload.put("outputTruncated", truncated);
         if (result.error() != null && !result.error().isBlank()) {
             payload.put("error", truncate(result.error()));
         }

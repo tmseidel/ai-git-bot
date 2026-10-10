@@ -380,10 +380,9 @@ public class ProcessPythonExecutionService implements PythonExecutionService {
         if (cutByChars) {
             output = TextSupport.cutAtCodePoint(output, cap);
         }
-        // The capture is bounded in bytes, at this cap plus one slack window, so a result that never
-        // reaches the character cap can still have been cut: multi-byte text hits the byte budget
-        // first. Marking only the character cut would hand back a shortened result as a complete one.
-        boolean cutByBytes = output.getBytes(StandardCharsets.UTF_8).length >= cap + OUTPUT_SLACK_BYTES;
+        // Use actual discarded bytes: UTF-8 boundary trimming can leave the decoded output below
+        // the byte cap even though capture was truncated. Exact-cap output is not necessarily cut.
+        boolean cutByBytes = result.outputTruncated();
         if (cutByChars) {
             output = output + "\n[output truncated at " + cap + " chars]";
         } else if (cutByBytes) {
@@ -403,9 +402,10 @@ public class ProcessPythonExecutionService implements PythonExecutionService {
         }
         if (!error.isEmpty()) {
             return PythonExecutionOutcome.failed(
-                    result.finished() ? result.exitCode() : EXIT_TIMEOUT, output, error);
+                    result.finished() ? result.exitCode() : EXIT_TIMEOUT, output, error,
+                    cutByChars || cutByBytes);
         }
-        return PythonExecutionOutcome.success(output);
+        return PythonExecutionOutcome.success(output, cutByChars || cutByBytes);
     }
 
     private static void writeResource(Path directory, String fileName, String resource)
