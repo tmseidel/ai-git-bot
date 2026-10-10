@@ -2,6 +2,8 @@ package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.WorkflowDispatchRequest;
+import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -12,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -68,6 +71,80 @@ class BitbucketApiClientTest {
         BitbucketApiClient client = new BitbucketApiClient(null, credsWithUsername());
         assertEquals("myuser", client.getCredentials().username());
         assertTrue(client.getCredentials().hasUsername());
+    }
+
+    @Test
+    void getAuthenticatedAccount_fetchesUserOnceAndMemoizesIt() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"type":"user","uuid":"{bot-uuid}","account_id":"557058:bot","nickname":"ai-bot",
+                         "display_name":"AI Bot","links":{"avatar":{"href":"https://example.invalid/a.png"}}}
+                        """, MediaType.APPLICATION_JSON));
+
+        BitbucketAccount account = client.getAuthenticatedAccount();
+
+        assertEquals(new BitbucketAccount("{bot-uuid}", "557058:bot", "ai-bot", "AI Bot"), account);
+        assertSame(account, client.getAuthenticatedAccount());
+        assertEquals("@{557058:bot}", account.mention());
+        assertEquals(java.util.Optional.of("AI Bot"), client.getBotMentionName());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedAccount_rejectsBlankIds() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("""
+                        {"uuid":" ","account_id":"","display_name":"AI Bot"}
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThrows(IllegalStateException.class, client::getAuthenticatedAccount);
+        server.verify();
+    }
+
+    @Test
+    void dispatchWorkflow_postsToPipelinesBelowApiBaseUrl() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pipelines/"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(jsonPath("$.target.ref_name").value("feature"))
+                .andExpect(jsonPath("$.target.selector.pattern").value("preview"))
+                .andRespond(withSuccess("{\"uuid\":\"{run-1}\"}", MediaType.APPLICATION_JSON));
+
+        String runId = client.dispatchWorkflow(
+                new WorkflowDispatchRequest("workspace", "repo", "preview", "feature", Map.of()));
+
+        server.verify();
+        assertEquals("{run-1}", runId);
+    }
+
+    @Test
+    void getWorkflowRun_readsPipelineBelowApiBaseUrl() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pipelines/%7Brun-1%7D"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(
+                        "{\"state\":{\"name\":\"COMPLETED\",\"result\":{\"name\":\"SUCCESSFUL\"}}}",
+                        MediaType.APPLICATION_JSON));
+
+        WorkflowRunStatus status = client.getWorkflowRun("workspace", "repo", "{run-1}");
+
+        server.verify();
+        assertEquals(WorkflowRunStatus.COMPLETED_SUCCESS, status);
     }
 
     @Test

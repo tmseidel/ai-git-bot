@@ -70,7 +70,7 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 - [Gitea Setup](doc/GITEA_SETUP.md): bot user, permissions, token, and webhook setup for Gitea.
 - [GitHub Setup](doc/GITHUB_SETUP.md): bot user, PAT permissions, and webhook setup for GitHub.
 - [GitLab Setup](doc/GITLAB_SETUP.md): bot user, token, project access, and webhook setup for GitLab.
-- [Bitbucket Setup](doc/BITBUCKET_SETUP.md): Bitbucket Cloud app password and webhook configuration.
+- [Bitbucket Setup](doc/BITBUCKET_SETUP.md): Bitbucket Cloud API token (email + token) and webhook configuration.
 - [Ollama](doc/OLLAMA.md): local LLM setup through Ollama.
 - [llama.cpp](doc/LLAMACPP.md): local llama.cpp setup and grammar support.
 

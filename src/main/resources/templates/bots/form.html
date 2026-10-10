@@ -35,6 +35,10 @@
                             <label for="username" class="form-label" th:text="#{label.username}">Username</label>
                             <input type="text" class="form-control" id="username" th:field="*{username}"
                                    th:placeholder="#{placeholder.botUsername}" placeholder="Bot username on the Git platform" required/>
+                            <div class="form-text" id="bitbucketUsernameHint" style="display: none;"
+                                 th:text="#{help.bot.bitbucketUsername}">
+                                Has no effect for Bitbucket: the bot is identified by the Atlassian account email of its Git integration.
+                            </div>
                         </div>
 
                         <div class="col-12">
@@ -74,6 +78,7 @@
                                 <option value="" th:text="#{message.selectGitIntegration}">Select a Git integration...</option>
                                 <option th:each="git : ${gitIntegrations}"
                                         th:value="${git.id}" th:text="${git.name}"
+                                        th:attr="data-provider=${git.providerType}"
                                         th:selected="${bot.gitIntegration != null and bot.gitIntegration.id == git.id}">
                                 </option>
                             </select>
@@ -554,6 +559,16 @@
             const i18nWebhookSecretRemoved = /*[[#{help.bot.webhookSecretRemoved}]]*/ 'signing secret will be removed on save';
 
             document.addEventListener('DOMContentLoaded', function() {
+                const gitIntegrationSelect = document.getElementById('gitIntegrationId');
+                const bitbucketUsernameHint = document.getElementById('bitbucketUsernameHint');
+                function updateBitbucketUsernameHint() {
+                    const selected = gitIntegrationSelect.options[gitIntegrationSelect.selectedIndex];
+                    const isBitbucket = selected && selected.dataset.provider === 'BITBUCKET';
+                    bitbucketUsernameHint.style.display = isBitbucket ? 'block' : 'none';
+                }
+                gitIntegrationSelect.addEventListener('change', updateBitbucketUsernameHint);
+                updateBitbucketUsernameHint();
+
                 const systemPromptSelect = document.getElementById('systemPromptId');
                 const previewButton = document.getElementById('previewSystemPrompt');
                 const previewTitle = document.getElementById('systemPromptPreviewTitle');

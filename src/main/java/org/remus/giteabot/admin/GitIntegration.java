@@ -41,8 +41,8 @@ public class GitIntegration {
     private String url;
 
     /**
-     * Username for authentication (required for Bitbucket Cloud with App Passwords).
-     * For other providers, this field may be optional or unused.
+     * Bitbucket Cloud: the Atlassian account e-mail used with the API token for REST API calls.
+     * Unused for other providers.
      */
     @Column
     private String username;

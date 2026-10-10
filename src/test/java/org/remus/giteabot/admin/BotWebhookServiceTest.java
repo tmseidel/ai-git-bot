@@ -1227,6 +1227,42 @@ class BotWebhookServiceTest {
         }
 
         @Test
+        void unrecognisedCommandReply_usesProviderMentionNameOverBotUsername() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(repositoryApiClient.getBotMentionName()).thenReturn(Optional.of("AI Bot"));
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postIssueComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@AI Bot rerun-tests`").doesNotContain("@claude_bot");
+        }
+
+        @Test
+        void unrecognisedCommandReply_providerMentionLookupFails_stillPostsWithNeutralName() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(repositoryApiClient.getBotMentionName()).thenThrow(new IllegalStateException("401"));
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postIssueComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@bot rerun-tests`").doesNotContain("@claude_bot");
+        }
+
+        @Test
         void noAgentSession_botWithReviewWorkflow_stillRoutesToCodeReview() {
             // Sanity: an explicit configuration that DOES include review keeps the
             // existing code-review behaviour.

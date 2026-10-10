@@ -643,9 +643,9 @@ public class BotWebhookService {
         }
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
-        String body = buildUnrecognisedCommandReply(bot);
         try {
             RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, client));
             client.postIssueComment(owner, repo, prNumber, body);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to post unrecognised-command reply on PR #{}: {}",
@@ -653,8 +653,26 @@ public class BotWebhookService {
         }
     }
 
-    private String buildUnrecognisedCommandReply(Bot bot) {
-        String mention = bot.getUsername() == null ? "bot" : bot.getUsername();
+    /**
+     * Name to show after {@code @} in replies: the provider's mention name if it has one,
+     * otherwise the bot username. Falls back to "bot" when the provider lookup fails, since
+     * the bot username may not identify the bot on that provider (e.g. Bitbucket).
+     */
+    private String resolveMentionName(Bot bot, RepositoryApiClient client) {
+        try {
+            var providerName = client.getBotMentionName();
+            if (providerName.isPresent()) {
+                return providerName.get();
+            }
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Could not resolve the bot's mention name from the Git provider: {}",
+                    bot.getName(), e.getMessage());
+            return "bot";
+        }
+        return bot.getUsername() == null ? "bot" : bot.getUsername();
+    }
+
+    private String buildUnrecognisedCommandReply(Bot bot, String mention) {
         StringBuilder sb = new StringBuilder();
         sb.append("🤖 Sorry, I did not understand that command.\n\n");
         sb.append("This bot is not configured to run code reviews, so I can only respond ");

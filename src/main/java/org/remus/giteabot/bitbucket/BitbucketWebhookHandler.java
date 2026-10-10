@@ -2,8 +2,11 @@ package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.BotWebhookService;
+import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.repository.RepositoryApiClient;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
@@ -21,15 +24,26 @@ import java.util.Map;
  * Supported events: pullrequest:created, pullrequest:open, pullrequest:updated,
  * pullrequest:fulfilled, pullrequest:rejected, pullrequest:merged,
  * pullrequest:declined, pullrequest:comment_created.
+ * <p>
+ * The bot's identity is the Bitbucket account behind the e-mail/API token configured on
+ * the Git integration (the bot username is not used). Since webhook payloads carry no
+ * e-mail addresses, that account is resolved via {@code GET /user} and matched against
+ * payload users by {@code account_id}/{@code uuid}; mentions are detected via
+ * Bitbucket's raw {@code @{account_id}} markup.
  */
 @Slf4j
 @Component
 public class BitbucketWebhookHandler {
 
     private final BotWebhookService botWebhookService;
+    private final GiteaClientFactory clientFactory;
+    private final BotService botService;
 
-    public BitbucketWebhookHandler(BotWebhookService botWebhookService) {
+    public BitbucketWebhookHandler(BotWebhookService botWebhookService, GiteaClientFactory clientFactory,
+                                   BotService botService) {
         this.botWebhookService = botWebhookService;
+        this.clientFactory = clientFactory;
+        this.botService = botService;
     }
 
     /**
@@ -54,24 +68,26 @@ public class BitbucketWebhookHandler {
             return ResponseEntity.ok("ignored");
         }
 
-        // Ignore events triggered by the bot itself
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            String senderLogin = webhookPayload.getSender() != null ? webhookPayload.getSender().getLogin() : "null";
-            log.info("Ignoring Bitbucket webhook event from bot's own user. Bot username='{}', sender='{}'",
-                    bot.getUsername(), senderLogin);
+        BitbucketAccount botAccount = resolveBotAccount(bot);
+        if (botAccount == null) {
             return ResponseEntity.ok("ignored");
         }
 
-        String botAlias = botWebhookService.getBotAlias(bot);
-        log.debug("Event passed all checks, processing {} with botAlias='{}'", eventKey, botAlias);
+        // Ignore events triggered by the bot itself
+        if (isBotEvent(botAccount, payload)) {
+            log.info("Ignoring Bitbucket webhook event from bot's own account '{}'", botAccount.accountId());
+            return ResponseEntity.ok("ignored");
+        }
+
+        log.debug("Event passed all checks, processing {} with botAlias='{}'", eventKey, botAccount.mention());
 
         return switch (eventKey) {
             case "pullrequest:created", "pullrequest:updated", "pullrequest:open" ->
-                    handlePullRequestOpenedOrUpdated(bot, eventKey, webhookPayload, payload);
+                    handlePullRequestOpenedOrUpdated(bot, botAccount, eventKey, webhookPayload, payload);
             case "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:merged", "pullrequest:declined" ->
                     handlePullRequestClosed(bot, webhookPayload);
             case "pullrequest:comment_created" ->
-                    handlePullRequestComment(bot, webhookPayload, botAlias);
+                    handlePullRequestComment(bot, webhookPayload, botAccount);
             default -> {
                 log.warn("Unhandled Bitbucket event key: {}", eventKey);
                 yield ResponseEntity.ok("ignored");
@@ -79,11 +95,31 @@ public class BitbucketWebhookHandler {
         };
     }
 
-    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, String eventKey, WebhookPayload payload,
-                                                                     Map<String, Object> raw) {
+    /**
+     * Resolves the Bitbucket account of the integration's e-mail/API token, or returns
+     * {@code null} when it cannot be determined. Events are then ignored, because without
+     * the bot's identity its own comments could re-trigger it. The failure is recorded as
+     * the bot's last error so a misconfigured integration is visible in the admin UI.
+     */
+    private BitbucketAccount resolveBotAccount(Bot bot) {
+        String error;
+        try {
+            BitbucketApiClient client = (BitbucketApiClient) clientFactory.getApiClient(bot.getGitIntegration());
+            return client.getAuthenticatedAccount();
+        } catch (RuntimeException e) {
+            error = "Could not resolve the Bitbucket account for the configured Atlassian account email/API token: "
+                    + e.getMessage();
+        }
+        log.error("[Bot '{}'] {}", bot.getName(), error);
+        botService.recordError(bot, error);
+        return null;
+    }
+
+    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, BitbucketAccount botAccount, String eventKey,
+                                                                     WebhookPayload payload, Map<String, Object> raw) {
         if (("pullrequest:created".equals(eventKey) || "pullrequest:open".equals(eventKey))
-                ? (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload))
-                : botReviewerWasAdded(bot, raw)) {
+                ? (bot.isRunOnPrCreation() || hasBotReviewer(botAccount, raw))
+                : botReviewerWasAdded(botAccount, raw)) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
         }
@@ -96,11 +132,16 @@ public class BitbucketWebhookHandler {
     }
 
     private ResponseEntity<String> handlePullRequestComment(Bot bot, WebhookPayload payload,
-                                                             String botAlias) {
+                                                             BitbucketAccount botAccount) {
+        String rawMention = botAccount.mention();
         String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (body == null || !body.contains(botAlias)) {
+        if (body == null || rawMention.isEmpty() || !body.contains(rawMention)) {
             return ResponseEntity.ok("ignored");
         }
+
+        // Replace the opaque @{account_id} markup so downstream handlers and the AI see a readable name
+        String botAlias = botAccount.readableMention();
+        payload.getComment().setBody(body.replace(rawMention, botAlias));
 
         // Bitbucket inline comments have a path set via the "inline" field
         if (payload.getComment().getPath() != null) {
@@ -109,11 +150,11 @@ public class BitbucketWebhookHandler {
         }
 
         if (botWebhookService.isReviewAgainRequest(payload, botAlias)) {
-            if (botWebhookService.isReviewAgainRequestFromPullRequestAuthor(payload, botAlias)) {
-                botWebhookService.reviewPullRequest(bot, payload);
-                return ResponseEntity.ok("review triggered");
+            if (!botWebhookService.isPullRequestAuthor(payload)) {
+                return ResponseEntity.ok("ignored");
             }
-            return ResponseEntity.ok("ignored");
+            botWebhookService.reviewPullRequest(bot, payload);
+            return ResponseEntity.ok("review triggered");
         }
 
         // General PR comment mentioning the bot
@@ -194,24 +235,37 @@ public class BitbucketWebhookHandler {
             repository.setId((long) uuid.hashCode());
         }
 
-        Map<String, Object> ownerMap = (Map<String, Object>) repo.get("owner");
-        if (ownerMap != null) {
+        String workspace = resolveWorkspaceSlug(repo);
+        if (workspace != null) {
             WebhookPayload.Owner owner = new WebhookPayload.Owner();
-            String nickname = (String) ownerMap.get("nickname");
-            String username = (String) ownerMap.get("username");
-            String displayName = (String) ownerMap.get("display_name");
-            owner.setLogin(nickname != null ? nickname : (username != null ? username : displayName));
+            owner.setLogin(workspace);
             repository.setOwner(owner);
-        } else {
-            String fullName = (String) repo.get("full_name");
-            if (fullName != null && fullName.contains("/")) {
-                WebhookPayload.Owner owner = new WebhookPayload.Owner();
-                owner.setLogin(fullName.substring(0, fullName.indexOf("/")));
-                repository.setOwner(owner);
-            }
         }
 
         return repository;
+    }
+
+    /**
+     * Resolves the workspace slug used as {@code {workspace}} in API paths. The repository
+     * owner is not reliable: for team-owned workspaces its legacy {@code username} can differ
+     * from the slug (e.g. owner "postremus1" for workspace "postremus").
+     */
+    @SuppressWarnings("unchecked")
+    private String resolveWorkspaceSlug(Map<String, Object> repo) {
+        if (repo.get("workspace") instanceof Map<?, ?> workspace
+                && workspace.get("slug") instanceof String slug && !slug.isBlank()) {
+            return slug;
+        }
+        if (repo.get("full_name") instanceof String fullName && fullName.contains("/")) {
+            return fullName.substring(0, fullName.indexOf('/'));
+        }
+        Map<String, Object> ownerMap = (Map<String, Object>) repo.get("owner");
+        if (ownerMap == null) {
+            return null;
+        }
+        String nickname = (String) ownerMap.get("nickname");
+        String username = (String) ownerMap.get("username");
+        return nickname != null ? nickname : (username != null ? username : (String) ownerMap.get("display_name"));
     }
 
     @SuppressWarnings("unchecked")
@@ -307,32 +361,36 @@ public class BitbucketWebhookHandler {
         return owners.stream().map(this::extractBitbucketOwner).toList();
     }
 
-    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
-        return bot.getUsername() != null
-                && payload.getPullRequest() != null
-                && payload.getPullRequest().getRequestedReviewers() != null
-                && payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getUsername().equalsIgnoreCase(reviewer.getLogin()));
+    private boolean isBotEvent(BitbucketAccount botAccount, Map<String, Object> raw) {
+        if (botAccount.isSameAccount(asMap(raw.get("actor")))) {
+            return true;
+        }
+        Map<?, ?> comment = asMap(raw.get("comment"));
+        return comment != null && botAccount.isSameAccount(asMap(comment.get("user")));
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean botReviewerWasAdded(Bot bot, Map<String, Object> raw) {
-        if (bot.getUsername() == null || !(raw.get("changes") instanceof Map<?, ?> changes)) {
-            return false;
-        }
-        Object reviewers = changes.get("reviewers");
-        if (!(reviewers instanceof Map<?, ?> reviewersChange)) {
-            return false;
-        }
-        List<Map<String, Object>> current = (List<Map<String, Object>>) reviewersChange.get("new");
-        List<Map<String, Object>> previous = (List<Map<String, Object>>) reviewersChange.get("old");
-        return containsBitbucketUser(current, bot.getUsername()) && !containsBitbucketUser(previous, bot.getUsername());
+    private boolean hasBotReviewer(BitbucketAccount botAccount, Map<String, Object> raw) {
+        Map<?, ?> pullRequest = asMap(raw.get("pullrequest"));
+        return pullRequest != null && containsAccount(pullRequest.get("reviewers"), botAccount);
     }
 
-    private boolean containsBitbucketUser(List<Map<String, Object>> users, String username) {
-        return users != null && users.stream()
-                .map(this::extractBitbucketOwner)
-                .anyMatch(user -> user != null && username.equalsIgnoreCase(user.getLogin()));
+    private boolean botReviewerWasAdded(BitbucketAccount botAccount, Map<String, Object> raw) {
+        Map<?, ?> changes = asMap(raw.get("changes"));
+        Map<?, ?> reviewersChange = changes != null ? asMap(changes.get("reviewers")) : null;
+        if (reviewersChange == null) {
+            return false;
+        }
+        return containsAccount(reviewersChange.get("new"), botAccount)
+                && !containsAccount(reviewersChange.get("old"), botAccount);
+    }
+
+    private boolean containsAccount(Object users, BitbucketAccount account) {
+        return users instanceof List<?> list && list.stream()
+                .anyMatch(user -> account.isSameAccount(asMap(user)));
+    }
+
+    private static Map<?, ?> asMap(Object value) {
+        return value instanceof Map<?, ?> map ? map : null;
     }
 
 }

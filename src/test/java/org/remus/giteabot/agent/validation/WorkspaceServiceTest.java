@@ -309,13 +309,13 @@ class WorkspaceServiceTest {
     void authenticationFile_preservesConfiguredUsernameWithUppercaseScheme() throws IOException {
         WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
         RepositoryCredentials credentials = RepositoryCredentials.of(
-                "https://api.bitbucket.org", "HTTPS://bitbucket.org", "alice", "app-password");
+                "https://api.bitbucket.org", "HTTPS://bitbucket.org", "alice", "api-token");
 
         workspaceService.createAuthenticationFiles(
                 "HTTPS://bitbucket.org/owner/repo.git", credentials, setup);
 
         assertThat(Files.readString(setup.credentialsFile()))
-                .isEqualTo("https://alice:app-password@bitbucket.org\n");
+                .isEqualTo("https://alice:api-token@bitbucket.org\n");
         workspaceService.cleanupWorkspace(setup);
     }
 

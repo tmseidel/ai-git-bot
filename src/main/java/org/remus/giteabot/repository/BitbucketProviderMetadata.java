@@ -2,6 +2,7 @@ package org.remus.giteabot.repository;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
@@ -17,18 +18,21 @@ import java.util.Base64;
  * Handles URL transformations between bitbucket.org and api.bitbucket.org,
  * and creates properly configured Bitbucket API clients.
  * <p>
- * Authentication methods supported:
+ * Authentication uses Atlassian API tokens:
  * <ul>
- *   <li><b>App Passwords</b>: Requires username and app password. The username is stored
- *       separately in the GitIntegration, and combined with the token for Basic authentication.</li>
- *   <li><b>API Tokens (new)</b>: Tokens starting with "ATATT" use Bearer authentication.
- *       No username required.</li>
+ *   <li><b>REST API</b>: HTTP Basic with the account e-mail (stored in
+ *       {@link GitIntegration#getUsername()}) and the API token.</li>
+ *   <li><b>Git over HTTPS</b>: the fixed username {@value #GIT_API_TOKEN_USERNAME}
+ *       with the API token.</li>
  * </ul>
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
+
+    /** Static Git username Bitbucket Cloud expects for HTTPS operations authenticated with an API token. */
+    public static final String GIT_API_TOKEN_USERNAME = "x-bitbucket-api-token-auth";
 
     private static final String DEFAULT_WEB_URL = "https://bitbucket.org";
     private static final String DEFAULT_API_URL = "https://api.bitbucket.org/2.0";
@@ -83,64 +87,31 @@ public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
         return url;
     }
 
-    public String buildAuthorizationHeader(String token) {
-        if (token == null || token.isBlank()) {
-            log.warn("Bitbucket token is empty or null");
-            return "";
-        }
-
-        // New Atlassian API Tokens (ATATT...) use Bearer authentication
-        if (token.startsWith("ATATT")) {
-            log.debug("Using Bearer authentication for Atlassian API Token");
-            return "Bearer " + token;
-        }
-
-        // Token with username:password format uses Basic authentication
-        if (token.contains(":")) {
-            log.debug("Using Basic authentication for App Password (username:password format)");
-            String encoded = Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8));
-            return "Basic " + encoded;
-        }
-
-        // For tokens without ":" that don't start with ATATT, assume Bearer
-        log.debug("Using Bearer authentication (token format not recognized as Basic auth)");
-        return "Bearer " + token;
-    }
-
     /**
-     * Build the Authorization header using credentials (supports username for App Passwords).
+     * Builds the API {@code Authorization} header: HTTP Basic with the Atlassian account
+     * e-mail and API token. Only Atlassian account API tokens are supported; workspace,
+     * project and repository access tokens (Bearer) are not.
+     *
+     * @throws IllegalStateException when no account e-mail is configured
      */
-    public String buildAuthorizationHeader(RepositoryCredentials credentials) {
-        String token = credentials.token();
+    public String buildAuthorizationHeader(@Nullable String email, @Nullable String token) {
         if (token == null || token.isBlank()) {
-            log.warn("Bitbucket token is empty or null");
+            log.warn("Bitbucket API token is empty or null");
             return "";
         }
-        // App Password with separate username
-        if (credentials.hasUsername()) {
-            log.debug("Using Basic authentication with username '{}' and App Password", credentials.username());
-            String combined = credentials.username() + ":" + token;
-            String encoded = Base64.getEncoder().encodeToString(combined.getBytes(StandardCharsets.UTF_8));
-            return "Basic " + encoded;
+        if (email == null || email.isBlank()) {
+            throw new IllegalStateException(
+                    "Bitbucket integration has no Atlassian account e-mail configured; "
+                            + "it is required together with the API token");
         }
-
-        // Token already contains username:password
-        if (token.contains(":")) {
-            log.debug("Using Basic authentication for App Password (username:password format in token)");
-            String encoded = Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8));
-            return "Basic " + encoded;
-        }
-
-        // For tokens without ":" that don't start with ATATT, assume Bearer
-        log.debug("Using Bearer authentication (token format not recognized as Basic auth)");
-        return "Bearer " + token;
+        String encoded = Base64.getEncoder().encodeToString((email + ":" + token).getBytes(StandardCharsets.UTF_8));
+        return "Basic " + encoded;
     }
 
     @Override
     public RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
-        RepositoryCredentials credentials = createCredentials(integration, decryptedToken);
-        String authHeader = buildAuthorizationHeader(credentials);
+        String authHeader = buildAuthorizationHeader(integration.getUsername(), decryptedToken);
 
         log.debug("Building Bitbucket RestClient: apiUrl={}", apiUrl);
 
@@ -151,12 +122,15 @@ public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
                 .build();
     }
 
+    /**
+     * Git operations authenticate with the fixed {@value #GIT_API_TOKEN_USERNAME} username and
+     * the API token; the account e-mail is only used for REST API calls.
+     */
     @Override
     public RepositoryCredentials createCredentials(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
         String cloneUrl = resolveCloneUrl(integration);
-        String username = integration.getUsername();
-        return RepositoryCredentials.of(apiUrl, cloneUrl, username, decryptedToken);
+        return RepositoryCredentials.of(apiUrl, cloneUrl, GIT_API_TOKEN_USERNAME, decryptedToken);
     }
 
     @Override

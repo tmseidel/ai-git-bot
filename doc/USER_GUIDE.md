@@ -255,7 +255,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `gitea` | `https://gitea.example.com` | API Token |
      | `github` | `https://github.com` | Personal Access Token (PAT) |
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
-     | `bitbucket` | `https://bitbucket.org` | App Password / API Token |
+     | `bitbucket` | `https://bitbucket.org` | Atlassian account email + API token |
      
     - **URL**: The Git server URL:
      - For Gitea: `https://gitea.example.com`
@@ -299,7 +299,9 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 
 #### Bitbucket Cloud
 
-- Uses Basic authentication (`username:token`)
+- API calls use Basic authentication with the Atlassian account email and an API token (`email:api_token`); Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
+- Only Atlassian account API tokens are supported for now; workspace/project/repository access tokens are not.
+- The bot's identity (reviewer requests, mentions, own comments) is the account behind the configured email; the bot **Username** has no effect. Use a dedicated Atlassian account: all events created by that account are ignored
 - API endpoint is at `api.bitbucket.org/2.0`
 - Issue-based agent workflows (coding and writer) are not available
 - See [Bitbucket Setup](BITBUCKET_SETUP.md) for token creation instructions
@@ -317,7 +319,7 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
 1. Click **New Bot**
 2. Fill in the form:
    - **Name**: A unique name for the bot (e.g., "Code Reviewer")
-   - **Username**: The Git username the bot uses (e.g., "ai_bot"). This is used to detect and ignore the bot's own actions, and as the mention alias (e.g., `@ai_bot`)
+   - **Username**: The Git username the bot uses (e.g., "ai_bot"). This is used to detect and ignore the bot's own actions, and as the mention alias (e.g., `@ai_bot`). Not used for Bitbucket Cloud, where the account email configured on the Git Integration identifies the bot
    - **Bot Type**: Choose **Coding bot** for pull-request reviews and issue implementation, or **Writer bot** for technical-writing assistance on issues.
    - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, writer-agent, and the three E2E (planner / author / runner) instructions before saving. The preview opens as an expandable panel view so long prompts can be inspected section by section.
    - **MCP Configuration** *(optional)*: Select a saved MCP configuration. Use **Details** next to the dropdown to open a read-only list of the currently selected MCP tools.

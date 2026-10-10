@@ -22,6 +22,7 @@ import org.springframework.web.client.RestClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Bitbucket Cloud implementation of {@link RepositoryApiClient}.
@@ -34,6 +35,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
 
     private final RestClient restClient;
     private final RepositoryCredentials credentials;
+    private volatile BitbucketAccount authenticatedAccount;
 
     /**
      * Creates a BitbucketApiClient with the given RestClient and credentials.
@@ -49,6 +51,36 @@ public class BitbucketApiClient implements RepositoryApiClient {
     @Override
     public RepositoryCredentials getCredentials() {
         return credentials;
+    }
+
+    /**
+     * Returns the Bitbucket account behind the configured e-mail/API-token pair.
+     * The result is memoized; clients are re-created whenever the integration changes.
+     *
+     * @throws IllegalStateException when Bitbucket returns neither an account id nor a uuid
+     */
+    public BitbucketAccount getAuthenticatedAccount() {
+        BitbucketAccount account = authenticatedAccount;
+        if (account == null) {
+            account = restClient.get()
+                    .uri("/user")
+                    .retrieve()
+                    .body(BitbucketAccount.class);
+            if (account == null || (account.accountId() == null && account.uuid() == null)) {
+                throw new IllegalStateException("Bitbucket /user returned neither account_id nor uuid");
+            }
+            authenticatedAccount = account;
+        }
+        return account;
+    }
+
+    /**
+     * Bitbucket mentions are picked via the {@code @} autocomplete, which searches by
+     * display name, so that name (or the nickname) is what users should type.
+     */
+    @Override
+    public Optional<String> getBotMentionName() {
+        return Optional.ofNullable(getAuthenticatedAccount().name());
     }
 
     // ---- Pull request operations ----
@@ -399,7 +431,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
             body.put("variables", variables);
         }
         Map<String, Object> response = restClient.post()
-                .uri("/2.0/repositories/{owner}/{repo}/pipelines/", request.owner(), request.repo())
+                .uri("/repositories/{owner}/{repo}/pipelines/", request.owner(), request.repo())
                 .body(body)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
@@ -419,7 +451,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public WorkflowRunStatus getWorkflowRun(String owner, String repo, String runId) {
         try {
             Map<String, Object> pipeline = restClient.get()
-                    .uri("/2.0/repositories/{owner}/{repo}/pipelines/{uuid}", owner, repo, runId)
+                    .uri("/repositories/{owner}/{repo}/pipelines/{uuid}", owner, repo, runId)
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {});
             if (pipeline == null) return WorkflowRunStatus.NOT_FOUND;
