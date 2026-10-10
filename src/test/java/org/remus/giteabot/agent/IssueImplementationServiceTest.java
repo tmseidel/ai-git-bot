@@ -107,7 +107,7 @@ class IssueImplementationServiceTest {
         service.handleIssueAssigned(payload);
 
         verify(sessionService, never()).createSession(anyString(), anyString(), any(), anyString());
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
         verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
                 contains("could not safely identify the authored source branch"));
     }
@@ -768,15 +768,15 @@ class IssueImplementationServiceTest {
                 .thenReturn(List.of(
                         Map.of("type", "blob", "path", "package.json"),
                         Map.of("type", "blob", "path", "src/main.ts")));
-        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
-                isNull(), isNull(), eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
 
         service.handleIssueComment(payload);
 
-        verify(workspaceService).prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
-                isNull(), isNull(), eq(null));
-        verify(workspaceService, never()).prepareWorkspace(eq("testowner"), eq("testrepo"), eq("gitea-pages"),
-                isNull(), isNull(), eq(null));
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null));
+        verify(workspaceService, never()).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("gitea-pages"),
+                eq(null));
         verify(sessionService, atLeastOnce()).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
     }
 
@@ -792,13 +792,13 @@ class IssueImplementationServiceTest {
         when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "recovery-source"))
                 .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
-        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("recovery-source"),
-                isNull(), isNull(), eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("recovery-source"),
+                eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
 
         service.handleIssueComment(payload);
 
-        verify(workspaceService).prepareWorkspace(eq("testowner"), eq("testrepo"), eq("recovery-source"),
-                isNull(), isNull(), eq(null));
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("recovery-source"),
+                eq(null));
         verify(repositoryClient, never()).getDefaultBranch("testowner", "testrepo");
     }
 
@@ -817,8 +817,8 @@ class IssueImplementationServiceTest {
                 .thenReturn(List.of(
                         Map.of("type", "blob", "path", "package.json"),
                         Map.of("type", "blob", "path", "src/main.ts")));
-        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
-                isNull(), isNull(), eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn("""
                 ```json
@@ -860,8 +860,8 @@ class IssueImplementationServiceTest {
                 .thenReturn(List.of(
                         Map.of("type", "blob", "path", "package.json"),
                         Map.of("type", "blob", "path", "src/main.ts")));
-        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("main"),
-                isNull(), isNull(), eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
                 .thenReturn("I do not know how to implement this");
@@ -884,13 +884,13 @@ class IssueImplementationServiceTest {
                 .thenReturn(Optional.of(session));
         when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
-        when(workspaceService.prepareWorkspace(eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
-                isNull(), isNull(), eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
+                eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
 
         service.handleIssueComment(payload);
 
-        verify(workspaceService).prepareWorkspace(eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
-                isNull(), isNull(), eq(null));
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
+                eq(null));
         verify(repositoryClient, never()).getRepositoryTree("testowner", "testrepo", "main");
     }
 
@@ -909,7 +909,7 @@ class IssueImplementationServiceTest {
 
         service.handleIssueComment(payload);
 
-        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any(), any());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
         verify(sessionService, atLeastOnce()).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
         verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
                 contains("could not safely identify the authored source branch for this retry"));
