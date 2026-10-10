@@ -874,7 +874,7 @@ class IssueImplementationServiceTest {
     }
 
     @Test
-    void handleIssueComment_preservesExistingBotBranchWithoutResolvingPagesMain() {
+    void handleIssueComment_existingBranchWithoutPrUsesQualifiedPagesMainForNewPr() {
         WebhookPayload payload = createCommentPayload("Please continue");
         AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
         session.setBranchName("ai-agent/issue-42");
@@ -884,13 +884,57 @@ class IssueImplementationServiceTest {
                 .thenReturn(Optional.of(session));
         when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
-        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
-                eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(
+                        Map.of("type", "blob", "path", "package.json"),
+                        Map.of("type", "blob", "path", "src/main.ts")));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn("""
+                ```json
+                {"summary":"Continue implementation","runTools":[
+                  {"id":"continue-file","tool":"write-file","args":["src/Feature.java","class Feature {}"]},
+                  {"id":"continue-validate","tool":"mvn","args":["compile"]}
+                ]}
+                ```
+                """);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File written", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(false))).thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
 
         service.handleIssueComment(payload);
 
-        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("ai-agent/issue-42"),
-                eq(null));
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null));
+        verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"));
+    }
+
+    @Test
+    void handleIssueComment_existingPrKeepsExistingBotBranchWithoutResolvingPagesMain() {
+        WebhookPayload payload = createCommentPayload("Please continue");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+
+        service.handleIssueComment(payload);
+
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null));
+        verify(repositoryClient, never()).getDefaultBranch("testowner", "testrepo");
         verify(repositoryClient, never()).getRepositoryTree("testowner", "testrepo", "main");
     }
 

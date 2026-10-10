@@ -415,9 +415,21 @@ public class IssueImplementationService {
                                     + "Please set a valid issue branch and mention me again.");
                     return;
                 }
-            } else {
-                // Existing bot branches are authoritative for a continuation.
-                defaultBranch = repositoryClient.getDefaultBranch(owner, repo);
+            } else if (session.getPrNumber() == null) {
+                // Keep the existing bot branch, but a missing PR still needs an
+                // authored target branch. Resolving here prevents a Pages output
+                // branch from becoming the target of the newly created PR.
+                try {
+                    defaultBranch = new CodingBaseBranchResolver(repositoryClient).resolve(owner, repo, issueRef);
+                } catch (CodingBaseBranchResolver.SourceBranchResolutionException e) {
+                    log.warn("Refusing to create a PR for continued coding issue #{} in {} without a qualified source branch: {}",
+                            issueNumber, repoFullName, e.getMessage());
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "⚠️ **AI Agent**: I could not safely identify the authored source branch for this retry. "
+                                    + "Please set a valid issue branch and mention me again.");
+                    return;
+                }
             }
 
             // Clone working branch into fresh workspace
