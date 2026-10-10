@@ -77,6 +77,8 @@ public class WebhookPayload {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Owner {
         private String login;
+        /** Reviewer vote (Azure DevOps only); {@code null} when the payload carries none. */
+        private Integer vote;
     }
 
     @Data

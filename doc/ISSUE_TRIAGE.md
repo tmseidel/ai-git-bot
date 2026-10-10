@@ -69,3 +69,4 @@ Two safety rules are enforced regardless of the prompt:
 | GitHub | Supported (`POST .../issues/{n}/assignees`; unknown or non-collaborator accounts are rejected by the API). |
 | GitLab | Supported (resolves the username to a user id first; unknown users fail before any change). |
 | Bitbucket | Not supported — routing to a real account ends in the error-comment path. |
+| Azure DevOps | Not supported — Azure DevOps has Work Items rather than issues, so the issue workflows do not apply. |
