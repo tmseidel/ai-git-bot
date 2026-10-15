@@ -11,8 +11,8 @@ import org.remus.giteabot.repository.GitTransport;
  *
  * @param baseUrl   the API base URL (e.g., "https://api.github.com")
  * @param cloneUrl  the credential-free HTTP clone base URL (e.g., "https://github.com")
- * @param username  the HTTP Git username (required for Bitbucket App Passwords, optional otherwise)
- * @param token     the API token and HTTP Git access token or app password
+ * @param username  the HTTP Git username (e.g. Bitbucket's fixed API-token Git user, optional otherwise)
+ * @param token     the API token and HTTP Git access token
  * @param transport transport used by Git commands
  * @param sshPrivateKey decrypted private key when SSH is selected
  * @param sshKnownHosts verified known_hosts entries when SSH is selected
@@ -39,7 +39,7 @@ public record RepositoryCredentials(
     }
 
     /**
-     * Creates credentials with a username (for Bitbucket App Passwords).
+     * Creates credentials with an explicit HTTP Git username (e.g. for Bitbucket API tokens).
      */
     public static RepositoryCredentials of(String baseUrl, String cloneUrl, String username, String token) {
         return new RepositoryCredentials(baseUrl, cloneUrl, username, token);

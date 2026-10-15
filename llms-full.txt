@@ -131,7 +131,7 @@ Supported AI/provider styles include:
 - `doc/GITEA_SETUP.md`: Gitea bot account, access token, permissions, webhook setup, and troubleshooting.
 - `doc/GITHUB_SETUP.md`: GitHub bot/PAT setup, permissions, webhook setup, and troubleshooting.
 - `doc/GITLAB_SETUP.md`: GitLab token and webhook setup.
-- `doc/BITBUCKET_SETUP.md`: Bitbucket Cloud app password and webhook setup.
+- `doc/BITBUCKET_SETUP.md`: Bitbucket Cloud API token and webhook setup.
 
 ### Local LLM setup
 

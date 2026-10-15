@@ -2,6 +2,9 @@ package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -33,6 +36,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_encryptsToken() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken("plain-token");
         when(encryptionService.encrypt("plain-token")).thenReturn("encrypted-value");
@@ -42,6 +46,48 @@ class GitIntegrationServiceTest {
 
         assertEquals("encrypted-value", result.getToken());
         verify(encryptionService).encrypt("plain-token");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   "})
+    void save_blankUsername_rejectsIntegration(String username) {
+        GitIntegration integration = new GitIntegration();
+        integration.setProviderType(RepositoryType.GITEA);
+        integration.setToken("plain-token");
+        integration.setUsername(username);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> gitIntegrationService.save(integration, false));
+
+        assertEquals("A username is required", error.getMessage());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void validateSave_blankUsername_rejectsIntegration() {
+        GitIntegration integration = new GitIntegration();
+        integration.setName("gitea");
+        integration.setProviderType(RepositoryType.GITEA);
+        integration.setUrl("https://gitea.example.com");
+        integration.setUsername(" ");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> gitIntegrationService.validateSave(integration, false, false));
+
+        assertEquals("A username is required", error.getMessage());
+    }
+
+    @Test
+    void save_trimsUsername() {
+        GitIntegration integration = new GitIntegration();
+        integration.setProviderType(RepositoryType.GITEA);
+        integration.setUsername("  ai_bot ");
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GitIntegration result = gitIntegrationService.save(integration, false);
+
+        assertEquals("ai_bot", result.getUsername());
     }
 
     @Test
@@ -96,6 +142,7 @@ class GitIntegrationServiceTest {
 
     private GitIntegration sshIntegration(String knownHosts) {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setName("gitea");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setUrl("https://gitea.example.com");
@@ -109,6 +156,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_blankTokenOnUpdate_keepsStoredTokenWithoutReEncrypting() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setId(7L);
         integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
@@ -128,6 +176,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_clearToken_removesStoredToken() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setId(7L);
         integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
@@ -147,6 +196,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_nullToken_staysNull() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken(null);
         when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -160,6 +210,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_sshTransport_encryptsPrivateKey() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setTransport(GitTransport.SSH);
         integration.setToken("plain-token");
@@ -180,6 +231,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_httpTransport_ignoresSubmittedSshCredentials() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setTransport(GitTransport.HTTP);
         integration.setSshPrivateKey("hidden-private-key");
@@ -196,6 +248,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_blankSshFieldsOnUpdate_keepsStoredValuesWithoutReEncrypting() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setId(7L);
         integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
@@ -222,6 +275,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_sshTransportWithoutCredentials_rejectsIntegration() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setTransport(GitTransport.SSH);
         integration.setToken("plain-token");
@@ -237,6 +291,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_replacingPrivateKeyWithoutKnownHosts_keepsStoredTrust() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setId(7L);
         integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
@@ -271,6 +326,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_keyRotationCannotReuseClearedOrMissingKnownHosts() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setId(7L);
         integration.setLockVersion(0L);
         integration.setTransport(GitTransport.SSH);
@@ -307,6 +363,7 @@ class GitIntegrationServiceTest {
         existing.setSshPrivateKey("stored-encrypted-key");
         existing.setSshKnownHosts("old-host-key");
         GitIntegration input = new GitIntegration();
+        input.setUsername("ai_bot");
         input.setId(7L);
         input.setLockVersion(0L);
         input.setUrl("https://new.example.com");
@@ -342,6 +399,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_changedEndpointRequiresNewToken() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setId(7L);
         integration.setLockVersion(0L);
         integration.setProviderType(RepositoryType.GITEA);
@@ -363,6 +421,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_sshTransportWithoutEncryption_rejectsPrivateKey() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setTransport(GitTransport.SSH);
         integration.setToken("plain-token");
@@ -380,6 +439,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_nonGiteaProvider_rejectsSshTransport() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITHUB);
         integration.setTransport(GitTransport.SSH);
         integration.setToken("plain-token");
@@ -397,6 +457,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_sshTransportWithoutApiToken_rejectsIntegration() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITEA);
         integration.setTransport(GitTransport.SSH);
         integration.setSshPrivateKey("plain-private-key");
@@ -413,6 +474,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_githubProvider_setsDefaultUrl() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("ai_bot");
         integration.setProviderType(RepositoryType.GITHUB);
         integration.setToken("gh-token");
         when(encryptionService.encrypt("gh-token")).thenReturn("encrypted");
@@ -426,6 +488,7 @@ class GitIntegrationServiceTest {
     @Test
     void save_bitbucketProvider_setsDefaultUrl() {
         GitIntegration integration = new GitIntegration();
+        integration.setUsername("bot@example.com");
         integration.setProviderType(RepositoryType.BITBUCKET);
         integration.setToken("bb-token");
         when(encryptionService.encrypt("bb-token")).thenReturn("encrypted");
@@ -547,6 +610,7 @@ class GitIntegrationServiceTest {
     @Test
     void managedKey_trackingCannotBeOverwrittenByFormInput() {
         GitIntegration input = new GitIntegration();
+        input.setUsername("ai_bot");
         input.setSshRemoteKeyId(42L);
         input.setSshRemoteKeyOwnerId(17L);
         input.setSshRemoteKeyTitle("forged");
@@ -562,6 +626,7 @@ class GitIntegrationServiceTest {
         when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(existing));
         when(gitIntegrationRepository.saveAndFlush(any())).thenAnswer(call -> call.getArgument(0));
         GitIntegration input = new GitIntegration();
+        input.setUsername("ai_bot");
         input.setId(7L);
         input.setLockVersion(0L);
         assertThrows(IllegalStateException.class, () -> gitIntegrationService.save(input, false));

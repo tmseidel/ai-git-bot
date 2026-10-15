@@ -143,8 +143,8 @@ class ReviewWorkflowTest {
         Bot bot = new Bot();
         bot.setId(1L);
         bot.setName("ai_bot");
-        bot.setUsername("ai_bot");
         org.remus.giteabot.admin.GitIntegration git = new org.remus.giteabot.admin.GitIntegration();
+        git.setUsername("ai_bot");
         git.setPostReviewAction(action);
         bot.setGitIntegration(git);
         return bot;

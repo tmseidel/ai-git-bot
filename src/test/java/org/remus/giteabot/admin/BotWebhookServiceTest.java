@@ -173,7 +173,7 @@ class BotWebhookServiceTest {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
                             repositoryApiClient, aiClient, sessionService,
-                            b.getUsername(), new ReviewConfigProperties(),
+                            b.getGitIntegration().getUsername(), new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
                             120000, 8, 60000, "");
@@ -212,17 +212,6 @@ class BotWebhookServiceTest {
     }
 
     @Test
-    void isBotUser_nullUsername_returnsFalse() {
-        Bot bot = createBot("test-bot", null);
-        WebhookPayload payload = new WebhookPayload();
-        WebhookPayload.Owner sender = new WebhookPayload.Owner();
-        sender.setLogin("human_user");
-        payload.setSender(sender);
-
-        assertFalse(botWebhookService.isBotUser(bot, payload));
-    }
-
-    @Test
     void isBotUser_commentUserMatchesBotUsername_returnsTrue() {
         Bot bot = createBot("test-bot", "ai_bot");
         WebhookPayload payload = new WebhookPayload();
@@ -241,12 +230,6 @@ class BotWebhookServiceTest {
     void getBotAlias_returnsMentionFormat() {
         Bot bot = createBot("test-bot", "ai_bot");
         assertEquals("@ai_bot", botWebhookService.getBotAlias(bot));
-    }
-
-    @Test
-    void getBotAlias_nullUsername_returnsEmpty() {
-        Bot bot = createBot("test-bot", null);
-        assertEquals("", botWebhookService.getBotAlias(bot));
     }
 
     @Test
@@ -288,6 +271,16 @@ class BotWebhookServiceTest {
 
         assertTrue(botWebhookService.isReviewAgainRequest(payload, "@ai_bot"));
         assertTrue(botWebhookService.isReviewAgainRequestFromPullRequestAuthor(payload, "@ai_bot"));
+    }
+
+    @Test
+    void isReviewAgainRequest_ignoresReviewKeywordInBotAlias() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setBody("@AI_Review_Bot can you repeat that explanation?");
+        payload.setComment(comment);
+
+        assertFalse(botWebhookService.isReviewAgainRequest(payload, "@AI_Review_Bot"));
     }
 
     // ---- handlePrComment routing tests ----
@@ -1227,6 +1220,42 @@ class BotWebhookServiceTest {
         }
 
         @Test
+        void unrecognisedCommandReply_usesProviderMentionNameOverBotUsername() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(repositoryApiClient.getBotMentionName()).thenReturn(Optional.of("AI Bot"));
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postIssueComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@AI Bot rerun-tests`").doesNotContain("@claude_bot");
+        }
+
+        @Test
+        void unrecognisedCommandReply_providerMentionLookupFails_stillPostsWithNeutralName() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(repositoryApiClient.getBotMentionName()).thenThrow(new IllegalStateException("401"));
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postIssueComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@bot rerun-tests`").doesNotContain("@claude_bot");
+        }
+
+        @Test
         void noAgentSession_botWithReviewWorkflow_stillRoutesToCodeReview() {
             // Sanity: an explicit configuration that DOES include review keeps the
             // existing code-review behaviour.
@@ -1710,7 +1739,9 @@ class BotWebhookServiceTest {
     private Bot createBot(String name, String username) {
         Bot bot = new Bot();
         bot.setName(name);
-        bot.setUsername(username);
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername(username);
+        bot.setGitIntegration(gitIntegration);
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);
         systemPrompt.setReviewSystemPrompt("Review prompt");

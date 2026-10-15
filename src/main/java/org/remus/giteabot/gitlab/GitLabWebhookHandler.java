@@ -80,7 +80,7 @@ public class GitLabWebhookHandler {
 
         // Ignore events from the bot itself, except GitLab reviewer re-request events.
         if (botUserEvent && !botReviewerReRequestEvent) {
-            log.debug("Ignoring GitLab event from bot's own user '{}'", bot.getUsername());
+            log.debug("Ignoring GitLab event from bot's own user '{}'", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -239,7 +239,7 @@ public class GitLabWebhookHandler {
 
             if (botWebhookService.isBotUser(bot, webhookPayload)) {
                 log.debug("Ignoring GitLab issue {} event from bot's own user '{}'",
-                        gitlabAction, bot.getUsername());
+                        gitlabAction, bot.getGitIntegration().getUsername());
                 return ResponseEntity.ok("ignored");
             }
 
@@ -268,7 +268,7 @@ public class GitLabWebhookHandler {
                 ? (List<Map<String, Object>>) assigneeChanges.get("previous") : null;
 
         if (!isBotNewlyAssigned(bot, currentAssignees, previousAssignees)) {
-            log.debug("Bot '{}' was not newly assigned to the issue, ignoring", bot.getUsername());
+            log.debug("Bot '{}' was not newly assigned to the issue, ignoring", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -277,7 +277,7 @@ public class GitLabWebhookHandler {
 
         // Ignore events from the bot itself
         if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            log.debug("Ignoring GitLab issue event from bot's own user '{}'", bot.getUsername());
+            log.debug("Ignoring GitLab issue event from bot's own user '{}'", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -290,13 +290,13 @@ public class GitLabWebhookHandler {
      */
     private boolean isBotNewlyAssigned(Bot bot, List<Map<String, Object>> currentAssignees,
                                         List<Map<String, Object>> previousAssignees) {
-        if (bot.getUsername() == null || currentAssignees == null) {
+        if (currentAssignees == null) {
             return false;
         }
         boolean inCurrent = currentAssignees.stream()
-                .anyMatch(a -> bot.getUsername().equalsIgnoreCase((String) a.get("username")));
+                .anyMatch(a -> bot.getGitIntegration().getUsername().equalsIgnoreCase((String) a.get("username")));
         boolean inPrevious = previousAssignees != null && previousAssignees.stream()
-                .anyMatch(a -> bot.getUsername().equalsIgnoreCase((String) a.get("username")));
+                .anyMatch(a -> bot.getGitIntegration().getUsername().equalsIgnoreCase((String) a.get("username")));
         return inCurrent && !inPrevious;
     }
 
@@ -525,9 +525,6 @@ public class GitLabWebhookHandler {
 
     @SuppressWarnings("unchecked")
     private boolean hasBotReviewer(Bot bot, Map<String, Object> payload, Map<String, Object> changes) {
-        if (bot.getUsername() == null) {
-            return false;
-        }
         List<Map<String, Object>> currentReviewers = (List<Map<String, Object>>) payload.get("reviewers");
         if (changes != null) {
             if (!(changes.get("reviewers") instanceof Map<?, ?> reviewersChange)) {
@@ -537,10 +534,10 @@ public class GitLabWebhookHandler {
                     (List<Map<String, Object>>) reviewersChange.get("previous");
             currentReviewers = (List<Map<String, Object>>) reviewersChange.get("current");
             // Trigger review only if the bot was newly added (present in current but not in previous).
-            return containsGitLabUser(currentReviewers, bot.getUsername())
-                    && !containsGitLabUser(previousReviewers, bot.getUsername());
+            return containsGitLabUser(currentReviewers, bot.getGitIntegration().getUsername())
+                    && !containsGitLabUser(previousReviewers, bot.getGitIntegration().getUsername());
         }
-        return containsGitLabUser(currentReviewers, bot.getUsername());
+        return containsGitLabUser(currentReviewers, bot.getGitIntegration().getUsername());
     }
 
     private boolean isBotReviewerReRequestEvent(Bot bot, Map<String, Object> payload, String gitlabAction) {

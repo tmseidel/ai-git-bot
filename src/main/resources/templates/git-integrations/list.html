@@ -25,6 +25,7 @@
                         <thead class="table-group-divider">
                             <tr>
                                 <th th:text="#{label.name}">Name</th>
+                                <th th:text="#{label.username}">Username</th>
                                 <th th:text="#{label.providerType}">Provider Type</th>
                                 <th th:text="#{label.url}">URL</th>
                                 <th th:text="#{label.created}">Created</th>
@@ -34,6 +35,7 @@
                         <tbody>
                             <tr th:each="integration : ${integrations}">
                                 <td th:text="${integration.name}"></td>
+                                <td th:text="${integration.username}"></td>
                                 <td>
                                     <span class="badge bg-secondary" th:text="${integration.providerType}"></span>
                                 </td>

@@ -134,12 +134,10 @@ In the bot's web UI:
      - For github.com: `https://github.com`
      - For GitHub Enterprise: `https://github.yourdomain.com`
    - Enter the Personal Access Token you created above
+   - Set **Username** to the bot's GitHub username (e.g., `ai-code-reviewer`). It is used to detect and ignore the bot's own actions, and the mention alias is derived as `@ai-code-reviewer`
    - Click **Save**
 
-2. **Create or Edit a Bot:**
-   - Set the **Username** to match the bot's GitHub username (e.g., `ai-code-reviewer`)
-   - This is used to detect and ignore the bot's own actions
-    - The mention alias is derived as `@ai-code-reviewer`
+2. **Create or Edit a Bot** and select this Git Integration.
 
 ## Review Workflow
 

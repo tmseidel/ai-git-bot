@@ -4,10 +4,15 @@ import lombok.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BitbucketProviderMetadataTest {
 
@@ -99,25 +104,37 @@ class BitbucketProviderMetadataTest {
     }
 
     @Test
-    void buildAuthorizationHeader_apiToken_usesBearer() {
-        String header = metadata.buildAuthorizationHeader("ATATT3xFfGF0CNndTrZZuJdJfXcmNmuF2RQK9fTUUTRhThM");
+    void buildAuthorizationHeader_emailAndApiToken_usesBasicAuth() {
+        String header = metadata.buildAuthorizationHeader("bot@example.com", "ATATT3xFfGF0token");
 
-        assertThat(header).startsWith("Bearer ATATT");
+        String expected = Base64.getEncoder().encodeToString(
+                "bot@example.com:ATATT3xFfGF0token".getBytes(StandardCharsets.UTF_8));
+        assertThat(header).isEqualTo("Basic " + expected);
     }
 
     @Test
-    void buildAuthorizationHeader_appPassword_usesBasicAuth() {
-        String header = metadata.buildAuthorizationHeader("username:app_password");
-
-        // Base64 of "username:app_password" is "dXNlcm5hbWU6YXBwX3Bhc3N3b3Jk"
-        assertThat(header).isEqualTo("Basic dXNlcm5hbWU6YXBwX3Bhc3N3b3Jk");
+    void buildAuthorizationHeader_withoutEmail_isRejected() {
+        assertThatThrownBy(() -> metadata.buildAuthorizationHeader(" ", "someToken"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("e-mail");
     }
 
     @Test
-    void buildAuthorizationHeader_unknownFormat_usesBearer() {
-        String header = metadata.buildAuthorizationHeader("someOtherToken123");
+    void buildAuthorizationHeader_withoutToken_returnsEmpty() {
+        assertThat(metadata.buildAuthorizationHeader("bot@example.com", " ")).isEmpty();
+    }
 
-        assertThat(header).isEqualTo("Bearer someOtherToken123");
+    @Test
+    void createCredentials_usesStaticGitUsernameInsteadOfEmail() {
+        GitIntegration integration = new GitIntegration();
+        integration.setUrl("https://bitbucket.org");
+        integration.setProviderType(RepositoryType.BITBUCKET);
+        integration.setUsername("bot@example.com");
+
+        RepositoryCredentials credentials = metadata.createCredentials(integration, "api-token");
+
+        assertThat(credentials.username()).isEqualTo("x-bitbucket-api-token-auth");
+        assertThat(credentials.token()).isEqualTo("api-token");
     }
 
     @Test

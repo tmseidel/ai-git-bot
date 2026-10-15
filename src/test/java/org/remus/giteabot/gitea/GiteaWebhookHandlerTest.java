@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
+import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.springframework.http.ResponseEntity;
 
@@ -39,7 +40,9 @@ class GiteaWebhookHandlerTest {
         handler = new GiteaWebhookHandler(botWebhookService);
         bot = new Bot();
         bot.setName("test-bot");
-        bot.setUsername(BOT_USERNAME);
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername(BOT_USERNAME);
+        bot.setGitIntegration(gitIntegration);
 
         // Default stubs used by most tests – declared lenient because a few tests override
         // isBotUser to return true and never reach getBotAlias.

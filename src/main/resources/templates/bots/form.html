@@ -31,11 +31,6 @@
                             <input type="text" class="form-control" id="name" th:field="*{name}"
                                    th:placeholder="#{placeholder.botName}" placeholder="e.g. Code Review Bot" required/>
                         </div>
-                        <div class="col-md-6">
-                            <label for="username" class="form-label" th:text="#{label.username}">Username</label>
-                            <input type="text" class="form-control" id="username" th:field="*{username}"
-                                   th:placeholder="#{placeholder.botUsername}" placeholder="Bot username on the Git platform" required/>
-                        </div>
 
                         <div class="col-12">
                             <label for="systemPromptId" class="form-label" th:text="#{label.systemPrompt}">System Prompt</label>
@@ -73,7 +68,7 @@
                             <select class="form-select" id="gitIntegrationId" name="gitIntegrationId" required>
                                 <option value="" th:text="#{message.selectGitIntegration}">Select a Git integration...</option>
                                 <option th:each="git : ${gitIntegrations}"
-                                        th:value="${git.id}" th:text="${git.name}"
+                                        th:value="${git.id}" th:text="|${git.name} (${git.username})|"
                                         th:selected="${bot.gitIntegration != null and bot.gitIntegration.id == git.id}">
                                 </option>
                             </select>
