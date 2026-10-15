@@ -209,7 +209,7 @@ public class IssueTriageService {
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 repoClient, allowedBuiltinTools, pythonExecution);
         TriageAgentStrategy strategy = new TriageAgentStrategy(systemPrompt, toolRouter, toolCatalog,
-                mcpToolCatalog, allowedBuiltinTools, allowed, bot.getUsername(),
+                mcpToolCatalog, allowedBuiltinTools, allowed, bot.getGitIntegration().getUsername(),
                 new AiResponseParser(), new BranchSwitcher(toolExecutionService), maxToolRounds());
 
         // Mirror the writer: one extra iteration beyond the context-round limit so the model

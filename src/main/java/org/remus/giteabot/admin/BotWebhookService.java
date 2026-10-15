@@ -527,9 +527,9 @@ public class BotWebhookService {
             // individual workflow implementations check that the issue is assigned to
             // the bot, so treat this creation event as a virtual assignment to this bot.
             WebhookPayload.Issue issue = payload.getIssue();
-            if (issue != null && bot.getUsername() != null && !bot.getUsername().isBlank()) {
+            if (issue != null) {
                 WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-                assignee.setLogin(bot.getUsername());
+                assignee.setLogin(bot.getGitIntegration().getUsername());
                 issue.setAssignee(assignee);
             }
             try {
@@ -643,18 +643,36 @@ public class BotWebhookService {
         }
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
-        String body = buildUnrecognisedCommandReply(bot);
         try {
             RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
-            client.postIssueComment(owner, repo, prNumber, body);
+            client.postIssueComment(owner, repo, prNumber,
+                    buildUnrecognisedCommandReply(bot, resolveMentionName(bot, client)));
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to post unrecognised-command reply on PR #{}: {}",
                     bot.getName(), prNumber, e.getMessage());
         }
     }
 
-    private String buildUnrecognisedCommandReply(Bot bot) {
-        String mention = bot.getUsername() == null ? "bot" : bot.getUsername();
+    /**
+     * Name to show after {@code @} in replies: the provider's mention name if it has one,
+     * otherwise the bot username. Falls back to "bot" when the provider lookup fails, since
+     * the bot username may not identify the bot on that provider (e.g. Bitbucket).
+     */
+    private String resolveMentionName(Bot bot, RepositoryApiClient client) {
+        try {
+            var providerName = client.getBotMentionName();
+            if (providerName.isPresent()) {
+                return providerName.get();
+            }
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Could not resolve the bot's mention name from the Git provider: {}",
+                    bot.getName(), e.getMessage());
+            return "bot";
+        }
+        return bot.getGitIntegration().getUsername();
+    }
+
+    private String buildUnrecognisedCommandReply(Bot bot, String mention) {
         StringBuilder sb = new StringBuilder();
         sb.append("🤖 Sorry, I did not understand that command.\n\n");
         sb.append("This bot is not configured to run code reviews, so I can only respond ");
@@ -802,10 +820,7 @@ public class BotWebhookService {
      * Checks whether the webhook event was triggered by this bot's own user.
      */
     public boolean isBotUser(Bot bot, WebhookPayload payload) {
-        String botUsername = bot.getUsername();
-        if (botUsername == null || botUsername.isBlank()) {
-            return false;
-        }
+        String botUsername = bot.getGitIntegration().getUsername();
 
         if (payload.getSender() != null && botUsername.equalsIgnoreCase(payload.getSender().getLogin())) {
             return true;
@@ -817,15 +832,11 @@ public class BotWebhookService {
     }
 
     /**
-     * Returns the bot alias used for @-mention detection,
-     * or an empty string if the bot has no username configured.
+     * Returns the bot alias used for @-mention detection, i.e. {@code @} followed by
+     * the username configured on the bot's Git integration.
      */
     public String getBotAlias(Bot bot) {
-        String username = bot.getUsername();
-        if (username == null || username.isBlank()) {
-            return "";
-        }
-        return "@" + username;
+        return "@" + bot.getGitIntegration().getUsername();
     }
 
     /**
@@ -837,8 +848,7 @@ public class BotWebhookService {
         if (text == null || text.isBlank()) {
             return false;
         }
-        String alias = getBotAlias(bot);
-        return !alias.isEmpty() && text.contains(alias);
+        return text.contains(getBotAlias(bot));
     }
 
     public boolean isPullRequestAuthor(WebhookPayload payload) {
@@ -871,7 +881,8 @@ public class BotWebhookService {
         if (body == null || botAlias == null || !body.contains(botAlias)) {
             return false;
         }
-        String normalized = body.toLowerCase();
+        // Ignore the alias itself, so a bot named e.g. "Review Bot" does not count as asking for a review
+        String normalized = body.replace(botAlias, " ").toLowerCase();
         return normalized.contains("review")
                 && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
     }

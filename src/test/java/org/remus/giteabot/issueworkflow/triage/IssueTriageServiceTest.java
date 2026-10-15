@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GiteaClientFactory;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
@@ -118,7 +119,9 @@ class IssueTriageServiceTest {
 
         bot = new Bot();
         bot.setName("Triage Bot");
-        bot.setUsername("triage-bot");
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername("triage-bot");
+        bot.setGitIntegration(gitIntegration);
 
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("owner");

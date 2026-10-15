@@ -37,7 +37,7 @@
                         <tbody>
                             <tr th:each="bot : ${bots}">
                                 <td th:text="${bot.name}"></td>
-                                <td th:text="${bot.username}"></td>
+                                <td th:text="${bot.gitIntegration.username}"></td>
                                 <td th:text="${bot.aiIntegration.name}"></td>
                                  <td th:text="${bot.gitIntegration.name}"></td>
                                  <td>

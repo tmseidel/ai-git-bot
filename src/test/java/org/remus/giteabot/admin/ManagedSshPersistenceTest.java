@@ -65,7 +65,8 @@ class ManagedSshPersistenceTest {
         input.setName("managed-proof-" + UUID.randomUUID());
         input.setUrl("https://gitea.example.com");
         input.setToken("test-token");
-        saved = service.save(input, false);
+        input.setUsername("race_bot");
+        saved =service.save(input, false);
     }
 
     @ParameterizedTest
@@ -551,6 +552,7 @@ class ManagedSshPersistenceTest {
         GitIntegration replacementInput = new GitIntegration();
         replacementInput.setName("replacement-" + UUID.randomUUID());
         replacementInput.setUrl("https://example.com");
+        replacementInput.setUsername("replacement_bot");
         GitIntegration replacement = service.save(replacementInput, false);
         try (var executor = Executors.newSingleThreadExecutor()) {
             executor.submit(() -> {
@@ -589,7 +591,6 @@ class ManagedSshPersistenceTest {
             ai.setModel("test");
             Bot result = new Bot();
             result.setName("race-bot-" + UUID.randomUUID());
-            result.setUsername("race_bot");
             result.setAiIntegration(aiRepository.save(ai));
             result.setSystemPrompt(promptRepository.findAll().getFirst());
             result.setToolConfiguration(toolsRepository.findByDefaultEntryTrue().orElseThrow());

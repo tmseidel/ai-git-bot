@@ -51,9 +51,6 @@ public class ReadmeSyncService {
     static final int MAX_DOC_FILES_IN_CONTEXT = 40;
     static final int MAX_SINGLE_DOC_CHARS = 20_000;
 
-    private static final String GIT_AUTHOR_NAME = "AI Agent";
-    private static final String GIT_AUTHOR_EMAIL = "ai-agent@bot.local";
-
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SystemPrompt systemPrompt;
@@ -233,7 +230,7 @@ public class ReadmeSyncService {
             String workBranch = "ai-docs/pr-" + prNumber + "-" + System.currentTimeMillis();
             boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
                     "docs: sync documentation for PR #" + prNumber,
-                    GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, true, beforeWrite);
+                    context.bot().getGitIntegration().gitAuthor(), true, beforeWrite);
             if (!pushed) {
                 context.appendStep("readme-sync-commit", "commit/push failed for branch " + workBranch);
                 return Result.failed("git commit/push failed");
@@ -264,7 +261,7 @@ public class ReadmeSyncService {
         // COMMIT_TO_PR (default): commit straight onto the PR head branch.
         boolean committed = workspaceService.commitAndPush(workspace, headBranch,
                 "docs: sync documentation for PR #" + prNumber,
-                GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, false, beforeWrite);
+                context.bot().getGitIntegration().gitAuthor(), false, beforeWrite);
         if (committed) {
             postReviewComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderCompletion(
                     prNumber, toolContext, true, "and committed to `" + headBranch + "`", null));

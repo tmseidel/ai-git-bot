@@ -1,11 +1,13 @@
 package org.remus.giteabot.agent;
 
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -16,6 +18,7 @@ import java.util.Set;
  *
  * @param allowedBuiltinTools whitelist of built-in tool names enabled for this bot;
  *                            {@code null} disables filtering (legacy/test use).
+ * @param gitAuthor           Git author identity for the agent's commits.
  */
 public record IssueImplementationContext(
         RepositoryApiClient repositoryClient,
@@ -26,11 +29,13 @@ public record IssueImplementationContext(
         McpConfiguration mcpConfiguration,
         McpToolCatalog mcpToolCatalog,
         Set<String> allowedBuiltinTools,
-        int contextWindowTokens
+        int contextWindowTokens,
+        GitAuthor gitAuthor
 ) {
 
     public IssueImplementationContext {
         mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
+        Objects.requireNonNull(gitAuthor, "gitAuthor");
     }
 }
 

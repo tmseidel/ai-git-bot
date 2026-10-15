@@ -44,9 +44,6 @@ public class UnitTestService {
     static final int MAX_FILE_CONTEXT_CHARS = 80_000;
     static final int MAX_CHANGED_FILES_IN_CONTEXT = 25;
 
-    private static final String GIT_AUTHOR_NAME = "AI Agent";
-    private static final String GIT_AUTHOR_EMAIL = "ai-agent@bot.local";
-
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SystemPrompt systemPrompt;
@@ -195,7 +192,7 @@ public class UnitTestService {
                     } else {
                         committed = workspaceService.commitAndPush(workspace, headBranch,
                                 "test: add AI-generated unit tests for PR #" + prNumber,
-                                GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, false);
+                                context.bot().getGitIntegration().gitAuthor(), false);
                         context.appendStep("unit-test-commit",
                                 committed ? "Committed generated tests to " + headBranch
                                         : "Commit skipped / failed");

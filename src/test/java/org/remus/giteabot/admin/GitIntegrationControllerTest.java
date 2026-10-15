@@ -9,6 +9,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -153,6 +154,16 @@ class GitIntegrationControllerTest {
     }
 
     @Test
+    void newForm_rendersGitAuthorFieldsWithDefaults() throws Exception {
+        mockMvc.perform(get("/git-integrations/new").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString(
+                        "name=\"gitAuthorName\" value=\"" + GitAuthor.DEFAULT_NAME + "\"")))
+                .andExpect(content().string(containsString(
+                        "name=\"gitAuthorEmail\" value=\"" + GitAuthor.DEFAULT_EMAIL + "\"")));
+    }
+
+    @Test
     void save_blankTokenForwardsClearFlag() throws Exception {
         mockMvc.perform(post("/git-integrations/save")
                         .with(user("admin").roles("ADMIN"))
@@ -227,6 +238,7 @@ class GitIntegrationControllerTest {
                         .param("name", "My Gitea")
                         .param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com")
+                        .param("username", "ai_bot")
                         .param("transport", "SSH")
                         .param("token", "")
                         .param("sshPrivateKey", "replacement-private-key")

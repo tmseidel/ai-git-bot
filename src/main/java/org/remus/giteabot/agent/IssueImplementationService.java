@@ -22,6 +22,7 @@ import org.remus.giteabot.agent.shared.SystemPromptAssembler;
 import org.remus.giteabot.agent.shared.ToolFailures;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.tools.ToolCatalog;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
@@ -54,9 +55,6 @@ import java.util.Optional;
 public class IssueImplementationService {
 
     private static final String AGENT_PROMPT_NAME = "agent";
-    /** Git author identity used for automated commits. */
-    private static final String GIT_AUTHOR_NAME  = "AI Agent";
-    private static final String GIT_AUTHOR_EMAIL = "ai-agent@bot.local";
 
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
@@ -68,6 +66,8 @@ public class IssueImplementationService {
     private final WorkspaceService workspaceService;
     private final String issueAgentSystemPrompt;
     private final String botUsername;
+    /** Git author identity used for automated commits. */
+    private final GitAuthor gitAuthor;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
@@ -99,6 +99,7 @@ public class IssueImplementationService {
         this.workspaceService = collaborators.workspaceService();
         this.issueAgentSystemPrompt = context.issueAgentSystemPrompt();
         this.botUsername = context.botUsername();
+        this.gitAuthor = context.gitAuthor();
         this.mcpOrchestrationService = context.mcpOrchestrationService();
         this.mcpConfiguration = context.mcpConfiguration();
         this.mcpToolCatalog = context.mcpToolCatalog();
@@ -253,7 +254,7 @@ public class IssueImplementationService {
 
             String commitMessage = String.format("agent: implement #%d - %s", issueNumber, issueTitle);
             boolean pushed = workspaceService.commitAndPush(workspaceDir, branchName, commitMessage,
-                    GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, true);
+                    gitAuthor, true);
 
             if (!pushed) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
@@ -441,7 +442,7 @@ public class IssueImplementationService {
             }
             String commitMessage = String.format("agent: follow-up for #%d", issueNumber);
             boolean pushed = workspaceService.commitAndPush(workspaceDir, branchName, commitMessage,
-                    GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, createNew);
+                    gitAuthor, createNew);
             if (!pushed) {
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Agent**: Tool execution succeeded but pushing changes failed.");

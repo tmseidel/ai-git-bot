@@ -33,9 +33,6 @@ public class Bot {
     @Column(nullable = false, unique = true)
     private String name;
 
-    @Column(nullable = false)
-    private String username;
-
     @ManyToOne(optional = false)
     @JoinColumn(name = "system_prompt_id", nullable = false)
     private SystemPrompt systemPrompt;

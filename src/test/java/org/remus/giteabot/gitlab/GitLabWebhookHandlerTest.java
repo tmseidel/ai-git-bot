@@ -38,7 +38,9 @@ class GitLabWebhookHandlerTest {
         handler = new GitLabWebhookHandler(botWebhookService);
         bot = new Bot();
         bot.setName("test-bot");
-        bot.setUsername("ai_bot");
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername("ai_bot");
+        bot.setGitIntegration(gitIntegration);
 
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
         lenient().when(botWebhookService.getBotAlias(bot)).thenReturn("@ai_bot");
@@ -133,6 +135,7 @@ class GitLabWebhookHandlerTest {
     @Test
     void mergeRequestApprovedFromBotReviewerAfterConfiguredApprove_isIgnored() {
         GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername("ai_bot");
         gitIntegration.setPostReviewAction(PostReviewAction.APPROVE);
         bot.setGitIntegration(gitIntegration);
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(true);

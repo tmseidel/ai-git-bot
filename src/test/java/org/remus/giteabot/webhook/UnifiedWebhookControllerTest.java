@@ -207,7 +207,6 @@ class UnifiedWebhookControllerTest {
         Bot bot = new Bot();
         bot.setId(1L);
         bot.setName("Test Bot");
-        bot.setUsername("ai_bot");
         bot.setWebhookSecret("test-secret");
         bot.setEnabled(true);
 
@@ -228,6 +227,7 @@ class UnifiedWebhookControllerTest {
         git.setProviderType(type);
         git.setUrl("http://localhost");
         git.setToken("test_token");
+        git.setUsername("ai_bot");
         git.setCreatedAt(Instant.now());
         git.setUpdatedAt(Instant.now());
         bot.setGitIntegration(git);

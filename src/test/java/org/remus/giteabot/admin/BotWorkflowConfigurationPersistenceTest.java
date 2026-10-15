@@ -78,11 +78,11 @@ class BotWorkflowConfigurationPersistenceTest {
             git.setName("git-" + suffix);
             git.setUrl("http://localhost");
             git.setToken("token");
+            git.setUsername("dual_cfg_bot");
             gitIntegrationRepository.save(git);
 
             Bot bot = new Bot();
             bot.setName("dual-cfg-bot-" + suffix);
-            bot.setUsername("dual_cfg_bot");
             bot.setSystemPrompt(prompt);
             bot.setToolConfiguration(tools);
             bot.setAiIntegration(ai);

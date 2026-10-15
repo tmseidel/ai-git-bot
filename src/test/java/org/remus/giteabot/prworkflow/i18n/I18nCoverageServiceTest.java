@@ -4,6 +4,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -51,7 +54,11 @@ class I18nCoverageServiceTest {
     }
 
     private I18nCoverageService.Request request(WebhookPayload payload, SuiteLifecycleMode mode) {
-        PrWorkflowContext ctx = new PrWorkflowContext(new org.remus.giteabot.admin.Bot(),
+        return request(new Bot(), payload, mode);
+    }
+
+    private I18nCoverageService.Request request(Bot bot, WebhookPayload payload, SuiteLifecycleMode mode) {
+        PrWorkflowContext ctx = new PrWorkflowContext(bot,
                 payload, 1L, (n, l) -> { }, () -> false);
         return new I18nCoverageService.Request(ctx, List.of("i18n/*.properties", "i18n/*.json"),
                 "en", 12, mode, null);
@@ -121,7 +128,7 @@ class I18nCoverageServiceTest {
         verify(agent, never()).generate(any(), any(), any(), anyString(), any(), any(), anyString(),
                 org.mockito.ArgumentMatchers.anyInt());
         verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+                any(), anyString(), anyString(), any(), anyBoolean());
         verify(workspaceService).cleanupWorkspace(ws);
     }
 
@@ -150,7 +157,7 @@ class I18nCoverageServiceTest {
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.FAILED);
         verify(workspaceService, never()).prepareWorkspace(any(), anyString(), anyString(), anyString(), anyLong());
         verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
+                any(), anyString(), anyString(), any(), anyBoolean());
     }
 
     @Test
@@ -172,15 +179,22 @@ class I18nCoverageServiceTest {
         when(workspaceService.listChangedFiles(workspace))
                 .thenReturn(List.of("i18n/messages_de.properties"));
         when(workspaceService.commitAndPush(eq(workspace), anyString(), anyString(),
-                anyString(), anyString(), eq(true))).thenReturn(true);
+                any(), eq(true))).thenReturn(true);
         when(repoClient.createPullRequest(eq("acme"), eq("my-repo"), anyString(), anyString(),
                 anyString(), eq("feature/i18n"))).thenReturn(null);
+        Bot bot = new Bot();
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setGitAuthorName("I18n Bot");
+        gitIntegration.setGitAuthorEmail("i18n-bot@example.com");
+        bot.setGitIntegration(gitIntegration);
 
         I18nCoverageService.Result result = service.run(
-                request(payloadWithHead("feature/i18n"), SuiteLifecycleMode.OFFER_AS_PR));
+                request(bot, payloadWithHead("feature/i18n"), SuiteLifecycleMode.OFFER_AS_PR));
 
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.FAILED);
         assertThat(result.summary()).contains("follow-up PR creation failed");
+        verify(workspaceService).commitAndPush(eq(workspace), anyString(), anyString(),
+                eq(new GitAuthor("I18n Bot", "i18n-bot@example.com")), eq(true));
     }
 
     /**

@@ -53,7 +53,7 @@ public class AgentReviewServiceFactory {
                 repoClient,
                 aiClient,
                 bot.getSystemPrompt().getReviewAgentSystemPrompt(),
-                bot.getUsername(),
+                bot.getGitIntegration().getUsername(),
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),

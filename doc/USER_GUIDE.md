@@ -255,14 +255,16 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `gitea` | `https://gitea.example.com` | API Token |
      | `github` | `https://github.com` | Personal Access Token (PAT) |
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
-     | `bitbucket` | `https://bitbucket.org` | App Password / API Token |
+     | `bitbucket` | `https://bitbucket.org` | Atlassian account email + API token |
      
     - **URL**: The Git server URL:
      - For Gitea: `https://gitea.example.com`
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
+    - **Username**: The username of the Git account the bot acts as (e.g. `ai_bot`) — not an e-mail address or display name. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). It applies to every bot that uses this integration. For Bitbucket Cloud, enter the **Atlassian account email** instead (see below).
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
+    - **Git Author Name / Git Author E-Mail**: Author identity for commits that bots using this integration push (issue implementations, README sync, i18n coverage, unit tests, E2E suite promotion). New integrations (and integrations created before this setting existed) start with `AI Agent <ai-agent@bot.local>`. Both fields are required and limited to 255 characters; a longer value is rejected on save instead of being truncated. Git platforms attribute a commit to an account by its author e-mail, so to have the bot's commits linked to the bot user, enter an e-mail address of that account — e.g. its no-reply address (`123+my-bot@users.noreply.github.com` on GitHub).
     - **Post-review Action**: defaults to **None**. Currently GitLab can use it to approve the merge request or post a request-changes note after each bot review.
 3. Click **Save**
 
@@ -299,7 +301,9 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 
 #### Bitbucket Cloud
 
-- Uses Basic authentication (`username:token`)
+- API calls use Basic authentication with the Atlassian account email and an API token (`email:api_token`); Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
+- Only Atlassian account API tokens are supported for now; workspace/project/repository access tokens are not
+- The bot's identity (reviewer requests, mentions, own comments) is the account behind the configured email, resolved via the API. Use a dedicated Atlassian account: all events created by that account are ignored
 - API endpoint is at `api.bitbucket.org/2.0`
 - Issue-based agent workflows (coding and writer) are not available
 - See [Bitbucket Setup](BITBUCKET_SETUP.md) for token creation instructions
@@ -317,7 +321,6 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
 1. Click **New Bot**
 2. Fill in the form:
    - **Name**: A unique name for the bot (e.g., "Code Reviewer")
-   - **Username**: The Git username the bot uses (e.g., "ai_bot"). This is used to detect and ignore the bot's own actions, and as the mention alias (e.g., `@ai_bot`)
    - **Bot Type**: Choose **Coding bot** for pull-request reviews and issue implementation, or **Writer bot** for technical-writing assistance on issues.
    - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, writer-agent, and the three E2E (planner / author / runner) instructions before saving. The preview opens as an expandable panel view so long prompts can be inspected section by section.
    - **MCP Configuration** *(optional)*: Select a saved MCP configuration. Use **Details** next to the dropdown to open a read-only list of the currently selected MCP tools.

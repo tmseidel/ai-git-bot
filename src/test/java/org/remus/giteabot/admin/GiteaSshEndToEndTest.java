@@ -66,6 +66,7 @@ class GiteaSshEndToEndTest {
             input.setProviderType(RepositoryType.GITEA);
             input.setUrl(baseUrl);
             input.setToken(token);
+            input.setUsername(owner);
             GitIntegration saved = gitIntegrationService.save(input, false);
             assertNotNull(saved.getId());
 

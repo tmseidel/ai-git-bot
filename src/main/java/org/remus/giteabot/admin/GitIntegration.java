@@ -7,6 +7,7 @@ import lombok.ToString;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.GitAuthor;
 
 import java.time.Instant;
 
@@ -41,11 +42,26 @@ public class GitIntegration {
     private String url;
 
     /**
-     * Username for authentication (required for Bitbucket Cloud with App Passwords).
-     * For other providers, this field may be optional or unused.
+     * A string used to identify the user for the provider.
+     * For most providers, this is the username used with the API token for REST API calls and git operations.
+     * Bitbucket Cloud: the Atlassian account e-mail used with the API token for REST API calls.
      */
-    @Column
+    @Column(nullable = false)
     private String username;
+
+    /**
+     * Git author name for commits that bots using this integration push.
+     * New integrations start with {@link GitAuthor#DEFAULT_NAME}.
+     */
+    @Column(name = "git_author_name", nullable = false)
+    private String gitAuthorName = GitAuthor.DEFAULT_NAME;
+
+    /**
+     * Git author e-mail for commits that bots using this integration push.
+     * New integrations start with {@link GitAuthor#DEFAULT_EMAIL}.
+     */
+    @Column(name = "git_author_email", nullable = false)
+    private String gitAuthorEmail = GitAuthor.DEFAULT_EMAIL;
 
     @Column(length = 1000)
     @ToString.Exclude
@@ -71,6 +87,11 @@ public class GitIntegration {
 
     @Column
     private String sshRemoteKeyTitle;
+
+    /** Resolves the Git author identity for commits pushed through this integration. */
+    public GitAuthor gitAuthor() {
+        return new GitAuthor(gitAuthorName, gitAuthorEmail);
+    }
 
     /** Includes incomplete registration markers so ambiguous failures remain recoverable. */
     public boolean hasManagedSshKeyTracking() {

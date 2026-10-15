@@ -9,6 +9,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Provider-agnostic interface for repository operations (pull requests, reviews,
@@ -87,6 +88,15 @@ public interface RepositoryApiClient {
     /** Returns the authentication token used by this client. */
     default String getToken() {
         return getCredentials().token();
+    }
+
+    /**
+     * Returns the name users type after {@code @} to address the bot, for providers that
+     * derive the bot's identity from the integration credentials rather than from the
+     * bot's configured username (e.g. Bitbucket). Empty means "use the bot username".
+     */
+    default Optional<String> getBotMentionName() {
+        return Optional.empty();
     }
 
     /**

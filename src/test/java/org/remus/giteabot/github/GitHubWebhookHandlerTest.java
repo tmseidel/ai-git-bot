@@ -8,6 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
+import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.springframework.http.ResponseEntity;
 
@@ -37,7 +38,9 @@ class GitHubWebhookHandlerTest {
         handler = new GitHubWebhookHandler(botWebhookService);
         bot = new Bot();
         bot.setName("test-bot");
-        bot.setUsername("ai_bot");
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername("ai_bot");
+        bot.setGitIntegration(gitIntegration);
 
         lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
         lenient().when(botWebhookService.getBotAlias(bot)).thenReturn("@ai_bot");

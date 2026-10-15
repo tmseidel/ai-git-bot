@@ -11,7 +11,7 @@ The bot needs its own Gitea user account to post reviews and comments.
 1. Log in to your Gitea instance as an **administrator**
 2. Navigate to **Site Administration → User Accounts → Create User Account**
 3. Fill in the details:
-   - **Username:** `ai_bot` (or any name you prefer — this will be configured in the bot settings)
+   - **Username:** `ai_bot` (or any name you prefer — this will be configured on the Git Integration)
    - **Email:** `ai_bot@noreply.localhost`
    - **Password:** Choose a strong password
 4. Click **Create User Account**
@@ -192,12 +192,10 @@ In the bot's web UI:
    - Select **Gitea** as the provider type
    - Enter your Gitea URL (e.g., `https://gitea.example.com`)
    - Enter the API token you created above
+   - Set **Username** to the bot's Gitea username (e.g., `ai_bot`). It is used to detect and ignore the bot's own actions, and the mention alias is derived as `@ai_bot`
    - Click **Save**
 
-2. **Create or Edit a Bot:**
-   - Set the **Username** to match the bot's Gitea username (e.g., `ai_bot`)
-   - This is used to detect and ignore the bot's own actions
-    - The mention alias is derived as `@ai_bot`
+2. **Create or Edit a Bot** and select this Git Integration.
 
 ## Review Workflow
 

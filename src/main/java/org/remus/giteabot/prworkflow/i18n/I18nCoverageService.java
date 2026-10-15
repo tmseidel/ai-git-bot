@@ -50,9 +50,6 @@ public class I18nCoverageService {
     static final int MAX_LOCALE_FILE_CHARS = 40_000;
     static final int MAX_LOCALE_CONTEXT_CHARS = 160_000;
 
-    private static final String GIT_AUTHOR_NAME = "AI Agent";
-    private static final String GIT_AUTHOR_EMAIL = "ai-agent@bot.local";
-
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SystemPrompt systemPrompt;
@@ -223,7 +220,7 @@ public class I18nCoverageService {
             String workBranch = "ai-i18n/pr-" + prNumber + "-" + System.currentTimeMillis();
             boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
                     "i18n: sync translation coverage for PR #" + prNumber,
-                    GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, true);
+                    context.bot().getGitIntegration().gitAuthor(), true);
             if (!pushed) {
                 postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
                         prNumber, toolContext, report, false, null, null));
@@ -256,7 +253,7 @@ public class I18nCoverageService {
         // COMMIT_TO_PR (default): commit straight onto the PR head branch.
         boolean committed = workspaceService.commitAndPush(workspace, headBranch,
                 "i18n: sync translation coverage for PR #" + prNumber,
-                GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, false);
+                context.bot().getGitIntegration().gitAuthor(), false);
         postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
                 prNumber, toolContext, report, committed,
                 committed ? "and committed to `" + headBranch + "`" : null, null));
