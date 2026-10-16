@@ -7,7 +7,7 @@ AI-Git-Bot has two issue-driven agents for administrators to enable on bots:
 | **Coding bot** | Issues that are ready to implement | Assign the bot to an issue | Feature branch, commit, and pull request |
 | **Writer bot** | Vague or incomplete issues | Assign the writer bot to an issue | Clarifying questions or a new improved issue |
 
-Issue agents require issue webhooks and assignment events. They are supported for **Gitea, GitHub, and GitLab**. Bitbucket Cloud is PR-review only.
+Issue agents require issue webhooks and assignment events. They are supported for **Gitea, GitHub, and GitLab**. Bitbucket Cloud and Azure DevOps are PR-review only.
 
 ## Choosing the right agent
 

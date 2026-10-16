@@ -35,7 +35,7 @@
 | **OpenAI** (+ OpenAI 호환 API) | **GitHub** / **GitHub Enterprise** |
 | **Google AI / Gemini** | **GitLab** (gitlab.com & 셀프매니지드) |
 | **Ollama** (로컬 LLM) | **Bitbucket Cloud** |
-| **llama.cpp** (로컬 GGUF 모델) | |
+| **llama.cpp** (로컬 GGUF 모델) | **Azure DevOps** (Services & Server) |
 
 대부분의 AI 코딩 도구와 달리, AI-Git-Bot 은 특정 Git 플랫폼이나 AI 제공자에 묶이지 않습니다.
 
@@ -147,6 +147,7 @@ AI-Git-Bot 은 개발자가 이미 작업하는 곳에 자리합니다:
 - Gitea
 - GitLab
 - Bitbucket Cloud
+- Azure DevOps
 
 1. 리뷰를 할당합니다.
 2. 이슈를 위임합니다.
@@ -514,6 +515,7 @@ docker compose up --build -d
 
 * GitLab
 * Bitbucket Cloud
+* Azure DevOps
 
 ### 실험적 워크플로우
 
@@ -544,7 +546,7 @@ docker compose up --build -d
 * ⭐ >100 GitHub 스타
 * 🚀 >15 릴리스
 * 🐳 Docker 이미지 이용 가능
-* 🌍 GitHub, Gitea, GitLab, Bitbucket 사용자
+* 🌍 GitHub, Gitea, GitLab, Bitbucket, Azure DevOps 사용자
 
 ## 시작하기
 

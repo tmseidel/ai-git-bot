@@ -27,6 +27,7 @@ Supported Git platforms include:
 - GitHub Enterprise
 - GitLab
 - Bitbucket Cloud
+- Azure DevOps
 
 Supported AI/provider styles include:
 
@@ -132,6 +133,7 @@ Supported AI/provider styles include:
 - `doc/GITHUB_SETUP.md`: GitHub bot/PAT setup, permissions, webhook setup, and troubleshooting.
 - `doc/GITLAB_SETUP.md`: GitLab token and webhook setup.
 - `doc/BITBUCKET_SETUP.md`: Bitbucket Cloud app password and webhook setup.
+- `doc/AZURE_DEVOPS_SETUP.md`: Azure DevOps PAT, repository addressing, and Service Hook setup.
 
 ### Local LLM setup
 
@@ -173,6 +175,7 @@ Typical source locations:
 - `src/main/java/org/remus/giteabot/agent/`: agent tools, tool catalog, prompt building, validation, and notification behavior.
 - `src/main/java/org/remus/giteabot/aiusage/`: AI usage and error logging.
 - `src/main/java/org/remus/giteabot/audit/`: tamper-evident workflow audit events.
+- `src/main/java/org/remus/giteabot/azuredevops/`: Azure DevOps webhook/controller/API support.
 - `src/main/java/org/remus/giteabot/bitbucket/`: Bitbucket integration support.
 - `src/main/java/org/remus/giteabot/config/`: application configuration and prompt-related services.
 - `src/main/java/org/remus/giteabot/eventhook/`: outgoing webhook endpoints, delivery, retry, and garbage collection.
@@ -255,7 +258,7 @@ After startup, open `http://localhost:8080`, create the initial admin account, c
 
 ## Search and classification keywords
 
-AI-Git-Bot, AI Git Bot, ai-git-bot, self-hosted AI code review, AI pull request review, pull request automation, AI unit tests, unit-test-author, white-box test generation, code review bot, Git bot, Gitea bot, GitHub bot, GitLab bot, Bitbucket bot, GitHub Enterprise AI review, coding agent, issue implementation agent, autonomous software agent, technical writer agent, AI issue triage, issue refinement, acceptance criteria generator, repository automation, webhook gateway, AI gateway, LLM gateway, Anthropic Claude, OpenAI, Gemini, Google AI, Ollama, llama.cpp, local LLM, Model Context Protocol, MCP server, MCP tool whitelist, Java, Spring Boot, PostgreSQL, Docker Compose, encrypted secrets, on-premise AI, compliance-friendly AI automation, Prometheus metrics, outgoing webhooks, audit trail, i18n coverage, README sync.
+AI-Git-Bot, AI Git Bot, ai-git-bot, self-hosted AI code review, AI pull request review, pull request automation, AI unit tests, unit-test-author, white-box test generation, code review bot, Git bot, Gitea bot, GitHub bot, GitLab bot, Bitbucket bot, Azure DevOps bot, GitHub Enterprise AI review, coding agent, issue implementation agent, autonomous software agent, technical writer agent, AI issue triage, issue refinement, acceptance criteria generator, repository automation, webhook gateway, AI gateway, LLM gateway, Anthropic Claude, OpenAI, Gemini, Google AI, Ollama, llama.cpp, local LLM, Model Context Protocol, MCP server, MCP tool whitelist, Java, Spring Boot, PostgreSQL, Docker Compose, encrypted secrets, on-premise AI, compliance-friendly AI automation, Prometheus metrics, outgoing webhooks, audit trail, i18n coverage, README sync.
 
 ## Guidance for LLMs and code agents
 

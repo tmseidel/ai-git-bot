@@ -2,7 +2,7 @@
 
 > Lightweight, self-hostable AI gateway that connects Git platforms with AI providers for reviewer-triggered pull-request reviews, interactive PR conversations, AI unit-test authoring, autonomous issue implementation, technical-writing issue refinement, i18n coverage, README sync, and signed outgoing webhooks.
 
-AI-Git-Bot is a Java/Spring Boot web application for teams that want centralized, self-hosted AI automation across Gitea, GitHub, GitHub Enterprise, GitLab, and Bitbucket Cloud. It supports cloud AI providers and local LLM runtimes, stores configuration centrally, and posts results back to the Git platform as reviews, comments, issue drafts, or pull requests.
+AI-Git-Bot is a Java/Spring Boot web application for teams that want centralized, self-hosted AI automation across Gitea, GitHub, GitHub Enterprise, GitLab, Bitbucket Cloud, and Azure DevOps. It supports cloud AI providers and local LLM runtimes, stores configuration centrally, and posts results back to the Git platform as reviews, comments, issue drafts, or pull requests.
 
 Primary repository: https://github.com/tmseidel/ai-git-bot
 Docker image: https://hub.docker.com/r/tmseidel/ai-git-bot
@@ -29,7 +29,7 @@ License: MIT
 
 ## Keywords
 
-ai code review, code review bot, pull request automation, AI unit tests, unit test author, white-box test generation, coding agent, issue implementation agent, technical writer agent, AI issue triage, i18n coverage, README sync, self-hosted AI, Git automation, Gitea bot, GitHub bot, GitHub Enterprise bot, GitLab bot, Bitbucket bot, Anthropic Claude, OpenAI, Google Gemini, Ollama, llama.cpp, local LLM, MCP, Model Context Protocol, Spring Boot, Java 21, Docker, PostgreSQL, Prometheus metrics, outgoing webhooks
+ai code review, code review bot, pull request automation, AI unit tests, unit test author, white-box test generation, coding agent, issue implementation agent, technical writer agent, AI issue triage, i18n coverage, README sync, self-hosted AI, Git automation, Gitea bot, GitHub bot, GitHub Enterprise bot, GitLab bot, Bitbucket bot, Azure DevOps bot, Anthropic Claude, OpenAI, Google Gemini, Ollama, llama.cpp, local LLM, MCP, Model Context Protocol, Spring Boot, Java 21, Docker, PostgreSQL, Prometheus metrics, outgoing webhooks
 
 ## Essential documentation
 
@@ -71,6 +71,7 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 - [GitHub Setup](doc/GITHUB_SETUP.md): bot user, PAT permissions, and webhook setup for GitHub.
 - [GitLab Setup](doc/GITLAB_SETUP.md): bot user, token, project access, and webhook setup for GitLab.
 - [Bitbucket Setup](doc/BITBUCKET_SETUP.md): Bitbucket Cloud app password and webhook configuration.
+- [Azure DevOps Setup](doc/AZURE_DEVOPS_SETUP.md): Personal Access Token, the organization/project/repository address format, and Service Hook configuration for Azure DevOps.
 - [Ollama](doc/OLLAMA.md): local LLM setup through Ollama.
 - [llama.cpp](doc/LLAMACPP.md): local llama.cpp setup and grammar support.
 
