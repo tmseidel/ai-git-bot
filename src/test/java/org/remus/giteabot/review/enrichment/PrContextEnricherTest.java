@@ -6,6 +6,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.util.List;
 import java.util.Map;
@@ -32,15 +34,13 @@ class PrContextEnricherTest {
 
         when(repositoryClient.getRepositoryTree("owner", "repo", "feature"))
                 .thenReturn(List.of(
-                        Map.of("type", "blob", "path", "src/Foo.java"),
-                        Map.of("type", "blob", "path", "pom.xml")
+                        new RepositoryTreeEntry("src/Foo.java", RepositoryTreeEntry.Type.FILE),
+                        new RepositoryTreeEntry("pom.xml", RepositoryTreeEntry.Type.FILE)
                 ));
         when(repositoryClient.getFileContent("owner", "repo", "src/Foo.java", "feature"))
                 .thenReturn("class Foo {}");
         when(repositoryClient.getPullRequestCommits("owner", "repo", 1L))
-                .thenReturn(List.of(
-                        Map.of("sha", "abc1234", "commit", Map.of("message", "Add Foo"))
-                ));
+                .thenReturn(List.of(new PullRequestCommit("abc1234", "Add Foo")));
         when(repositoryClient.getIssueDetails("owner", "repo", 5L))
                 .thenReturn(Map.of("title", "Create Foo class", "body", "Need a Foo implementation"));
 
@@ -73,7 +73,7 @@ class PrContextEnricherTest {
     @Test
     void buildEnrichedContext_nullDiffAndBody() {
         when(repositoryClient.getRepositoryTree("owner", "repo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
 
         PrContextEnricher enricher = new PrContextEnricher(repositoryClient, new ReviewConfigProperties());
         String result = enricher.buildEnrichedContext("owner", "repo", 1L, null, "main", null);

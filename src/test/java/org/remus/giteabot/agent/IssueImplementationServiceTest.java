@@ -23,6 +23,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -100,7 +101,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
                 .thenReturn(List.of(
                         Map.of("body", "Please keep backward compatibility", "user", Map.of("login", "alice")),
@@ -174,7 +175,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
                 .thenReturn(List.of(
                         Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
@@ -223,7 +224,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("main"), isNull()))
@@ -300,7 +301,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("main"), isNull()))
@@ -320,7 +321,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("main"), isNull()))
@@ -380,7 +381,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("main"), isNull()))
@@ -437,7 +438,7 @@ class IssueImplementationServiceTest {
         payload.getIssue().setRef("refs/heads/release/1.x");
 
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "release/1.x"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "pom.xml")));
+                .thenReturn(List.of(new RepositoryTreeEntry("pom.xml", RepositoryTreeEntry.Type.FILE)));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("release/1.x"), isNull()))
@@ -551,7 +552,7 @@ class IssueImplementationServiceTest {
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+                .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("main"), isNull()))

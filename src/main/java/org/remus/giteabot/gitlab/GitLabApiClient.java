@@ -1,15 +1,19 @@
 package org.remus.giteabot.gitlab;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.gitlab.model.GitLabCommit;
 import org.remus.giteabot.gitlab.model.GitLabReview;
 import org.remus.giteabot.gitlab.model.GitLabReviewComment;
+import org.remus.giteabot.gitlab.model.GitLabTreeEntry;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
+import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -380,15 +384,17 @@ public class GitLabApiClient implements RepositoryApiClient {
     // ---- PR context enrichment ----
 
     @Override
-    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+    public List<PullRequestCommit> getPullRequestCommits(String owner, String repo, Long pullNumber) {
         log.info("Fetching commits for MR !{} in {}/{}", pullNumber, owner, repo);
         String projectPath = encodeProjectPath(owner, repo);
-        List<Map<String, Object>> commits = gitlabRestClient.get()
+        List<GitLabCommit> commits = gitlabRestClient.get()
                 .uri("/api/v4/projects/{projectPath}/merge_requests/{iid}/commits",
                         projectPath, pullNumber)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-        return commits != null ? commits : List.of();
+        return commits != null
+                ? commits.stream().map(GitLabCommit::toPullRequestCommit).toList()
+                : List.of();
     }
 
     @Override
@@ -483,10 +489,10 @@ public class GitLabApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public List<Map<String, Object>> getRepositoryTree(String owner, String repo, String ref) {
+    public List<RepositoryTreeEntry> getRepositoryTree(String owner, String repo, String ref) {
         log.info("Fetching repository tree for {}/{} at ref={}", owner, repo, ref);
         String projectPath = encodeProjectPath(owner, repo);
-        List<Map<String, Object>> tree = gitlabRestClient.get()
+        List<GitLabTreeEntry> tree = gitlabRestClient.get()
                 .uri("/api/v4/projects/{projectPath}/repository/tree?recursive=true&ref={ref}&per_page=100",
                         projectPath, ref)
                 .retrieve()
@@ -494,11 +500,7 @@ public class GitLabApiClient implements RepositoryApiClient {
         if (tree == null) {
             return List.of();
         }
-        // Normalize to match the Gitea tree format (path, type fields)
-        return tree.stream().map(entry -> {
-            // GitLab uses "blob"/"tree", same as Gitea convention
-            return (Map<String, Object>) new LinkedHashMap<>(entry);
-        }).collect(Collectors.toList());
+        return tree.stream().map(GitLabTreeEntry::toRepositoryTreeEntry).toList();
     }
 
     @Override

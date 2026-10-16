@@ -1,13 +1,17 @@
 package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.bitbucket.model.BitbucketCommit;
 import org.remus.giteabot.bitbucket.model.BitbucketReviewComment;
+import org.remus.giteabot.bitbucket.model.BitbucketTreeEntry;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
+import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -280,18 +284,17 @@ public class BitbucketApiClient implements RepositoryApiClient {
     // ---- PR context enrichment ----
 
     @Override
-    @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+    public List<PullRequestCommit> getPullRequestCommits(String owner, String repo, Long pullNumber) {
         log.info("Fetching commits for PR #{} in {}/{}", pullNumber, owner, repo);
-        Map<String, Object> result = restClient.get()
+        BitbucketCommit.Page page = restClient.get()
                 .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}/commits",
                         owner, repo, pullNumber)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("values")) {
-            return (List<Map<String, Object>>) result.get("values");
+                .body(BitbucketCommit.Page.class);
+        if (page == null || page.getValues() == null) {
+            return List.of();
         }
-        return List.of();
+        return page.getValues().stream().map(BitbucketCommit::toPullRequestCommit).toList();
     }
 
     @Override
@@ -321,18 +324,17 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> getRepositoryTree(String owner, String repo, String ref) {
+    public List<RepositoryTreeEntry> getRepositoryTree(String owner, String repo, String ref) {
         log.info("Fetching repository tree for {}/{} at ref={}", owner, repo, ref);
-        Map<String, Object> result = restClient.get()
+        BitbucketTreeEntry.Page page = restClient.get()
                 .uri("/repositories/{workspace}/{repo}/src/{ref}/?max_depth=100&pagelen=100",
                         owner, repo, ref)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("values")) {
-            return (List<Map<String, Object>>) result.get("values");
+                .body(BitbucketTreeEntry.Page.class);
+        if (page == null || page.getValues() == null) {
+            return List.of();
         }
-        return List.of();
+        return page.getValues().stream().map(BitbucketTreeEntry::toRepositoryTreeEntry).toList();
     }
 
     @Override

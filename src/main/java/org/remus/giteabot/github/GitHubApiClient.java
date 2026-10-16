@@ -1,13 +1,19 @@
 package org.remus.giteabot.github;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.github.model.GitHubCommit;
+import org.remus.giteabot.github.model.GitHubPullRequest;
 import org.remus.giteabot.github.model.GitHubReview;
+import org.remus.giteabot.github.model.GitHubTree;
 import org.remus.giteabot.github.model.GitHubReviewComment;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
+import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -15,6 +21,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * GitHub-specific implementation of {@link RepositoryApiClient}.
@@ -226,13 +233,15 @@ public class GitHubApiClient implements RepositoryApiClient {
     // ---- PR context enrichment ----
 
     @Override
-    public List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+    public List<PullRequestCommit> getPullRequestCommits(String owner, String repo, Long pullNumber) {
         log.info("Fetching commits for PR #{} in {}/{}", pullNumber, owner, repo);
-        List<Map<String, Object>> commits = restClient.get()
+        List<GitHubCommit> commits = restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{pull_number}/commits", owner, repo, pullNumber)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-        return commits != null ? commits : List.of();
+        return commits != null
+                ? commits.stream().map(GitHubCommit::toPullRequestCommit).toList()
+                : List.of();
     }
 
     @Override
@@ -246,13 +255,13 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+    public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
         log.info("Fetching pull-request #{} details in {}/{}", pullNumber, owner, repo);
-        Map<String, Object> pr = restClient.get()
+        GitHubPullRequest pr = restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{pull_number}", owner, repo, pullNumber)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        return pr != null ? pr : Map.of();
+                .body(GitHubPullRequest.class);
+        return Optional.ofNullable(pr).map(GitHubPullRequest::toPullRequestDetails);
     }
 
     @Override
@@ -291,17 +300,16 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public List<Map<String, Object>> getRepositoryTree(String owner, String repo, String ref) {
+    public List<RepositoryTreeEntry> getRepositoryTree(String owner, String repo, String ref) {
         log.info("Fetching repository tree for {}/{} at ref={}", owner, repo, ref);
-        Map<String, Object> result = restClient.get()
+        GitHubTree result = restClient.get()
                 .uri("/repos/{owner}/{repo}/git/trees/{ref}?recursive=1", owner, repo, ref)
                 .retrieve()
-                .body(new ParameterizedTypeReference<>() {});
-        if (result != null && result.containsKey("tree")) {
-            return (List<Map<String, Object>>) result.get("tree");
+                .body(GitHubTree.class);
+        if (result == null || result.getTree() == null) {
+            return List.of();
         }
-        return List.of();
+        return result.getTree().stream().map(GitHubTree.Entry::toRepositoryTreeEntry).toList();
     }
 
     @Override

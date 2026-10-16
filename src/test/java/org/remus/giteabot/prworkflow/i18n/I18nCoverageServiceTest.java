@@ -19,7 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -78,7 +78,7 @@ class I18nCoverageServiceTest {
 
     @Test
     void missingHeadRef_andApiCannotResolve_skipsWithoutCloning() {
-        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Map.of());
+        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Optional.empty());
 
         I18nCoverageService.Result result = service.run(
                 request(payloadWithHead(null), SuiteLifecycleMode.COMMIT_TO_PR));

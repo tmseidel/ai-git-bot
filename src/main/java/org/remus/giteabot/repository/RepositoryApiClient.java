@@ -1,6 +1,10 @@
 package org.remus.giteabot.repository;
 
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -9,6 +13,7 @@ import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Provider-agnostic interface for repository operations (pull requests, reviews,
@@ -198,11 +203,15 @@ public interface RepositoryApiClient {
                                                      Long pullNumber, Long reviewId);
 
     /**
-     * Returns the list of commits in a pull request.
-     * Each map contains at minimum "message" (commit message) and "sha" keys.
+     * Returns the commits of a pull request in the order the provider reports them.
      * Default implementation returns an empty list.
+     *
+     * @return the commits; never {@code null}, empty when the pull request has no
+     *         commits or the provider does not support this lookup. Individual
+     *         {@link PullRequestCommit#sha()} / {@link PullRequestCommit#message()}
+     *         values may be {@code null}.
      */
-    default List<Map<String, Object>> getPullRequestCommits(String owner, String repo, Long pullNumber) {
+    default List<PullRequestCommit> getPullRequestCommits(String owner, String repo, Long pullNumber) {
         return List.of();
     }
 
@@ -236,24 +245,27 @@ public interface RepositoryApiClient {
     }
 
     /**
-     * Fetches the full pull-request payload (head / base refs, SHAs, title, …)
-     * from the provider. Used to "hydrate" webhook payloads that lack the
-     * pull-request object — most notably GitHub {@code issue_comment} events
-     * which carry only the issue, not the PR.
+     * Fetches the pull-request title, body, state and head / base ref and SHA from the provider.
+     * Used to "hydrate" webhook payloads that lack the pull-request object —
+     * most notably GitHub {@code issue_comment} events which carry only the
+     * issue, not the PR.
+     *
+     * @return the details, or empty when the provider does not support this lookup
      */
-    default Map<String, Object> getPullRequestDetails(String owner, String repo, Long pullNumber) {
-        return Map.of();
+    default Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        return Optional.empty();
     }
 
     /**
-     * Re-fetches whether a PR is open for workflow writes. The default understands
-     * GitHub/Gitea details; other providers override it. Missing state denies
+     * Re-fetches whether a PR is open for workflow writes. The default relies on the
+     * state mapped by {@link #getPullRequestDetails}; other providers override it. Missing state denies
      * writes, and API failures propagate to the workflow.
      */
     default boolean isPullRequestOpen(String owner, String repo, Long pullNumber) {
-        Map<String, Object> details = getPullRequestDetails(owner, repo, pullNumber);
-        return details != null && "open".equals(details.get("state"))
-                && Boolean.FALSE.equals(details.get("merged"));
+        return getPullRequestDetails(owner, repo, pullNumber)
+                .map(PullRequestDetails::state)
+                .filter(PullRequestState.OPEN::equals)
+                .isPresent();
     }
 
     /**
@@ -280,7 +292,16 @@ public interface RepositoryApiClient {
 
     String getDefaultBranch(String owner, String repo);
 
-    List<Map<String, Object>> getRepositoryTree(String owner, String repo, String ref);
+    /**
+     * Returns the recursive tree of {@code repo} at {@code ref}: files, directories
+     * and other entries such as submodules (see {@link RepositoryTreeEntry.Type}).
+     * Providers with paginated listings may return only the first page, so large
+     * repositories can be truncated.
+     *
+     * @return the tree entries; never {@code null}, empty when the provider returns
+     *         no tree
+     */
+    List<RepositoryTreeEntry> getRepositoryTree(String owner, String repo, String ref);
 
     String getFileContent(String owner, String repo, String path, String ref);
 

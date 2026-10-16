@@ -27,6 +27,7 @@ import org.remus.giteabot.gitea.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import tools.jackson.databind.JsonNode;
@@ -106,7 +107,7 @@ class IssueTriageServiceTest {
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/triage-ws")));
         lenient().when(repoClient.getDefaultBranch("owner", "repo")).thenReturn("main");
         lenient().when(repoClient.getRepositoryTree("owner", "repo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "src/App.java")));
+                .thenReturn(List.of(new RepositoryTreeEntry("src/App.java", RepositoryTreeEntry.Type.FILE)));
         lenient().when(sessionService.toAiMessages(any())).thenReturn(List.of());
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
