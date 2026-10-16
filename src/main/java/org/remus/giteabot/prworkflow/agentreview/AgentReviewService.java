@@ -31,6 +31,7 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -171,13 +172,15 @@ public class AgentReviewService {
      *                              classification
      * @param severityThresholds    optional per-severity thresholds used to
      *                              compute the final review action
+     * @param enableProgressComments whether to create and update a pull-request progress comment
      * @return whether a review was posted, no diff was available, or the review failed
      */
     public ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds,
                                          boolean enableFormalDecision, String decisionPrompt,
                                          SeverityThresholds severityThresholds,
                                          Long runId,
-                                         Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+                                         Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                         boolean enableProgressComments) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -203,8 +206,14 @@ public class AgentReviewService {
             return ReviewResult.FAILED;
         }
 
+        ReviewProgress progress = enableProgressComments
+                ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
+        boolean completed = false;
         Path workspaceDir = null;
         try {
+            if (progress != null) {
+                progress.start();
+            }
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     repositoryClient, owner, repo, headBranch, prNumber);
             if (!wsResult.success()) {
@@ -223,7 +232,7 @@ public class AgentReviewService {
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
-                    runId, toolCallConsumer);
+                    runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {
                 log.warn("Agentic review for PR #{} failed; no review will be published", prNumber);
@@ -261,6 +270,7 @@ public class AgentReviewService {
             publishFindingEvents(eventHookPublisher, bot, parsed, owner, repo, prNumber);
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
                     prNumber, owner, repo, action);
+            completed = true;
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
@@ -270,8 +280,14 @@ public class AgentReviewService {
                             + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
-            if (workspaceDir != null) {
-                workspaceService.cleanupWorkspace(workspaceDir);
+            try {
+                if (workspaceDir != null) {
+                    workspaceService.cleanupWorkspace(workspaceDir);
+                }
+            } finally {
+                if (progress != null) {
+                    progress.finish(completed);
+                }
             }
         }
     }
@@ -279,8 +295,10 @@ public class AgentReviewService {
     /**
      * Answers a clarification question about a previously-reviewed PR by running
      * a conversational agent loop. Formal review decisions are not applicable here.
+     * Optional progress comments use the same lifecycle as the initial review.
      */
-    public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds) {
+    public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds,
+                                           boolean enableProgressComments) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -306,8 +324,14 @@ public class AgentReviewService {
             return ReviewResult.FAILED;
         }
 
+        ReviewProgress progress = enableProgressComments
+                ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
+        boolean completed = false;
         Path workspaceDir = null;
         try {
+            if (progress != null) {
+                progress.start();
+            }
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     repositoryClient, owner, repo, headBranch, prNumber);
             if (!wsResult.success()) {
@@ -327,7 +351,7 @@ public class AgentReviewService {
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage,
-                    maxToolRounds, diffSummary, null, null);
+                    maxToolRounds, diffSummary, null, null, progress);
 
             if (!outcome.success()) {
                 log.warn("Clarification for PR #{} failed; no answer will be published", prNumber);
@@ -342,6 +366,7 @@ public class AgentReviewService {
 
             repositoryClient.postPullRequestComment(owner, repo, prNumber, formatClarification(answer));
             log.info("Clarification answered for PR #{} in {}/{}", prNumber, owner, repo);
+            completed = true;
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Clarification failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
@@ -351,8 +376,14 @@ public class AgentReviewService {
                             + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
-            if (workspaceDir != null) {
-                workspaceService.cleanupWorkspace(workspaceDir);
+            try {
+                if (workspaceDir != null) {
+                    workspaceService.cleanupWorkspace(workspaceDir);
+                }
+            } finally {
+                if (progress != null) {
+                    progress.finish(completed);
+                }
             }
         }
     }
@@ -612,7 +643,8 @@ public class AgentReviewService {
                                       Path workspaceDir, String headBranch,
                                       String systemPrompt, String userMessage, int maxToolRounds,
                                       DiffSummary diffSummary, Long runId,
-                                      Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+                                      Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                      Consumer<AgentRunContext.ProgressUpdate> progressConsumer) {
         int rounds = Math.max(1, maxToolRounds);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy(
                 systemPrompt, toolRouter, toolCatalog,
@@ -631,6 +663,7 @@ public class AgentReviewService {
         AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
+        ctx.setProgressConsumer(progressConsumer);
         return loop.run(ctx, userMessage, strategy);
     }
 

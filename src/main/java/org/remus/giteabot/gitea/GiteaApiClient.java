@@ -305,14 +305,25 @@ public class GiteaApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+    public Long postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
         log.info("Posting comment on PR #{} in {}/{}", pullNumber, owner, repo);
-        giteaRestClient.post()
-                .uri("/api/v1/repos/{owner}/{repo}/issues/{index}/comments", owner, repo, pullNumber)
-                .body(new CommentRequest(body))
-                .retrieve()
-                .toBodilessEntity();
+        Map<?, ?> response = commentCreationRequest(owner, repo, pullNumber, body).body(Map.class);
         log.info("Comment posted successfully");
+        return RepositoryApiClient.commentId(response);
+    }
+
+    @Override
+    public void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+        giteaRestClient.patch()
+                .uri("/api/v1/repos/{owner}/{repo}/issues/comments/{id}", owner, repo, commentId)
+                .body(new CommentRequest(body))
+                .retrieve().toBodilessEntity();
+    }
+
+    private RestClient.ResponseSpec commentCreationRequest(String owner, String repo, Long number, String body) {
+        return giteaRestClient.post()
+                .uri("/api/v1/repos/{owner}/{repo}/issues/{index}/comments", owner, repo, number)
+                .body(new CommentRequest(body)).retrieve();
     }
 
     /**
@@ -400,11 +411,7 @@ public class GiteaApiClient implements RepositoryApiClient {
     @Override
     public void postIssueComment(String owner, String repo, Long issueNumber, String body) {
         log.info("Posting comment on issue #{} in {}/{}", issueNumber, owner, repo);
-        giteaRestClient.post()
-                .uri("/api/v1/repos/{owner}/{repo}/issues/{index}/comments", owner, repo, issueNumber)
-                .body(new CommentRequest(body))
-                .retrieve()
-                .toBodilessEntity();
+        commentCreationRequest(owner, repo, issueNumber, body).toBodilessEntity();
         log.info("Comment posted successfully");
     }
 

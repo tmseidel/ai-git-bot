@@ -108,24 +108,31 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+    public Long postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
         log.info("Posting top-level comment on PR #{} in {}/{}", pullNumber, owner, repo);
-        restClient.post()
-                .uri("/repos/{owner}/{repo}/issues/{issue_number}/comments", owner, repo, pullNumber)
-                .body(new CommentRequest(body))
-                .retrieve()
-                .toBodilessEntity();
+        Map<?, ?> response = commentCreationRequest(owner, repo, pullNumber, body).body(Map.class);
         log.info("Comment posted successfully");
+        return RepositoryApiClient.commentId(response);
+    }
+
+    @Override
+    public void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+        restClient.patch()
+                .uri("/repos/{owner}/{repo}/issues/comments/{comment_id}", owner, repo, commentId)
+                .body(new CommentRequest(body))
+                .retrieve().toBodilessEntity();
+    }
+
+    private RestClient.ResponseSpec commentCreationRequest(String owner, String repo, Long number, String body) {
+        return restClient.post()
+                .uri("/repos/{owner}/{repo}/issues/{issue_number}/comments", owner, repo, number)
+                .body(new CommentRequest(body)).retrieve();
     }
 
     @Override
     public void postIssueComment(String owner, String repo, Long issueNumber, String body) {
         log.info("Posting comment on issue #{} in {}/{}", issueNumber, owner, repo);
-        restClient.post()
-                .uri("/repos/{owner}/{repo}/issues/{issue_number}/comments", owner, repo, issueNumber)
-                .body(new CommentRequest(body))
-                .retrieve()
-                .toBodilessEntity();
+        commentCreationRequest(owner, repo, issueNumber, body).toBodilessEntity();
         log.info("Comment posted successfully");
     }
 

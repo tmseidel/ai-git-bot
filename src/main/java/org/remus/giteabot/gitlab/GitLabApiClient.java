@@ -130,14 +130,22 @@ public class GitLabApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+    public Long postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
         log.info("Posting merge request note on MR !{} in {}/{}", pullNumber, owner, repo);
         String projectPath = encodeProjectPath(owner, repo);
-        gitlabRestClient.post()
+        Map<?, ?> response = gitlabRestClient.post()
                 .uri("/api/v4/projects/{projectPath}/merge_requests/{iid}/notes", projectPath, pullNumber)
-                .body(Map.of("body", body))
-                .retrieve()
-                .toBodilessEntity();
+                .body(Map.of("body", body)).retrieve().body(Map.class);
+        return RepositoryApiClient.commentId(response);
+    }
+
+    @Override
+    public void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+        String projectPath = encodeProjectPath(owner, repo);
+        gitlabRestClient.put()
+                .uri("/api/v4/projects/{projectPath}/merge_requests/{iid}/notes/{note_id}",
+                        projectPath, pullNumber, commentId)
+                .body(Map.of("body", body)).retrieve().toBodilessEntity();
     }
 
     /**

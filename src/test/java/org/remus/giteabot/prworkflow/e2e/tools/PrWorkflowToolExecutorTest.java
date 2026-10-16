@@ -417,7 +417,7 @@ class PrWorkflowToolExecutorTest {
         }
         @Override public String getPullRequestDiff(String o, String r, Long p) { return ""; }
         @Override public void postReviewComment(String o, String r, Long p, String b) { }
-        @Override public void postPullRequestComment(String o, String r, Long p, String b) { }
+        @Override public Long postPullRequestComment(String o, String r, Long p, String b) { return null; }
         @Override public void postIssueComment(String o, String r, Long i, String b) { }
         @Override public void addReaction(String o, String r, Long c, String x) { }
         @Override public void postInlineReviewComment(String o, String r, Long p, String f, int l, String b) { }

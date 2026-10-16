@@ -3,11 +3,25 @@ package org.remus.giteabot.repository;
 import lombok.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.client.RestClient;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class BitbucketProviderMetadataTest {
 
@@ -103,6 +117,51 @@ class BitbucketProviderMetadataTest {
         String header = metadata.buildAuthorizationHeader("ATATT3xFfGF0CNndTrZZuJdJfXcmNmuF2RQK9fTUUTRhThM");
 
         assertThat(header).startsWith("Bearer ATATT");
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = "account@example.com")
+    void apiToken_preservesRestAuthenticationAndUsesSupportedGitUsername(String username) {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        metadata = new BitbucketProviderMetadata(new ObjectProvider<>() {
+            @Override
+            public @NonNull RestClient.Builder getObject() {
+                return builder;
+            }
+        });
+        GitIntegration integration = new GitIntegration();
+        integration.setUrl("https://bitbucket.org");
+        integration.setUsername(username);
+        String token = "ATATT-test-api-token";
+        RepositoryCredentials credentials = metadata.createCredentials(integration, token);
+        String expectedHeader = credentials.hasUsername()
+                ? "Basic " + Base64.getEncoder().encodeToString((username + ":" + token).getBytes(StandardCharsets.UTF_8))
+                : "Bearer " + token;
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/1"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", expectedHeader))
+                .andRespond(withSuccess("{\"state\":\"OPEN\"}", MediaType.APPLICATION_JSON));
+
+        RepositoryApiClient client = metadata.createClient(metadata.buildRestClient(integration, token), credentials);
+
+        assertThat(client.isPullRequestOpen("workspace", "repo", 1L)).isTrue();
+        server.verify();
+        assertThat(client.getCredentials().username()).isEqualTo("x-token-auth");
+        assertThat(client.getCredentials().token()).isEqualTo(token);
+        assertThat(credentials.username()).isEqualTo(username);
+    }
+
+    @Test
+    void apiToken_preservesSshCredentials() {
+        RepositoryCredentials credentials = RepositoryCredentials.of(
+                "https://api.bitbucket.org/2.0", "https://bitbucket.org", "account@example.com", "ATATT-test-token")
+                .withSsh("private-key", "known-hosts");
+
+        RepositoryApiClient client = metadata.createClient(null, credentials);
+
+        assertThat(client.getCredentials()).isSameAs(credentials);
     }
 
     @Test

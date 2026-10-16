@@ -463,6 +463,16 @@ public class GitLabWebhookHandler {
                 pr.setTitle((String) mr.get("title"));
                 pr.setBody((String) mr.get("description"));
                 pr.setUser(extractGitLabAuthor(mr, user));
+                WebhookPayload.Head head = new WebhookPayload.Head();
+                head.setRef((String) mr.get("source_branch"));
+                Map<String, Object> lastCommit = (Map<String, Object>) mr.get("last_commit");
+                if (lastCommit != null) {
+                    head.setSha((String) lastCommit.get("id"));
+                }
+                pr.setHead(head);
+                WebhookPayload.Head base = new WebhookPayload.Head();
+                base.setRef((String) mr.get("target_branch"));
+                pr.setBase(base);
                 payload.setPullRequest(pr);
             }
         } else if ("Issue".equals(noteableType)) {
@@ -488,19 +498,22 @@ public class GitLabWebhookHandler {
         String pathWithNamespace = (String) project.get("path_with_namespace");
         repo.setFullName(pathWithNamespace);
 
-        // Extract owner from the namespace
+        // Namespace and project names can be display labels; prefer the canonical path.
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         if (pathWithNamespace != null && pathWithNamespace.contains("/")) {
-            owner.setLogin(pathWithNamespace.substring(0, pathWithNamespace.lastIndexOf('/')));
-        }
-        // GitLab sends namespace as a String (e.g. Issue Hook) or as an object with "path" (e.g. MR Hook)
-        Object namespace = project.get("namespace");
-        if (namespace instanceof String ns) {
-            owner.setLogin(ns);
-        } else if (namespace instanceof Map<?, ?> nsMap) {
-            String path = (String) nsMap.get("path");
-            if (path != null) {
-                owner.setLogin(path);
+            int separator = pathWithNamespace.lastIndexOf('/');
+            owner.setLogin(pathWithNamespace.substring(0, separator));
+            repo.setName(pathWithNamespace.substring(separator + 1));
+        } else {
+            // Retain existing namespace payload support when the canonical path is absent.
+            Object namespace = project.get("namespace");
+            if (namespace instanceof String ns) {
+                owner.setLogin(ns);
+            } else if (namespace instanceof Map<?, ?> nsMap) {
+                String path = (String) nsMap.get("path");
+                if (path != null) {
+                    owner.setLogin(path);
+                }
             }
         }
         repo.setOwner(owner);

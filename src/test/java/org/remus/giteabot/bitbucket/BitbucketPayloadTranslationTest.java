@@ -120,6 +120,22 @@ class BitbucketPayloadTranslationTest {
     }
 
     @Test
+    void translateRepository_usesWorkspaceCoordinateInsteadOfLegacyOwner() {
+        Map<String, Object> raw = new HashMap<>(createPullRequestPayload());
+        raw.put("repository", Map.of(
+                "name", "Review fixture",
+                "full_name", "workspace/review-fixture",
+                "owner", Map.of("username", "legacy-team", "display_name", "Workspace Owner"),
+                "workspace", Map.of("slug", "workspace")));
+
+        WebhookPayload payload = handler.translatePayload("pullrequest:created", raw);
+
+        assertEquals("workspace", payload.getRepository().getOwner().getLogin());
+        assertEquals("review-fixture", payload.getRepository().getName());
+        assertEquals("workspace/review-fixture", payload.getRepository().getFullName());
+    }
+
+    @Test
     void translateRealBitbucketPayload_mapsAllFields() {
         // Real Bitbucket Cloud payload from a pullrequest:created event
         String json = """

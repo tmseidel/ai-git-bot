@@ -124,8 +124,25 @@ public interface RepositoryApiClient {
      * <p>
      * Providers like GitHub and Gitea can often reuse the same underlying endpoint as issue comments,
      * while GitLab requires a merge-request-specific endpoint.
+     *
+     * @return the positive integral comment ID, or {@code null} if the response has no usable ID;
+     *         callers that only need to publish a comment can ignore the return value
      */
-    void postPullRequestComment(String owner, String repo, Long pullNumber, String body);
+    Long postPullRequestComment(String owner, String repo, Long pullNumber, String body);
+
+    /** Updates a top-level PR comment owned by the authenticated account. */
+    default void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+        throw new UnsupportedOperationException("Updating PR comments is not supported");
+    }
+
+    /** Returns the positive integral ID from a comment response, or {@code null} if unavailable. */
+    static Long commentId(Map<?, ?> response) {
+        Object id = response == null ? null : response.get("id");
+        if ((id instanceof Integer || id instanceof Long) && ((Number) id).longValue() > 0) {
+            return ((Number) id).longValue();
+        }
+        return null;
+    }
 
     /**
      * Attaches an artifact (test screenshot, trace, log file, …) to a pull
