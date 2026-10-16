@@ -88,13 +88,13 @@
                             </div>
                         </div>
 
-                        <!-- Username field - shown for Bitbucket only -->
+                        <!-- Account e-mail field - shown for Bitbucket only (stored in GitIntegration.username) -->
                         <div class="col-md-6" id="usernameField" style="display: none;">
-                            <label for="username" class="form-label" th:text="#{label.username}">Username</label>
-                            <input type="text" class="form-control" id="username" th:field="*{username}"
-                                   th:placeholder="#{placeholder.gitUsername}" placeholder="e.g. your-bitbucket-username"/>
-                            <div class="form-text" th:text="#{help.git.bitbucketUsername}">
-                                Your Bitbucket username (used together with the App Password for authentication).
+                            <label for="username" class="form-label" th:text="#{label.bitbucketEmail}">Atlassian Account Email</label>
+                            <input type="email" class="form-control" id="username" th:field="*{username}" autocomplete="email"
+                                   th:placeholder="#{placeholder.bitbucketEmail}" placeholder="e.g. bot@example.com"/>
+                            <div class="form-text" th:text="#{help.git.bitbucketEmail}">
+                                Email address of the Atlassian account the bot acts as.
                             </div>
                         </div>
 
@@ -292,13 +292,13 @@
                     reviewTriggerNotice.style.display = 'block';
                     postReviewActionField.style.display = 'block';
                 } else if (providerType === 'BITBUCKET') {
-                    // Bitbucket: Username + Token (App Password)
+                    // Bitbucket: account e-mail + Atlassian API token
                     urlField.style.display = 'none';
                     urlInput.required = false;
                     usernameField.style.display = 'block';
                     usernameInput.required = true;
-                    tokenLabel.textContent = /*[[#{label.appPassword}]]*/ 'App Password';
-                    tokenDescription.textContent = /*[[#{help.git.bitbucketToken}]]*/ 'A Bitbucket App Password with repository read/write permissions. Create one at Bitbucket Settings → App passwords.';
+                    tokenLabel.textContent = /*[[#{label.apiToken}]]*/ 'API Token';
+                    tokenDescription.textContent = /*[[#{help.git.bitbucketToken}]]*/ 'An Atlassian API token with Bitbucket scopes.';
                     reviewTriggerNotice.style.display = 'block';
                 } else {
                     // Default / no selection
@@ -310,6 +310,10 @@
                     tokenLabel.textContent = /*[[#{label.token}]]*/ 'Token';
                     tokenDescription.textContent = /*[[#{help.git.tokenDescription}]]*/ 'The access token for API authentication.';
                 }
+
+                // Disabled inputs are neither validated nor submitted: a stale non-email value in the
+                // hidden e-mail field must not block saving an integration of another provider.
+                usernameInput.disabled = providerType !== 'BITBUCKET';
 
                 if (providerType !== 'GITEA') {
                     transportInput.value = 'HTTP';
