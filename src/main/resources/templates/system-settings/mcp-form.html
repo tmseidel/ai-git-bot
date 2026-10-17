@@ -41,11 +41,12 @@
                                     <i class="bi bi-code-slash"></i> Format JSON
                                 </button>
                             </div>
-                            <textarea class="form-control font-monospace" id="jsonContent" th:field="*{jsonContent}"
+                            <textarea class="form-control font-monospace invisible" id="jsonContent" th:field="*{jsonContent}"
                                       rows="14" required
                                       placeholder='{"name":"github","type":"url","url":"https://example.com/mcp"}'></textarea>
                             <div class="form-text" th:utext="#{help.mcp.description}">
-                                Enter a remote/network MCP configuration. Local <code>stdio</code> transports are rejected.
+                                Enter a remote/network MCP configuration. Local <code>stdio</code> transports are rejected.<br/>
+                                See <a href="https://github.com/tmseidel/ai-git-bot/blob/main/doc/MCP_SERVER_HANDLING.md" target="_blank">doc/MCP_SERVER_HANDLING.md</a> for examples.
                             </div>
                         </div>
                     </div>
@@ -67,8 +68,13 @@
     <th:block th:fragment="extraScripts">
         <script type="module">
             import { initJsonEditor } from /*[[@{/js/json-editor.js}]]*/ '/js/json-editor.js';
-            initJsonEditor(document.getElementById('jsonContent'), {
-                formatButton: document.getElementById('jsonContentFormatBtn')
+            // The textarea starts invisible so it does not flash before the editor replaces it.
+            const textarea = document.getElementById('jsonContent');
+            initJsonEditor(textarea, {
+                formatButton: document.getElementById('jsonContentFormatBtn'),
+                // Match the (invisible, but laid out) textarea so the content below does not
+                // shift when the editor replaces it; minHeight applies inside the editor's 1px border.
+                minHeight: (textarea.offsetHeight - 2) + 'px'
             });
         </script>
     </th:block>

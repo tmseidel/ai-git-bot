@@ -57,7 +57,7 @@
                         <i class="bi bi-code-slash"></i> Format JSON
                     </button>
                 </div>
-                <textarea class="form-control font-monospace" rows="3" name="plainCustomHeaders" id="plainCustomHeaders"
+                <textarea class="form-control font-monospace invisible" rows="3" name="plainCustomHeaders" id="plainCustomHeaders"
                           th:placeholder="${endpoint.customHeaders != null} ? #{placeholder.configuredKeep} : '{ &quot;X-Source&quot;: &quot;ai-git-bot&quot; }'"></textarea>
                 <div class="form-text" th:text="#{help.hook.customHeaders}">Sent with every delivery. Must be a single JSON object. Stored
                     encrypted when APP_ENCRYPTION_KEY is configured; leave blank on edit to keep the current value.</div>
@@ -145,6 +145,7 @@
     <th:block th:fragment="extraScripts">
         <script type="module">
             import { initJsonEditor } from /*[[@{/js/json-editor.js}]]*/ '/js/json-editor.js';
+            // The textarea starts invisible so it does not flash before the editor replaces it.
             initJsonEditor(document.getElementById('plainCustomHeaders'), {
                 formatButton: document.getElementById('plainCustomHeadersFormatBtn')
             });

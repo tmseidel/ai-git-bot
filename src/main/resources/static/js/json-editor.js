@@ -11,12 +11,14 @@
  * so that standard form submission continues to work.
  */
 
-import { EditorView, basicSetup } from "https://esm.sh/codemirror@6.0.1?deps=@codemirror/state@6.4.1";
-import { Compartment } from "https://esm.sh/@codemirror/state@6.4.1";
-import { json, jsonParseLinter } from "https://esm.sh/@codemirror/lang-json@6.0.1?deps=@codemirror/state@6.4.1";
-import { linter, lintGutter } from "https://esm.sh/@codemirror/lint@6.8.1?deps=@codemirror/state@6.4.1";
-import { oneDark } from "https://esm.sh/@codemirror/theme-one-dark@6.1.2?deps=@codemirror/state@6.4.1";
-import { placeholder as cmPlaceholder } from "https://esm.sh/@codemirror/view@6.33.0?deps=@codemirror/state@6.4.1";
+// Every module must resolve to the same @codemirror/view copy: CodeMirror matches extensions
+// by facet identity, so a plugin from a second copy (e.g. the placeholder) is silently ignored.
+import { basicSetup } from "https://esm.sh/codemirror@6.0.1?deps=@codemirror/state@6.7.6,@codemirror/view@6.43.14";
+import { EditorView, placeholder as cmPlaceholder } from "https://esm.sh/@codemirror/view@6.43.14?deps=@codemirror/state@6.7.6";
+import { Compartment } from "https://esm.sh/@codemirror/state@6.7.6";
+import { json, jsonParseLinter } from "https://esm.sh/@codemirror/lang-json@6.0.1?deps=@codemirror/state@6.7.6,@codemirror/view@6.43.14";
+import { linter, lintGutter } from "https://esm.sh/@codemirror/lint@6.9.7?deps=@codemirror/state@6.7.6,@codemirror/view@6.43.14";
+import { oneDark } from "https://esm.sh/@codemirror/theme-one-dark@6.1.2?deps=@codemirror/state@6.7.6,@codemirror/view@6.43.14";
 import * as prettier from "https://esm.sh/prettier@3.3.3/standalone";
 import * as estreePlugin from "https://esm.sh/prettier@3.3.3/plugins/estree";
 import * as babelPlugin from "https://esm.sh/prettier@3.3.3/plugins/babel";
