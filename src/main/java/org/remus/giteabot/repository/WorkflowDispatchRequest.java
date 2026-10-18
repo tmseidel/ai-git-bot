@@ -11,9 +11,10 @@ import java.util.Map;
  * <ul>
  *     <li><b>GitHub Actions / Gitea Actions:</b> {@link #workflowRef()} is the
  *         workflow file name (e.g. {@code preview.yml}) and {@link #gitRef()}
- *         is the branch or fully qualified ref ({@code refs/heads/main} or
- *         {@code refs/pull/{n}/head}). {@link #inputs()} are passed verbatim
- *         as {@code workflow_dispatch} inputs.</li>
+ *         is the branch or fully qualified ref ({@code refs/heads/main}) that
+ *         exists in this repository. Pull-request refs are not dispatchable, so
+ *         a PR opened from a fork cannot be dispatched. {@link #inputs()} are
+ *         passed verbatim as {@code workflow_dispatch} inputs.</li>
  *     <li><b>GitLab CI:</b> {@link #workflowRef()} is the trigger token (used
  *         as {@code token} on {@code POST /projects/:id/trigger/pipeline}) and
  *         {@link #gitRef()} is the pipeline {@code ref}. {@link #inputs()} are

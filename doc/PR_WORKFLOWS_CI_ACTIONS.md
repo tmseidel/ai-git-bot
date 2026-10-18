@@ -174,8 +174,13 @@ Deployment-target config:
 
 > ⚠️ `workflow_dispatch` only works on the branch's default workflow file —
 > the file must already be present on the ref you dispatch (typically the PR
-> head branch). For forks GitHub silently no-ops the dispatch; in that case
-> use `refs/heads/main` and pass the PR's SHA through the inputs.
+> head branch).
+>
+> ⚠️ **Pull requests opened from a fork are not supported.** The fork's head
+> branch does not exist in the repository being PR'd, and dispatch rejects
+> pull-request refs (`refs/pull/N/head`) as well — both end in
+> `422 Unprocessable Entity: {"message":"No ref found for: …"}`. Deploy from a
+> branch that lives in the PR'd repository.
 
 ### Gitea Actions (≥ 1.21)
 

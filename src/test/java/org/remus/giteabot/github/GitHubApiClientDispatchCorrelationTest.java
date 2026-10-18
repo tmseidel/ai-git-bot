@@ -1,6 +1,9 @@
 package org.remus.giteabot.github;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.WorkflowDispatchRequest;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -59,6 +62,37 @@ class GitHubApiClientDispatchCorrelationTest {
         assertThat(GitHubApiClient.deriveBranchFilter(null)).isNull();
         assertThat(GitHubApiClient.deriveBranchFilter("")).isNull();
         assertThat(GitHubApiClient.deriveBranchFilter("   ")).isNull();
+    }
+
+    @Test
+    void dispatch422MessageReportsForkPullRequestsAsUnsupported() {
+        // Measured against api.github.com: a fork PR's head branch has no
+        // refs/heads/<branch> in the base repository, and refs/pull/N/head is
+        // rejected with the same 422 body — so the message must not blame the
+        // workflow file.
+        String message = GitHubApiClient.dispatch422Message(
+                dispatchRequest("refs/heads/feature/x"),
+                "{\"message\":\"No ref found for: refs/heads/feature/x\",\"status\":\"422\"}");
+
+        assertThat(message)
+                .contains("on ref refs/heads/feature/x: that ref does not exist in acme/web")
+                .contains("from a fork is not supported")
+                .contains("refs/pull/N/head");
+    }
+
+    @Test
+    void dispatch422MessageKeepsWorkflowFileReadingForUnrelatedBodies() {
+        String message = GitHubApiClient.dispatch422Message(
+                dispatchRequest("refs/heads/develop"),
+                "{\"message\":\"Workflow does not have 'workflow_dispatch' trigger\"}");
+
+        assertThat(message)
+                .contains("does not declare")
+                .doesNotContain("fork");
+    }
+
+    private static WorkflowDispatchRequest dispatchRequest(String gitRef) {
+        return new WorkflowDispatchRequest("acme", "web", "preview.yml", gitRef, Map.of());
     }
 }
 

@@ -29,7 +29,7 @@ import java.util.Optional;
  * <pre>
  * {
  *   "workflowRef":        "preview.yml",                  // workflow file (GH/Gitea) | trigger token (GitLab) | pipeline pattern (Bitbucket)
- *   "refTemplate":        "refs/heads/{branch}",          // optional, default = "refs/heads/{branch}"; MUST resolve to a branch or tag on the remote — Gitea/GitLab/Bitbucket reject "refs/pull/N/head"; only GitHub Actions also accepts that form (for fork PRs)
+ *   "refTemplate":        "refs/heads/{branch}",          // optional, default = "refs/heads/{branch}"; MUST resolve to a branch or tag in the PR's repository — pull-request refs (i.e. fork PRs) are rejected by every provider
  *   "previewUrlOutput":   "preview_url",                  // optional, key into getWorkflowRunOutputs(...) (GitLab only)
  *   "pollIntervalSeconds": 15,                            // optional, default 15 (clamped 5..120)
  *   "inputs": {                                           // optional, extra inputs/variables for the CI dispatch

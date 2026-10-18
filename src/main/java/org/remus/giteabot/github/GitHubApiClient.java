@@ -400,14 +400,8 @@ public class GitHubApiClient implements RepositoryApiClient {
                         e);
             }
             if (status == 422) {
-                // 422 typically means the workflow file exists but does not declare
-                // workflow_dispatch, or required inputs are missing.
                 throw new IllegalStateException(
-                        "GitHub returned 422 when dispatching workflow '" + request.workflowRef()
-                                + "'. The workflow file likely does not declare"
-                                + " 'on: workflow_dispatch:' or is missing a required input."
-                                + " Original response: " + e.getMessage(),
-                        e);
+                        dispatch422Message(request, e.getResponseBodyAsString()), e);
             }
             throw e;
         }
@@ -488,6 +482,28 @@ public class GitHubApiClient implements RepositoryApiClient {
         }
         // bare branch name
         return gitRef;
+    }
+
+    /**
+     * Message for a {@code 422} from the dispatch endpoint. GitHub uses 422 for two
+     * unrelated causes, and the generic "missing workflow_dispatch" reading sends the
+     * operator looking in the workflow file when the ref itself is the problem:
+     * {@code "No ref found"} means the dispatched ref does not exist in this
+     * repository — the typical case is a PR opened from a fork.
+     */
+    static String dispatch422Message(WorkflowDispatchRequest request, String responseBody) {
+        if (responseBody != null && responseBody.contains("No ref found")) {
+            return "GitHub returned 422 when dispatching workflow '" + request.workflowRef()
+                    + "' on ref " + request.gitRef() + ": that ref does not exist in "
+                    + request.owner() + "/" + request.repo() + ". Dispatching a pull request"
+                    + " from a fork is not supported — its head branch exists only in the"
+                    + " fork, and GitHub rejects pull-request refs (refs/pull/N/head) as"
+                    + " dispatch targets. Original response: " + responseBody;
+        }
+        return "GitHub returned 422 when dispatching workflow '" + request.workflowRef()
+                + "'. The workflow file likely does not declare"
+                + " 'on: workflow_dispatch:' or is missing a required input."
+                + " Original response: " + responseBody;
     }
 
     /**
