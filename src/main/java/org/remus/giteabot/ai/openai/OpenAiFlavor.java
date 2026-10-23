@@ -2,6 +2,7 @@ package org.remus.giteabot.ai.openai;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.ModelFlavor;
 
 import java.util.List;
@@ -26,12 +27,12 @@ public enum OpenAiFlavor {
 
     /**
      * Forces {@code reasoning_effort: "none"}. Required by newer reasoning
-     * models (e.g. gpt-5.6-sol) on the Chat Completions endpoint when the
+     * models (e.g. gpt-6-luna) on the Chat Completions endpoint when the
      * front-end injects a default {@code reasoning_effort}: such models
      * refuse native function tools otherwise.
      */
     NO_REASONING("no_reasoning", "No reasoning effort",
-            "Sends reasoning_effort=none. Select this for reasoning models such as gpt-5.6-sol "
+            "Sends reasoning_effort=none. Select this for reasoning models such as gpt-6-luna "
                     + "that reject function tools on /v1/chat/completions when a gateway injects "
                     + "a default reasoning_effort.");
 
@@ -50,7 +51,7 @@ public enum OpenAiFlavor {
      * {@code openai/no_reasoning} can never be confused with another
      * provider's {@code no_reasoning}).
      */
-    public static List<ModelFlavor> modelFlavors(String providerType) {
+    public static List<ModelFlavor> modelFlavors(AiProviderType providerType) {
         return java.util.Arrays.stream(values())
                 .map(f -> new ModelFlavor(providerType, f.id, f.label, f.description))
                 .toList();

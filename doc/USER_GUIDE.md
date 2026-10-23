@@ -85,19 +85,19 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
      
      | Provider | Default API URL | Suggested Models |
      |----------|-----------------|------------------|
-     | `anthropic` | `https://api.anthropic.com` | claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5-20251001 |
-     | `openai` | `https://api.openai.com` | gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex |
-     | `openrouter` | `https://openrouter.ai/api` | `openrouter/auto`, `deepseek/deepseek-v4.1-flash`, `z-ai/glm-5.3-flash`, `xiaomi/mimo-v2.6-flash` |
-     | `google` | `https://generativelanguage.googleapis.com` | gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash |
-     | `ollama` | `http://localhost:11434` | *(user-configured)* |
-     | `llamacpp` | `http://localhost:8081` | *(user-configured)* |
+     | Anthropic | `https://api.anthropic.com` | claude-fable-5-1, claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5 |
+     | OpenAI | `https://api.openai.com` | gpt-6-astra, gpt-6.1-sol, gpt-6-luna |
+     | OpenRouter | `https://openrouter.ai/api` | `openrouter/auto`, `deepseek/deepseek-v4.1-flash`, `z-ai/glm-5.3-flash`, `xiaomi/mimo-v2.6-flash` |
+     | Google Gemini | `https://generativelanguage.googleapis.com` | gemini-4-argon, gemini-3.8-flash, gemini-3.5-flash-lite |
+     | Ollama | `http://localhost:11434` | *(user-configured)* |
+     | llama.cpp | `http://localhost:8081` | *(user-configured)* |
      
-   - **API URL**: Pre-filled based on provider; customize for self-hosted or proxy setups. OpenRouter uses a read-only, region-derived official URL.
+   - **API URL**: Pre-filled based on provider; customize for self-hosted or proxy setups. For OpenRouter the URL is shown as text and determined by the selected region.
    - **API Key**: Your API key (encrypted at rest when `APP_ENCRYPTION_KEY` is configured; not needed for Ollama or llama.cpp)
    - **API Version**: API version string (Anthropic only, e.g., `2023-06-01`)
    - **Model**: Select from the dropdown for suggested models, or type a custom model name
-   - **Model Flavor**: Available flavors are listed under the field. OpenRouter currently accepts only `standard` (provider default); see the OpenAI-compatible section for OpenAI flavors.
-   - **Max Tokens**: Maximum tokens per AI response (default: 4096)
+   - **Model Flavor**: Shown only for providers that offer flavors (currently OpenAI); available flavors are listed under the field. See the OpenAI-compatible section for details.
+   - **Max Tokens**: Maximum tokens per AI response, used for reviews and comment replies (default: 16000 for hosted providers, 4096 for Ollama and llama.cpp)
    - **Parallel Worker Limit**: Maximum number of jobs that may run at the same time for this integration (`0` = unlimited, `1`–`20` = cap). See [Parallel worker limit](#parallel-worker-limit)
    - **Max Diff Chars Per Chunk**: Maximum characters per diff chunk (default: 120000)
    - **Max Diff Chunks**: Maximum number of diff chunks to process (default: 8)
@@ -109,20 +109,20 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 #### Anthropic
 - Requires an API key
 - API version defaults to `2023-06-01` if not specified
-- Suggested models: claude-opus-4-7 (most capable), claude-sonnet-4-6 (balanced), claude-haiku-4-5-20251001 (fastest)
+- Suggested models: claude-fable-5-1 (most capable), claude-opus-5-5, claude-sonnet-5-5 (balanced), claude-haiku-5-5 (fastest)
 
 #### OpenAI
 - Requires an API key
 - Compatible with OpenAI API proxies by changing the API URL
-- Suggested models: gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.3-codex
-- **Model Flavor** (this provider only): `Standard` sends no extra request fields. `No reasoning effort` sends `reasoning_effort: "none"` — use it when a gateway in front of the model (e.g. for `gpt-5.6-sol`) injects a default `reasoning_effort` and the provider rejects function tools on `/v1/chat/completions`
+- Suggested models: gpt-6-astra (flagship), gpt-6.1-sol (balanced), gpt-6-luna (fastest)
+- **Model Flavor** (this provider only): `Standard` sends no extra request fields. `No reasoning effort` sends `reasoning_effort: "none"` — use it when a gateway in front of the model (e.g. for `gpt-6-luna`) injects a default `reasoning_effort` and the provider rejects function tools on `/v1/chat/completions`
 
 #### OpenRouter
 
 - Select **openrouter**, enter an **inference API key**, choose a suggested model or enter an exact model ID (usually `author/model`), and set your response/context limits. Suggestions are bundled examples, not a live catalog or availability guarantee; check the current [model catalog](https://openrouter.ai/models?order=most-popular) and enter another model ID when needed. Custom model IDs remain supported without changing configuration files or requesting the catalog during inference.
-- Configure **Routing and privacy**: Global (default), EU or US. EU/US are Enterprise in-region routes and require account eligibility. The API root is fixed by the selected region; custom proxies use the generic `openai` provider.
+- Configure **Routing and privacy**: Global (default), EU or US. EU/US are Enterprise in-region routes and require account eligibility. The API root is fixed by the selected region; custom proxies use the generic **OpenAI** provider.
 - When entering or replacing a key, the server checks `/v1/key` at the selected official host, rejects management/provisioning keys, and verifies the region is allowed. Missing or invalid key-type flags fail closed. An omitted `allowed_data_regions` is accepted only for Global; EU/US require an explicit matching entitlement. Explicit restrictions must be an array containing the selected region. See the [OpenRouter key response schema](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key). Validation runs outside database transactions. HTTP redirects are disabled for key checks and inference.
-- Leave the key blank on edit to keep it **only for the same provider**. A provider change requires a newly entered key or an explicit **Clear** for providers that allow keyless saves. Switching an existing generic OpenRouter integration from `openai` to `openrouter` therefore requires re-entering its key. Keys use the existing encrypted storage when `APP_ENCRYPTION_KEY` is configured.
+- Leave the key blank on edit to keep it **only for the same provider**. A provider change requires a newly entered key or an explicit **Clear** for providers that allow keyless saves. Switching an existing generic OpenRouter integration from **OpenAI** to **OpenRouter** therefore requires re-entering its key. Keys use the existing encrypted storage when `APP_ENCRYPTION_KEY` is configured.
 - Existing OpenRouter keys are not rechecked on ordinary settings edits. Changing the region rechecks the retained key against the new route; to recheck a key otherwise, enter it again. OpenRouter integrations cannot be saved without a key, including after using **Clear**; enter a replacement before saving.
 - **Provider data collection** defaults to **Deny**; **Require zero data retention (ZDR)** defaults to off. Requests always require the configured parameters and disable provider fallbacks. A missing compatible route fails explicitly rather than weakening the settings.
 - ZDR and data collection are independent routing filters. When ZDR is enabled, only ZDR endpoints are eligible even if data collection is set to **Allow**; **Allow** does not override ZDR. Both selections are preserved rather than silently normalised.
@@ -134,7 +134,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
 #### Google AI
 - Requires a Gemini API key from Google AI Studio; the key is encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 - Uses the Gemini REST API at `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
-- Suggested models: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash
+- Suggested models: gemini-4-argon (most capable), gemini-3.8-flash, gemini-3.5-flash-lite (fastest)
 - Enter model names without the `models/` prefix (for example, `gemini-2.5-flash`) or with the prefix if copied from Google documentation
 - Leave **API Version** blank; the integration currently targets the Gemini REST `v1beta` API surface
 - Invalid API keys or model names are returned as Google AI request failures with the provider's error message; API keys are sent in the `x-goog-api-key` header and are not included in logged URLs
@@ -143,7 +143,7 @@ To create a Google AI integration in the admin UI:
 
 | Field | What to enter |
 |-------|---------------|
-| **Provider Type** | Select `gemini`. The saved provider type is `google`. |
+| **Provider Type** | Select **Google Gemini**. |
 | **API URL** | Keep the default `https://generativelanguage.googleapis.com` unless you are using a compatible proxy. |
 | **API Key** | Enter your Gemini API key from Google AI Studio. |
 | **API Version** | Leave blank. |
@@ -152,25 +152,25 @@ To create a Google AI integration in the admin UI:
 
 ##### OpenAI-Compatible APIs
 
-The `openai` integration uses the OpenAI Chat Completions-compatible request and response format. Third-party hosted providers, API gateways, and self-hosted tools can often be used with this integration when they expose a sufficiently compatible `/v1/chat/completions` endpoint. Compatibility depends on the provider and model; these examples are documented configuration patterns, not a guarantee that every advertised OpenAI-compatible API will work.
+The **OpenAI** integration uses the OpenAI Chat Completions-compatible request and response format. Third-party hosted providers, API gateways, and self-hosted tools can often be used with this integration when they expose a sufficiently compatible `/v1/chat/completions` endpoint. Compatibility depends on the provider and model; these examples are documented configuration patterns, not a guarantee that every advertised OpenAI-compatible API will work.
 
 Configure OpenAI-compatible providers in **AI Integrations → New Integration**:
 
 | Field | What to enter |
 |-------|---------------|
-| **Provider Type** | Select `openai`. |
+| **Provider Type** | Select **OpenAI**. |
 | **API URL** | Enter the provider base URL before the `/v1/chat/completions` path. For example, if provider docs show `https://example.com/api/v1/chat/completions`, enter `https://example.com/api`. |
 | **API Key** | Enter the provider API key. For local tools that do not enforce authentication, enter a placeholder value such as `local` if the server accepts or ignores it. |
 | **API Version** | Leave blank. This field is only used for Anthropic integrations. |
 | **Model** | Enter the provider's exact model identifier, including any provider-specific prefix. |
-| **Model Flavor** | Keep the default `Standard` unless the selected model rejects function tools because of an injected `reasoning_effort` (see Troubleshooting). Select `No reasoning effort` for reasoning models such as `gpt-5.6-sol` used through a gateway that injects a default `reasoning_effort`. The field is only shown for providers that offer flavors. |
+| **Model Flavor** | Keep the default `Standard` unless the selected model rejects function tools because of an injected `reasoning_effort` (see Troubleshooting). Select `No reasoning effort` for reasoning models such as `gpt-6-luna` used through a gateway that injects a default `reasoning_effort`. Only use it with models that accept `reasoning_effort: "none"` (`gpt-6.1-sol` does not). The field is only shown for providers that offer flavors. |
 | **Max Tokens** and chunk limits | Start with the defaults, then reduce chunk limits if the selected model has a smaller context window. |
 
 Documented examples:
 
 | Provider/tool | API URL | API key | Example model | Notes |
 |---------------|---------|---------|---------------|-------|
-| OpenRouter (existing generic setup) | `https://openrouter.ai/api` | OpenRouter API key | `openai/gpt-4o-mini` | For new setups, select the dedicated **OpenRouter** provider above, which uses OpenRouter's token-cap dialect and explicit routing policy. Existing `openai` configurations remain supported. |
+| OpenRouter (existing generic setup) | `https://openrouter.ai/api` | OpenRouter API key | `openai/gpt-4o-mini` | For new setups, select the dedicated **OpenRouter** provider above, which uses OpenRouter's token-cap dialect and explicit routing policy. Existing **OpenAI** configurations remain supported. |
 | LM Studio local server | `http://localhost:1234` | Placeholder such as `local` if authentication is disabled | Model name shown by LM Studio | Enable LM Studio's OpenAI-compatible local server before using the integration. |
 | vLLM OpenAI-compatible server | `http://localhost:8000` | The key configured for the server, or a placeholder if auth is disabled | Served model name, for example `meta-llama/Llama-3.1-8B-Instruct` | Ensure the vLLM server exposes `/v1/chat/completions` from this base URL. |
 

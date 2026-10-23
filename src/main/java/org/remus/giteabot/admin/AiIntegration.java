@@ -6,6 +6,7 @@ import jakarta.validation.constraints.Min;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.openrouter.OpenRouterDataCollection;
 import org.remus.giteabot.ai.openrouter.OpenRouterRegion;
 
@@ -25,7 +26,8 @@ public class AiIntegration {
     private String name;
 
     @Column(nullable = false)
-    private String providerType;
+    @Enumerated(EnumType.STRING)
+    private AiProviderType providerType;
 
     @Column(nullable = false)
     private String apiUrl;
@@ -39,8 +41,9 @@ public class AiIntegration {
     @Column(nullable = false)
     private String model;
 
+    // Reasoning models count thinking toward this cap; the form lowers it to 4096 for local providers.
     @Column(nullable = false)
-    private int maxTokens = 4096;
+    private int maxTokens = 16000;
 
     /**
      * If {@code false} (the current default), tool descriptors are sent

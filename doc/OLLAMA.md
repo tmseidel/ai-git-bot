@@ -55,7 +55,7 @@ The `ollama-pull` service automatically downloads the configured model on first 
 All AI provider settings are configured through the **web UI**:
 
 1. Go to **AI Integrations → New Integration**
-2. Select **ollama** as the provider type
+2. Select **Ollama** as the provider type
 3. Set the **API URL** to your Ollama instance (e.g., `http://localhost:11434` or `http://ollama:11434` if using Docker networking)
 4. Enter the **Model** name (must match a model you've pulled, e.g., `llama3.2:1b`)
 5. Adjust **Max Tokens**, **Max Diff Chars Per Chunk**, and other settings as needed for local models
@@ -111,7 +111,7 @@ mvn spring-boot:run
 ```
 
 Then configure the AI Integration in the web UI:
-- **Provider type:** ollama
+- **Provider type:** Ollama
 - **API URL:** `http://localhost:11434`
 - **Model:** `llama3.2:1b`
 

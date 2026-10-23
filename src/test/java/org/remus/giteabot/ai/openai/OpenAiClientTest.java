@@ -263,7 +263,7 @@ class OpenAiClientTest {
         okResponse.setChoices(java.util.List.of(choice));
         when(responseSpec.body(OpenAiResponse.class)).thenReturn(okResponse);
 
-        OpenAiClient client = new OpenAiClient(restClient, "gpt-5.6-sol", 1024, true, OpenAiFlavor.NO_REASONING);
+        OpenAiClient client = new OpenAiClient(restClient, "gpt-6-luna", 1024, true, OpenAiFlavor.NO_REASONING);
         org.remus.giteabot.ai.ToolDescriptor tool =
                 new org.remus.giteabot.ai.ToolDescriptor("search", "Search the codebase.",
                         new tools.jackson.databind.ObjectMapper().createObjectNode());
@@ -299,7 +299,7 @@ class OpenAiClientTest {
         okResponse.setChoices(java.util.List.of(choice));
         when(responseSpec.body(OpenAiResponse.class)).thenReturn(okResponse);
 
-        OpenAiClient client = new OpenAiClient(restClient, "gpt-5.6-sol", 1024, true, OpenAiFlavor.STANDARD);
+        OpenAiClient client = new OpenAiClient(restClient, "gpt-6-luna", 1024, true, OpenAiFlavor.STANDARD);
         org.remus.giteabot.ai.ToolDescriptor tool =
                 new org.remus.giteabot.ai.ToolDescriptor("search", "Search the codebase.",
                         new tools.jackson.databind.ObjectMapper().createObjectNode());
@@ -331,8 +331,8 @@ class OpenAiClientTest {
         assertEquals("standard", flavors.get(0).id());
         assertEquals("no_reasoning", flavors.get(1).id());
         // Every flavor carries its provider type so ids are globally unique.
-        assertEquals("openai", flavors.get(0).providerType());
-        assertEquals("openai", flavors.get(1).providerType());
+        assertEquals(org.remus.giteabot.ai.AiProviderType.OPENAI, flavors.get(0).providerType());
+        assertEquals(org.remus.giteabot.ai.AiProviderType.OPENAI, flavors.get(1).providerType());
         assertEquals("none", OpenAiFlavor.NO_REASONING.reasoningEffort());
         assertEquals(null, OpenAiFlavor.STANDARD.reasoningEffort());
     }

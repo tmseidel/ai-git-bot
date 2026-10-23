@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
 import jakarta.annotation.Nonnull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,7 +84,7 @@ class AiClientFactoryTest {
 
     @Test
     void getClient_anthropic_createsAnthropicClient() {
-        AiIntegration integration = createIntegration("anthropic", "sk-test");
+        AiIntegration integration = createIntegration(AiProviderType.ANTHROPIC, "sk-test");
         when(aiIntegrationService.decryptApiKey(integration)).thenReturn("sk-test");
 
         AiClient client = aiClientFactory.getClient(integration);
@@ -92,7 +93,7 @@ class AiClientFactoryTest {
 
     @Test
     void getClient_openai_createsOpenAiClient() {
-        AiIntegration integration = createIntegration("openai", "sk-test");
+        AiIntegration integration = createIntegration(AiProviderType.OPENAI, "sk-test");
         when(aiIntegrationService.decryptApiKey(integration)).thenReturn("sk-test");
 
         AiClient client = aiClientFactory.getClient(integration);
@@ -101,7 +102,7 @@ class AiClientFactoryTest {
 
     @Test
     void getClient_google_createsGoogleAiClient() {
-        AiIntegration integration = createIntegration("google", "google-key");
+        AiIntegration integration = createIntegration(AiProviderType.GOOGLE, "google-key");
         when(aiIntegrationService.decryptApiKey(integration)).thenReturn("google-key");
 
         AiClient client = aiClientFactory.getClient(integration);
@@ -110,7 +111,7 @@ class AiClientFactoryTest {
 
     @Test
     void getClient_ollama_createsOllamaClient() {
-        AiIntegration integration = createIntegration("ollama", null);
+        AiIntegration integration = createIntegration(AiProviderType.OLLAMA, null);
         // Ollama doesn't require API key, so decryptApiKey should not be called
 
         AiClient client = aiClientFactory.getClient(integration);
@@ -120,7 +121,7 @@ class AiClientFactoryTest {
 
     @Test
     void getClient_llamacpp_createsLlamaCppClient() {
-        AiIntegration integration = createIntegration("llamacpp", null);
+        AiIntegration integration = createIntegration(AiProviderType.LLAMACPP, null);
         // llamacpp doesn't require API key, so decryptApiKey should not be called
 
         AiClient client = aiClientFactory.getClient(integration);
@@ -136,15 +137,15 @@ class AiClientFactoryTest {
     }
 
     @Test
-    void getClient_unknownProvider_throwsException() {
-        AiIntegration integration = createIntegration("unknown", null);
+    void getClient_unregisteredProvider_throwsException() {
+        AiIntegration integration = createIntegration(AiProviderType.OPENROUTER, null);
 
         assertThrows(IllegalArgumentException.class, () -> aiClientFactory.getClient(integration));
     }
 
     @Test
     void getClient_cachesResult_returnsSameInstance() {
-        AiIntegration integration = createIntegration("ollama", null);
+        AiIntegration integration = createIntegration(AiProviderType.OLLAMA, null);
 
         AiClient first = aiClientFactory.getClient(integration);
         AiClient second = aiClientFactory.getClient(integration);
@@ -153,7 +154,7 @@ class AiClientFactoryTest {
 
     @Test
     void getClient_rebuildsClientWhenUpdatedAtChanges() {
-        AiIntegration integration = createIntegration("ollama", null);
+        AiIntegration integration = createIntegration(AiProviderType.OLLAMA, null);
 
         AiClient first = aiClientFactory.getClient(integration);
         // Simulate configuration update
@@ -162,7 +163,7 @@ class AiClientFactoryTest {
         assertNotSame(first, second);
     }
 
-    private AiIntegration createIntegration(String providerType, String apiKey) {
+    private AiIntegration createIntegration(AiProviderType providerType, String apiKey) {
         AiIntegration integration = new AiIntegration();
         integration.setId(1L);
         integration.setName("test-" + providerType);

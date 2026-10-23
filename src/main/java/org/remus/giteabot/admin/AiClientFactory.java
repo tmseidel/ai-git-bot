@@ -8,6 +8,7 @@ import org.remus.giteabot.ai.AiAuditRecorder;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.AiProviderRegistry;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.AuditingAiClient;
 import org.remus.giteabot.ai.ProviderRetryNotifier;
 import org.remus.giteabot.ai.RetryAiClient;
@@ -61,7 +62,7 @@ public class AiClientFactory {
 
 
     private AiClient buildClient(AiIntegration integration) {
-        String providerType = integration.getProviderType();
+        AiProviderType providerType = integration.getProviderType();
         AiProviderMetadata provider = providerRegistry.getProviderOrThrow(providerType);
 
         String decryptedApiKey = provider.requiresApiKey()

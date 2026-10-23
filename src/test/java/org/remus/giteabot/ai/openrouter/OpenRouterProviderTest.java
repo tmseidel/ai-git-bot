@@ -1,5 +1,6 @@
 package org.remus.giteabot.ai.openrouter;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -73,11 +74,12 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class OpenRouterProviderTest {
     @Test
-    void registeredProviderUsesLowercaseDisplayName() {
+    void registeredProviderUsesOpenRouterDisplayName() {
         try (var context = providerContext(RestClient.builder())) {
             var registry = context.getBean(AiProviderRegistry.class);
 
-            assertThat(registry.getDisplayNames()).containsEntry("openrouter", "openrouter");
+            assertThat(registry.getProviderTypes()).contains(AiProviderType.OPENROUTER);
+            assertThat(AiProviderType.OPENROUTER.getDisplayName()).isEqualTo("OpenRouter");
         }
     }
 
@@ -86,7 +88,7 @@ class OpenRouterProviderTest {
         try (var context = providerContext(RestClient.builder())) {
             var registry = context.getBean(AiProviderRegistry.class);
 
-            assertThat(registry.getSuggestedModels().get("openrouter")).containsExactly(
+            assertThat(registry.getSuggestedModels().get(AiProviderType.OPENROUTER)).containsExactly(
                     "openrouter/auto",
                     "deepseek/deepseek-v4.1-flash",
                     "z-ai/glm-5.3-flash",
@@ -238,12 +240,12 @@ class OpenRouterProviderTest {
                              "usage":{"prompt_tokens":100,"completion_tokens":12}}
                             """, MediaType.APPLICATION_JSON));
             AiProviderRegistry registry = context.getBean(AiProviderRegistry.class);
-            assertThat(registry.getProviderTypes()).contains("openrouter");
+            assertThat(registry.getProviderTypes()).contains(AiProviderType.OPENROUTER);
             AiIntegration integration = new AiIntegration();
             integration.setId(1L);
             integration.setUpdatedAt(Instant.EPOCH);
             integration.setName("OpenRouter test");
-            integration.setProviderType("openrouter");
+            integration.setProviderType(AiProviderType.OPENROUTER);
             integration.setOpenRouterRegion(region);
             integration.setApiUrl("https://untrusted.example");
             integration.setModel("author/test-model");

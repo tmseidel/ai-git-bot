@@ -35,7 +35,7 @@ docker compose -f systemtest/docker-compose-llamacpp.yml logs -f model-downloade
 Then start the bot and configure the AI Integration in the **web UI**:
 
 1. Go to **AI Integrations → New Integration**
-2. Select **llamacpp** as the provider type
+2. Select **llama.cpp** as the provider type
 3. Set the **API URL** to `http://localhost:8081`
 4. Enter the **Model** identifier (e.g., `qwen2.5-coder-7b-instruct`)
 5. Click **Save**
@@ -47,7 +47,7 @@ Then start the bot and configure the AI Integration in the **web UI**:
 All AI provider settings are configured through the **web UI** under **AI Integrations**:
 
 1. Go to **AI Integrations → New Integration**
-2. Select **llamacpp** as the provider type
+2. Select **llama.cpp** as the provider type
 3. Set the **API URL** to your llama.cpp server (e.g., `http://localhost:8081` or `http://llamacpp:8081` if using Docker networking)
 4. Enter the model name configured in the server. With a single model launched using `--model`, llama.cpp ignores this value; in router mode, enter the exact model ID returned by `GET /v1/models` because it selects the model for each request.
 5. Adjust settings as needed:

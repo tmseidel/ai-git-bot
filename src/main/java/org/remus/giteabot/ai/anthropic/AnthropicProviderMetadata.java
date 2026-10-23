@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.config.AnthropicExtendedThinkingProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
@@ -18,21 +19,22 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AnthropicProviderMetadata implements AiProviderMetadata {
 
-    public static final String PROVIDER_TYPE = "anthropic";
+    public static final AiProviderType PROVIDER_TYPE = AiProviderType.ANTHROPIC;
     public static final String DEFAULT_API_URL = "https://api.anthropic.com";
     public static final String DEFAULT_API_VERSION = "2023-06-01";
+    // Current models checked against Anthropic's model list on 2026-10-18.
     public static final List<String> SUGGESTED_MODELS = List.of(
-            "claude-fable-5",
-            "claude-opus-5",
-            "claude-sonnet-5",
-            "claude-haiku-4-5-20251001"
+            "claude-fable-5-1",
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5"
     );
 
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
     private final AnthropicExtendedThinkingProperties extendedThinkingProperties;
 
     @Override
-    public String getProviderType() {
+    public AiProviderType getProviderType() {
         return PROVIDER_TYPE;
     }
 

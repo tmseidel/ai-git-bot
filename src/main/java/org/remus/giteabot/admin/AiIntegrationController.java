@@ -61,7 +61,6 @@ public class AiIntegrationController {
 
     private void addProviderMetadataToModel(Model model) {
         model.addAttribute("providerTypes", providerRegistry.getProviderTypes());
-        model.addAttribute("providerDisplayNames", providerRegistry.getDisplayNames());
         model.addAttribute("defaultApiUrls", providerRegistry.getDefaultApiUrls());
         model.addAttribute("suggestedModels", providerRegistry.getSuggestedModels());
         model.addAttribute("apiKeyRequirements", providerRegistry.getApiKeyRequirements());

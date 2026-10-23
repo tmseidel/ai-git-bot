@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.AiProviderType;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,7 +18,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class OllamaProviderMetadata implements AiProviderMetadata {
 
-    public static final String PROVIDER_TYPE = "ollama";
+    public static final AiProviderType PROVIDER_TYPE = AiProviderType.OLLAMA;
     public static final String DEFAULT_API_URL = "http://localhost:11434";
 
     /**
@@ -29,7 +30,7 @@ public class OllamaProviderMetadata implements AiProviderMetadata {
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
-    public String getProviderType() {
+    public AiProviderType getProviderType() {
         return PROVIDER_TYPE;
     }
 
