@@ -3,6 +3,8 @@ package org.remus.giteabot.admin;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
@@ -10,8 +12,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.GitAuthor;
 
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -88,6 +92,68 @@ class GitIntegrationServiceTest {
         GitIntegration result = gitIntegrationService.save(integration, false);
 
         assertEquals("ai_bot", result.getUsername());
+    }
+
+    static Stream<Arguments> invalidGitAuthors() {
+        String tooLong = "a".repeat(GitIntegrationService.MAX_GIT_AUTHOR_LENGTH + 1);
+        return Stream.of(
+                Arguments.of("  ", GitAuthor.DEFAULT_EMAIL, "Git author name must not be blank"),
+                Arguments.of(GitAuthor.DEFAULT_NAME, null, "Git author e-mail must not be blank"),
+                Arguments.of(tooLong, GitAuthor.DEFAULT_EMAIL, "Git author name must be at most 255 characters"),
+                Arguments.of(GitAuthor.DEFAULT_NAME, tooLong, "Git author e-mail must be at most 255 characters"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidGitAuthors")
+    void save_rejectsInvalidGitAuthorInsteadOfStoringIt(String name, String email, String expectedMessage) {
+        GitIntegration integration = giteaIntegration();
+        integration.setGitAuthorName(name);
+        integration.setGitAuthorEmail(email);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> gitIntegrationService.save(integration, false));
+
+        assertEquals(expectedMessage, error.getMessage());
+        verify(gitIntegrationRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void save_trimsGitAuthorAndAcceptsMaxLengthAfterTrimming() {
+        GitIntegration integration = giteaIntegration();
+        String maxName = "a".repeat(GitIntegrationService.MAX_GIT_AUTHOR_LENGTH);
+        integration.setGitAuthorName("  " + maxName + "  ");
+        integration.setGitAuthorEmail(" docs-bot@example.com  ");
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GitIntegration result = gitIntegrationService.save(integration, false);
+
+        assertEquals(new GitAuthor(maxName, "docs-bot@example.com"), result.gitAuthor());
+    }
+
+    @Test
+    void save_updateCopiesGitAuthorOntoStoredIntegration() {
+        GitIntegration stored = giteaIntegration();
+        stored.setId(7L);
+        stored.setLockVersion(1L);
+        when(gitIntegrationRepository.findByIdForUpdate(7L)).thenReturn(Optional.of(stored));
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        GitIntegration submitted = giteaIntegration();
+        submitted.setId(7L);
+        submitted.setLockVersion(1L);
+        submitted.setGitAuthorName("Docs Bot");
+        submitted.setGitAuthorEmail("docs-bot@example.com");
+
+        GitIntegration result = gitIntegrationService.save(submitted, false);
+
+        assertSame(stored, result);
+        assertEquals(new GitAuthor("Docs Bot", "docs-bot@example.com"), stored.gitAuthor());
+    }
+
+    private GitIntegration giteaIntegration() {
+        GitIntegration integration = new GitIntegration();
+        integration.setProviderType(RepositoryType.GITEA);
+        integration.setUsername("ai_bot");
+        return integration;
     }
 
     @Test

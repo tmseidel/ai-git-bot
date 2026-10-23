@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.gitea.model.WebhookPayload;
@@ -205,7 +206,9 @@ class ReadmeSyncWritebackTest {
         head.setRef("feature/docs");
         pr.setHead(head);
         payload.setPullRequest(pr);
-        return new ReadmeSyncService.Request(new PrWorkflowContext(new Bot(), payload, 7L,
+        Bot bot = new Bot();
+        bot.setGitIntegration(new GitIntegration());
+        return new ReadmeSyncService.Request(new PrWorkflowContext(bot, payload, 7L,
                 (label, message) -> { }, cancelled::get), List.of("*.md"), 12, mode, null);
     }
 

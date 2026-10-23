@@ -127,6 +127,23 @@
                             </div>
                         </div>
 
+                        <!-- Git author for commits pushed by bots using this integration - always shown -->
+                        <div class="col-md-6">
+                            <label for="gitAuthorName" class="form-label" th:text="#{label.gitAuthorName}">Git Author Name</label>
+                            <input type="text" class="form-control" id="gitAuthorName" th:field="*{gitAuthorName}"
+                                   required/>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="gitAuthorEmail" class="form-label" th:text="#{label.gitAuthorEmail}">Git Author E-Mail</label>
+                            <input type="email" class="form-control" id="gitAuthorEmail" th:field="*{gitAuthorEmail}"
+                                   required/>
+                        </div>
+                        <div class="col-12 mt-1">
+                            <div class="form-text" th:text="#{help.git.gitAuthor}">
+                                Author identity for commits that bots using this integration push (issue implementations, README sync, i18n coverage, unit tests, E2E suites). To link the commits to the bot's account on the Git platform, use an e-mail address of that account.
+                            </div>
+                        </div>
+
                         <!-- SSH private key - shown for Gitea with SSH transport -->
                         <div class="col-12" id="sshPrivateKeyField" style="display: none;">
                             <label for="sshPrivateKey" class="form-label" th:text="#{label.sshPrivateKey}">SSH Private Key</label>

@@ -66,7 +66,8 @@ public class AgentServiceFactory {
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
-                getContextWindowTokens(bot));
+                getContextWindowTokens(bot),
+                bot.getGitIntegration().gitAuthor());
         return new IssueImplementationService(context, collaborators());
     }
 

@@ -68,9 +68,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class SuitePromotionService {
 
-    private static final String GIT_AUTHOR_NAME = "AI-Git-Bot";
-    private static final String GIT_AUTHOR_EMAIL = "ai-git-bot@local";
-
     private final WorkspaceService workspaceService;
     private final GiteaClientFactory giteaClientFactory;
     private final PrWorkflowRunRepository runRepository;
@@ -159,7 +156,7 @@ public class SuitePromotionService {
 
             boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
                     commitMessage(mode, prNumber),
-                    GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL,
+                    bot.getGitIntegration().gitAuthor(),
                     mode != SuiteLifecycleMode.COMMIT_TO_PR);
             if (!pushed) {
                 return Outcome.failure("git commit/push failed for branch '" + workBranch + "'.");

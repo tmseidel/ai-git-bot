@@ -7,6 +7,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.GitAuthor;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import java.io.IOException;
@@ -155,7 +156,7 @@ class WorkspaceServiceTest {
         assertThat(result.success()).isTrue();
         Files.writeString(result.workspacePath().resolve("README.md"), "bot update");
         assertThat(workspaceService.commitAndPush(result.workspacePath(), "main", "docs: update",
-                "AI Agent", "ai-agent@bot.local", false)).isTrue();
+                GitAuthor.DEFAULT, false)).isTrue();
 
         assertThat(runGitCapture(targetRemote, "rev-parse", "refs/heads/main")).isEqualTo(targetBefore);
         assertThat(runGitCapture(forkRemote, "rev-parse", "refs/heads/main")).isNotEqualTo(forkBefore);
@@ -471,7 +472,39 @@ class WorkspaceServiceTest {
 
         try {
             assertThat(workspaceService.commitAndPush(workspace, branch, "test commit",
-                    "Test User", "test@example.com", false)).isTrue();
+                    GitAuthor.DEFAULT, false)).isTrue();
+        } finally {
+            workspaceService.cleanupWorkspace(setup);
+        }
+    }
+
+    @Test
+    void commitAndPush_usesGivenGitAuthor() throws Exception {
+        WorkspaceSetup setup = workspaceService.createWorkspaceSetup();
+        Path workspace = setup.workspaceDir();
+        Files.createDirectories(workspace);
+        initGitRepository(workspace);
+        Path remote = tempDir.resolve("remote");
+        Files.createDirectories(remote);
+        runGit(remote, "init", "--bare");
+        String branch = runGitCapture(workspace, "branch", "--show-current");
+        runGit(workspace, "remote", "add", "origin", remote.toAbsolutePath().toString());
+        runGit(workspace, "push", "-u", "origin", branch);
+        setup.setAuthentication(remote.toString(),
+                RepositoryCredentials.of("", remote.toString(), ""), false);
+        workspaceService.registerWorkspace(setup);
+        // Repository config the workspace's code could have written must not change the identity
+        runGit(workspace, "config", "author.name", "Planted Author");
+        runGit(workspace, "config", "committer.email", "planted@example.com");
+        Files.writeString(workspace.resolve("README.md"), "changed");
+
+        try {
+            assertThat(workspaceService.commitAndPush(workspace, branch, "docs: update",
+                    new GitAuthor("Docs Bot", "docs-bot@example.com"), false)).isTrue();
+            assertThat(runGitCapture(remote, "log", "-1", "--format=%an <%ae>|%cn <%ce>", branch))
+                    .isEqualTo("Docs Bot <docs-bot@example.com>|Docs Bot <docs-bot@example.com>");
+            // The identity is not persisted into the workspace's repository config
+            assertThat(runGitCapture(workspace, "config", "user.name")).isEqualTo("Test User");
         } finally {
             workspaceService.cleanupWorkspace(setup);
         }
@@ -484,7 +517,7 @@ class WorkspaceServiceTest {
         Files.writeString(tempDir.resolve("README.md"), "changed");
 
         assertThat(workspaceService.commitAndPush(tempDir, "main", "test commit",
-                "Test User", "test@example.com", false)).isFalse();
+                GitAuthor.DEFAULT, false)).isFalse();
         assertThat(runGitCapture(tempDir, "rev-parse", "HEAD")).isEqualTo(previousHead);
     }
 
