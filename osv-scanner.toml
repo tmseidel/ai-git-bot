@@ -1,0 +1,13 @@
+# OSV-Scanner configuration — used by .github/workflows/osv-scanner.yml.
+#
+# This file is intentionally comment-only: with no active keys every finding is
+# reported, which is what we want while the dependency baseline is being cleaned
+# up. When an exception is genuinely unavoidable, add it in this shape so that it
+# is reviewed and expires on its own:
+#
+#   [[IgnoredVulns]]
+#   id = "GHSA-xxxx-xxxx-xxxx"
+#   reason = "Not exploitable here: the vulnerable code path is never reached"
+#   ignoreUntil = 2026-12-31
+#
+# Do not add entries without `reason` and `ignoreUntil`.
