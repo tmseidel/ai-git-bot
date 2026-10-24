@@ -1,5 +1,6 @@
 package org.remus.giteabot.eventhook;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
 
@@ -20,7 +21,8 @@ public record EventHookPayload(
         Actor actor,
         Integration integration,
         RepositoryRef repository,
-        Map<String, Object> data) {
+        Map<String, Object> data,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String eventKey) {
 
     public record Actor(String type, String id) {
     }
@@ -39,7 +41,18 @@ public record EventHookPayload(
                 new Actor("BOT", bot.getName()),
                 new Integration(bot.getId(), bot.getName(), platformOf(bot)),
                 new RepositoryRef(owner, repo, prNumber, issueNumber),
-                data == null ? Map.of() : data);
+                data == null ? Map.of() : data, null);
+    }
+
+    /** Required envelope; event identity survives retries and process restarts. */
+    public static EventHookPayload required(String eventKey, String deliveryUuid, Instant timestamp,
+                                            EventHookEventType type, Bot bot, String owner, String repo,
+                                            Long prNumber, Map<String, Object> data) {
+        return new EventHookPayload(1, deliveryUuid, type.wireValue(), timestamp,
+                new Actor("BOT", bot.getName()),
+                new Integration(bot.getId(), bot.getName(), platformOf(bot)),
+                new RepositoryRef(owner, repo, prNumber, null),
+                data == null ? Map.of() : data, eventKey);
     }
 
     /** Lowercase provider type (e.g. "gitea"); null when the bot has no git integration (tests). */
