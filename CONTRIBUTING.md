@@ -137,6 +137,25 @@ src/main/java/org/remus/giteabot/
 - Use `@ActiveProfiles("test")` with `application-test.properties` for test configuration
 - Aim for meaningful test coverage on new code
 
+### Database Migrations
+
+Flyway migrations live in `src/main/resources/db/migration/h2` and
+`src/main/resources/db/migration/postgresql`. Every change needs a script in
+both directories with the same version.
+
+- Name new scripts with a UTC timestamp version:
+  `V<yyyy>_<MM>_<dd>_<HHmm>__<lower_snake_description>.sql`,
+  e.g. `V2026_10_20_1430__add_bot_labels.sql`. Parallel pull requests then no
+  longer conflict over the next sequence number.
+- Flyway runs with `out-of-order=true`, so a script may be applied after one
+  with a newer timestamp. Do not rely on unmerged migrations from other pull
+  requests; if your script depends on another one, give it a later timestamp.
+- Never rename or edit a migration that has been merged. The existing
+  sequential scripts (`V1` to `V58`) are recorded in the schema history of
+  deployed databases and must keep their names and contents.
+- `FlywayMigrationNamingTest` enforces the naming scheme and that both vendor
+  directories contain the same versions.
+
 ### Prompt Files
 
 When adding or modifying prompt definitions:
