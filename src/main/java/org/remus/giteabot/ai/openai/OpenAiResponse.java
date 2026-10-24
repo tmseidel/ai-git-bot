@@ -3,6 +3,12 @@ package org.remus.giteabot.ai.openai;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
+import org.remus.giteabot.ai.UsageCounterDeserializer;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
+import tools.jackson.databind.DeserializationContext;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.List;
 import java.util.Map;
@@ -16,6 +22,7 @@ public class OpenAiResponse {
     private String model;
 
     private List<Choice> choices;
+    @JsonDeserialize(using = UsageDeserializer.class)
     private Usage usage;
 
     private Error error;
@@ -63,15 +70,19 @@ public class OpenAiResponse {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Usage {
         @JsonProperty("prompt_tokens")
+        @JsonDeserialize(using = UsageCounterDeserializer.class)
         private Integer promptTokens;
 
         @JsonProperty("completion_tokens")
+        @JsonDeserialize(using = UsageCounterDeserializer.class)
         private Integer completionTokens;
 
         @JsonProperty("total_tokens")
-        private int totalTokens;
+        @JsonDeserialize(using = UsageCounterDeserializer.class)
+        private Integer totalTokens;
 
         @JsonProperty("prompt_tokens_details")
+        @JsonDeserialize(using = PromptTokensDetailsDeserializer.class)
         private PromptTokensDetails promptTokensDetails;
     }
 
@@ -79,10 +90,30 @@ public class OpenAiResponse {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PromptTokensDetails {
         @JsonProperty("cached_tokens")
+        @JsonDeserialize(using = UsageCounterDeserializer.LongCounter.class)
         private Long cachedTokens;
 
         @JsonProperty("cache_write_tokens")
+        @JsonDeserialize(using = UsageCounterDeserializer.LongCounter.class)
         private Long cacheWriteTokens;
+    }
+
+    /** Ignores malformed optional usage containers, not malformed responses. */
+    public static final class UsageDeserializer extends ValueDeserializer<Usage> {
+        @Override public Usage deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.hasToken(JsonToken.START_OBJECT)) return context.readValue(parser, Usage.class);
+            parser.skipChildren();
+            return null;
+        }
+    }
+
+    /** Keeps bad cache metadata from discarding valid prompt/completion counters. */
+    public static final class PromptTokensDetailsDeserializer extends ValueDeserializer<PromptTokensDetails> {
+        @Override public PromptTokensDetails deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.hasToken(JsonToken.START_OBJECT)) return context.readValue(parser, PromptTokensDetails.class);
+            parser.skipChildren();
+            return null;
+        }
     }
 
     /**

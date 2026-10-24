@@ -25,7 +25,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class OpenAiUsageAvailabilityTest {
     @Test
-    void nativeAuditNormalizationDoesNotRewriteRawProviderEvidence() {
+    void invalidWireCounterIsUnavailableInTheTurnAndOptInAuditPayload() {
         var http = RestClient.builder().baseUrl("https://provider.example");
         var server = MockRestServiceServer.bindTo(http).build();
         server.expect(requestTo("https://provider.example/v1/chat/completions"))
@@ -46,8 +46,9 @@ class OpenAiUsageAvailabilityTest {
         assertThat(turn.inputTokensReported()).isFalse();
         assertThat(turn.inputTokens()).isZero();
         assertThat(recorder.usage).containsExactly(new RecordedUsage(0, 3));
-        assertThat(AgentJackson.mapper().readTree(recorder.rawResponse)
-                .get("usage").get("prompt_tokens").asInt()).isEqualTo(-1);
+        var rawUsage = AgentJackson.mapper().readTree(recorder.rawResponse).get("usage");
+        assertThat(rawUsage.get("prompt_tokens").isNull()).isTrue();
+        assertThat(rawUsage.get("completion_tokens").asInt()).isEqualTo(3);
         server.verify();
     }
 
