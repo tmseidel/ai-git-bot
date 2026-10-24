@@ -143,6 +143,24 @@ public class IssueImplementationService {
             return;
         }
 
+        String baseBranch;
+        try {
+            baseBranch = new CodingBaseBranchResolver(repositoryClient).resolve(owner, repo, issueRef);
+        } catch (CodingBaseBranchResolver.SourceBranchResolutionException e) {
+            log.warn("Refusing to create a coding workspace for issue #{} in {}: {}",
+                    issueNumber, repoFullName, e.getMessage());
+            repositoryClient.postIssueComment(owner, repo, issueNumber,
+                    "⚠️ **AI Agent**: I could not safely identify the authored source branch for this issue. "
+                            + "Please set a valid issue branch and assign me again.");
+            return;
+        }
+
+        if (issueRef != null && !issueRef.isBlank()) {
+            log.info("Using validated issue branch '{}' as base for issue #{}", baseBranch, issueNumber);
+        } else {
+            log.info("No issue branch set, using resolved base branch '{}' for issue #{}", baseBranch, issueNumber);
+        }
+
         AgentSession session = sessionService.createSession(owner, repo, issueNumber, issueTitle);
         Path workspaceDir = null;
 
@@ -151,16 +169,6 @@ public class IssueImplementationService {
 
             repositoryClient.postIssueComment(owner, repo, issueNumber,
                     "🤖 **AI Agent**: I've been assigned to this issue. Analyzing repository structure...");
-
-            // Determine base branch
-            String baseBranch;
-            if (issueRef != null && !issueRef.isBlank()) {
-                baseBranch = issueRef;
-                log.info("Using issue branch '{}' as base for issue #{}", baseBranch, issueNumber);
-            } else {
-                baseBranch = repositoryClient.getDefaultBranch(owner, repo);
-                log.info("No issue branch set, using default branch '{}' for issue #{}", baseBranch, issueNumber);
-            }
 
             // Clone repository once — all operations happen in this workspace
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
@@ -353,6 +361,7 @@ public class IssueImplementationService {
         Long   issueNumber  = payload.getIssue().getNumber();
         Long   commentId    = payload.getComment().getId();
         String commentBody  = payload.getComment().getBody();
+        String issueRef     = normalizeBranchRef(payload.getIssue().getRef());
 
         log.info("Handling agent comment #{} on issue #{} in {}", commentId, issueNumber, repoFullName);
 
@@ -388,14 +397,46 @@ public class IssueImplementationService {
             // loop would trigger ObjectNotFoundException.
             session = sessionService.compactContextWindow(session.getId());
 
-            String branchName    = session.getBranchName();
-            String defaultBranch = repositoryClient.getDefaultBranch(owner, repo);
-            String workingBranch = branchName != null ? branchName : defaultBranch;
+            String branchName = session.getBranchName();
+            if (branchName != null && branchName.isBlank()) {
+                branchName = null;
+            }
+            String defaultBranch = null;
+            String workingBranch = branchName;
+            if (workingBranch == null) {
+                try {
+                    workingBranch = new CodingBaseBranchResolver(repositoryClient).resolve(owner, repo, issueRef);
+                } catch (CodingBaseBranchResolver.SourceBranchResolutionException e) {
+                    log.warn("Refusing to continue coding issue #{} in {} without a qualified source branch: {}",
+                            issueNumber, repoFullName, e.getMessage());
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "⚠️ **AI Agent**: I could not safely identify the authored source branch for this retry. "
+                                    + "Please set a valid issue branch and mention me again.");
+                    return;
+                }
+            } else if (session.getPrNumber() == null) {
+                // Keep the existing bot branch, but a missing PR still needs an
+                // authored target branch. Resolving here prevents a Pages output
+                // branch from becoming the target of the newly created PR.
+                try {
+                    defaultBranch = new CodingBaseBranchResolver(repositoryClient).resolve(owner, repo, issueRef);
+                } catch (CodingBaseBranchResolver.SourceBranchResolutionException e) {
+                    log.warn("Refusing to create a PR for continued coding issue #{} in {} without a qualified source branch: {}",
+                            issueNumber, repoFullName, e.getMessage());
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "⚠️ **AI Agent**: I could not safely identify the authored source branch for this retry. "
+                                    + "Please set a valid issue branch and mention me again.");
+                    return;
+                }
+            }
 
             // Clone working branch into fresh workspace
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
                     repositoryClient, owner, repo, workingBranch, null);
             if (!wsResult.success()) {
+                sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
                 return;
@@ -426,7 +467,9 @@ public class IssueImplementationService {
             }
 
             if (!success) {
-                sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
+                sessionService.setStatus(session, session.getPrNumber() == null
+                        ? AgentSession.AgentSessionStatus.FAILED
+                        : AgentSession.AgentSessionStatus.PR_CREATED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "🤖 **AI Agent**: Validation failed and I couldn't fix the issues. " +
                         "Please check the tool output above and provide more guidance.");

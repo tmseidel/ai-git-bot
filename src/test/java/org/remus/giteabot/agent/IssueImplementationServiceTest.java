@@ -95,6 +95,24 @@ class IssueImplementationServiceTest {
     // ---- handleIssueAssigned tests ----
 
     @Test
+    void handleIssueAssigned_refusesPagesOutputWithoutCreatingAStaleSessionOrWorkspace() {
+        WebhookPayload payload = createIssuePayload();
+
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(
+                        Map.of("type", "blob", "path", "index.html"),
+                        Map.of("type", "blob", "path", "assets/app.js")));
+
+        service.handleIssueAssigned(payload);
+
+        verify(sessionService, never()).createSession(anyString(), anyString(), any(), anyString());
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
+                contains("could not safely identify the authored source branch"));
+    }
+
+    @Test
     void handleIssueAssigned_successfulFlow_writesFileAndValidates() {
         WebhookPayload payload = createIssuePayload();
 
@@ -613,7 +631,6 @@ class IssueImplementationServiceTest {
         when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
                 .thenReturn(List.of(Map.of("body", "Existing clarification from issue author", "user", Map.of("login", "alice"))));
-        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(
                 new ArrayList<>(List.of(AiMessage.builder().role("user").content("Please trace where Config is used").build())));
@@ -689,7 +706,6 @@ class IssueImplementationServiceTest {
         // compactContextWindow now reloads + returns the managed entity; the
         // handler rebinds to it, so return the same session to preserve state.
         when(sessionService.compactContextWindow(any())).thenReturn(session);
-        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(
                 new ArrayList<>(List.of(AiMessage.builder().role("user").content("Please inspect the current branch state").build())));
@@ -737,6 +753,211 @@ class IssueImplementationServiceTest {
     }
 
     @Test
+    void handleIssueComment_retriesBranchlessFailedSessionFromQualifiedPagesMain() {
+        WebhookPayload payload = createCommentPayload("Please retry");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(
+                        Map.of("type", "blob", "path", "package.json"),
+                        Map.of("type", "blob", "path", "src/main.ts")));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+
+        service.handleIssueComment(payload);
+
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null));
+        verify(workspaceService, never()).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("gitea-pages"),
+                eq(null));
+        verify(sessionService, atLeastOnce()).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+    }
+
+    @Test
+    void handleIssueComment_honorsValidatedExplicitIssueRefForBranchlessRetry() {
+        WebhookPayload payload = createCommentPayload("Please retry");
+        payload.getIssue().setRef("refs/heads/recovery-source");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "recovery-source"))
+                .thenReturn(List.of(Map.of("type", "blob", "path", "README.md")));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("recovery-source"),
+                eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+
+        service.handleIssueComment(payload);
+
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("recovery-source"),
+                eq(null));
+        verify(repositoryClient, never()).getDefaultBranch("testowner", "testrepo");
+    }
+
+    @Test
+    void handleIssueComment_treatsBlankStoredBranchAsNewBotBranch() {
+        WebhookPayload payload = createCommentPayload("Please retry");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("  ");
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(
+                        Map.of("type", "blob", "path", "package.json"),
+                        Map.of("type", "blob", "path", "src/main.ts")));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn("""
+                ```json
+                {"summary":"Retry implementation","runTools":[
+                  {"id":"retry-file","tool":"write-file","args":["src/Feature.java","class Feature {}"]},
+                  {"id":"retry-validate","tool":"mvn","args":["compile"]}
+                ]}
+                ```
+                """);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File written", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(true))).thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
+
+        service.handleIssueComment(payload);
+
+        verify(sessionService).setBranchName(session, "ai-agent/issue-42");
+        verify(workspaceService).commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(true));
+        verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"));
+    }
+
+    @Test
+    void handleIssueComment_keepsFailedStatusWhenBranchlessRetryHasNoPrAndLoopFails() {
+        WebhookPayload payload = createCommentPayload("Please retry");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(
+                        Map.of("type", "blob", "path", "package.json"),
+                        Map.of("type", "blob", "path", "src/main.ts")));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"), eq("main"),
+                eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt()))
+                .thenReturn("I do not know how to implement this");
+
+        service.handleIssueComment(payload);
+
+        verify(sessionService, atLeastOnce()).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+        verify(sessionService, never()).setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
+        verify(repositoryClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void handleIssueComment_existingBranchWithoutPrUsesQualifiedPagesMainForNewPr() {
+        WebhookPayload payload = createCommentPayload("Please continue");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(
+                        Map.of("type", "blob", "path", "package.json"),
+                        Map.of("type", "blob", "path", "src/main.ts")));
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null))).thenReturn(WorkspaceResult.success(FAKE_WORKSPACE));
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn("""
+                ```json
+                {"summary":"Continue implementation","runTools":[
+                  {"id":"continue-file","tool":"write-file","args":["src/Feature.java","class Feature {}"]},
+                  {"id":"continue-validate","tool":"mvn","args":["compile"]}
+                ]}
+                ```
+                """);
+        when(toolExecutionService.executeFileTool(eq(FAKE_WORKSPACE), eq("write-file"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "File written", ""));
+        when(toolExecutionService.executeTool(eq(FAKE_WORKSPACE), eq("mvn"), anyList()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspaceService.commitAndPush(eq(FAKE_WORKSPACE), eq("ai-agent/issue-42"),
+                anyString(), anyString(), anyString(), eq(false))).thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
+
+        service.handleIssueComment(payload);
+
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null));
+        verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                eq("ai-agent/issue-42"), eq("main"));
+    }
+
+    @Test
+    void handleIssueComment_existingPrKeepsExistingBotBranchWithoutResolvingPagesMain() {
+        WebhookPayload payload = createCommentPayload("Please continue");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null))).thenReturn(WorkspaceResult.failure("test stop"));
+
+        service.handleIssueComment(payload);
+
+        verify(workspaceService).prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), eq(null));
+        verify(repositoryClient, never()).getDefaultBranch("testowner", "testrepo");
+        verify(repositoryClient, never()).getRepositoryTree("testowner", "testrepo", "main");
+    }
+
+    @Test
+    void handleIssueComment_refusesAmbiguousBranchlessRetryBeforeWorkspace() {
+        WebhookPayload payload = createCommentPayload("Please retry");
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setStatus(AgentSession.AgentSessionStatus.FAILED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L))
+                .thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("gitea-pages");
+        when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
+                .thenReturn(List.of(Map.of("type", "blob", "path", "index.html")));
+
+        service.handleIssueComment(payload);
+
+        verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
+        verify(sessionService, atLeastOnce()).setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+        verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(42L),
+                contains("could not safely identify the authored source branch for this retry"));
+    }
+
+    @Test
     void handleIssueComment_unhandledFailure_postsUnifiedInternalErrorComment() {
         WebhookPayload payload = createCommentPayload("Please continue");
 
@@ -750,7 +971,6 @@ class IssueImplementationServiceTest {
         // compactContextWindow now reloads + returns the managed entity; the
         // handler rebinds to it, so return the same session to preserve state.
         when(sessionService.compactContextWindow(any())).thenReturn(session);
-        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
                 eq("ai-agent/issue-42"), isNull()))
@@ -779,7 +999,6 @@ class IssueImplementationServiceTest {
         // compactContextWindow now reloads + returns the managed entity; the
         // handler rebinds to it, so return the same session to preserve state.
         when(sessionService.compactContextWindow(any())).thenReturn(session);
-        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(
                 new ArrayList<>(List.of(AiMessage.builder().role("user").content("Please continue").build())));
@@ -870,7 +1089,6 @@ class IssueImplementationServiceTest {
         when(sessionService.getSessionByIssue("testowner", "testrepo", 42L)).thenReturn(Optional.of(session));
         when(sessionService.compactContextWindow(any())).thenReturn(session);
         when(repositoryClient.getIssueComments("testowner", "testrepo", 42L)).thenReturn(List.of());
-        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(sessionService.toAiMessages(any())).thenReturn(new ArrayList<>());
         when(workspaceService.prepareWorkspace(eq(repositoryClient), eq("testowner"), eq("testrepo"),
