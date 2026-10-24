@@ -27,6 +27,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check review migration prerequisites
+        run: python3 scripts/check_review_migration_prerequisites.py --root .
+
       - name: Extract version from pom.xml
         id: version
         run: echo "VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> "$GITHUB_OUTPUT"

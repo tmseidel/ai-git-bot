@@ -1,0 +1,28 @@
+name: Review migration prerequisites
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check review migration prerequisites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Test prerequisite guard CLI
+        run: python3 -B -m unittest discover -s scripts/tests -p test_check_review_migration_prerequisites.py -v
+
+      - name: Check review migration prerequisites
+        run: python3 scripts/check_review_migration_prerequisites.py --root .
