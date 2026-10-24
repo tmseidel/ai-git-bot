@@ -1,43 +1,44 @@
 package org.remus.giteabot.systemsettings;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+@Transactional
 class McpToolSelectionServiceTest {
 
-    @Mock
+    @Autowired
     private McpConfigurationRepository mcpConfigurationRepository;
 
-    @Mock
+    @Autowired
     private McpSelectedToolRepository mcpSelectedToolRepository;
 
-    @Mock
+    @MockitoBean
     private McpOrchestrationService mcpOrchestrationService;
 
-    @InjectMocks
+    @Autowired
     private McpToolSelectionService service;
 
     @Test
     void loadAvailableTools_marksPersistedEntriesAsSelected() {
-        McpConfiguration configuration = configuration(3L);
-        when(mcpConfigurationRepository.findById(3L)).thenReturn(Optional.of(configuration));
+        McpConfiguration configuration = configuration();
         when(mcpOrchestrationService.discoverTools(configuration)).thenReturn(new McpToolCatalog(List.of(
                 tool("mcp:github:search_repositories", "github", "search_repositories"),
                 tool("mcp:docs:search", "docs", "search")
@@ -47,9 +48,10 @@ class McpToolSelectionServiceTest {
         selected.setQualifiedName("mcp:docs:search");
         selected.setServerName("docs");
         selected.setToolName("search");
-        when(mcpSelectedToolRepository.findByMcpConfigurationId(3L)).thenReturn(List.of(selected));
+        selected.setMcpConfiguration(configuration);
+        mcpSelectedToolRepository.save(selected);
 
-        List<McpToolSelectionRow> rows = service.loadAvailableTools(3L);
+        List<McpToolSelectionRow> rows = service.loadAvailableTools(configuration.getId());
 
         assertEquals(2, rows.size());
         assertTrue(rows.stream().anyMatch(row -> row.qualifiedName().equals("mcp:docs:search") && row.selected()));
@@ -58,8 +60,10 @@ class McpToolSelectionServiceTest {
 
     @Test
     void filterCatalogForPrompt_returnsOnlySelectedTools() {
-        McpConfiguration configuration = configuration(4L);
-        when(mcpSelectedToolRepository.findByMcpConfigurationId(4L)).thenReturn(List.of(selectedTool("mcp:github:get_file")));
+        McpConfiguration configuration = configuration();
+        McpSelectedTool selected = selectedTool("mcp:github:get_file");
+        selected.setMcpConfiguration(configuration);
+        mcpSelectedToolRepository.save(selected);
         McpToolCatalog catalog = new McpToolCatalog(List.of(
                 tool("mcp:github:get_file", "github", "get_file"),
                 tool("mcp:github:list_issues", "github", "list_issues")
@@ -73,25 +77,31 @@ class McpToolSelectionServiceTest {
 
     @Test
     void saveSelection_replacesPersistedSelection() {
-        McpConfiguration configuration = configuration(11L);
-        when(mcpConfigurationRepository.findById(11L)).thenReturn(Optional.of(configuration));
+        McpConfiguration configuration = configuration();
         when(mcpOrchestrationService.discoverTools(configuration)).thenReturn(new McpToolCatalog(List.of(
                 tool("mcp:github:search", "github", "search")
         )));
-        when(mcpSelectedToolRepository.findByMcpConfigurationId(11L)).thenReturn(List.of());
 
-        service.saveSelection(11L, List.of("mcp:github:search"));
+        service.saveSelection(configuration.getId(), List.of("mcp:github:search"));
 
-        verify(mcpSelectedToolRepository).deleteByMcpConfigurationId(11L);
-        verify(mcpSelectedToolRepository).saveAll(any());
+        assertEquals(List.of("mcp:github:search"), service.loadSelectedTools(configuration.getId()).stream()
+                .map(McpToolSelectionRow::qualifiedName).toList());
+        assertTrue(service.readReviewReadOnlyApprovals(configuration,
+                mcpOrchestrationService.discoverTools(configuration)).isEmpty());
     }
 
-    private McpConfiguration configuration(Long id) {
+    private McpConfiguration configuration() {
         McpConfiguration configuration = new McpConfiguration();
-        configuration.setId(id);
         configuration.setName("Config");
         configuration.setJsonContent("[{\"name\":\"github\",\"url\":\"https://example.test/mcp\"}]");
-        return configuration;
+        return mcpConfigurationRepository.save(configuration);
+    }
+
+    @Test
+    void legacySixArgumentRowConstructorDoesNotGrantApproval() {
+        McpToolSelectionRow row = new McpToolSelectionRow("mcp:docs:read", "docs", "read", "Read", "Read files", true);
+        assertTrue(row.selected());
+        org.junit.jupiter.api.Assertions.assertFalse(row.reviewReadOnlyApproved());
     }
 
     private McpToolDefinition tool(String qualifiedName, String serverName, String name) {
@@ -106,4 +116,3 @@ class McpToolSelectionServiceTest {
         return tool;
     }
 }
-

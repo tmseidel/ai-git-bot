@@ -62,15 +62,15 @@ class McpConfigurationServiceTest {
                 {"name":"github","type":"url","url":"https://api.githubcopilot.com/mcp/"}
                 """;
         McpConfiguration mcpConfiguration = configuration(jsonContent);
-        when(mcpConfigurationRepository.save(mcpConfiguration)).thenReturn(mcpConfiguration);
+        when(mcpConfigurationRepository.save(any(McpConfiguration.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         McpConfiguration result = mcpConfigurationService.save(mcpConfiguration);
 
-        assertSame(mcpConfiguration, result);
+        assertNotSame(mcpConfiguration, result);
         assertNotEquals(jsonContent, result.getJsonContent());
         assertEquals(jsonContent, mcpConfigurationService.getDecryptedJsonContent(result));
         assertEquals(jsonContent, mcpConfigurationService.decryptedView(result).getJsonContent());
-        verify(mcpConfigurationRepository).save(mcpConfiguration);
+        verify(mcpConfigurationRepository).save(result);
     }
 
     @Test
