@@ -17,6 +17,11 @@ import java.util.Locale;
  */
 public interface AiClient {
 
+    /** Returns the frozen admission evidence for this transport, without making a request. */
+    default ReviewProviderContract reviewProviderContract() {
+        return ReviewProviderContract.unsupported();
+    }
+
     /**
      * Sends a single review prompt to the AI provider and returns the response.
      * This is the primitive operation that the code-review service uses for each

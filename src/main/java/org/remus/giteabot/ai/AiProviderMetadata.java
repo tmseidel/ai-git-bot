@@ -61,6 +61,14 @@ public interface AiProviderMetadata {
     default void validateConfiguration(AiIntegration integration, String apiKey) {
     }
 
+    /**
+     * Returns immutable evidence for this integration's transport, without I/O.
+     * Existing adapters remain unsupported until their request semantics are proven.
+     */
+    default ReviewProviderContract reviewProviderContract(AiIntegration integration) {
+        return ReviewProviderContract.unsupported();
+    }
+
     /** Whether changing settings requires rechecking a retained key against the provider. */
     default boolean requiresRetainedKeyValidation(AiIntegration previous, AiIntegration updated) {
         return false;
