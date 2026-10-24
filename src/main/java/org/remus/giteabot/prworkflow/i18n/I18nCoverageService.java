@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.i18n;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.BranchRefs;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -117,8 +118,9 @@ public class I18nCoverageService {
             }
             context.requireActive("before preparing i18n-coverage workspace");
             WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
-                    ? workspaceService.prepareWritablePullRequestWorkspace(
-                            repositoryClient, owner, repo, headBranch, prNumber)
+                    ? workspaceService.preparePullRequestWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber,
+                            PullRequestWorkspaceMode.PUSH_BACK)
                     : workspaceService.prepareWorkspace(
                             repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
@@ -230,8 +232,7 @@ public class I18nCoverageService {
                 context.appendStep("i18n-coverage-commit", "commit/push failed for branch " + workBranch);
                 return Result.failed("git commit/push failed");
             }
-            String target = "(follow-up PR against `" + headBranch + "`)";
-            Long followUp = null;
+            Long followUp;
             try {
                 followUp = repositoryClient.createPullRequest(owner, repo,
                         "Sync translation coverage for PR #" + prNumber,
@@ -245,11 +246,11 @@ public class I18nCoverageService {
                 context.appendStep("i18n-coverage-commit", "follow-up PR creation returned no PR number");
                 return Result.failed("follow-up PR creation failed");
             }
-            target = "(follow-up PR #" + followUp + " against `" + headBranch + "`)";
+            String target = "(follow-up PR #" + followUp + " against `" + headBranch + "`)";
             postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
                     prNumber, toolContext, report, true, target, null));
             context.appendStep("i18n-coverage-commit",
-                    "offer-as-pr — pushed " + workBranch + (followUp == null ? "" : (", opened PR #" + followUp)));
+                    "offer-as-pr — pushed " + workBranch + ", opened PR #" + followUp);
             return Result.success(toolContext.changeCount() + " translation change(s) offered as a follow-up PR");
         }
 

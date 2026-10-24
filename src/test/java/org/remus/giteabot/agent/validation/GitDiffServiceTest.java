@@ -36,7 +36,7 @@ class GitDiffServiceTest {
         git("config", "uploadpack.allowAnySHA1InWant", "true");
 
         workspaces = tempDir.resolve("workspaces");
-        service = new GitDiffService(new WorkspaceService(workspaces.toString()));
+        service = new GitDiffService(new WorkspaceService(workspaces.toString(), 60));
         client = mock(RepositoryApiClient.class);
         when(client.getRepositoryRemote("owner", "repo")).thenReturn(origin.toUri().toString());
         when(client.getCredentials()).thenReturn(

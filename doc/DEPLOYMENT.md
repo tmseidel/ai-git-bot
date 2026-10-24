@@ -145,6 +145,7 @@ See [Agent Documentation](AGENT.md) for full details.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITEABOT_WORKSPACES_DIR` |  | Optional host-visible root for private agent workspace parents. |
+| `GITEABOT_WORKSPACES_CLONE_TIMEOUT_SECONDS` | `300` | Budget (seconds) for one clone, PR-head fetch or checkout while preparing an agent workspace. Raise it for very large repositories: a shallow clone of a repo with tens of thousands of files can take minutes on a slow link, and an exhausted budget surfaces as a skipped workflow. |
 
 ### Review Context (Optional)
 

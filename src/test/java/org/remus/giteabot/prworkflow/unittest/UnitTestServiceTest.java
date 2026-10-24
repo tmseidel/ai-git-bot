@@ -7,6 +7,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -73,15 +74,17 @@ class UnitTestServiceTest {
         UnitTestService.Request request = new UnitTestService.Request(
                 context, null, 1, 1, SuiteLifecycleMode.COMMIT_TO_PR);
         when(repositoryClient.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff");
-        when(workspaceService.prepareWritablePullRequestWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L))
+        when(workspaceService.preparePullRequestWorkspace(
+                repositoryClient, "acme", "repo", "feature/test", 42L,
+                PullRequestWorkspaceMode.PUSH_BACK))
                 .thenReturn(WorkspaceResult.failure("stop"));
 
         UnitTestService.Result result = service.generate(request);
 
         assertThat(result.status()).isEqualTo(UnitTestService.Result.Status.FAILED);
-        verify(workspaceService).prepareWritablePullRequestWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L);
+        verify(workspaceService).preparePullRequestWorkspace(
+                repositoryClient, "acme", "repo", "feature/test", 42L,
+                PullRequestWorkspaceMode.PUSH_BACK);
     }
 
     @Test
@@ -92,8 +95,9 @@ class UnitTestServiceTest {
         UnitTestService.Request request = new UnitTestService.Request(
                 context, UnitTestFramework.MAVEN, 1, 1, SuiteLifecycleMode.COMMIT_TO_PR);
         when(repositoryClient.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff");
-        when(workspaceService.prepareWritablePullRequestWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L))
+        when(workspaceService.preparePullRequestWorkspace(
+                repositoryClient, "acme", "repo", "feature/test", 42L,
+                PullRequestWorkspaceMode.PUSH_BACK))
                 .thenReturn(WorkspaceResult.success(workspace));
         when(suiteRepository.save(any(UnitTestSuite.class))).thenAnswer(invocation -> {
             UnitTestSuite suite = invocation.getArgument(0);

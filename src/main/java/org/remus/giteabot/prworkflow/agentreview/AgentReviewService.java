@@ -19,6 +19,7 @@ import org.remus.giteabot.agent.shared.SystemPromptAssembler;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -214,13 +215,15 @@ public class AgentReviewService {
             if (progress != null) {
                 progress.start();
             }
-            WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+                    repositoryClient, owner, repo, headBranch, prNumber,
+                    PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
                 repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent (Review)**: Failed to prepare workspace: " + wsResult.error());
+                        "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
+                                + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
@@ -332,13 +335,15 @@ public class AgentReviewService {
             if (progress != null) {
                 progress.start();
             }
-            WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+                    repositoryClient, owner, repo, headBranch, prNumber,
+                    PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
                         prNumber, wsResult.error());
                 repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
+                        "⚠️ **AI Agent**: Could not check out this pull request, so the question "
+                                + "could not be answered. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();

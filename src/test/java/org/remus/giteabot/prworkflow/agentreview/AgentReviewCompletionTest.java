@@ -17,6 +17,7 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -99,7 +100,8 @@ class AgentReviewCompletionTest {
                 config, null, new Bot(), eventHooks, null);
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
         when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
-        lenient().when(workspaceService.prepareWorkspace(repositoryClient, "owner", "repo", "feature", 1L))
+        lenient().when(workspaceService.preparePullRequestWorkspace(repositoryClient, "owner", "repo",
+                        "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
                 .thenReturn(WorkspaceResult.success(WORKSPACE));
     }
 

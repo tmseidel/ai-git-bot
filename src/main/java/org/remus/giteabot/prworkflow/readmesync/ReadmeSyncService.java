@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.readmesync;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.shared.BranchRefs;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -126,8 +127,9 @@ public class ReadmeSyncService {
             }
             context.requireActive("before preparing readme-sync workspace");
             WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
-                    ? workspaceService.prepareWritablePullRequestWorkspace(
-                            repositoryClient, owner, repo, headBranch, prNumber)
+                    ? workspaceService.preparePullRequestWorkspace(
+                            repositoryClient, owner, repo, headBranch, prNumber,
+                            PullRequestWorkspaceMode.PUSH_BACK)
                     : workspaceService.prepareWorkspace(
                             repositoryClient, owner, repo, headBranch, prNumber);
             if (!ws.success()) {

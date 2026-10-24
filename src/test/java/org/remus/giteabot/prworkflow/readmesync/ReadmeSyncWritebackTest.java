@@ -79,7 +79,7 @@ class ReadmeSyncWritebackTest {
             return new ReadmeSyncAgent.Result(3, "done", false);
         });
         service = new ReadmeSyncService(client, mock(AiClient.class), new SystemPrompt(),
-                new WorkspaceService(root.resolve("workspaces").toString()), agent,
+                new WorkspaceService(root.resolve("workspaces").toString(), 60), agent,
                 mock(WorkflowToolSurfaceFactory.class));
     }
 

@@ -92,7 +92,7 @@ class AgentToolRouterTruncationTest {
 
     private ToolResult executeCode(AgentConfigProperties config, String code) {
         ToolCatalog catalog = new ToolCatalog(config);
-        ToolExecutionService tools = new ToolExecutionService(config, catalog, new WorkspaceService());
+        ToolExecutionService tools = new ToolExecutionService(config, catalog, new WorkspaceService(null, 60));
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, Set.of("execute-code", "cat"), new ProcessPythonExecutionService(config));
         ToolCallContext context = new ToolCallContext("owner", "repo", 1L, workspace,

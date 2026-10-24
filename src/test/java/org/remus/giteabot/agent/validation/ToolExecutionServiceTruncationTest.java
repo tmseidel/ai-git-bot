@@ -23,7 +23,7 @@ class ToolExecutionServiceTruncationTest {
 
     private final AgentConfigProperties config = new AgentConfigProperties();
     private final ToolExecutionService service = new ToolExecutionService(config,
-            new ToolCatalog(config), new WorkspaceService());
+            new ToolCatalog(config), new WorkspaceService(null, 60));
 
     @ParameterizedTest
     @ValueSource(strings = {"ctags-signatures", "ctags-deps"})
@@ -86,7 +86,7 @@ class ToolExecutionServiceTruncationTest {
         assertThat(result.formatForAi()).contains("not complete evidence");
     }
 
-    private static boolean jsonCtagsAvailable() throws IOException, InterruptedException {
+    private static boolean jsonCtagsAvailable() throws InterruptedException {
         try {
             Process process = new ProcessBuilder("ctags", "--list-features").redirectErrorStream(true).start();
             boolean finished = process.waitFor(5, TimeUnit.SECONDS);

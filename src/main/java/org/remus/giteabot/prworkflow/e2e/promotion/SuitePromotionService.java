@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -137,8 +138,9 @@ public class SuitePromotionService {
         };
 
         WorkspaceResult ws = mode == SuiteLifecycleMode.COMMIT_TO_PR
-                ? workspaceService.prepareWritablePullRequestWorkspace(
-                        client, repoOwner, repoName, baseBranch, prNumber)
+                ? workspaceService.preparePullRequestWorkspace(
+                        client, repoOwner, repoName, baseBranch, prNumber,
+                        PullRequestWorkspaceMode.PUSH_BACK)
                 : workspaceService.prepareWorkspace(
                         client, repoOwner, repoName, baseBranch,
                         mode == SuiteLifecycleMode.PROMOTE_ON_MERGE ? null : prNumber);
