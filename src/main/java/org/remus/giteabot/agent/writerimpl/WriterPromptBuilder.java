@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.writerimpl;
 
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.util.List;
 
@@ -118,21 +119,19 @@ public class WriterPromptBuilder {
         }
     }
 
-    public String buildTreeContext(List<java.util.Map<String, Object>> tree, int maxFiles) {
+    public String buildTreeContext(List<RepositoryTreeEntry> tree, int maxFiles) {
         if (tree == null || tree.isEmpty()) {
             return "No repository tree is available.";
         }
         StringBuilder sb = new StringBuilder();
         int count = 0;
-        for (java.util.Map<String, Object> entry : tree) {
+        for (RepositoryTreeEntry entry : tree) {
             if (count >= maxFiles) {
                 sb.append("... (truncated, ").append(tree.size() - count).append(" more entries)\n");
                 break;
             }
-            String type = String.valueOf(entry.getOrDefault("type", "blob"));
-            String path = String.valueOf(entry.getOrDefault("path", ""));
-            if ("blob".equals(type) && !path.isBlank()) {
-                sb.append("- ").append(path).append("\n");
+            if (entry.isFile() && entry.path() != null && !entry.path().isBlank()) {
+                sb.append("- ").append(entry.path()).append("\n");
                 count++;
             }
         }

@@ -11,6 +11,7 @@ import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
@@ -424,7 +425,7 @@ class PrWorkflowToolExecutorTest {
         @Override public List<Review> getReviews(String o, String r, Long p) { return List.of(); }
         @Override public List<ReviewComment> getReviewComments(String o, String r, Long p, Long rid) { return List.of(); }
         @Override public String getDefaultBranch(String o, String r) { return "main"; }
-        @Override public List<Map<String, Object>> getRepositoryTree(String o, String r, String ref) { return List.of(); }
+        @Override public List<RepositoryTreeEntry> getRepositoryTree(String o, String r, String ref) { return List.of(); }
         @Override public String getFileContent(String o, String r, String p, String ref) { return ""; }
         @Override public Long createPullRequest(String o, String r, String t, String b, String h, String base) { return 0L; }
     }

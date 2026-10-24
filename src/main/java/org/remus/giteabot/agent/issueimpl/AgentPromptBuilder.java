@@ -3,6 +3,7 @@ package org.remus.giteabot.agent.issueimpl;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.util.List;
 import java.util.Map;
@@ -181,21 +182,19 @@ public class AgentPromptBuilder {
     /**
      * Builds a human-readable representation of the repository file tree.
      */
-    public String buildTreeContext(List<Map<String, Object>> tree) {
+    public String buildTreeContext(List<RepositoryTreeEntry> tree) {
         if (tree == null || tree.isEmpty()) {
             return "No files found in repository.";
         }
         StringBuilder sb = new StringBuilder("Repository file tree:\n");
         int count = 0;
-        for (Map<String, Object> entry : tree) {
+        for (RepositoryTreeEntry entry : tree) {
             if (count >= maxTreeFilesForContext) {
                 sb.append("... (truncated, ").append(tree.size() - count).append(" more files)\n");
                 break;
             }
-            String type = (String) entry.getOrDefault("type", "blob");
-            String path = (String) entry.getOrDefault("path", "");
-            if ("blob".equals(type)) {
-                sb.append("  ").append(path).append("\n");
+            if (entry.isFile()) {
+                sb.append("  ").append(entry.path()).append("\n");
             }
             count++;
         }
