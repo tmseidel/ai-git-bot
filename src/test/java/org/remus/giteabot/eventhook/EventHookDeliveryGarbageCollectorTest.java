@@ -18,7 +18,7 @@ import static org.mockito.Mockito.*;
  * Repository-mock tests for the GC decision logic (cutoff computation, keep
  * semantics, per-endpoint independence). The status filter that exempts
  * PENDING/RETRYING rows lives in the JPQL of {@code deleteTerminalBefore},
- * which Spring Data validates at context boot ({@code GiteaBotApplicationTests}).
+ * which Spring Data validates at context boot ({@code AiGitBotApplicationTests}).
  */
 @ExtendWith(MockitoExtension.class)
 class EventHookDeliveryGarbageCollectorTest {

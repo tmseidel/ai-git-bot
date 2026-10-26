@@ -5,7 +5,7 @@ import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.config.DeploymentTarget;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 class CiActionTriggerStrategyTest {
 
     private final BotRepository botRepository = mock(BotRepository.class);
-    private final GiteaClientFactory clientFactory = mock(GiteaClientFactory.class);
+    private final RepositoryApiClientFactory clientFactory = mock(RepositoryApiClientFactory.class);
     private final RepositoryApiClient apiClient = mock(RepositoryApiClient.class);
 
     private final CiActionTriggerStrategy strategy =

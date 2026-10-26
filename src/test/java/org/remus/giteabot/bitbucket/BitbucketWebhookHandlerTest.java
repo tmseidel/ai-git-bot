@@ -10,8 +10,8 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.GiteaClientFactory;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
@@ -35,7 +35,7 @@ class BitbucketWebhookHandlerTest {
     @Mock
     private BotWebhookService botWebhookService;
     @Mock
-    private GiteaClientFactory clientFactory;
+    private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock
     private BitbucketApiClient bitbucketClient;
     @Mock
@@ -46,16 +46,14 @@ class BitbucketWebhookHandlerTest {
 
     @BeforeEach
     void setUp() {
-        handler = new BitbucketWebhookHandler(botWebhookService, clientFactory, botService);
+        handler = new BitbucketWebhookHandler(botWebhookService, repositoryApiClientFactory, botService);
         GitIntegration integration = new GitIntegration();
         integration.setUsername("bot@example.com");
         bot = new Bot();
         bot.setName("test-bot");
-        // Deliberately different from the Bitbucket account: the bot username must have no effect.
-        bot.setUsername("unrelated-bot-name");
         bot.setGitIntegration(integration);
 
-        lenient().when(clientFactory.getApiClient(integration)).thenReturn(bitbucketClient);
+        lenient().when(repositoryApiClientFactory.getApiClient(integration)).thenReturn(bitbucketClient);
         lenient().when(bitbucketClient.getAuthenticatedAccount())
                 .thenReturn(new BitbucketAccount("{uuid-ai_bot}", "acc-ai_bot", "ai_bot", "AI Bot"));
         lenient().when(botWebhookService.isPullRequestAuthor(any(WebhookPayload.class))).thenReturn(true);
@@ -113,7 +111,7 @@ class BitbucketWebhookHandlerTest {
 
     @Test
     void missingAccountEmail_ignoresEventAndRecordsBotError() {
-        when(clientFactory.getApiClient(bot.getGitIntegration()))
+        when(repositoryApiClientFactory.getApiClient(bot.getGitIntegration()))
                 .thenThrow(new IllegalStateException("no Atlassian account e-mail configured"));
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:created",

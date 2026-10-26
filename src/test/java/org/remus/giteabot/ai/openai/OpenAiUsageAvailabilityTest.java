@@ -33,7 +33,7 @@ class OpenAiUsageAvailabilityTest {
                         {"choices":[{"finish_reason":"stop","message":{"content":"Answer"}}],
                          "usage":{"prompt_tokens":-1,"completion_tokens":3}}
                         """, MediaType.APPLICATION_JSON));
-        var client = new OpenAiClient(http.build(), "model", 32, true, OpenAiFlavor.STANDARD);
+        var client = new OpenAiClient(http.build(), "model", 32, true, OpenAiFlavor.STANDARD, null);
         var recorder = new CapturingRecorder();
         client.setAuditRecorder(recorder);
         var properties = new AiUsageProperties();
@@ -62,7 +62,7 @@ class OpenAiUsageAvailabilityTest {
                         {"choices":[{"finish_reason":"stop","message":{"content":"Answer"}}],
                          "usage":%s}
                         """.formatted(usage), MediaType.APPLICATION_JSON));
-        var client = new OpenAiClient(http.build(), "model", 32, true, OpenAiFlavor.STANDARD);
+        var client = new OpenAiClient(http.build(), "model", 32, true, OpenAiFlavor.STANDARD, null);
         var recorder = new CapturingRecorder();
         client.setAuditRecorder(recorder);
 
@@ -121,7 +121,7 @@ class OpenAiUsageAvailabilityTest {
                 .andRespond(withSuccess("""
                         {"choices":[{"finish_reason":"stop","message":{"content":"12345678"}}],"usage":%s}
                         """.formatted(usage), MediaType.APPLICATION_JSON));
-        var client = new OpenAiClient(http.build(), "model", 32, true, OpenAiFlavor.STANDARD);
+        var client = new OpenAiClient(http.build(), "model", 32, true, OpenAiFlavor.STANDARD, null);
         var turn = client.chatWithTools(List.of(), "Review", List.of(), "sys", null, null);
         assertThat(turn.inputTokensReported()).isEqualTo(inputReported);
         assertThat(turn.outputTokensReported()).isEqualTo(outputReported);

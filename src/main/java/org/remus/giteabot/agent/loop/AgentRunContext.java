@@ -26,6 +26,8 @@ public final class AgentRunContext {
     private DiffSummary diffSummary;
     @Setter
     private Consumer<ToolCallRecord> auditToolCallConsumer;
+    @Setter
+    private Consumer<ProgressUpdate> progressConsumer;
 
     public AgentRunContext(AgentSession session, String owner, String repo,
                            Long issueNumber, Path workspaceDir, String baseBranch) {
@@ -46,6 +48,10 @@ public final class AgentRunContext {
     public ToolingMode toolingMode() { return toolingMode; }
     public DiffSummary diffSummary() { return diffSummary; }
     public Consumer<ToolCallRecord> auditToolCallConsumer() { return auditToolCallConsumer; }
+    public Consumer<ProgressUpdate> progressConsumer() { return progressConsumer; }
+
+    /** Reports the current round and activity, with inspection tool calls just completed. */
+    public record ProgressUpdate(int round, String activity, int completedToolCalls) {}
 
     public record ToolCallRecord(
             String toolName,

@@ -2,7 +2,7 @@
 
 ## Overview
 
-AI-Git-Bot is a **Gateway application** that provides a web-based management interface for creating and managing AI-powered code review bots. Each bot connects an AI provider (Anthropic, OpenAI, OpenRouter, Google AI, Ollama, or llama.cpp) with a Git provider (Gitea, GitHub, GitHub Enterprise, GitLab, or Bitbucket Cloud) and has its own unique webhook URL. The Gateway architecture allows you to manage multiple bots with different configurations across different Git platforms — all from a single dashboard.
+AI-Git-Bot is a **Gateway application** that provides a web-based management interface for creating and managing AI-powered code review bots. Each bot connects an AI provider (Anthropic, OpenAI, OpenRouter, Google AI, Ollama, or llama.cpp) with a Git provider (Gitea, GitHub, GitHub Enterprise, GitLab, Bitbucket Cloud, or Azure DevOps) and has its own unique webhook URL. The Gateway architecture allows you to manage multiple bots with different configurations across different Git platforms — all from a single dashboard.
 
 Besides classic pull-request review bots, AI-Git-Bot also supports **issue-based agent workflows** and **opt-in PR workflows**:
 
@@ -192,6 +192,8 @@ Troubleshooting:
 - **Empty or malformed responses**: The provider may not return the expected OpenAI chat completions response format for that model.
 - **Context length or token errors**: Reduce **Max Diff Chars/Chunk**, **Max Diff Chunks**, or **Max Tokens**, or choose a model with a larger context window.
 - **400 "Function tools with reasoning_effort are not supported"**: Your gateway injects a default `reasoning_effort`, which the selected model rejects when function tools are used on `/v1/chat/completions`. In the integration, set **Model Flavor** to `No reasoning effort` (sends `reasoning_effort: "none"`).
+- **400 "Unexpected reasoning effort ..."**: the model's chat template inside vLLM validates the value, and each template has its own vocabulary (Qwen templates accept `xhigh`, `medium`, `low`; others take a number or only a boolean). Correct `OPENAI_CHAT_TEMPLATE_KWARGS` (property `openai.chat-template-kwargs`) to a value the template lists, or clear it to use the server default.
+- **Reviews spend more tokens than expected on a self-hosted model**: a vLLM started with `--default-chat-template-kwargs '{"enable_thinking":true,...}'` applies that effort to every client. Set `OPENAI_CHAT_TEMPLATE_KWARGS` for the bot (e.g. `{"enable_thinking": true, "reasoning_effort": "low"}` or `{"enable_thinking": false}`); the request then carries `chat_template_kwargs` and overrides the server default for this bot only, because `--default-chat-template-kwargs` has no per-request opt-out of its own.
 
 #### Ollama
 - No API key required
@@ -242,6 +244,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 | **GitHub** | github.com or GitHub Enterprise Server | [GitHub Setup](GITHUB_SETUP.md) |
 | **GitLab** | gitlab.com or self-managed GitLab CE/EE | [GitLab Setup](GITLAB_SETUP.md) |
 | **Bitbucket Cloud** | bitbucket.org | [Bitbucket Setup](BITBUCKET_SETUP.md) |
+| **Azure DevOps** | dev.azure.com, the legacy `*.visualstudio.com` hosts, and Azure DevOps Server (collection in the URL optional) | [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md) |
 
 ### Creating a Git Integration
 
@@ -256,14 +259,17 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `github` | `https://github.com` | Personal Access Token (PAT) |
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
      | `bitbucket` | `https://bitbucket.org` | Atlassian account email + API token |
+     | `azure_devops` | `https://dev.azure.com` | Personal Access Token (PAT) |
      
     - **URL**: The Git server URL:
      - For Gitea: `https://gitea.example.com`
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
+     - For Azure DevOps: `https://dev.azure.com` (Services), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
+    - **Username**: The username of the Git account the bot acts as (e.g. `ai_bot`) — not an e-mail address or display name. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). It applies to every bot that uses this integration. For Bitbucket Cloud, enter the **Atlassian account email** instead (see below).
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
-    - **Post-review Action**: defaults to **None**. Currently GitLab can use it to approve the merge request or post a request-changes note after each bot review.
+    - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.
 3. Click **Save**
 
 ### Provider-Specific Notes
@@ -301,10 +307,20 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 
 - API calls use Basic authentication with the Atlassian account email and an API token (`email:api_token`); Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
 - Only Atlassian account API tokens are supported for now; workspace/project/repository access tokens are not.
-- The bot's identity (reviewer requests, mentions, own comments) is the account behind the configured email; the bot **Username** has no effect. Use a dedicated Atlassian account: all events created by that account are ignored
+- The bot's identity (reviewer requests, mentions, own comments) is the account behind the configured email, resolved via the API. Use a dedicated Atlassian account: all events created by that account are ignored
 - API endpoint is at `api.bitbucket.org/2.0`
 - Issue-based agent workflows (coding and writer) are not available
 - See [Bitbucket Setup](BITBUCKET_SETUP.md) for token creation instructions
+
+#### Azure DevOps
+
+- Uses Basic authentication with an empty username and the PAT as the password
+- Repositories are addressed as organization + `Project/Repository`, because Azure DevOps has three
+  address levels where the other providers have two
+- Webhooks are Service Hooks, which carry no body signature; the bot verifies a shared secret in an
+  `X-AiGitBot-Token` header instead
+- Work Items and Azure Pipelines (and therefore the `CI_ACTION` deployment target) are not supported
+- See [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md) for PAT and Service Hook instructions
 
 ### Managing Git Integrations
 
@@ -319,7 +335,6 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
 1. Click **New Bot**
 2. Fill in the form:
    - **Name**: A unique name for the bot (e.g., "Code Reviewer")
-   - **Username**: The Git username the bot uses (e.g., "ai_bot"). This is used to detect and ignore the bot's own actions, and as the mention alias (e.g., `@ai_bot`). Not used for Bitbucket Cloud, where the account email configured on the Git Integration identifies the bot
    - **Bot Type**: Choose **Coding bot** for pull-request reviews and issue implementation, or **Writer bot** for technical-writing assistance on issues.
    - **System Prompt**: Select one of the prompt entries configured under **System settings → System prompts**. Use **Preview** next to the dropdown to review the code-review, issue-agent, writer-agent, and the three E2E (planner / author / runner) instructions before saving. The preview opens as an expandable panel view so long prompts can be inspected section by section.
    - **MCP Configuration** *(optional)*: Select a saved MCP configuration. Use **Details** next to the dropdown to open a read-only list of the currently selected MCP tools.
@@ -504,18 +519,20 @@ Configure this URL in your Git provider's webhook settings. See the provider-spe
 - **GitHub**: [GitHub Webhook Setup](GITHUB_SETUP.md#4-configure-webhooks)
 - **GitLab**: [GitLab Webhook Setup](GITLAB_SETUP.md#4-configure-webhooks)
 - **Bitbucket Cloud**: [Bitbucket Webhook Setup](BITBUCKET_SETUP.md#step-4-configure-the-webhook-in-bitbucket)
+- **Azure DevOps**: [Azure DevOps Service Hook Setup](AZURE_DEVOPS_SETUP.md#step-4-create-service-hook-subscriptions)
 
 ### Webhook Events
 
 Select the following events in your Git provider's webhook configuration:
 
-| Event | Gitea | GitHub | GitLab | Bitbucket | Description |
-|-------|-------|--------|--------|-----------|-------------|
-| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | PR/MR open/close and reviewer request events |
-| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | Bot mentions in comments; Bitbucket re-review requests |
-| PR Review | ✅ Pull Request (`reviewed` action) | ✅ Pull request reviews | — | — | Review submissions |
-| PR Comment | ✅ Pull Request Comment | ✅ Pull request review comments | — | — | Inline code comments |
-| Issues | ✅ Issues | ✅ Issues | ✅ Issues events | — | Issue-based agent workflows (optional) |
+| Event | Gitea | GitHub | GitLab | Bitbucket | Azure DevOps | Description |
+|-------|-------|--------|--------|-----------|--------------|-------------|
+| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | ✅ Pull request created + Pull request updated | PR/MR open/close and reviewer request events |
+| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | ✅ Pull request commented on | Bot mentions in comments; Bitbucket and Azure DevOps re-review requests |
+| PR Review | ✅ Pull Request (`reviewed` action) | ✅ Pull request reviews | — | — | — | Review submissions |
+| PR Comment | ✅ Pull Request Comment | ✅ Pull request review comments | — | — | ✅ Pull request commented on (same subscription) | Inline code comments |
+| Issues | ✅ Issues | ✅ Issues | ✅ Issues events | — | — | Issue-based agent workflows (optional) |
+
 
 ### Bot Statistics
 
@@ -530,7 +547,7 @@ The dashboard and bot list show per-bot statistics:
 
 Coding bots use an explicit-request review workflow:
 
-- Review pull requests only when the PR/MR is created with the bot as reviewer, the bot is added/re-requested as reviewer, or (Bitbucket) the PR author comments a request such as `@ai_bot - Review the Pull-Request again`.
+- Review pull requests only when the PR/MR is created with the bot as reviewer, the bot is added/re-requested as reviewer, or (Bitbucket, Azure DevOps) the PR author comments a request such as `@ai_bot - Review the Pull-Request again`.
 - Do not automatically re-review when new commits are pushed.
 - Respond to bot mentions in PR comments and inline review comments from the PR/MR author.
 - Start the issue implementation workflow when the bot is assigned to an issue.

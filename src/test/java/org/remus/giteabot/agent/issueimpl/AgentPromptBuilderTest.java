@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.util.List;
 import java.util.Map;
@@ -22,10 +23,10 @@ class AgentPromptBuilderTest {
 
     @Test
     void buildTreeContext_withFiles_formatsTree() {
-        List<Map<String, Object>> tree = List.of(
-                Map.of("type", "blob", "path", "src/Main.java"),
-                Map.of("type", "blob", "path", "README.md"),
-                Map.of("type", "tree", "path", "src")
+        List<RepositoryTreeEntry> tree = List.of(
+                new RepositoryTreeEntry("src/Main.java", RepositoryTreeEntry.Type.FILE),
+                new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE),
+                new RepositoryTreeEntry("src", RepositoryTreeEntry.Type.DIRECTORY)
         );
 
         String context = builder.buildTreeContext(tree);
@@ -55,8 +56,8 @@ class AgentPromptBuilderTest {
         AgentPromptBuilder limitedBuilder = new AgentPromptBuilder(contextConfig);
 
         String context = limitedBuilder.buildTreeContext(List.of(
-                Map.of("type", "blob", "path", "src/Main.java"),
-                Map.of("type", "blob", "path", "src/Other.java")
+                new RepositoryTreeEntry("src/Main.java", RepositoryTreeEntry.Type.FILE),
+                new RepositoryTreeEntry("src/Other.java", RepositoryTreeEntry.Type.FILE)
         ));
 
         assertThat(context).contains("src/Main.java");

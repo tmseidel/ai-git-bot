@@ -1,5 +1,6 @@
 package org.remus.giteabot.ai;
 
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.remus.giteabot.ai.anthropic.AnthropicAiClient;
@@ -119,7 +120,7 @@ class NativeStopReasonTest {
     private static Stream<Provider> providers() {
         return Stream.of(
                 new Provider("OpenAI-compatible", "/v1/chat/completions",
-                        http -> new OpenAiClient(http, "test-model", 32, true, OpenAiFlavor.STANDARD),
+                        http -> new OpenAiClient(http, "test-model", 32, true, OpenAiFlavor.STANDARD, null),
                         "length", "stop", """
                         {"choices":[{"finish_reason":%s,"message":{"role":"assistant","content":"",
                           "tool_calls":[{"id":"call-1","type":"function",
@@ -178,6 +179,7 @@ class NativeStopReasonTest {
         }
 
         @Override
+        @NonNull
         public String toString() {
             return name;
         }

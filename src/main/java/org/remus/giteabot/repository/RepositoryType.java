@@ -9,5 +9,6 @@ public enum RepositoryType {
     GITEA,
     GITHUB,
     GITLAB,
-    BITBUCKET
+    BITBUCKET,
+    AZURE_DEVOPS
 }

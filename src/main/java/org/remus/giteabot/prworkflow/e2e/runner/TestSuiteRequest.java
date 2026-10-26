@@ -1,7 +1,7 @@
 package org.remus.giteabot.prworkflow.e2e.runner;
 
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.PrTestSuite;

@@ -7,9 +7,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
@@ -31,9 +31,9 @@ class RepositoryTreeEnricherTest {
     void enrich_formatsTree() {
         when(repositoryClient.getRepositoryTree("owner", "repo", "main"))
                 .thenReturn(List.of(
-                        Map.of("type", "blob", "path", "pom.xml"),
-                        Map.of("type", "blob", "path", "src/main/java/Foo.java"),
-                        Map.of("type", "tree", "path", "src")
+                        new RepositoryTreeEntry("pom.xml", RepositoryTreeEntry.Type.FILE),
+                        new RepositoryTreeEntry("src/main/java/Foo.java", RepositoryTreeEntry.Type.FILE),
+                        new RepositoryTreeEntry("src", RepositoryTreeEntry.Type.DIRECTORY)
                 ));
 
         String result = enricher.enrich(new EnrichmentContext("owner", "repo", 1L, null, "main", null));

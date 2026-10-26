@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Chat-Completions request payload (OpenAI flavour). Tool-related fields
@@ -33,6 +34,18 @@ public class OpenAiRequest {
      */
     @JsonProperty("reasoning_effort")
     private String reasoningEffort;
+
+    /**
+     * Provider-side chat template switches, sent verbatim as
+     * {@code chat_template_kwargs}. vLLM hands these to the model's Jinja chat
+     * template, so they override the server's
+     * {@code --default-chat-template-kwargs} for this one request — that is how
+     * a review bot asks for {@code enable_thinking=false} (or a lower
+     * {@code reasoning_effort}) on an endpoint another client uses as a
+     * full-effort code agent.
+     */
+    @JsonProperty("chat_template_kwargs")
+    private Map<String, Object> chatTemplateKwargs;
 
     private List<Message> messages;
 

@@ -208,7 +208,7 @@ CREATE INDEX IF NOT EXISTS idx_event_hook_delivery_endpoint ON event_hook_delive
 
 Note: `IF NOT EXISTS` guards the common re-run/pre-created cases. It deliberately does not reconcile drifted column definitions — that remains the job of a new, higher-numbered migration, matching how the project handles schema evolution elsewhere.
 
-**Verification:** `mvn -q compile` then run `GiteaBotApplicationTests` (context boot runs Flyway against H2): `mvn test -Dtest=GiteaBotApplicationTests`. Expected: PASS, migration applied.
+**Verification:** `mvn -q compile` then run `AiGitBotApplicationTests` (context boot runs Flyway against H2): `mvn test -Dtest=AiGitBotApplicationTests`. Expected: PASS, migration applied.
 
 ### Task 2: Event type enum and endpoint/delivery status enums
 
@@ -362,7 +362,7 @@ public interface EventHookDeliveryRepository extends JpaRepository<EventHookDeli
 }
 ```
 
-**Verification:** context test passes with new entities (`mvn test -Dtest=GiteaBotApplicationTests`).
+**Verification:** context test passes with new entities (`mvn test -Dtest=AiGitBotApplicationTests`).
 
 ### Task 5: `EventHookProperties` configuration
 
@@ -544,7 +544,7 @@ public class EventHookDeliveryWorker {
     private final RestClient defaultClient;    // standard TLS verification
     private final RestClient insecureClient;   // trust-all, for endpoints with skipTlsVerify=true
     // Constructor builds both from EventHookProperties timeouts over httpclient5 — mirror the
-    // request-factory pattern in GiteaClientFactory. The insecure client uses a trust-all
+    // request-factory pattern in RepositoryApiClientFactory. The insecure client uses a trust-all
     // SSLContext (org.apache.hc.core5.ssl.SSLContextBuilder + TrustAllStrategy) and
     // NoopHostnameVerifier; verify exact httpclient5 API against the existing factory code.
 
@@ -651,7 +651,7 @@ public class EventHookRetrySweeper {
 }
 ```
 
-(`@EnableScheduling` already exists on `GiteaBotApplication`.) Batching at 100 keeps the sweep cheap; leftover rows are picked next tick. Accept the small risk of double-dispatch when a PENDING row's async attempt is still in flight — guarded by the worker's status re-check; document it in the class javadoc.
+(`@EnableScheduling` already exists on `AiGitBotApplication`.) Batching at 100 keeps the sweep cheap; leftover rows are picked next tick. Accept the small risk of double-dispatch when a PENDING row's async attempt is still in flight — guarded by the worker's status re-check; document it in the class javadoc.
 
 **Test:** `EventHookRetrySweeperTest` (Mockito) — due rows are dispatched, none when disabled. Expected: PASS.
 

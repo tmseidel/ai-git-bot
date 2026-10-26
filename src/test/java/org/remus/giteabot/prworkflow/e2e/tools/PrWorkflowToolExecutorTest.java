@@ -11,6 +11,7 @@ import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
@@ -417,14 +418,14 @@ class PrWorkflowToolExecutorTest {
         }
         @Override public String getPullRequestDiff(String o, String r, Long p) { return ""; }
         @Override public void postReviewComment(String o, String r, Long p, String b) { }
-        @Override public void postPullRequestComment(String o, String r, Long p, String b) { }
+        @Override public Long postPullRequestComment(String o, String r, Long p, String b) { return null; }
         @Override public void postIssueComment(String o, String r, Long i, String b) { }
         @Override public void addReaction(String o, String r, Long c, String x) { }
         @Override public void postInlineReviewComment(String o, String r, Long p, String f, int l, String b) { }
         @Override public List<Review> getReviews(String o, String r, Long p) { return List.of(); }
         @Override public List<ReviewComment> getReviewComments(String o, String r, Long p, Long rid) { return List.of(); }
         @Override public String getDefaultBranch(String o, String r) { return "main"; }
-        @Override public List<Map<String, Object>> getRepositoryTree(String o, String r, String ref) { return List.of(); }
+        @Override public List<RepositoryTreeEntry> getRepositoryTree(String o, String r, String ref) { return List.of(); }
         @Override public String getFileContent(String o, String r, String p, String ref) { return ""; }
         @Override public Long createPullRequest(String o, String r, String t, String b, String h, String base) { return 0L; }
     }

@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.config.ApplicationVersion;
 import org.remus.giteabot.secret.KeyResolveException;
 import org.remus.giteabot.secret.SecretTemplate;
 import org.remus.giteabot.systemsettings.McpConfiguration;
@@ -49,11 +50,14 @@ public class McpOrchestrationService {
             List.of(ProtocolVersions.MCP_2024_11_05, ProtocolVersions.MCP_2025_03_26),
             List.of(ProtocolVersions.MCP_2024_11_05));
 
+    private static final String CLIENT_NAME = "ai-git-bot";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<CacheKey, McpToolCatalog> toolCache = new ConcurrentHashMap<>();
     private final McpServerDiscovery serverDiscovery;
     private final EncryptionService encryptionService;
-
+    /** Reported to MCP servers as {@code clientInfo.version}. */
+    private final ApplicationVersion applicationVersion;
 
     /** The MCP configuration JSON is stored encrypted - decrypt before parsing. */
     private String decryptedJson(McpConfiguration configuration) {
@@ -189,7 +193,7 @@ public class McpOrchestrationService {
                 .requestTimeout(REQUEST_TIMEOUT)
                 .loggingConsumer(notification -> log.debug(notification.data()))
                 .initializationTimeout(REQUEST_TIMEOUT)
-                .clientInfo(new McpSchema.Implementation("ai-git-bot", "1.5.0"))
+                .clientInfo(new McpSchema.Implementation(CLIENT_NAME, applicationVersion.get()))
                 .build();
     }
 
@@ -246,7 +250,7 @@ public class McpOrchestrationService {
                     "params", Map.of(
                             "protocolVersion", protocolVersion,
                             "capabilities", Map.of(),
-                            "clientInfo", Map.of("name", "ai-git-bot", "version", "1.5.0"))));
+                            "clientInfo", Map.of("name", CLIENT_NAME, "version", applicationVersion.get()))));
             URI uri = URI.create(attempt.endpoint().baseUri()).resolve(attempt.endpoint().endpoint());
             HttpRequest.Builder request = HttpRequest.newBuilder(uri)
                     .timeout(REQUEST_TIMEOUT)

@@ -44,7 +44,7 @@ class ReviewToolTruncationTest {
         Files.writeString(workspace.resolve("Content.txt"), truncated ? "x".repeat(11_000) : "complete content");
         AgentConfigProperties config = new AgentConfigProperties();
         ToolCatalog catalog = new ToolCatalog(config);
-        ToolExecutionService tools = new ToolExecutionService(config, catalog, new WorkspaceService());
+        ToolExecutionService tools = new ToolExecutionService(config, catalog, new WorkspaceService(null, 60));
         Set<String> allowed = Set.of("cat");
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, allowed, null);

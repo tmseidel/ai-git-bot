@@ -3,7 +3,7 @@ package org.remus.giteabot.notification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.springframework.stereotype.Component;
@@ -15,7 +15,7 @@ import java.util.Optional;
  * request or issue a running workflow belongs to.
  *
  * <p>Orchestrators hand over the repository coordinates they already resolved
- * for the run, so neither {@link GiteaClientFactory} nor
+ * for the run, so neither {@link RepositoryApiClientFactory} nor
  * {@link RepositoryApiClient} has to appear in the orchestration layer.</p>
  *
  * <p>Best-effort by design, matching {@link AiRetryContext}: without a
@@ -27,7 +27,7 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class WorkflowRetryNotices {
 
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
 
     /** Points the retry notices of a PR workflow run at the pull request it belongs to. */
     public void installForPullRequest(Bot bot, String workflowKey,
@@ -53,7 +53,7 @@ public class WorkflowRetryNotices {
 
     private Optional<RepositoryApiClient> resolveClient(Bot bot, String workflowKey) {
         try {
-            return Optional.of(giteaClientFactory.getApiClient(bot.getGitIntegration()));
+            return Optional.of(repositoryApiClientFactory.getApiClient(bot.getGitIntegration()));
         } catch (RuntimeException e) {
             log.debug("[Workflow '{}'] No retry-notice target: {}", workflowKey, e.getMessage());
             return Optional.empty();

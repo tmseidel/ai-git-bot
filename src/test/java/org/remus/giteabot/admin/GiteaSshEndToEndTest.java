@@ -49,7 +49,7 @@ class GiteaSshEndToEndTest {
 
     @Autowired private GitIntegrationService gitIntegrationService;
     @Autowired private GiteaSshSetupService setupService;
-    @Autowired private GiteaClientFactory giteaClientFactory;
+    @Autowired private RepositoryApiClientFactory repositoryApiClientFactory;
     @Autowired private WorkspaceService workspaceService;
 
     @Test
@@ -66,6 +66,7 @@ class GiteaSshEndToEndTest {
             input.setProviderType(RepositoryType.GITEA);
             input.setUrl(baseUrl);
             input.setToken(token);
+            input.setUsername(owner);
             GitIntegration saved = gitIntegrationService.save(input, false);
             assertNotNull(saved.getId());
 
@@ -79,7 +80,7 @@ class GiteaSshEndToEndTest {
             assertNotNull(configured.getSshRemoteKeyId());
             assertNotNull(configured.getSshRemoteKeyTitle());
 
-            RepositoryApiClient client = giteaClientFactory.getApiClient(configured);
+            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(configured);
             assertInstanceOf(GiteaApiClient.class, client);
             GiteaApiClient gitea = (GiteaApiClient) client;
             assertTrue(gitea.getSshKeyIdsByTitle(configured.getSshRemoteKeyTitle())

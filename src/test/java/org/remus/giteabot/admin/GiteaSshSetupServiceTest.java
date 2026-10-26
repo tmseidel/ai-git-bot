@@ -26,7 +26,7 @@ class GiteaSshSetupServiceTest {
     private static final String REMOTE = "ssh://git@gitea.example.com:2222/owner/repo.git";
 
     @Mock private GitIntegrationService gitIntegrationService;
-    @Mock private GiteaClientFactory giteaClientFactory;
+    @Mock private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock private SshCommandService sshCommandService;
     @Mock private GiteaApiClient client;
     @Mock private GiteaApiClient replacement;
@@ -55,7 +55,7 @@ class GiteaSshSetupServiceTest {
     @Test
     void preview_requiresEncryptionBeforeRemoteAccess() {
         assertThrows(IllegalStateException.class, () -> service.preview(7L));
-        verifyNoInteractions(giteaClientFactory, sshCommandService);
+        verifyNoInteractions(repositoryApiClientFactory, sshCommandService);
         verify(gitIntegrationService, never()).findById(anyLong());
     }
 
@@ -89,7 +89,7 @@ class GiteaSshSetupServiceTest {
         integration.setSshPrivateKey("encrypted-private-key");
         prepareContext();
         assertThrows(IllegalStateException.class, () -> service.setup(7L, 0L, "scan", true));
-        verifyNoInteractions(giteaClientFactory, sshCommandService);
+        verifyNoInteractions(repositoryApiClientFactory, sshCommandService);
     }
 
     @Test
@@ -100,7 +100,7 @@ class GiteaSshSetupServiceTest {
         integration.setProviderType(RepositoryType.GITEA);
         integration.setToken("");
         assertThrows(IllegalArgumentException.class, () -> service.preview(7L));
-        verifyNoInteractions(giteaClientFactory);
+        verifyNoInteractions(repositoryApiClientFactory);
     }
 
     @Test
@@ -239,7 +239,7 @@ class GiteaSshSetupServiceTest {
     void cleanup_expiredTokenCanUseReplacementForSameOwner() {
         prepareCleanup();
         when(client.getCurrentUserId()).thenThrow(new HttpClientErrorException(HttpStatus.UNAUTHORIZED));
-        when(giteaClientFactory.createApiClient(integration, "new-token")).thenReturn(replacement);
+        when(repositoryApiClientFactory.createApiClient(integration, "new-token")).thenReturn(replacement);
         when(replacement.getCurrentUserId()).thenReturn(17L);
         when(replacement.getSshKeyIdsByTitle(TITLE)).thenReturn(List.of(42L));
         assertNotNull(service.removeManagedKey(integration, "new-token"));
@@ -250,7 +250,7 @@ class GiteaSshSetupServiceTest {
     void cleanup_wrongReplacementOwnerCannotDeleteKeys() {
         prepareCleanup();
         when(client.getCurrentUserId()).thenThrow(new HttpClientErrorException(HttpStatus.FORBIDDEN));
-        when(giteaClientFactory.createApiClient(integration, "new-token")).thenReturn(replacement);
+        when(repositoryApiClientFactory.createApiClient(integration, "new-token")).thenReturn(replacement);
         when(replacement.getCurrentUserId()).thenReturn(18L);
         assertNull(service.removeManagedKey(integration, "new-token"));
         verify(replacement, never()).deleteSshKey(anyLong());
@@ -261,7 +261,7 @@ class GiteaSshSetupServiceTest {
         prepareCleanup();
         when(client.getSshKeyIdsByTitle(TITLE)).thenThrow(new IllegalStateException("unavailable"));
         assertNull(service.removeManagedKey(integration, "new-token"));
-        verify(giteaClientFactory, never()).createApiClient(any(), anyString());
+        verify(repositoryApiClientFactory, never()).createApiClient(any(), anyString());
     }
 
     @Test
@@ -276,7 +276,7 @@ class GiteaSshSetupServiceTest {
     @Test
     void cleanup_manualKeyDoesNotContactGitea() {
         assertNotNull(service.removeManagedKey(integration, null));
-        verifyNoInteractions(giteaClientFactory);
+        verifyNoInteractions(repositoryApiClientFactory);
     }
 
     private void prepareContext() {
@@ -286,7 +286,7 @@ class GiteaSshSetupServiceTest {
 
     private void prepareScan() {
         prepareContext();
-        when(giteaClientFactory.getApiClient(integration)).thenReturn(client);
+        when(repositoryApiClientFactory.getApiClient(integration)).thenReturn(client);
         when(client.getAnySshCloneUrl()).thenReturn(REMOTE);
         when(sshCommandService.scanHostKeys(REMOTE)).thenReturn(scan);
     }
@@ -310,7 +310,7 @@ class GiteaSshSetupServiceTest {
         integration.setSshRemoteKeyId(42L);
         integration.setSshRemoteKeyOwnerId(17L);
         integration.setSshRemoteKeyTitle(TITLE);
-        when(giteaClientFactory.getApiClient(integration)).thenReturn(client);
+        when(repositoryApiClientFactory.getApiClient(integration)).thenReturn(client);
         when(client.getCurrentUserId()).thenReturn(17L);
     }
 }

@@ -4,10 +4,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
@@ -19,7 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -78,7 +79,7 @@ class I18nCoverageServiceTest {
 
     @Test
     void missingHeadRef_andApiCannotResolve_skipsWithoutCloning() {
-        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Map.of());
+        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Optional.empty());
 
         I18nCoverageService.Result result = service.run(
                 request(payloadWithHead(null), SuiteLifecycleMode.COMMIT_TO_PR));
@@ -86,22 +87,25 @@ class I18nCoverageServiceTest {
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.SKIPPED);
         verify(workspaceService, never()).prepareWorkspace(
                 any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
-        verify(workspaceService, never()).prepareWritablePullRequestWorkspace(
-                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
+        verify(workspaceService, never()).preparePullRequestWorkspace(
+                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK));
         verify(repoClient, never()).getDefaultBranch(anyString(), anyString());
     }
 
     @Test
     void headRefInPayload_isUsedForClone() {
-        when(workspaceService.prepareWritablePullRequestWorkspace(
-                eq(repoClient), anyString(), anyString(), anyString(), anyLong()))
+        when(workspaceService.preparePullRequestWorkspace(
+                eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.failure("stop here"));
 
         service.run(request(payloadWithHead("feature/login"), SuiteLifecycleMode.COMMIT_TO_PR));
 
         ArgumentCaptor<String> branch = ArgumentCaptor.forClass(String.class);
-        verify(workspaceService).prepareWritablePullRequestWorkspace(
-                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L));
+        verify(workspaceService).preparePullRequestWorkspace(
+                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L),
+                eq(PullRequestWorkspaceMode.PUSH_BACK));
         assertThat(branch.getValue()).isEqualTo("feature/login");
     }
 
@@ -110,8 +114,9 @@ class I18nCoverageServiceTest {
         Files.createDirectories(ws.resolve("i18n"));
         Files.writeString(ws.resolve("i18n/messages_en.properties"), "a=1", StandardCharsets.UTF_8);
         Files.writeString(ws.resolve("i18n/messages_de.properties"), "a=1", StandardCharsets.UTF_8);
-        when(workspaceService.prepareWritablePullRequestWorkspace(
-                eq(repoClient), anyString(), anyString(), anyString(), anyLong()))
+        when(workspaceService.preparePullRequestWorkspace(
+                eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.success(ws));
 
         I18nCoverageService.Result result = service.run(

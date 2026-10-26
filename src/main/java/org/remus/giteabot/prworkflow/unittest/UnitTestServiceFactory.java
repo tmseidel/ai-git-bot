@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
@@ -23,7 +23,7 @@ import org.springframework.stereotype.Component;
 public class UnitTestServiceFactory {
 
     private final AiClientFactory aiClientFactory;
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final WorkspaceService workspaceService;
     private final FrameworkDetector frameworkDetector;
     private final UnitTestAuthorAgent authorAgent;
@@ -36,7 +36,7 @@ public class UnitTestServiceFactory {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
         return new UnitTestService(repoClient, aiClient, bot.getSystemPrompt(),
                 workspaceService, frameworkDetector, authorAgent, runner, suiteRepository, surfaceFactory);
     }

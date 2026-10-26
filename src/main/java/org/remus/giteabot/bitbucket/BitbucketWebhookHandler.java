@@ -4,9 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.BotWebhookService;
-import org.remus.giteabot.admin.GiteaClientFactory;
-import org.remus.giteabot.gitea.model.WebhookPayload;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -37,13 +36,13 @@ import java.util.Map;
 public class BitbucketWebhookHandler {
 
     private final BotWebhookService botWebhookService;
-    private final GiteaClientFactory clientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final BotService botService;
 
-    public BitbucketWebhookHandler(BotWebhookService botWebhookService, GiteaClientFactory clientFactory,
+    public BitbucketWebhookHandler(BotWebhookService botWebhookService, RepositoryApiClientFactory repositoryApiClientFactory,
                                    BotService botService) {
         this.botWebhookService = botWebhookService;
-        this.clientFactory = clientFactory;
+        this.repositoryApiClientFactory = repositoryApiClientFactory;
         this.botService = botService;
     }
 
@@ -104,7 +103,7 @@ public class BitbucketWebhookHandler {
      */
     private BitbucketAccount resolveBotAccount(Bot bot) {
         try {
-            BitbucketApiClient client = (BitbucketApiClient) clientFactory.getApiClient(bot.getGitIntegration());
+            BitbucketApiClient client = (BitbucketApiClient) repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
             return client.getAuthenticatedAccount();
         } catch (RuntimeException e) {
             String error = "Could not resolve the Bitbucket account for the configured Atlassian account email/API token: "
@@ -217,6 +216,12 @@ public class BitbucketWebhookHandler {
         String uuid = (String) repo.get("uuid");
         if (uuid != null) {
             repository.setId((long) uuid.hashCode());
+        }
+
+        // The repository name can be a display label; full_name contains its API slug.
+        String fullName = (String) repo.get("full_name");
+        if (fullName != null && fullName.contains("/")) {
+            repository.setName(fullName.substring(fullName.indexOf('/') + 1));
         }
 
         String workspace = resolveWorkspaceSlug(repo);

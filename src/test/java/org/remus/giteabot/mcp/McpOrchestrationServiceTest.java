@@ -2,11 +2,14 @@ package org.remus.giteabot.mcp;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.EncryptionService;
+import org.remus.giteabot.config.ApplicationVersion;
 import org.remus.giteabot.secret.FakeSecretSource;
 import org.remus.giteabot.secret.KeyResolveException;
 import org.remus.giteabot.secret.SecretSourceRegistry;
 import org.remus.giteabot.secret.SecretTemplateParser;
 import org.remus.giteabot.systemsettings.McpConfiguration;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.boot.info.BuildProperties;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -33,7 +36,8 @@ class McpOrchestrationServiceTest {
     private final McpConfigurationParser configurationParser = new McpConfigurationParser(secretTemplateParser);
     private final McpServerDiscovery serverDiscovery = new McpServerDiscovery(configurationParser);
     private final McpOrchestrationService service =
-            new McpOrchestrationService(serverDiscovery, encryptionService);
+            new McpOrchestrationService(serverDiscovery, encryptionService,
+                    new ApplicationVersion(new StaticListableBeanFactory().getBeanProvider(BuildProperties.class)));
 
     @Test
     void discoverServers_decryptsPersistedConfiguration() {

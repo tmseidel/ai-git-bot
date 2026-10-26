@@ -44,6 +44,28 @@ class WorkflowConfigurationControllerMvcTest {
 
     @Test
     @WithMockUser(roles = "ADMIN")
+    void agenticReviewProgressDefaultsToUncheckedAndDescribesLifecycle() throws Exception {
+        MockMvc mvc = MockMvcBuilders.webAppContextSetup(wac).apply(springSecurity()).build();
+        Long cfgId = tx.execute(s -> {
+            WorkflowConfiguration cfg = new WorkflowConfiguration();
+            cfg.setName("Progress-" + System.nanoTime());
+            cfg.setCreatedAt(Instant.now());
+            cfg.setUpdatedAt(Instant.now());
+            return configurationRepository.save(cfg).getId();
+        });
+
+        String html = mvc.perform(get("/system-settings/workflow-configurations/{id}/workflows", cfgId)
+                        .param("lang", "zh_CN"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        var input = java.util.regex.Pattern.compile(
+                "<input[^>]*id=\"param-agentic-review-enableProgressComments\"[^>]*>").matcher(html);
+        assertTrue(input.find(), "The agentic-review option must render a progress checkbox");
+        org.junit.jupiter.api.Assertions.assertFalse(input.group().contains("checked"));
+        assertTrue(html.contains("审查或追问期间持续更新同一条进度评论"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
     void postFormWithParams_persistsAndOverwritesOnRepeat() throws Exception {
         MockMvc mvc = MockMvcBuilders.webAppContextSetup(wac)
                 .apply(springSecurity())

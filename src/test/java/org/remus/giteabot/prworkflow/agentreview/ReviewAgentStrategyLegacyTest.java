@@ -110,7 +110,7 @@ class ReviewAgentStrategyLegacyTest {
         server.expect(requestTo("https://provider.example/v1/chat/completions"))
                 .andExpect(jsonPath("$.tools").doesNotExist())
                 .andRespond(withSuccess(response.toString(), MediaType.APPLICATION_JSON));
-        AiClient client = new OpenAiClient(http.build(), "test-model", 32, false, OpenAiFlavor.STANDARD);
+        AiClient client = new OpenAiClient(http.build(), "test-model", 32, false, OpenAiFlavor.STANDARD, null);
         AiResponseParser parser = mock(AiResponseParser.class);
         ReviewAgentStrategy.FileFetcher fetcher = mock(ReviewAgentStrategy.FileFetcher.class);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("system", toolRouter,
@@ -166,6 +166,33 @@ class ReviewAgentStrategyLegacyTest {
         StepDecision.Continue cont = assertInstanceOf(StepDecision.Continue.class, decision);
         assertTrue(cont.nextUserMessage().contains("requested repository context"));
         assertTrue(cont.nextUserMessage().contains("tool output"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void reportsContextExplorationInBothToolModes(boolean nativeMode) {
+        when(toolRouter.execute(any(), any())).thenReturn(new ToolResult(true, 0, "tool output", ""));
+        var activities = new java.util.ArrayList<AgentRunContext.ProgressUpdate>();
+        var context = ctx();
+        context.setProgressConsumer(activities::add);
+
+        if (nativeMode) {
+            var turn = new ChatTurn("Inspecting the change",
+                    List.of(new ToolCall("call-1", "cat",
+                            AgentJackson.mapper().createObjectNode().put("path", "README.md"))),
+                    StopReason.TOOL_USE, 100, 10);
+            assertInstanceOf(StepDecision.ContinueWithToolResults.class, strategy().step(context, turn, 2));
+            assertEquals(List.of(
+                    new AgentRunContext.ProgressUpdate(2, "Inspecting repository: cat", 0),
+                    new AgentRunContext.ProgressUpdate(2, "Repository inspection completed", 1)), activities);
+        } else {
+            String request = "{\"requestTools\":[{\"tool\":\"cat\",\"args\":[\"README.md\"]}]}";
+            assertInstanceOf(StepDecision.Continue.class, strategy().stepLegacy(context, ChatTurn.text(request), 2));
+            assertEquals(List.of(
+                    new AgentRunContext.ProgressUpdate(2, "Gathering repository context", 0),
+                    new AgentRunContext.ProgressUpdate(2, "Repository context gathered", 1)), activities);
+        }
+        verify(toolRouter).execute(eq(AgentToolRouter.Mode.REVIEW), any());
     }
 
     @Test

@@ -1,7 +1,7 @@
 package org.remus.giteabot.issueworkflow;
 
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 
 import java.util.Map;
 

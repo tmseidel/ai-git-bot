@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 public class AgentReviewServiceFactory {
 
     private final AiClientFactory aiClientFactory;
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final PythonExecutionService pythonExecution;
     private final McpToolSelectionService mcpToolSelectionService;
     private final McpOrchestrationService mcpOrchestrationService;
@@ -42,7 +42,7 @@ public class AgentReviewServiceFactory {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
         McpToolCatalog mcpToolCatalog = mcpToolSelectionService.filterCatalogForPrompt(
                 bot.getMcpConfiguration(),
                 mcpOrchestrationService.discoverTools(bot.getMcpConfiguration()));
@@ -53,7 +53,7 @@ public class AgentReviewServiceFactory {
                 repoClient,
                 aiClient,
                 bot.getSystemPrompt().getReviewAgentSystemPrompt(),
-                bot.getUsername(),
+                bot.getGitIntegration().getUsername(),
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),

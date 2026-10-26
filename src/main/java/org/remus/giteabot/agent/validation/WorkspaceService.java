@@ -28,6 +28,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -60,19 +61,23 @@ public class WorkspaceService {
             PosixFilePermission.OWNER_READ,
             PosixFilePermission.OWNER_WRITE);
     private final Path workspaceBaseDir;
+    private final int cloneTimeoutSeconds;
     private final ConcurrentMap<Path, WorkspaceSetup> setupsByWorkspace = new ConcurrentHashMap<>();
 
-    /** Creates a service that places workspaces under the system temporary directory. */
-    public WorkspaceService() {
-        this(null);
-    }
-
-    /** Creates a service that places private workspace parents under the configured directory. */
+    /**
+     * Creates a service with a private workspace parent and the operator's clone
+     * budget. Both values come from the configuration; the placeholders carry the
+     * same defaults as {@code application.properties}, so a missing property needs
+     * no defensive fallback here.
+     */
     @Autowired
-    public WorkspaceService(@Value("${giteabot.workspaces.dir:#{null}}") String configuredDir) {
+    public WorkspaceService(@Value("${giteabot.workspaces.dir:#{null}}") String configuredDir,
+                            @Value("${giteabot.workspaces.clone-timeout-seconds:300}")
+                            int cloneTimeoutSeconds) {
         this.workspaceBaseDir = configuredDir == null || configuredDir.isBlank()
                 ? null
                 : Path.of(configuredDir).toAbsolutePath().normalize();
+        this.cloneTimeoutSeconds = cloneTimeoutSeconds;
     }
 
     /**
@@ -87,21 +92,17 @@ public class WorkspaceService {
      */
     public WorkspaceResult prepareWorkspace(RepositoryApiClient repositoryClient,
                                             String owner, String repo, String branch, Long prNumber) {
-        final String repositoryRemote;
-        final RepositoryCredentials credentials;
-        final boolean usesAuthorizationHeader;
+        final CheckoutConfig checkout;
         try {
-            repositoryRemote = repositoryClient.getRepositoryRemote(owner, repo);
-            credentials = repositoryClient.getCredentials();
-            usesAuthorizationHeader = repositoryClient.usesGitAuthorizationHeader();
-            if (repositoryRemote == null || repositoryRemote.isBlank() || credentials == null) {
-                throw new IllegalStateException("Repository client returned incomplete checkout configuration");
-            }
+            checkout = resolveCheckout(repositoryClient, owner, repo);
         } catch (RuntimeException e) {
             String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             log.error("Failed to resolve repository checkout for {}/{}: {}", owner, repo, message, e);
             return WorkspaceResult.failure("Failed to resolve repository checkout: " + message);
         }
+        final String repositoryRemote = checkout.remote();
+        final RepositoryCredentials credentials = checkout.credentials();
+        final boolean usesAuthorizationHeader = checkout.usesAuthorizationHeader();
 
         WorkspaceSetup setup = null;
         try {
@@ -110,7 +111,8 @@ public class WorkspaceService {
             log.info("Cloning repository to {} for workspace", workspaceDir);
 
             setup.setAuthentication(repositoryRemote, credentials, usesAuthorizationHeader);
-            CommandResult cloneResult = runRemoteCommand(setup, workspaceDir.getParent().toFile(), 60,
+            CommandResult cloneResult = runRemoteCommand(setup, workspaceDir.getParent().toFile(),
+                    cloneTimeoutSeconds,
                     "clone", "--depth", "1", "--branch", branch,
                     repositoryRemote, workspaceDir.getFileName().toString());
 
@@ -121,8 +123,9 @@ public class WorkspaceService {
 
             // Fork PR fallback: clone default branch → fetch PR head ref
             if (prNumber != null) {
-                log.info("Branch clone failed, falling back to PR head ref for PR #{}: {}",
-                        prNumber, cloneResult.output());
+                log.info("Branch '{}' is not in {}/{} (PR #{}), falling back to refs/pull/{}/head "
+                                + "in this repository: {}", branch, owner, repo, prNumber, prNumber,
+                        cloneResult.output());
                 // Tear down the failed attempt before starting the retry.
                 if (!cleanupWorkspace(setup)) {
                     return WorkspaceResult.failure("Failed to clean up the initial clone attempt");
@@ -132,7 +135,7 @@ public class WorkspaceService {
                 setup.setAuthentication(repositoryRemote, credentials, usesAuthorizationHeader);
 
                 CommandResult defaultCloneResult = runRemoteCommand(setup,
-                        workspaceDir.getParent().toFile(), 60,
+                        workspaceDir.getParent().toFile(), cloneTimeoutSeconds,
                         "clone", "--depth", "1", repositoryRemote, workspaceDir.getFileName().toString());
 
                 if (!defaultCloneResult.success()) {
@@ -140,13 +143,15 @@ public class WorkspaceService {
                             defaultCloneResult.output());
                     cleanupWorkspace(setup);
                     return WorkspaceResult.failure(
-                            "Failed to clone repository (branch: " + cloneResult.output()
-                                    + "; default branch: " + defaultCloneResult.output() + ")");
+                            "Failed to clone " + owner + "/" + repo + " (branch '" + branch + "': "
+                                    + cloneResult.output() + "; default branch: "
+                                    + defaultCloneResult.output() + ")");
                 }
 
                 registerWorkspace(setup);
 
-                CommandResult fetchResult = runRemoteCommand(setup, workspaceDir.toFile(), 60,
+                CommandResult fetchResult = runRemoteCommand(setup, workspaceDir.toFile(),
+                        cloneTimeoutSeconds,
                         "fetch", "origin", "refs/pull/" + prNumber + "/head");
 
                 if (!fetchResult.success()) {
@@ -154,29 +159,34 @@ public class WorkspaceService {
                             fetchResult.output());
                     cleanupWorkspace(setup);
                     return WorkspaceResult.failure(
-                            "Failed to fetch PR head ref for PR #" + prNumber + ": "
-                                    + fetchResult.output());
+                            "Failed to fetch refs/pull/" + prNumber + "/head from " + owner + "/"
+                                    + repo + ": " + fetchResult.output());
                 }
 
+                // Checking out a large tree can take as long as the clone that fetched it,
+                // so it shares the clone budget instead of a fixed 15 s.
                 CommandResult checkoutResult = runCommand(workspaceDir.toFile(),
-                        new String[]{"git", "checkout", "-B", branch, "FETCH_HEAD"}, 15);
+                        new String[]{"git", "checkout", "-B", branch, "FETCH_HEAD"},
+                        cloneTimeoutSeconds);
 
                 if (!checkoutResult.success()) {
                     log.error("Failed to checkout FETCH_HEAD for PR #{}: {}", prNumber,
                             checkoutResult.output());
                     cleanupWorkspace(setup);
                     return WorkspaceResult.failure(
-                            "Failed to checkout FETCH_HEAD for PR #" + prNumber + ": "
-                                    + checkoutResult.output());
+                            "Failed to checkout refs/pull/" + prNumber + "/head for PR #"
+                                    + prNumber + ": " + checkoutResult.output());
                 }
 
                 return WorkspaceResult.success(workspaceDir);
             }
 
             // No fallback — report the original clone error
-            log.error("Failed to clone repository: {}", cloneResult.output());
+            log.error("Failed to clone {}/{} branch '{}': {}", owner, repo, branch,
+                    cloneResult.output());
             cleanupWorkspace(setup);
-            return WorkspaceResult.failure("Failed to clone repository: " + cloneResult.output());
+            return WorkspaceResult.failure("Failed to clone " + owner + "/" + repo + " branch '"
+                    + branch + "': " + cloneResult.output());
 
         } catch (IOException e) {
             log.error("Failed to prepare workspace: {}", e.getMessage());
@@ -189,32 +199,76 @@ public class WorkspaceService {
     }
 
     /**
-     * Prepares a workspace that may be pushed back to an existing PR branch.
-     * Providers that require authoritative head resolution are cloned from the
-     * source repository and fail closed; other providers retain the legacy
-     * target-repository and PR-ref fallback behaviour.
+     * Prepares a workspace that holds the pull-request head commit.
+     *
+     * <p>Providers that resolve the authoritative head clone the <em>source</em>
+     * repository and branch, so a fork PR is checked out directly instead of
+     * paying a branch clone against the target repository that can never
+     * succeed — the contributor's branch does not live there. Providers without
+     * that resolution keep the target-repository behaviour of
+     * {@link #prepareWorkspace}, including its {@code refs/pull/<n>/head}
+     * fallback.</p>
+     *
+     * <p>{@code mode} decides how much of the fallback chain is acceptable when
+     * the source checkout does not work out: a {@link PullRequestWorkspaceMode#PUSH_BACK}
+     * workspace must be a checkout of the head branch itself, so every
+     * target-repository or PR-ref fallback fails closed; a
+     * {@link PullRequestWorkspaceMode#READ_ONLY} workspace accepts the target
+     * repository's PR ref, which carries the same commit while the PR is
+     * open.</p>
      */
-    public WorkspaceResult prepareWritablePullRequestWorkspace(RepositoryApiClient repositoryClient,
-                                                               String owner, String repo,
-                                                               String branch, Long prNumber) {
+    public WorkspaceResult preparePullRequestWorkspace(RepositoryApiClient repositoryClient,
+                                                       String owner, String repo,
+                                                       String branch, Long prNumber,
+                                                       PullRequestWorkspaceMode mode) {
+        Objects.requireNonNull(mode, "mode");
+        boolean mustPushBack = mode == PullRequestWorkspaceMode.PUSH_BACK;
         if (!repositoryClient.requiresAuthoritativePullRequestHead()) {
             return prepareWorkspace(repositoryClient, owner, repo, branch, prNumber);
         }
         final PullRequestHead head;
         try {
-            head = repositoryClient.getPullRequestHead(owner, repo, prNumber, branch);
-            if (head == null || head.owner() == null || head.owner().isBlank()
-                    || head.repository() == null || head.repository().isBlank()
-                    || head.branch() == null || head.branch().isBlank()) {
-                throw new IllegalStateException("Repository client returned an incomplete pull-request head");
-            }
+            head = resolvePullRequestHead(repositoryClient, owner, repo, branch, prNumber);
         } catch (RuntimeException e) {
             String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            log.error("Failed to resolve writable pull-request head for {}/{}#{}: {}",
-                    owner, repo, prNumber, message, e);
-            return WorkspaceResult.failure("Failed to resolve writable pull-request head: " + message);
+            if (mustPushBack) {
+                log.error("Failed to resolve pull-request head for {}/{}#{}: {}",
+                        owner, repo, prNumber, message, e);
+                return WorkspaceResult.failure("Failed to resolve pull-request head: " + message);
+            }
+            // A read-only review loses nothing by reviewing the target repository's
+            // PR ref: it carries the head commit even when the provider's head
+            // lookup is unavailable or reports a stale branch.
+            log.warn("Could not resolve the pull-request head of {}/{}#{} ({}); reviewing "
+                            + "refs/pull/{}/head in the target repository instead",
+                    owner, repo, prNumber, message, prNumber);
+            return prepareWorkspace(repositoryClient, owner, repo, branch, prNumber);
         }
-        return prepareWorkspace(repositoryClient, head.owner(), head.repository(), head.branch(), null);
+
+        boolean sameRepository = owner.equalsIgnoreCase(head.owner())
+                && repo.equalsIgnoreCase(head.repository());
+        // Only a read-only same-repository PR may fall back to its own
+        // refs/pull/<n>/head inside prepareWorkspace: for a fork head that ref
+        // belongs to the target repository, and a PUSH_BACK workspace may use
+        // neither.
+        WorkspaceResult result = prepareWorkspace(repositoryClient, head.owner(), head.repository(),
+                head.branch(), !mustPushBack && sameRepository ? prNumber : null);
+        if (result.success() || mustPushBack || sameRepository || prNumber == null) {
+            return result;
+        }
+
+        log.info("Could not check out head branch '{}' of {}/{} for PR #{}, falling back to "
+                        + "refs/pull/{}/head in {}/{}: {}", head.branch(), head.owner(),
+                head.repository(), prNumber, prNumber, owner, repo, result.error());
+        WorkspaceResult fallback = prepareWorkspace(repositoryClient, owner, repo, head.branch(),
+                prNumber);
+        if (fallback.success()) {
+            return fallback;
+        }
+        return WorkspaceResult.failure("Failed to prepare a workspace for PR #" + prNumber
+                + " (head " + head.owner() + "/" + head.repository() + " branch '" + head.branch()
+                + "': " + result.error() + "; " + owner + "/" + repo + " refs/pull/" + prNumber
+                + "/head: " + fallback.error() + ")");
     }
 
     /**
@@ -460,6 +514,43 @@ public class WorkspaceService {
     }
 
     // ---- internal helpers ------------------------------------------------
+
+    /**
+     * Resolves the credential-free remote, the credentials and the transport mode
+     * of one checkout. Runs before a workspace is allocated, so a provider failure
+     * leaves no directory behind.
+     */
+    private CheckoutConfig resolveCheckout(RepositoryApiClient repositoryClient,
+                                           String owner, String repo) {
+        String repositoryRemote = repositoryClient.getRepositoryRemote(owner, repo);
+        RepositoryCredentials credentials = repositoryClient.getCredentials();
+        boolean usesAuthorizationHeader = repositoryClient.usesGitAuthorizationHeader();
+        if (repositoryRemote == null || repositoryRemote.isBlank() || credentials == null) {
+            throw new IllegalStateException("Repository client returned incomplete checkout configuration");
+        }
+        return new CheckoutConfig(repositoryRemote, credentials, usesAuthorizationHeader);
+    }
+
+    /** One checkout's credential-free remote, credentials and transport mode. */
+    private record CheckoutConfig(String remote, RepositoryCredentials credentials,
+                                  boolean usesAuthorizationHeader) {
+    }
+
+    /**
+     * Resolves the authoritative head of a pull request, rejecting any head whose
+     * coordinates are incomplete — the callers clone from those coordinates.
+     */
+    private PullRequestHead resolvePullRequestHead(RepositoryApiClient repositoryClient,
+                                                   String owner, String repo,
+                                                   String branch, Long prNumber) {
+        PullRequestHead head = repositoryClient.getPullRequestHead(owner, repo, prNumber, branch);
+        if (head == null || head.owner() == null || head.owner().isBlank()
+                || head.repository() == null || head.repository().isBlank()
+                || head.branch() == null || head.branch().isBlank()) {
+            throw new IllegalStateException("Repository client returned an incomplete pull-request head");
+        }
+        return head;
+    }
 
     /**
      * Writes a git credential-store file <em>outside</em> the workspace in its
@@ -760,6 +851,21 @@ public class WorkspaceService {
                 || setup.sshKnownHostsFile() != null;
     }
 
+    /**
+     * Returns the git subcommand of a command line that may carry {@code -c}
+     * {@code key=value} pairs in front of it, so a timeout names the operation
+     * that ran out of budget instead of just its duration.
+     */
+    private static String gitSubcommand(String[] command) {
+        for (int i = 1; i < command.length; i++) {
+            if (!"-c".equals(command[i])) {
+                return command[i];
+            }
+            i++; // skip the configuration value that follows -c
+        }
+        return command[0];
+    }
+
     private Path workspaceKey(Path workspaceDir) {
         return workspaceDir.toAbsolutePath().normalize();
     }
@@ -810,8 +916,8 @@ public class WorkspaceService {
             ProcessSupport.CommandResult result = ProcessSupport.run(
                     pb, timeoutSeconds, TimeUnit.SECONDS, 1024 * 1024);
             if (!result.finished()) {
-                return new CommandResult(false,
-                        "Command timed out after " + timeoutSeconds + " seconds");
+                return new CommandResult(false, "git " + gitSubcommand(command)
+                        + " timed out after " + timeoutSeconds + " seconds");
             }
 
             return new CommandResult(result.exitCode() == 0, result.output());

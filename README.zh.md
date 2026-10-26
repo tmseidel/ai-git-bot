@@ -35,7 +35,7 @@
 | **OpenAI**（+ OpenAI 兼容 API） | **GitHub** / **GitHub Enterprise** |
 | **Google AI / Gemini** | **GitLab**（gitlab.com 与自管理） |
 | **Ollama**（本地 LLM） | **Bitbucket Cloud** |
-| **llama.cpp**（本地 GGUF 模型） | |
+| **llama.cpp**（本地 GGUF 模型） | **Azure DevOps**（Services 与 Server） |
 
 与大多数 AI 编码工具不同，AI-Git-Bot 不绑定于特定的 Git 平台或 AI 提供商。
 
@@ -147,6 +147,7 @@ AI-Git-Bot 存在于你的开发者已经工作的地方：
 - Gitea
 - GitLab
 - Bitbucket Cloud
+- Azure DevOps
 
 1. 给它分配一个审查。
 2. 给它分配一个 issue。
@@ -510,6 +511,7 @@ docker compose up --build -d
 
 * GitLab
 * Bitbucket Cloud
+* Azure DevOps
 
 ### 实验性工作流
 
@@ -540,7 +542,7 @@ Bug 报告始终欢迎。
 * ⭐ 超过 100 个 GitHub stars
 * 🚀 超过 15 个版本发布
 * 🐳 Docker 镜像可用
-* 🌍 用户遍布 GitHub、Gitea、GitLab 和 Bitbucket
+* 🌍 用户遍布 GitHub、Gitea、GitLab、Bitbucket 和 Azure DevOps
 
 ## 开始
 

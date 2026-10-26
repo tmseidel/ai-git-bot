@@ -187,6 +187,7 @@ src/main/java/org/remus/giteabot/
 ├── github/         # GitHub webhook translation + API client
 ├── gitlab/         # GitLab webhook translation + API client
 ├── bitbucket/      # Bitbucket webhook translation + API client
+├── azuredevops/    # Azure DevOps webhook translation + API client
 ├── session/        # Review session persistence
 ├── systemsettings/ # Reusable system prompt entries and settings UI
 └── config/         # Spring configuration and properties

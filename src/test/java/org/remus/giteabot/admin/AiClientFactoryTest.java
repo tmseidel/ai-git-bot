@@ -50,7 +50,7 @@ class AiClientFactoryTest {
         // Create real provider registry with all providers
         AiProviderRegistry providerRegistry = new AiProviderRegistry(List.of(
                 new AnthropicProviderMetadata(builderProvider(), new AnthropicExtendedThinkingProperties()),
-                new OpenAiProviderMetadata(builderProvider()),
+                new OpenAiProviderMetadata(builderProvider(), new org.remus.giteabot.config.OpenAiProperties()),
                 new GoogleAiProviderMetadata(builderProvider()),
                 new OllamaProviderMetadata(builderProvider()),
                 new LlamaCppProviderMetadata(builderProvider())

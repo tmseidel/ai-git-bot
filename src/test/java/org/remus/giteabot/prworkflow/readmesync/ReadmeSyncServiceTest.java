@@ -4,18 +4,20 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -81,7 +83,7 @@ class ReadmeSyncServiceTest {
 
     @Test
     void missingHeadRef_andApiCannotResolve_skipsWithoutCommitting() {
-        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Map.of());
+        when(repoClient.getPullRequestDetails("acme", "my-repo", 42L)).thenReturn(Optional.empty());
 
         ReadmeSyncService.Result result = service.run(
                 request(payloadWithoutHeadRef(), SuiteLifecycleMode.COMMIT_TO_PR));
@@ -90,8 +92,9 @@ class ReadmeSyncServiceTest {
         // The critical guarantee: no clone and no push to any (default) branch.
         verify(workspaceService, never()).prepareWorkspace(
                 any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
-        verify(workspaceService, never()).prepareWritablePullRequestWorkspace(
-                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
+        verify(workspaceService, never()).preparePullRequestWorkspace(
+                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK));
         verify(workspaceService, never()).commitAndPush(
                 any(), anyString(), anyString(), anyString(), anyString(), anyBoolean());
         // And it must never substitute the default branch.
@@ -101,18 +104,20 @@ class ReadmeSyncServiceTest {
     @Test
     void missingHeadRef_butApiResolvesIt_clonesThatBranch() {
         when(repoClient.getPullRequestDetails("acme", "my-repo", 42L))
-                .thenReturn(Map.of("head", Map.of("ref", "feature/login")));
+                .thenReturn(Optional.of(new PullRequestDetails(null, null, null, "feature/login", null, null, null)));
         // Fail the workspace prep so the run stops right after resolution — we only
         // assert which branch it tried to clone.
-        when(workspaceService.prepareWritablePullRequestWorkspace(
-                eq(repoClient), anyString(), anyString(), anyString(), anyLong()))
+        when(workspaceService.preparePullRequestWorkspace(
+                eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.failure("stop here"));
 
         service.run(request(payloadWithoutHeadRef(), SuiteLifecycleMode.COMMIT_TO_PR));
 
         ArgumentCaptor<String> branch = ArgumentCaptor.forClass(String.class);
-        verify(workspaceService).prepareWritablePullRequestWorkspace(
-                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L));
+        verify(workspaceService).preparePullRequestWorkspace(
+                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L),
+                eq(PullRequestWorkspaceMode.PUSH_BACK));
         assertThat(branch.getValue()).isEqualTo("feature/login");
         verify(repoClient, never()).getDefaultBranch(anyString(), anyString());
     }
@@ -123,15 +128,17 @@ class ReadmeSyncServiceTest {
         WebhookPayload.Head head = new WebhookPayload.Head();
         head.setRef("feature/from-payload");
         payload.getPullRequest().setHead(head);
-        when(workspaceService.prepareWritablePullRequestWorkspace(
-                eq(repoClient), anyString(), anyString(), anyString(), anyLong()))
+        when(workspaceService.preparePullRequestWorkspace(
+                eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.failure("stop here"));
 
         service.run(request(payload, SuiteLifecycleMode.COMMIT_TO_PR));
 
         ArgumentCaptor<String> branch = ArgumentCaptor.forClass(String.class);
-        verify(workspaceService).prepareWritablePullRequestWorkspace(
-                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L));
+        verify(workspaceService).preparePullRequestWorkspace(
+                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L),
+                eq(PullRequestWorkspaceMode.PUSH_BACK));
         assertThat(branch.getValue()).isEqualTo("feature/from-payload");
         verify(repoClient, never()).getPullRequestDetails(anyString(), anyString(), anyLong());
     }

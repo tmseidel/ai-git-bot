@@ -5,7 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -51,24 +52,25 @@ class SuitePromotionServiceTest {
     void setUp(@TempDir Path tmp) throws IOException {
         workspace = Files.createDirectories(tmp.resolve("ws"));
         workspaceService = mock(WorkspaceService.class);
-        GiteaClientFactory giteaClientFactory = mock(GiteaClientFactory.class);
+        RepositoryApiClientFactory repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
         PrWorkflowRunRepository runRepository = mock(PrWorkflowRunRepository.class);
         repoClient = mock(RepositoryApiClient.class);
 
-        when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
         when(repoClient.getDefaultBranch(anyString(), anyString())).thenReturn("main");
         when(workspaceService.prepareWorkspace(any(RepositoryApiClient.class),
                 anyString(), anyString(), anyString(), any()))
                 .thenReturn(WorkspaceResult.success(workspace));
-        when(workspaceService.prepareWritablePullRequestWorkspace(any(RepositoryApiClient.class),
-                anyString(), anyString(), anyString(), any()))
+        when(workspaceService.preparePullRequestWorkspace(any(RepositoryApiClient.class),
+                anyString(), anyString(), anyString(), any(),
+                eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(),
                 anyString(), anyString(), anyBoolean()))
                 .thenReturn(true);
         lenient().when(runRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service = new SuitePromotionService(workspaceService, giteaClientFactory, runRepository);
+        service = new SuitePromotionService(workspaceService, repositoryApiClientFactory, runRepository);
     }
 
     @Test
@@ -167,8 +169,9 @@ class SuitePromotionServiceTest {
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.COMMITTED);
         assertThat(out.branch()).isEqualTo("feature/x");
         assertThat(workspace.resolve("tests/e2e/pr-3/smoke.spec.ts")).exists();
-        verify(workspaceService).prepareWritablePullRequestWorkspace(
-                repoClient, "acme", "web", "feature/x", 3L);
+        verify(workspaceService).preparePullRequestWorkspace(
+                repoClient, "acme", "web", "feature/x", 3L,
+                PullRequestWorkspaceMode.PUSH_BACK);
         verify(workspaceService).commitAndPush(eq(workspace), eq("feature/x"),
                 anyString(), anyString(), anyString(), eq(false));
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());

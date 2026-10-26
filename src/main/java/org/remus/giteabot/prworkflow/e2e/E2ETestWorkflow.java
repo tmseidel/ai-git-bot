@@ -2,8 +2,9 @@ package org.remus.giteabot.prworkflow.e2e;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflow;
 import org.remus.giteabot.prworkflow.PrWorkflowCategory;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
@@ -81,7 +82,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     private final PrTestWorkspaceManager workspaceManager;
     private final TestSuiteRunnerRegistry runnerRegistry;
     private final WorkflowSelectionService selectionService;
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final SuitePromotionService suitePromotionService;
     private final PrWorkflowRunRepository runRepository;
 
@@ -97,7 +98,7 @@ public class E2ETestWorkflow implements PrWorkflow {
                            PrTestWorkspaceManager workspaceManager,
                            TestSuiteRunnerRegistry runnerRegistry,
                            @Lazy WorkflowSelectionService selectionService,
-                           GiteaClientFactory giteaClientFactory,
+                           RepositoryApiClientFactory repositoryApiClientFactory,
                            SuitePromotionService suitePromotionService,
                            PrWorkflowRunRepository runRepository) {
         this.deploymentOrchestrator = deploymentOrchestrator;
@@ -105,7 +106,7 @@ public class E2ETestWorkflow implements PrWorkflow {
         this.workspaceManager = workspaceManager;
         this.runnerRegistry = runnerRegistry;
         this.selectionService = selectionService;
-        this.giteaClientFactory = giteaClientFactory;
+        this.repositoryApiClientFactory = repositoryApiClientFactory;
         this.suitePromotionService = suitePromotionService;
         this.runRepository = runRepository;
     }
@@ -190,7 +191,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     public WorkflowResult run(PrWorkflowContext context) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
-        long prNumber = resolvePrNumber(payload);
+        long prNumber = PrPayloadHydrator.resolvePrNumberOrZero(payload);
 
         Map<String, Object> params = bot.getWorkflowConfiguration() == null
                 ? Map.of()
@@ -449,7 +450,7 @@ public class E2ETestWorkflow implements PrWorkflow {
             return;
         }
         try {
-            RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
             String owner = payload.getRepository().getOwner() == null
                     ? null : payload.getRepository().getOwner().getLogin();
             String repoName = payload.getRepository().getName();
@@ -465,7 +466,7 @@ public class E2ETestWorkflow implements PrWorkflow {
             return;
         }
         try {
-            RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
             String owner = payload.getRepository().getOwner() == null
                     ? null : payload.getRepository().getOwner().getLogin();
             String repoName = payload.getRepository().getName();
@@ -538,25 +539,6 @@ public class E2ETestWorkflow implements PrWorkflow {
             return null;
         }
         return payload.getPullRequest().getHead().getSha();
-    }
-
-    /**
-     * Resolves the pull-request number using the same fallback chain as
-     * {@code PrWorkflowOrchestrator.resolvePrNumber}: PR object first,
-     * then issue (for GitHub {@code issue_comment} events that lack the
-     * pull-request block), then the top-level {@code number} field.
-     */
-    private long resolvePrNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
-            return payload.getPullRequest().getNumber();
-        }
-        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
-            return payload.getIssue().getNumber();
-        }
-        if (payload.getNumber() != null) {
-            return payload.getNumber();
-        }
-        return 0L;
     }
 }
 

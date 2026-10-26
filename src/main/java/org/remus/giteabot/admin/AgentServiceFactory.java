@@ -37,7 +37,7 @@ import org.springframework.stereotype.Component;
 public class AgentServiceFactory {
 
     private final AiClientFactory aiClientFactory;
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final PromptService promptService;
     private final AgentConfigProperties agentConfig;
     private final AgentSessionService agentSessionService;
@@ -54,14 +54,14 @@ public class AgentServiceFactory {
      */
     public IssueImplementationService createIssueImplementationService(Bot bot) {
         AiClient aiClient = getAiClient(bot);
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
         McpToolCatalog mcpToolCatalog = discoverMcpToolCatalog(bot);
         requireSystemPrompt(bot);
         IssueImplementationContext context = new IssueImplementationContext(
                 repoClient,
                 aiClient,
                 bot.getSystemPrompt().getIssueAgentSystemPrompt(),
-                bot.getUsername(),
+                bot.getGitIntegration().getUsername(),
                 mcpOrchestrationService,
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
@@ -80,12 +80,12 @@ public class AgentServiceFactory {
      */
     public WriterAgentService createWriterAgentService(Bot bot) {
         AiClient aiClient = getAiClient(bot);
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
         McpToolCatalog mcpToolCatalog = discoverMcpToolCatalog(bot);
         requireSystemPrompt(bot);
         return new WriterAgentService(repoClient, aiClient, promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService,
-                bot.getSystemPrompt().getWriterAgentSystemPrompt(), bot.getUsername(),
+                bot.getSystemPrompt().getWriterAgentSystemPrompt(), bot.getGitIntegration().getUsername(),
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
                 getContextWindowTokens(bot), pythonExecution);

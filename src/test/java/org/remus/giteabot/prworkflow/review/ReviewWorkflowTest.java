@@ -6,9 +6,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.config.ReviewChunkingProperties;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowCategory;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
@@ -44,7 +44,7 @@ import static org.mockito.Mockito.when;
 class ReviewWorkflowTest {
 
     @Mock private CodeReviewServiceFactory factory;
-    @Mock private GiteaClientFactory giteaClientFactory;
+    @Mock private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock private WorkflowSelectionService selectionService;
     @Mock private ReviewChunkingProperties chunkingProperties;
     @Mock private RepositoryApiClient repoClient;
@@ -58,8 +58,8 @@ class ReviewWorkflowTest {
         lenient().when(chunkingProperties.getMaxDiffChunks()).thenReturn(8);
         lenient().when(chunkingProperties.getRetryTruncatedChunkChars()).thenReturn(60_000);
 
-        workflow = new ReviewWorkflow(factory, giteaClientFactory, selectionService, chunkingProperties);
-        lenient().when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
+        workflow = new ReviewWorkflow(factory, repositoryApiClientFactory, selectionService, chunkingProperties);
+        lenient().when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
         lenient().when(factory.create(any(Bot.class), eq(repoClient),
                 anyInt(), anyInt(), anyInt(), any())).thenReturn(codeReviewService);
         lenient().when(selectionService.resolveParams(any(), any())).thenReturn(Map.of());
@@ -143,8 +143,8 @@ class ReviewWorkflowTest {
         Bot bot = new Bot();
         bot.setId(1L);
         bot.setName("ai_bot");
-        bot.setUsername("ai_bot");
         org.remus.giteabot.admin.GitIntegration git = new org.remus.giteabot.admin.GitIntegration();
+        git.setUsername("ai_bot");
         git.setPostReviewAction(action);
         bot.setGitIntegration(git);
         return bot;

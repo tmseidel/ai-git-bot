@@ -45,7 +45,7 @@ class ToolExecutionServiceExecuteScriptTest {
     }
 
     private static ToolExecutionService newService(AgentConfigProperties config) {
-        return new ToolExecutionService(config, new ToolCatalog(config), new WorkspaceService());
+        return new ToolExecutionService(config, new ToolCatalog(config), new WorkspaceService(null, 60));
     }
 
     private void git(String... arguments) throws IOException {

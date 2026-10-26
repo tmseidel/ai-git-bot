@@ -7,8 +7,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.GiteaClientFactory;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -21,7 +21,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class IssueCommentAcknowledgementTest {
 
-    @Mock private GiteaClientFactory giteaClientFactory;
+    @Mock private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock private RepositoryApiClient repositoryApiClient;
 
     private IssueCommentAcknowledgement acknowledgement;
@@ -29,7 +29,7 @@ class IssueCommentAcknowledgementTest {
 
     @BeforeEach
     void setUp() {
-        acknowledgement = new IssueCommentAcknowledgement(giteaClientFactory);
+        acknowledgement = new IssueCommentAcknowledgement(repositoryApiClientFactory);
         bot = new Bot();
         bot.setName("test-bot");
         bot.setGitIntegration(new GitIntegration());
@@ -37,7 +37,7 @@ class IssueCommentAcknowledgementTest {
 
     @Test
     void acknowledge_addsEyesReactionToTheTriggeringComment() {
-        when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
 
         acknowledgement.acknowledge(bot, commentPayload());
 
@@ -46,7 +46,7 @@ class IssueCommentAcknowledgementTest {
 
     @Test
     void acknowledge_reactionFailure_isSwallowed() {
-        when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
         doThrow(new RuntimeException("reaction api down"))
                 .when(repositoryApiClient).addReaction(any(), any(), any(), any());
 
@@ -60,7 +60,7 @@ class IssueCommentAcknowledgementTest {
 
         acknowledgement.acknowledge(bot, payload);
 
-        verifyNoInteractions(giteaClientFactory);
+        verifyNoInteractions(repositoryApiClientFactory);
     }
 
     private static WebhookPayload commentPayload() {

@@ -7,7 +7,7 @@ AI-Git-Bot has two issue-driven agents for administrators to enable on bots:
 | **Coding bot** | Issues that are ready to implement | Assign the bot to an issue | Feature branch, commit, and pull request |
 | **Writer bot** | Vague or incomplete issues | Assign the writer bot to an issue | Clarifying questions or a new improved issue |
 
-Issue agents require issue webhooks and assignment events. They are supported for **Gitea, GitHub, and GitLab**. Bitbucket Cloud is PR-review only.
+Issue agents require issue webhooks and assignment events. They are supported for **Gitea, GitHub, and GitLab**. Bitbucket Cloud and Azure DevOps are PR-review only.
 
 ## Choosing the right agent
 
@@ -187,6 +187,30 @@ For **AI Integrations**, **Enable native tool calling** is on by default and rec
 ## Model flavors
 
 An **AI Integration** can carry a **model flavor** that tweaks the provider request without changing the model. The field is only shown when the selected provider offers flavors; today that is the OpenAI integration, which offers **Standard** (no extra request fields) and **No reasoning effort** (sends `reasoning_effort: "none"`). The second flavor exists for reasoning models such as `gpt-5.6-sol` served through a gateway that injects a default `reasoning_effort`: on `/v1/chat/completions` such models refuse native function tools unless `reasoning_effort` is explicitly `none`. Keep **Standard** unless the provider reports exactly that `400` error. Unknown or blank flavors degrade to **Standard** and never break a workflow.
+
+Flavors stay a property of the *request shape*, identical for every model of the provider. They deliberately do not encode model-specific reasoning vocabularies — see below.
+
+## chat_template_kwargs
+
+`chat_template_kwargs` is an extension of OpenAI-compatible serving frameworks (vLLM hands the object to the model's Jinja chat template; llama.cpp's server and gateways have equivalents). It is not part of the OpenAI API and not a property of the bot's model abstraction, so it is configured as a **provider-scoped property**, not as an entity column, an admin-form field or a flavor:
+
+    openai.chat-template-kwargs='{"enable_thinking":true,"reasoning_effort":"low"}'
+    # env: OPENAI_CHAT_TEMPLATE_KWARGS
+
+`OpenAiProperties` (`config/`) parses it once at startup and fails the start on malformed JSON; `OpenAiProviderMetadata#createClient` hands the parsed map to `OpenAiClient`, which writes it into every request body. Blank means "send nothing", so the server's own `--default-chat-template-kwargs` apply.
+
+The value is opaque on purpose, because the vocabulary belongs to the served model's template and differs per family — a JSON object keeps all of these expressible without touching this codebase:
+
+| Template | Value type | Example |
+|---|---|---|
+| Qwen-style | string effort | `{"enable_thinking": true, "reasoning_effort": "low"}` |
+| numeric-effort templates | number | `{"reasoning_effort": 2}` |
+| boolean-only templates | boolean | `{"enable_thinking": false}` |
+| nested switches | object | `{"thinking": {"budget": 1024}}` |
+
+JSON types survive end to end (a template expecting `2` receives a number, not `"2"`). A wrong *value* can only be judged by the template: vLLM answers `400 Unexpected reasoning effort ...` and names the accepted set (Qwen templates accept `xhigh`, `medium`, `low`). The request-side override wins over the server default because vLLM merges `--default-chat-template-kwargs` underneath the request's object.
+
+Because the setting is global to the provider, one endpoint can keep serving a full-effort code agent for interactive clients while this bot's reviews run at the level configured here.
 
 ## Prompt caching
 

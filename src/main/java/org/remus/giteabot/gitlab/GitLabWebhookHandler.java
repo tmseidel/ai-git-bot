@@ -3,7 +3,7 @@ package org.remus.giteabot.gitlab;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
@@ -81,7 +81,7 @@ public class GitLabWebhookHandler {
 
         // Ignore events from the bot itself, except GitLab reviewer re-request events.
         if (botUserEvent && !botReviewerReRequestEvent) {
-            log.debug("Ignoring GitLab event from bot's own user '{}'", bot.getUsername());
+            log.debug("Ignoring GitLab event from bot's own user '{}'", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -240,7 +240,7 @@ public class GitLabWebhookHandler {
 
             if (botWebhookService.isBotUser(bot, webhookPayload)) {
                 log.debug("Ignoring GitLab issue {} event from bot's own user '{}'",
-                        gitlabAction, bot.getUsername());
+                        gitlabAction, bot.getGitIntegration().getUsername());
                 return ResponseEntity.ok("ignored");
             }
 
@@ -269,7 +269,7 @@ public class GitLabWebhookHandler {
                 ? (List<Map<String, Object>>) assigneeChanges.get("previous") : null;
 
         if (!isBotNewlyAssigned(bot, currentAssignees, previousAssignees)) {
-            log.debug("Bot '{}' was not newly assigned to the issue, ignoring", bot.getUsername());
+            log.debug("Bot '{}' was not newly assigned to the issue, ignoring", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -278,7 +278,7 @@ public class GitLabWebhookHandler {
 
         // Ignore events from the bot itself
         if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            log.debug("Ignoring GitLab issue event from bot's own user '{}'", bot.getUsername());
+            log.debug("Ignoring GitLab issue event from bot's own user '{}'", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -291,13 +291,13 @@ public class GitLabWebhookHandler {
      */
     private boolean isBotNewlyAssigned(Bot bot, List<Map<String, Object>> currentAssignees,
                                         List<Map<String, Object>> previousAssignees) {
-        if (bot.getUsername() == null || currentAssignees == null) {
+        if (currentAssignees == null) {
             return false;
         }
         boolean inCurrent = currentAssignees.stream()
-                .anyMatch(a -> bot.getUsername().equalsIgnoreCase((String) a.get("username")));
+                .anyMatch(a -> bot.getGitIntegration().getUsername().equalsIgnoreCase((String) a.get("username")));
         boolean inPrevious = previousAssignees != null && previousAssignees.stream()
-                .anyMatch(a -> bot.getUsername().equalsIgnoreCase((String) a.get("username")));
+                .anyMatch(a -> bot.getGitIntegration().getUsername().equalsIgnoreCase((String) a.get("username")));
         return inCurrent && !inPrevious;
     }
 
@@ -463,6 +463,16 @@ public class GitLabWebhookHandler {
                 pr.setTitle((String) mr.get("title"));
                 pr.setBody((String) mr.get("description"));
                 pr.setUser(extractGitLabAuthor(mr, user));
+                WebhookPayload.Head head = new WebhookPayload.Head();
+                head.setRef((String) mr.get("source_branch"));
+                Map<String, Object> lastCommit = (Map<String, Object>) mr.get("last_commit");
+                if (lastCommit != null) {
+                    head.setSha((String) lastCommit.get("id"));
+                }
+                pr.setHead(head);
+                WebhookPayload.Head base = new WebhookPayload.Head();
+                base.setRef((String) mr.get("target_branch"));
+                pr.setBase(base);
                 payload.setPullRequest(pr);
             }
         } else if ("Issue".equals(noteableType)) {
@@ -488,19 +498,22 @@ public class GitLabWebhookHandler {
         String pathWithNamespace = (String) project.get("path_with_namespace");
         repo.setFullName(pathWithNamespace);
 
-        // Extract owner from the namespace
+        // Namespace and project names can be display labels; prefer the canonical path.
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         if (pathWithNamespace != null && pathWithNamespace.contains("/")) {
-            owner.setLogin(pathWithNamespace.substring(0, pathWithNamespace.lastIndexOf('/')));
-        }
-        // GitLab sends namespace as a String (e.g. Issue Hook) or as an object with "path" (e.g. MR Hook)
-        Object namespace = project.get("namespace");
-        if (namespace instanceof String ns) {
-            owner.setLogin(ns);
-        } else if (namespace instanceof Map<?, ?> nsMap) {
-            String path = (String) nsMap.get("path");
-            if (path != null) {
-                owner.setLogin(path);
+            int separator = pathWithNamespace.lastIndexOf('/');
+            owner.setLogin(pathWithNamespace.substring(0, separator));
+            repo.setName(pathWithNamespace.substring(separator + 1));
+        } else {
+            // Retain existing namespace payload support when the canonical path is absent.
+            Object namespace = project.get("namespace");
+            if (namespace instanceof String ns) {
+                owner.setLogin(ns);
+            } else if (namespace instanceof Map<?, ?> nsMap) {
+                String path = (String) nsMap.get("path");
+                if (path != null) {
+                    owner.setLogin(path);
+                }
             }
         }
         repo.setOwner(owner);
@@ -526,9 +539,6 @@ public class GitLabWebhookHandler {
 
     @SuppressWarnings("unchecked")
     private boolean hasBotReviewer(Bot bot, Map<String, Object> payload, Map<String, Object> changes) {
-        if (bot.getUsername() == null) {
-            return false;
-        }
         List<Map<String, Object>> currentReviewers = (List<Map<String, Object>>) payload.get("reviewers");
         if (changes != null) {
             if (!(changes.get("reviewers") instanceof Map<?, ?> reviewersChange)) {
@@ -538,10 +548,10 @@ public class GitLabWebhookHandler {
                     (List<Map<String, Object>>) reviewersChange.get("previous");
             currentReviewers = (List<Map<String, Object>>) reviewersChange.get("current");
             // Trigger review only if the bot was newly added (present in current but not in previous).
-            return containsGitLabUser(currentReviewers, bot.getUsername())
-                    && !containsGitLabUser(previousReviewers, bot.getUsername());
+            return containsGitLabUser(currentReviewers, bot.getGitIntegration().getUsername())
+                    && !containsGitLabUser(previousReviewers, bot.getGitIntegration().getUsername());
         }
-        return containsGitLabUser(currentReviewers, bot.getUsername());
+        return containsGitLabUser(currentReviewers, bot.getGitIntegration().getUsername());
     }
 
     private boolean isBotReviewerReRequestEvent(Bot bot, Map<String, Object> payload, String gitlabAction) {

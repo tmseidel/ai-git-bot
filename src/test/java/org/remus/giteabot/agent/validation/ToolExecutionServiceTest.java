@@ -24,7 +24,7 @@ class ToolExecutionServiceTest {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
                 new org.remus.giteabot.agent.tools.ToolCatalog(config),
-                new WorkspaceService());
+                new WorkspaceService(null, 60));
     }
 
     @Test

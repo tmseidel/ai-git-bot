@@ -17,6 +17,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * AI client implementation for OpenAI-compatible APIs.
@@ -32,14 +33,23 @@ public class OpenAiClient extends AbstractAiClient {
     private final RestClient restClient;
     private final boolean nativeToolsEnabled;
     private final OpenAiFlavor flavor;
+    /**
+     * Free-form switches sent as {@code chat_template_kwargs}; {@code null}
+     * when {@code openai.chat-template-kwargs} is unset, so the server's own
+     * defaults apply. The keys and value types are whatever the served
+     * model's chat template expects — the bot never interprets them.
+     */
+    private final Map<String, Object> chatTemplateKwargs;
     private final ObjectMapper jackson = AgentJackson.mapper();
 
     public OpenAiClient(RestClient restClient, String model, int maxTokens,
-                        boolean nativeToolsEnabled, OpenAiFlavor flavor) {
+                        boolean nativeToolsEnabled, OpenAiFlavor flavor,
+                        Map<String, Object> chatTemplateKwargs) {
         super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
         this.flavor = flavor == null ? OpenAiFlavor.STANDARD : flavor;
+        this.chatTemplateKwargs = chatTemplateKwargs;
     }
 
     @Override
@@ -93,12 +103,14 @@ public class OpenAiClient extends AbstractAiClient {
                 .model(effectiveModel)
                 .maxTokens(effectiveMaxTokens)
                 .reasoningEffort(flavor.reasoningEffort())
+                .chatTemplateKwargs(chatTemplateKwargs)
                 .messages(messages)
                 .tools(useNativeTools ? toolPayloads : null)
                 .build();
 
-        log.info("OpenAI chat turn request: model={}, flavor={}, tools={}, history={}",
-                effectiveModel, flavor.getId(), toolPayloads.size(), messages.size());
+        log.info("OpenAI chat turn request: model={}, flavor={}, chat_template_kwargs={}, tools={}, history={}",
+                effectiveModel, flavor.getId(), chatTemplateKwargs,
+                toolPayloads.size(), messages.size());
 
         OpenAiResponse response = executeRequest(request);
         return interpret(request, response);
@@ -247,6 +259,7 @@ public class OpenAiClient extends AbstractAiClient {
                 .model(model)
                 .maxTokens(maxTokens)
                 .reasoningEffort(flavor.reasoningEffort())
+                .chatTemplateKwargs(chatTemplateKwargs)
                 .messages(messages)
                 .tools(tools)
                 .build();

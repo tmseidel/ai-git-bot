@@ -303,24 +303,14 @@ class OpenRouterConfigurationTest {
     private static final int OPENROUTER_MIGRATION_VERSION = 56;
 
     /** Highest migration version available on this checkout below the OpenRouter migration. */
-    private static String baselineBeforeOpenRouter() throws Exception {
-        try (var files = java.nio.file.Files.list(java.nio.file.Path.of("src/main/resources/db/migration/h2"))) {
-            return files.map(path -> path.getFileName().toString())
-                    .map(name -> name.replaceFirst("^V(\\d+)__.*", "$1"))
-                    .map(Integer::parseInt)
-                    .filter(version -> version < OPENROUTER_MIGRATION_VERSION)
-                    .max(Integer::compareTo)
-                    .orElseThrow()
-                    .toString();
-        }
-    }
+    private static final int BEFORE_OPENROUTER_MIGRATION_VERSION = 55;
 
     @Test
     void migrationAddsDefaultsWithoutChangingExistingProviderCredentials() throws Exception {
         String url = "jdbc:h2:mem:openrouter-upgrade;DB_CLOSE_DELAY=-1";
         var flyway = Flyway.configure().dataSource(url, "sa", "")
                 .locations("classpath:db/migration/h2");
-        flyway.target(baselineBeforeOpenRouter()).load().migrate();
+        flyway.target(BEFORE_OPENROUTER_MIGRATION_VERSION+"").load().migrate();
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement()) {
             statement.execute("""
@@ -349,7 +339,7 @@ class OpenRouterConfigurationTest {
         String url = "jdbc:h2:mem:openrouter-partial-" + existingColumns + ";DB_CLOSE_DELAY=-1";
         var flyway = Flyway.configure().dataSource(url, "sa", "")
                 .locations("classpath:db/migration/h2");
-        flyway.target(baselineBeforeOpenRouter()).load().migrate();
+        flyway.target(BEFORE_OPENROUTER_MIGRATION_VERSION+"").load().migrate();
         try (var connection = DriverManager.getConnection(url, "sa", "");
              var statement = connection.createStatement()) {
             if ((existingColumns & 1) != 0) {

@@ -16,6 +16,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
+import org.remus.giteabot.event.model.WebhookPayload;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -25,7 +26,7 @@ import java.util.List;
  * Persisted record of one {@link PrWorkflow} invocation for a specific bot,
  * repository and pull request. Created by
  * {@link PrWorkflowOrchestrator#run(org.remus.giteabot.admin.Bot,
- * org.remus.giteabot.gitea.model.WebhookPayload, String)} and updated as the
+ * WebhookPayload, String)} and updated as the
  * workflow progresses.
  *
  * <p>The {@code bot_id} foreign key is modelled as a plain {@code Long}

@@ -9,7 +9,7 @@ authors:
 repository-code: "https://github.com/tmseidel/ai-git-bot"
 url: "https://github.com/tmseidel/ai-git-bot"
 license: "MIT"
-version: "1.28.0"
+version: "1.29.0"
 keywords:
   - "ai-code-review"
   - "code-review-bot"
@@ -24,6 +24,7 @@ keywords:
   - "github-enterprise"
   - "gitlab"
   - "bitbucket"
+  - "azure-devops"
   - "gemini"
   - "ollama"
   - "llama-cpp"

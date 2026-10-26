@@ -1,0 +1,65 @@
+name: Database contracts
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'src/main/resources/db/migration/**'
+  push:
+    branches:
+      - develop
+    paths-ignore:
+      - 'doc/**'
+
+permissions:
+  contents: read
+
+jobs:
+  database-contracts:
+    name: H2 and PostgreSQL contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: ai_git_bot_contracts
+          POSTGRES_USER: contract_test
+          # Test-only trust auth, confined to this disposable runner and its service network.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U contract_test -d ai_git_bot_contracts"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_POSTGRES_REQUIRED: 'true'
+      TEST_POSTGRES_URL: jdbc:postgresql://127.0.0.1:5432/ai_git_bot_contracts
+      TEST_POSTGRES_USER: contract_test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Require H2 and real PostgreSQL database contracts
+        run: mvn --batch-mode '-Dtest=org.remus.giteabot.database.*ContractTest' clean verify
+
+      - name: Collect database contract reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: database-contract-reports
+          path: target/surefire-reports/

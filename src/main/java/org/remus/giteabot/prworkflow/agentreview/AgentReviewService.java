@@ -13,24 +13,26 @@ import org.remus.giteabot.agent.loop.LoopOutcome;
 import org.remus.giteabot.agent.loop.ToolingMode;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
-import org.remus.giteabot.agent.shared.BranchRefs;
 import org.remus.giteabot.agent.shared.BranchSwitcher;
 import org.remus.giteabot.agent.shared.SystemPromptAssembler;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -171,13 +173,15 @@ public class AgentReviewService {
      *                              classification
      * @param severityThresholds    optional per-severity thresholds used to
      *                              compute the final review action
+     * @param enableProgressComments whether to create and update a pull-request progress comment
      * @return whether a review was posted, no diff was available, or the review failed
      */
     public ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds,
                                          boolean enableFormalDecision, String decisionPrompt,
                                          SeverityThresholds severityThresholds,
                                          Long runId,
-                                         Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+                                         Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                         boolean enableProgressComments) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -196,22 +200,30 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = resolveHeadBranch(payload, owner, repo, prNumber);
+        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo, prNumber);
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
             return ReviewResult.FAILED;
         }
 
+        ReviewProgress progress = enableProgressComments
+                ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
+        boolean completed = false;
         Path workspaceDir = null;
         try {
-            WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            if (progress != null) {
+                progress.start();
+            }
+            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+                    repositoryClient, owner, repo, headBranch, prNumber,
+                    PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
                 repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent (Review)**: Failed to prepare workspace: " + wsResult.error());
+                        "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
+                                + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
@@ -223,7 +235,7 @@ public class AgentReviewService {
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
-                    runId, toolCallConsumer);
+                    runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {
                 log.warn("Agentic review for PR #{} failed; no review will be published", prNumber);
@@ -261,6 +273,7 @@ public class AgentReviewService {
             publishFindingEvents(eventHookPublisher, bot, parsed, owner, repo, prNumber);
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
                     prNumber, owner, repo, action);
+            completed = true;
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
@@ -270,8 +283,14 @@ public class AgentReviewService {
                             + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
-            if (workspaceDir != null) {
-                workspaceService.cleanupWorkspace(workspaceDir);
+            try {
+                if (workspaceDir != null) {
+                    workspaceService.cleanupWorkspace(workspaceDir);
+                }
+            } finally {
+                if (progress != null) {
+                    progress.finish(completed);
+                }
             }
         }
     }
@@ -279,8 +298,10 @@ public class AgentReviewService {
     /**
      * Answers a clarification question about a previously-reviewed PR by running
      * a conversational agent loop. Formal review decisions are not applicable here.
+     * Optional progress comments use the same lifecycle as the initial review.
      */
-    public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds) {
+    public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds,
+                                           boolean enableProgressComments) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -299,22 +320,30 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for clarification on PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = resolveHeadBranch(payload, owner, repo, prNumber);
+        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo, prNumber);
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — cannot answer clarification "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
             return ReviewResult.FAILED;
         }
 
+        ReviewProgress progress = enableProgressComments
+                ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
+        boolean completed = false;
         Path workspaceDir = null;
         try {
-            WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber);
+            if (progress != null) {
+                progress.start();
+            }
+            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+                    repositoryClient, owner, repo, headBranch, prNumber,
+                    PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
                         prNumber, wsResult.error());
                 repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
+                        "⚠️ **AI Agent**: Could not check out this pull request, so the question "
+                                + "could not be answered. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
@@ -327,7 +356,7 @@ public class AgentReviewService {
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
                     workspaceDir, headBranch, systemPrompt, userMessage,
-                    maxToolRounds, diffSummary, null, null);
+                    maxToolRounds, diffSummary, null, null, progress);
 
             if (!outcome.success()) {
                 log.warn("Clarification for PR #{} failed; no answer will be published", prNumber);
@@ -342,6 +371,7 @@ public class AgentReviewService {
 
             repositoryClient.postPullRequestComment(owner, repo, prNumber, formatClarification(answer));
             log.info("Clarification answered for PR #{} in {}/{}", prNumber, owner, repo);
+            completed = true;
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Clarification failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
@@ -351,8 +381,14 @@ public class AgentReviewService {
                             + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
-            if (workspaceDir != null) {
-                workspaceService.cleanupWorkspace(workspaceDir);
+            try {
+                if (workspaceDir != null) {
+                    workspaceService.cleanupWorkspace(workspaceDir);
+                }
+            } finally {
+                if (progress != null) {
+                    progress.finish(completed);
+                }
             }
         }
     }
@@ -612,7 +648,8 @@ public class AgentReviewService {
                                       Path workspaceDir, String headBranch,
                                       String systemPrompt, String userMessage, int maxToolRounds,
                                       DiffSummary diffSummary, Long runId,
-                                      Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+                                      Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                      Consumer<AgentRunContext.ProgressUpdate> progressConsumer) {
         int rounds = Math.max(1, maxToolRounds);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy(
                 systemPrompt, toolRouter, toolCatalog,
@@ -631,6 +668,7 @@ public class AgentReviewService {
         AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
+        ctx.setProgressConsumer(progressConsumer);
         return loop.run(ctx, userMessage, strategy);
     }
 
@@ -679,42 +717,6 @@ public class AgentReviewService {
     private String formatReview(String review) {
         return "## 🤖 Agentic Code Review\n\n" + review
                 + "\n\n---\n*Read-only agentic review by AI Git Bot*";
-    }
-
-    /**
-     * Resolves the PR head branch to clone for review. Prefers the webhook
-     * payload; when the head ref is missing (notably {@code issue_comment}-style
-     * events with no {@code pull_request.head} block) it authoritatively
-     * re-fetches it from the provider API. Returns {@code null} when it cannot be
-     * determined — callers MUST skip rather than substitute the repository default
-     * branch, so the bot never reviews the wrong branch.
-     */
-    private String resolveHeadBranch(WebhookPayload payload, String owner, String repo, long prNumber) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getHead() != null
-                && payload.getPullRequest().getHead().getRef() != null
-                && !payload.getPullRequest().getHead().getRef().isBlank()) {
-            return BranchRefs.normalize(payload.getPullRequest().getHead().getRef());
-        }
-        return fetchHeadBranchFromApi(owner, repo, prNumber);
-    }
-
-    @SuppressWarnings("unchecked")
-    private String fetchHeadBranchFromApi(String owner, String repo, long prNumber) {
-        if (prNumber <= 0) {
-            return null;
-        }
-        try {
-            java.util.Map<String, Object> pr = repositoryClient.getPullRequestDetails(owner, repo, prNumber);
-            if (pr != null && pr.get("head") instanceof java.util.Map<?, ?> head
-                    && ((java.util.Map<String, Object>) head).get("ref") instanceof String ref
-                    && !ref.isBlank()) {
-                return BranchRefs.normalize(ref);
-            }
-        } catch (Exception e) {
-            log.debug("agentic-review: getPullRequestDetails failed for {}/{}#{}: {}",
-                    owner, repo, prNumber, e.getMessage());
-        }
-        return null;
     }
 
     private String fetchFiles(String owner, String repo, String ref, List<String> filePaths) {

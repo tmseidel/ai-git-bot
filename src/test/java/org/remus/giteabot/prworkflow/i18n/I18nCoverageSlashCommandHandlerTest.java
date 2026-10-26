@@ -4,8 +4,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
@@ -27,7 +27,7 @@ class I18nCoverageSlashCommandHandlerTest {
 
     private PrWorkflowOrchestrator orchestrator;
     private WorkflowSelectionService selectionService;
-    private GiteaClientFactory giteaClientFactory;
+    private RepositoryApiClientFactory repositoryApiClientFactory;
     private RepositoryApiClient repoClient;
     private I18nCoverageSlashCommandHandler handler;
 
@@ -37,10 +37,10 @@ class I18nCoverageSlashCommandHandlerTest {
     void setUp() {
         orchestrator = mock(PrWorkflowOrchestrator.class);
         selectionService = mock(WorkflowSelectionService.class);
-        giteaClientFactory = mock(GiteaClientFactory.class);
+        repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
         repoClient = mock(RepositoryApiClient.class);
-        when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
-        handler = new I18nCoverageSlashCommandHandler(orchestrator, selectionService, giteaClientFactory);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
+        handler = new I18nCoverageSlashCommandHandler(orchestrator, selectionService, repositoryApiClientFactory);
 
         WorkflowConfiguration cfg = new WorkflowConfiguration();
         cfg.setId(7L);

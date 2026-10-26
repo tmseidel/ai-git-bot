@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GitIntegrationService;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
 import org.remus.giteabot.prworkflow.PrWorkflowRunStatus;
@@ -51,7 +51,7 @@ public class CiActionPoller {
     private final DeploymentTargetService deploymentTargetService;
     private final DeploymentCallbackNotifier callbackNotifier;
     private final GitIntegrationService gitIntegrationService;
-    private final GiteaClientFactory clientFactory;
+    private final RepositoryApiClientFactory clientFactory;
 
     /** Run id → epoch-millis of last status call. */
     private final Map<Long, Long> lastPolledAt = new ConcurrentHashMap<>();

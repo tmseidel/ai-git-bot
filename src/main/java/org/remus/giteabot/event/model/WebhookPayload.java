@@ -1,18 +1,16 @@
-package org.remus.giteabot.gitea.model;
+package org.remus.giteabot.event.model;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class WebhookPayload {
 
     private String action;
 
     private Long number;
 
-    @JsonProperty("pull_request")
     private PullRequest pullRequest;
 
     private Repository repository;
@@ -25,11 +23,9 @@ public class WebhookPayload {
 
     private Owner sender;
 
-    @JsonProperty("requested_reviewer")
     private Owner requestedReviewer;
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class PullRequest {
         private Long id;
         private Long number;
@@ -38,7 +34,6 @@ public class WebhookPayload {
         private String state;
         private Boolean merged;
 
-        @JsonProperty("diff_url")
         private String diffUrl;
 
         private Head head;
@@ -48,39 +43,35 @@ public class WebhookPayload {
 
         private Owner assignee;
 
-        private java.util.List<Owner> assignees;
+        private List<Owner> assignees;
 
-        @JsonProperty("requested_reviewers")
-        private java.util.List<Owner> requestedReviewers;
+        private List<Owner> requestedReviewers;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Head {
         private String ref;
         private String sha;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Repository {
         private Long id;
         private String name;
 
-        @JsonProperty("full_name")
         private String fullName;
 
         private Owner owner;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Owner {
         private String login;
+        /** Reviewer vote (Azure DevOps only); {@code null} when the payload carries none. */
+        private Integer vote;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Comment {
         private Long id;
         private String body;
@@ -89,17 +80,14 @@ public class WebhookPayload {
         // Review comment specific fields (inline comments on code)
         private String path;
 
-        @JsonProperty("diff_hunk")
         private String diffHunk;
 
         private Integer line;
 
-        @JsonProperty("pull_request_review_id")
         private Long pullRequestReviewId;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Issue {
         private Long number;
         private String title;
@@ -111,24 +99,21 @@ public class WebhookPayload {
          */
         private String ref;
 
-        @JsonProperty("pull_request")
         private IssuePullRequest pullRequest;
 
         private Owner assignee;
 
-        private java.util.List<Owner> assignees;
+        private List<Owner> assignees;
 
         private Owner user;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class IssuePullRequest {
         private Boolean merged;
     }
 
     @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Review {
         private Long id;
         private String type;

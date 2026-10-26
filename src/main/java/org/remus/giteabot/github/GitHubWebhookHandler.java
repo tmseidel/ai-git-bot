@@ -3,7 +3,7 @@ package org.remus.giteabot.github;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -56,7 +56,7 @@ public class GitHubWebhookHandler {
 
         // Ignore events triggered by the bot itself
         if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            log.debug("Ignoring GitHub webhook event from bot's own user '{}'", bot.getUsername());
+            log.debug("Ignoring GitHub webhook event from bot's own user '{}'", bot.getGitIntegration().getUsername());
             return ResponseEntity.ok("ignored");
         }
 
@@ -137,8 +137,7 @@ public class GitHubWebhookHandler {
         if ("assigned".equals(action)) {
             if (payload.getIssue() != null
                     && payload.getIssue().getAssignee() != null
-                    && bot.getUsername() != null
-                    && bot.getUsername().equalsIgnoreCase(payload.getIssue().getAssignee().getLogin())) {
+                    && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getIssue().getAssignee().getLogin())) {
                 botWebhookService.handleIssueAssigned(bot, payload);
                 return ResponseEntity.ok("agent triggered");
             }
@@ -393,16 +392,14 @@ public class GitHubWebhookHandler {
     }
 
     private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
-        return bot.getUsername() != null
-                && payload.getPullRequest() != null
+        return payload.getPullRequest() != null
                 && payload.getPullRequest().getRequestedReviewers() != null
                 && payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getUsername().equalsIgnoreCase(reviewer.getLogin()));
+                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin()));
     }
 
     private boolean isRequestedReviewer(Bot bot, WebhookPayload payload) {
-        return bot.getUsername() != null
-                && payload.getRequestedReviewer() != null
-                && bot.getUsername().equalsIgnoreCase(payload.getRequestedReviewer().getLogin());
+        return payload.getRequestedReviewer() != null
+                && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getRequestedReviewer().getLogin());
     }
 }

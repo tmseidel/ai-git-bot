@@ -7,11 +7,11 @@ import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
@@ -55,7 +55,7 @@ class PlaywrightTestSuiteRunnerTest {
     @BeforeEach
     void setUp() {
         aiClientFactory = mock(AiClientFactory.class);
-        GiteaClientFactory giteaClientFactory = mock(GiteaClientFactory.class);
+        RepositoryApiClientFactory repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
         RepositoryApiClient apiClient = mock(RepositoryApiClient.class);
         caseRepository = mock(PrTestCaseRepository.class);
         toolExecutor = mock(PrWorkflowToolExecutor.class);
@@ -66,7 +66,7 @@ class PlaywrightTestSuiteRunnerTest {
         TestRunnerAgent runnerAgent = new TestRunnerAgent(catalog, toolExecutor);
 
         suiteRunner = new PlaywrightTestSuiteRunner(
-                aiClientFactory, giteaClientFactory,
+                aiClientFactory, repositoryApiClientFactory,
                 plannerAgent, authorAgent, runnerAgent, caseRepository, toolExecutor,
                 mock(WorkflowToolSurfaceFactory.class));
 
@@ -75,7 +75,7 @@ class PlaywrightTestSuiteRunnerTest {
         bot.setAiIntegration(new AiIntegration());
         bot.setGitIntegration(new GitIntegration());
 
-        when(giteaClientFactory.getApiClient(any())).thenReturn(apiClient);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(apiClient);
         when(apiClient.getPullRequestDiff(any(), any(), any()))
                 .thenReturn("diff --git a/srv.js b/srv.js\n+console.log('hi');\n");
     }

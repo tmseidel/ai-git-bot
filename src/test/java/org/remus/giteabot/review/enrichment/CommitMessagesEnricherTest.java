@@ -7,9 +7,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestCommit;
 
 import java.util.List;
-import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.when;
@@ -28,28 +28,25 @@ class CommitMessagesEnricherTest {
     }
 
     @Test
-    void enrich_formatsGiteaCommits() {
+    void enrich_formatsCommits() {
         when(repositoryClient.getPullRequestCommits("owner", "repo", 1L))
                 .thenReturn(List.of(
-                        Map.of("sha", "abc1234567890", "commit", Map.of("message", "Initial implementation")),
-                        Map.of("sha", "def5678901234", "commit", Map.of("message", "Fix bug"))
+                        new PullRequestCommit("abc1234567890", "Initial implementation"),
+                        new PullRequestCommit("def5678901234", "Fix bug")
                 ));
 
         String result = enricher.enrich(new EnrichmentContext("owner", "repo", 1L, null, null, null));
 
         assertTrue(result.contains("Commit messages"));
-        assertTrue(result.contains("abc1234"));
-        assertTrue(result.contains("Initial implementation"));
-        assertTrue(result.contains("def5678"));
-        assertTrue(result.contains("Fix bug"));
+        assertTrue(result.contains("- abc1234 Initial implementation"));
+        assertTrue(result.contains("- def5678 Fix bug"));
     }
 
     @Test
-    void enrich_formatsGitLabCommits() {
+    void enrich_onlyIncludesFirstLineOfMessage() {
         when(repositoryClient.getPullRequestCommits("owner", "repo", 1L))
                 .thenReturn(List.of(
-                        Map.of("id", "abc1234567890", "message", "Add feature\n\nDetailed description"),
-                        Map.of("id", "def5678901234", "message", "Update tests")
+                        new PullRequestCommit("abc1234567890", "Add feature\n\nDetailed description")
                 ));
 
         String result = enricher.enrich(new EnrichmentContext("owner", "repo", 1L, null, null, null));

@@ -159,7 +159,16 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         for (ToolCall call : turn.toolCalls()) {
             requests.add(toRequest(call));
         }
+        if (ctx.progressConsumer() != null) {
+            ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(round,
+                    "Inspecting repository: "
+                            + String.join(", ", requests.stream().map(ImplementationPlan.ToolRequest::getTool).toList()), 0));
+        }
         List<ToolResult> results = executeAll(ctx, requests);
+        if (ctx.progressConsumer() != null) {
+            ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
+                    round, "Repository inspection completed", results.size()));
+        }
         List<StepDecision.ToolCallResult> packaged = packageResults(requests, results, turn.toolCalls());
         return new StepDecision.ContinueWithToolResults(packaged, null);
     }
@@ -207,8 +216,17 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             log.info("Agentic review (legacy) gathering context for PR #{} (round {}/{})",
                     ctx.issueNumber(), contextRounds, maxContextRounds);
 
+            if (ctx.progressConsumer() != null) {
+                ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
+                        round, "Gathering repository context", 0));
+            }
+
             // Review context stays on the original revision; all tools pass through the review policy.
             String context = gatherContext(ctx, requestFiles, toolRequests);
+            if (ctx.progressConsumer() != null) {
+                ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
+                        round, "Repository context gathered", toolRequests.size()));
+            }
             return new StepDecision.Continue(
                     "Here is the requested repository context:\n" + context
                             + "\n\nContinue your review. When you have gathered enough context, reply with "

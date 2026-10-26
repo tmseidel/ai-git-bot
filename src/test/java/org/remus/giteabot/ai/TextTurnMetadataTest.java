@@ -1,5 +1,6 @@
 package org.remus.giteabot.ai;
 
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -134,7 +135,7 @@ class TextTurnMetadataTest {
         return Stream.of(
                 new Provider("OpenAI-compatible", "/v1/chat/completions",
                         (http, nativeTools) -> new OpenAiClient(http, "test-model", 32, nativeTools,
-                                OpenAiFlavor.STANDARD), "length", "stop", """
+                                OpenAiFlavor.STANDARD, null), "length", "stop", """
                         {"choices":[{"finish_reason":"%s","message":{"content":"Review text"}}],
                          "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
                         """, """
@@ -207,6 +208,7 @@ class TextTurnMetadataTest {
         }
 
         @Override
+        @NonNull
         public String toString() {
             return name;
         }

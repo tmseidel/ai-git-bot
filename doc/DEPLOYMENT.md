@@ -11,6 +11,7 @@ This guide covers deploying the AI-Git-Bot Gateway using Docker Compose.
   - GitHub / GitHub Enterprise: See [GitHub Setup](GITHUB_SETUP.md)
   - GitLab / GitLab CE/EE: See [GitLab Setup](GITLAB_SETUP.md)
   - Bitbucket Cloud: See [Bitbucket Setup](BITBUCKET_SETUP.md)
+  - Azure DevOps: See [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md)
 - API credentials for your chosen AI provider (Anthropic, OpenAI) or a local Ollama/llama.cpp instance
 
 ## Quick Start
@@ -27,7 +28,7 @@ Then:
 1. Navigate to `http://localhost:8080` to complete initial setup
 2. Create your admin account
 3. Configure AI and Git integrations via the web UI
-4. Create a bot and configure webhooks in your Git provider (Gitea, GitHub, GitLab, or Bitbucket)
+4. Create a bot and configure webhooks in your Git provider (Gitea, GitHub, GitLab, Bitbucket, or Azure DevOps)
 
 See the [User Guide](USER_GUIDE.md) for detailed instructions.
 
@@ -144,6 +145,7 @@ See [Agent Documentation](AGENT.md) for full details.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITEABOT_WORKSPACES_DIR` |  | Optional host-visible root for private agent workspace parents. |
+| `GITEABOT_WORKSPACES_CLONE_TIMEOUT_SECONDS` | `300` | Budget (seconds) for one clone, PR-head fetch or checkout while preparing an agent workspace. Raise it for very large repositories: a shallow clone of a repo with tens of thousands of files can take minutes on a slow link, and an exhausted budget surfaces as a skipped workflow. |
 
 ### Review Context (Optional)
 
@@ -198,6 +200,12 @@ default; requires a Claude 5.x model (`claude-fable-5`, `claude-opus-5`,
 |----------|---------|-------------|
 | `ANTHROPIC_EXTENDED_THINKING_ENABLED` | `false` | Set to `true` to enable adaptive extended thinking for the Anthropic provider. |
 | `ANTHROPIC_EXTENDED_THINKING_EFFORT` | `high` | How often and how deeply the model thinks: `low`, `medium`, `high`, `xhigh`, or `max`. Higher efforts need larger max tokens. |
+
+### OpenAI-compatible request switches (Optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENAI_CHAT_TEMPLATE_KWARGS` |  | JSON object forwarded verbatim as `chat_template_kwargs` on every request of the **openai** provider (vLLM, llama.cpp's server, gateways). The server hands it to the model's chat template, so it overrides that server's own `--default-chat-template-kwargs` for this bot only. Keys and value types belong to the served model's template, e.g. `{"enable_thinking": true, "reasoning_effort": "low"}` (Qwen-style string effort), `{"reasoning_effort": 2}` (numeric effort) or `{"enable_thinking": false}`. Blank sends nothing and keeps the server default; malformed JSON fails at startup. |
 
 ### Security / Web UI Login (Optional)
 
@@ -276,6 +284,7 @@ All AI provider and Git configuration is managed through the web interface:
    - **GitHub**: github.com or GitHub Enterprise Server — see [GitHub Setup](GITHUB_SETUP.md)
    - **GitLab**: gitlab.com or self-managed GitLab — see [GitLab Setup](GITLAB_SETUP.md)
    - **Bitbucket Cloud**: bitbucket.org — see [Bitbucket Setup](BITBUCKET_SETUP.md)
+   - **Azure DevOps**: dev.azure.com or Azure DevOps Server (collection in the URL is optional) — see [Azure DevOps Setup](AZURE_DEVOPS_SETUP.md)
    - Tokens are encrypted at rest when `APP_ENCRYPTION_KEY` is configured
 
 3. **Bots**: Create bots that combine an AI integration with a Git integration

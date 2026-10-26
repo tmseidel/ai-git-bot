@@ -52,7 +52,7 @@ Just better engineering hygiene through automation.
 | **OpenAI** (+ OpenAI-compatible APIs) | **GitHub** / **GitHub Enterprise** |
 | **Google AI / Gemini** | **GitLab** (gitlab.com & self-managed) |
 | **Ollama** (local LLMs) | **Bitbucket Cloud** |
-| **llama.cpp** (local GGUF models) | |
+| **llama.cpp** (local GGUF models) | **Azure DevOps** (Services & Server) |
 
 Unlike most AI coding tools, AI-Git-Bot is not tied to a specific Git platform or
 AI provider. **Fully self-hostable. Your code can stay inside your infrastructure.**
@@ -207,10 +207,11 @@ environment variables needed beyond what's listed above.
 | **GitHub Enterprise** | Self-hosted GitHub Enterprise Server |
 | **GitLab** | gitlab.com and self-managed GitLab CE/EE |
 | **Bitbucket Cloud** | bitbucket.org |
+| **Azure DevOps** | dev.azure.com, `*.visualstudio.com`, and Azure DevOps Server (collection in the URL optional) |
 
 Issue-based agent workflows (coding and writer) require issue assignment and
-webhook support — **Gitea, GitHub, and GitLab**. Bitbucket Cloud is PR-review
-only.
+webhook support — **Gitea, GitHub, and GitLab**. Bitbucket Cloud and Azure
+DevOps are PR-review only.
 
 ---
 
@@ -222,11 +223,11 @@ Each bot gets a unique webhook URL displayed in the web UI:
 
 ### Supported Events per Platform
 
-| Event | Gitea | GitHub | GitLab | Bitbucket |
-|-------|-------|--------|--------|-----------|
-| Pull Request | ✅ | ✅ | ✅ Merge request events | ✅ PR: Created/Updated |
-| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created |
-| Issues (agents) | ✅ | ✅ | ✅ Issues events | — |
+| Event | Gitea | GitHub | GitLab | Bitbucket | Azure DevOps |
+|-------|-------|--------|--------|-----------|--------------|
+| Pull Request | ✅ | ✅ | ✅ Merge request events | ✅ PR: Created/Updated | ✅ PR created/updated |
+| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | ✅ PR comment events |
+| Issues (agents) | ✅ | ✅ | ✅ Issues events | — | — (Work Items) |
 
 ---
 
@@ -273,6 +274,7 @@ See the [Deployment Guide](https://github.com/tmseidel/ai-git-bot/blob/main/doc/
 - [GitHub Setup](https://github.com/tmseidel/ai-git-bot/blob/main/doc/GITHUB_SETUP.md)
 - [GitLab Setup](https://github.com/tmseidel/ai-git-bot/blob/main/doc/GITLAB_SETUP.md)
 - [Bitbucket Setup](https://github.com/tmseidel/ai-git-bot/blob/main/doc/BITBUCKET_SETUP.md)
+- [Azure DevOps Setup](https://github.com/tmseidel/ai-git-bot/blob/main/doc/AZURE_DEVOPS_SETUP.md)
 - [Security Policy](https://github.com/tmseidel/ai-git-bot/blob/main/SECURITY.md)
 
 ---

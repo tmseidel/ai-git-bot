@@ -1,7 +1,7 @@
 package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.HashMap;
@@ -117,6 +117,22 @@ class BitbucketPayloadTranslationTest {
 
         assertNotNull(payload);
         assertEquals("developer", payload.getSender().getLogin());
+    }
+
+    @Test
+    void translateRepository_usesCanonicalSlugsInsteadOfDisplayNameAndLegacyOwner() {
+        Map<String, Object> raw = new HashMap<>(createPullRequestPayload());
+        raw.put("repository", Map.of(
+                "name", "Review fixture",
+                "full_name", "workspace/review-fixture",
+                "owner", Map.of("username", "legacy-owner", "display_name", "Workspace Owner"),
+                "workspace", Map.of("slug", "workspace")));
+
+        WebhookPayload payload = handler.translatePayload("pullrequest:created", raw);
+
+        assertEquals("workspace", payload.getRepository().getOwner().getLogin());
+        assertEquals("review-fixture", payload.getRepository().getName());
+        assertEquals("workspace/review-fixture", payload.getRepository().getFullName());
     }
 
     @Test

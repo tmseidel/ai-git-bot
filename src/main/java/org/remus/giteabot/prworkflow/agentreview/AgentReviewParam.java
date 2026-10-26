@@ -10,6 +10,9 @@ public enum AgentReviewParam implements WorkflowParamName {
     /** Upper bound on the number of explore/answer rounds the agent may take. */
     MAX_TOOL_ROUNDS("maxToolRounds"),
 
+    /** Opt-in progress comments for review and clarification runs. */
+    ENABLE_PROGRESS_COMMENTS("enableProgressComments"),
+
     /** When true, the workflow may post a formal PR review decision (approve/request-changes). */
     ENABLE_FORMAL_REVIEW_DECISION("enableFormalReviewDecision"),
 

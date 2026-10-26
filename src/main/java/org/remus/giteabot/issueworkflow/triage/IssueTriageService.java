@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentBudget;
@@ -25,7 +25,7 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.agent.writerimpl.WriterPromptBuilder;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -113,7 +113,7 @@ public class IssueTriageService {
             """;
 
     private final AiClientFactory aiClientFactory;
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final AgentSessionService sessionService;
     private final ToolExecutionService toolExecutionService;
     private final ToolCatalog toolCatalog;
@@ -150,7 +150,7 @@ public class IssueTriageService {
         Set<String> allowed = allowedAssignees(params);
         String configuredPrompt = configuredPrompt(params);
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = giteaClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
 
         String issueRef = BranchRefs.normalize(issue.getRef());
         String baseBranch = issueRef != null && !issueRef.isBlank()
@@ -209,7 +209,7 @@ public class IssueTriageService {
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 repoClient, allowedBuiltinTools, pythonExecution);
         TriageAgentStrategy strategy = new TriageAgentStrategy(systemPrompt, toolRouter, toolCatalog,
-                mcpToolCatalog, allowedBuiltinTools, allowed, bot.getUsername(),
+                mcpToolCatalog, allowedBuiltinTools, allowed, bot.getGitIntegration().getUsername(),
                 new AiResponseParser(), new BranchSwitcher(toolExecutionService), maxToolRounds());
 
         // Mirror the writer: one extra iteration beyond the context-round limit so the model

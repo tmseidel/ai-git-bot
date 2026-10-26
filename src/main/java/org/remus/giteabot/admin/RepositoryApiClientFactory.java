@@ -26,7 +26,7 @@ import java.util.concurrent.ConcurrentMap;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class GiteaClientFactory {
+public class RepositoryApiClientFactory {
 
     private final GitIntegrationService gitIntegrationService;
     private final RepositoryProviderRegistry providerRegistry;

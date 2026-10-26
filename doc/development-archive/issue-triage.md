@@ -45,7 +45,7 @@ Option 1. New package `org.remus.giteabot.issueworkflow.triage` (name shares no 
 - `TriageIssueWorkflow` (`@Component implements IssueWorkflow`): key `issue-triage`, display name `Issue Triage`, description stating it routes the issue to an assignee and never implements it.
   - `onIssueAssigned` → delegate to `IssueTriageService.triage(bot, payload, params)`.
   - `onIssueComment` → **conscious no-op** (triage is a one-shot routing decision; follow-up conversation belongs to the coding/writer workflows). Documented in the javadoc, per the SPI contract's "decide consciously" rule.
-- `IssueTriageService` (`@Service`, stateless; collaborators injected, `Bot` passed per call): prompt assembly, model call, output validation, comment + assignment execution. Stateless-single-shot differs from the session-ful coding/writer services, so the `AgentServiceFactory` per-bot creation pattern does not apply; the service injects `AiClientFactory` + `GiteaClientFactory` directly (both already depended upon from feature packages).
+- `IssueTriageService` (`@Service`, stateless; collaborators injected, `Bot` passed per call): prompt assembly, model call, output validation, comment + assignment execution. Stateless-single-shot differs from the session-ful coding/writer services, so the `AgentServiceFactory` per-bot creation pattern does not apply; the service injects `AiClientFactory` + `RepositoryApiClientFactory` directly (both already depended upon from feature packages).
 
 **Self-assignment loop guard:** if the model selects the bot's own username, the assignment webhook would re-trigger the workflow indefinitely. The service treats `assignee == bot.getUsername()` (case-insensitive) as invalid output → error comment, no assignment.
 
@@ -154,7 +154,7 @@ Follow the V39 precedent: add **V42** (`h2/` + `postgresql/`, byte-identical dia
 ### Task 5: V42 seed migration
 - Create: `db/migration/h2/V42__issue_triage_configuration_seed.sql` + `db/migration/postgresql/V42__issue_triage_configuration_seed.sql` (V39-style guards).
 - Sync: `src/test/resources/data.sql`.
-- Test: `IssueTriageMigrationTest` following `issueworkflow/IssueWorkflowMigrationTest` (programmatic Flyway, pre-migration fixture, assert configuration + selection rows; plain JUnit, not `@SpringBootTest`). `GiteaBotApplicationTests` context boot is the free smoke test.
+- Test: `IssueTriageMigrationTest` following `issueworkflow/IssueWorkflowMigrationTest` (programmatic Flyway, pre-migration fixture, assert configuration + selection rows; plain JUnit, not `@SpringBootTest`). `AiGitBotApplicationTests` context boot is the free smoke test.
 
 ### Task 6: Documentation
 - Create: `doc/ISSUE_TRIAGE.md` — top-level feature doc: when it runs (issue-created bot setting + assignment), prompt configuration and the mandatory review warning, tool-calling vs JSON mode, `none` semantics, failure behavior (invalid output / non-assignable account → error comment + bot error record + `issueassignment.failed`), the `issue_hemingway` canonical name.

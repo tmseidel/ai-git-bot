@@ -317,6 +317,9 @@ public class GitIntegrationService {
 
     private void validate(GitIntegration integration, GitIntegration existing,
                           boolean clearToken, boolean clearSshCredentials) {
+        if (isBlank(integration.getUsername())) {
+            throw new IllegalArgumentException("A username is required");
+        }
         boolean duplicate = integration.getId() == null
                 ? gitIntegrationRepository.existsByName(integration.getName())
                 : gitIntegrationRepository.existsByNameAndIdNot(integration.getName(), integration.getId());
@@ -373,6 +376,10 @@ public class GitIntegrationService {
     }
 
     private void applyProviderDefaults(GitIntegration integration) {
+        // The username identifies the bot in webhook payloads, so surrounding whitespace would break matching.
+        if (integration.getUsername() != null) {
+            integration.setUsername(integration.getUsername().trim());
+        }
         if (integration.getProviderType() == RepositoryType.GITHUB) {
             integration.setUrl("https://github.com");
         } else if (integration.getProviderType() == RepositoryType.BITBUCKET) {

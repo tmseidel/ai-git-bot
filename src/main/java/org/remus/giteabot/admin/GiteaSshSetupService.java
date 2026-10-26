@@ -22,7 +22,7 @@ import java.util.UUID;
 public class GiteaSshSetupService {
 
     private final GitIntegrationService gitIntegrationService;
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final SshCommandService sshCommandService;
 
     /** Scans the SSH endpoint without changing local or remote configuration. */
@@ -138,7 +138,7 @@ public class GiteaSshSetupService {
                     throw e;
                 }
                 deleteTrackedRemoteKeys(requireGiteaClient(
-                        giteaClientFactory.createApiClient(integration, replacementToken)), integration, verifyOnly);
+                        repositoryApiClientFactory.createApiClient(integration, replacementToken)), integration, verifyOnly);
             }
             return true;
         } catch (RuntimeException e) {
@@ -172,7 +172,7 @@ public class GiteaSshSetupService {
     }
 
     private GiteaApiClient giteaClient(GitIntegration integration) {
-        return requireGiteaClient(giteaClientFactory.getApiClient(integration));
+        return requireGiteaClient(repositoryApiClientFactory.getApiClient(integration));
     }
 
     private GiteaApiClient requireGiteaClient(RepositoryApiClient client) {

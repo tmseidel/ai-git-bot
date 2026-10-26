@@ -127,7 +127,7 @@ class OpenRouterProviderTest {
                 .andRespond(withSuccess("""
                         {"choices":[{"finish_reason":"stop","message":{"content":"Answer"}}]}
                         """, MediaType.APPLICATION_JSON));
-        var client = new OpenAiClient(http.build(), "author/model", 32, true, OpenAiFlavor.STANDARD);
+        var client = new OpenAiClient(http.build(), "author/model", 32, true, OpenAiFlavor.STANDARD, null);
         var previous = AiMessage.builder().role("assistant").content("Previous answer")
                 .reasoningDetails(List.of(AgentJackson.mapper().readTree("{\"data\":\"opaque\"}"))).build();
 

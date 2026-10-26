@@ -6,6 +6,7 @@ import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.ModelFlavor;
+import org.remus.giteabot.config.OpenAiProperties;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -30,6 +31,8 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
     );
 
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
+    /** Provider-scoped request settings; {@code chat_template_kwargs} lives there. */
+    private final OpenAiProperties openAiProperties;
 
     @Override
     public String getProviderType() {
@@ -79,7 +82,7 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
                 : rawFlavor.trim().toLowerCase(Locale.ROOT);
         OpenAiFlavor flavor = OpenAiFlavor.fromId(storedFlavor);
         // A blank or unknown value degrades to 'standard' silently; only a
-        // non-blank value that we do not recognise is worth flagging.
+        // non-blank value that we do not recognize is worth flagging.
         if (storedFlavor != null && !OpenAiFlavor.STANDARD.getId().equals(storedFlavor)
                 && flavor == OpenAiFlavor.STANDARD) {
             log.warn("Unknown model flavor '{}' for OpenAI integration '{}'; using 'standard'",
@@ -90,7 +93,8 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
                 integration.getModel(),
                 integration.getMaxTokens(),
                 !integration.isUseLegacyToolCalling(),
-                flavor
+                flavor,
+                openAiProperties.getParsedChatTemplateKwargs()
         );
     }
 }

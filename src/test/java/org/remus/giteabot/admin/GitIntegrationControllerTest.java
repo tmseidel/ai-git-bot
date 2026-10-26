@@ -227,6 +227,7 @@ class GitIntegrationControllerTest {
                         .param("name", "My Gitea")
                         .param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com")
+                        .param("username", "ai_bot")
                         .param("transport", "SSH")
                         .param("token", "")
                         .param("sshPrivateKey", "replacement-private-key")

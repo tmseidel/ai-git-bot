@@ -21,6 +21,8 @@ import java.util.Map;
  *   <li>Gitea: {@code X-Gitea-Signature: <hex-hmac>}</li>
  *   <li>GitLab: {@code X-Gitlab-Token: <secret>} (plain equality)</li>
  *   <li>Bitbucket Cloud: {@code X-Hub-Signature: sha256=<hex-hmac>}</li>
+ *   <li>Azure DevOps: {@code X-AiGitBot-Token: <secret>} (plain equality; Service Hooks
+ *       provide no body signature)</li>
  * </ul>
  *
  * All comparisons are constant-time. When a signing secret is configured for a
@@ -65,6 +67,13 @@ public final class WebhookSignatureVerifier {
             case BITBUCKET -> {
                 expected = "sha256=" + hmacSha256Hex(signingSecret, rawBody);
                 actual = header(headers, "X-Hub-Signature");
+            }
+            case AZURE_DEVOPS -> {
+                // Azure DevOps Service Hooks send no signature over the body. The
+                // subscription's "HTTP headers" field carries the shared secret instead,
+                // so this is plain equality like GitLab's X-Gitlab-Token.
+                expected = signingSecret;
+                actual = header(headers, "X-AiGitBot-Token");
             }
             default -> {
                 log.warn("Webhook signature verification not implemented for provider {}", providerType);

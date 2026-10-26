@@ -43,7 +43,8 @@ class AiProviderRegistryTest {
     @Test
     void registryExposesProviderFlavors_forOpenAi() {
         AiProviderRegistry registry = new AiProviderRegistry(List.of(
-                new org.remus.giteabot.ai.openai.OpenAiProviderMetadata(builderProvider())
+                new org.remus.giteabot.ai.openai.OpenAiProviderMetadata(builderProvider(),
+                        new org.remus.giteabot.config.OpenAiProperties())
         ));
 
         java.util.List<ModelFlavor> flavors = registry.getFlavors().get("openai");

@@ -50,6 +50,11 @@ services:
       # reasoning in dedicated blocks that are discarded. effort: low|medium|high|xhigh|max.
       ANTHROPIC_EXTENDED_THINKING_ENABLED: ${ANTHROPIC_EXTENDED_THINKING_ENABLED:-false}
       ANTHROPIC_EXTENDED_THINKING_EFFORT: ${ANTHROPIC_EXTENDED_THINKING_EFFORT:-high}
+      # chat_template_kwargs for the OpenAI-compatible provider (vLLM, llama.cpp server).
+      # JSON object sent on every request; it overrides the server's
+      # --default-chat-template-kwargs for this bot. Keys/value types are the served
+      # model template's, e.g. {"enable_thinking":true,"reasoning_effort":"low"}.
+      OPENAI_CHAT_TEMPLATE_KWARGS: ${OPENAI_CHAT_TEMPLATE_KWARGS:-}
       PROMETHEUS_ENABLED: false
     depends_on:
       db:

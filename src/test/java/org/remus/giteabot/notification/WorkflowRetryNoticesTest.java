@@ -8,7 +8,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class WorkflowRetryNoticesTest {
 
-    @Mock private GiteaClientFactory giteaClientFactory;
+    @Mock private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock private RepositoryApiClient repositoryApiClient;
 
     private WorkflowRetryNotices notices;
@@ -32,7 +32,7 @@ class WorkflowRetryNoticesTest {
 
     @BeforeEach
     void setUp() {
-        notices = new WorkflowRetryNotices(giteaClientFactory);
+        notices = new WorkflowRetryNotices(repositoryApiClientFactory);
         bot = new Bot();
         bot.setName("test-bot");
         bot.setGitIntegration(new GitIntegration());
@@ -45,7 +45,7 @@ class WorkflowRetryNoticesTest {
 
     @Test
     void installForPullRequest_pointsTheNoticeAtThePullRequest() {
-        when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
 
         notices.installForPullRequest(bot, "agentic-review", "o", "r", 7L);
 
@@ -58,7 +58,7 @@ class WorkflowRetryNoticesTest {
 
     @Test
     void installForIssue_pointsTheNoticeAtTheIssue() {
-        when(giteaClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
 
         notices.installForIssue(bot, "issue-x", "o", "r", 12L);
 
@@ -73,12 +73,12 @@ class WorkflowRetryNoticesTest {
         notices.installForPullRequest(bot, "agentic-review", "o", "r", null);
 
         assertNull(AiRetryContext.notice());
-        verifyNoInteractions(giteaClientFactory);
+        verifyNoInteractions(repositoryApiClientFactory);
     }
 
     @Test
     void unresolvableClient_installsNoNoticeAndDoesNotThrow() {
-        when(giteaClientFactory.getApiClient(any()))
+        when(repositoryApiClientFactory.getApiClient(any()))
                 .thenThrow(new IllegalArgumentException("No repository provider registered for type: null"));
 
         assertDoesNotThrow(() -> notices.installForIssue(bot, "issue-x", "o", "r", 12L));

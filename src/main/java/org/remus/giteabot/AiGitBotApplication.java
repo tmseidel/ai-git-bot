@@ -8,9 +8,9 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableAsync
 @EnableScheduling
-public class GiteaBotApplication {
+public class AiGitBotApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(GiteaBotApplication.class, args);
+        SpringApplication.run(AiGitBotApplication.class, args);
     }
 }

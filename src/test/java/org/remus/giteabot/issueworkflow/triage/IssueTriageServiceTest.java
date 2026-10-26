@@ -9,7 +9,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.GiteaClientFactory;
+import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
@@ -23,10 +24,11 @@ import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import tools.jackson.databind.JsonNode;
@@ -71,7 +73,7 @@ class IssueTriageServiceTest {
     @Mock
     private AiClientFactory aiClientFactory;
     @Mock
-    private GiteaClientFactory giteaClientFactory;
+    private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock
     private AgentSessionService sessionService;
     @Mock
@@ -95,18 +97,18 @@ class IssueTriageServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IssueTriageService(aiClientFactory, giteaClientFactory, sessionService,
+        service = new IssueTriageService(aiClientFactory, repositoryApiClientFactory, sessionService,
                 toolExecutionService, new ToolCatalog(new AgentConfigProperties()), workspaceService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
                 new AgentConfigProperties(), null);
         lenient().when(aiClientFactory.getClient(any())).thenReturn(aiClient);
-        lenient().when(giteaClientFactory.getApiClient(any())).thenReturn(repoClient);
+        lenient().when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
         lenient().when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
                 anyString(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/triage-ws")));
         lenient().when(repoClient.getDefaultBranch("owner", "repo")).thenReturn("main");
         lenient().when(repoClient.getRepositoryTree("owner", "repo", "main"))
-                .thenReturn(List.of(Map.of("type", "blob", "path", "src/App.java")));
+                .thenReturn(List.of(new RepositoryTreeEntry("src/App.java", RepositoryTreeEntry.Type.FILE)));
         lenient().when(sessionService.toAiMessages(any())).thenReturn(List.of());
         lenient().when(mcpOrchestrationService.discoverTools(any())).thenReturn(McpToolCatalog.empty());
         lenient().when(mcpToolSelectionService.filterCatalogForPrompt(any(), any()))
@@ -118,7 +120,9 @@ class IssueTriageServiceTest {
 
         bot = new Bot();
         bot.setName("Triage Bot");
-        bot.setUsername("triage-bot");
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setUsername("triage-bot");
+        bot.setGitIntegration(gitIntegration);
 
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("owner");

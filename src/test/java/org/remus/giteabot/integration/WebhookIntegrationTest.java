@@ -165,11 +165,11 @@ class WebhookIntegrationTest {
         git.setProviderType(org.remus.giteabot.repository.RepositoryType.GITEA);
         git.setUrl("http://localhost:" + giteaPort);
         git.setToken("test-gitea-token");
+        git.setUsername("ai_bot");
         git = gitIntegrationService.save(git, false);
 
         Bot bot = new Bot();
         bot.setName("Integration Test Bot");
-        bot.setUsername("ai_bot");
         bot.setEnabled(true);
         bot.setAiIntegration(ai);
         bot.setGitIntegration(git);
@@ -224,11 +224,11 @@ class WebhookIntegrationTest {
         git.setProviderType(org.remus.giteabot.repository.RepositoryType.GITEA);
         git.setUrl("http://localhost:" + giteaPort);
         git.setToken("test-token");
+        git.setUsername("ai_bot");
         git = gitIntegrationService.save(git, false);
 
         Bot bot = new Bot();
         bot.setName("Close Test Bot");
-        bot.setUsername("ai_bot");
         bot.setEnabled(true);
         bot.setAiIntegration(ai);
         bot.setGitIntegration(git);

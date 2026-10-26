@@ -48,7 +48,7 @@ Create a new Bot in the admin UI and link it to:
 - Your Bitbucket Git Integration
 - Your AI Integration (e.g., Anthropic)
 
-> **Note**: For Bitbucket, the bot's **Username** field has no effect — the bot's identity comes from the email configured on the Git Integration. Entries in the bot's **User whitelist** must be Bitbucket nicknames.
+> **Note**: For Bitbucket, the Git Integration's **Username** is the Atlassian account email, and the bot's identity is the account behind it (resolved via the API). Entries in the bot's **User whitelist** must be Bitbucket nicknames.
 
 Note the **Webhook Secret** that is generated — you'll need this for the next step.
 

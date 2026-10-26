@@ -25,7 +25,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class GiteaClientFactoryTest {
+class RepositoryApiClientFactoryTest {
 
     @Mock
     private GitIntegrationService integrationService;
@@ -37,7 +37,7 @@ class GiteaClientFactoryTest {
     private RestClient restClient;
 
     @InjectMocks
-    private GiteaClientFactory factory;
+    private RepositoryApiClientFactory factory;
 
     @BeforeEach
     void setUp() {

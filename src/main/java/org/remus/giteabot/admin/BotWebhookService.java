@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
-import org.remus.giteabot.gitea.model.WebhookPayload;
+import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
@@ -36,7 +36,7 @@ import java.util.Set;
  * <p>
  * This is the bridge between the admin data model and the code-review / agent
  * services.  Each bot gets its own {@link AiClient} (via {@link AiClientFactory})
- * and its own {@link RepositoryApiClient} (via {@link GiteaClientFactory}).
+ * and its own {@link RepositoryApiClient} (via {@link RepositoryApiClientFactory}).
  * <p>
  * PR events are delegated to the {@link PrWorkflowOrchestrator}, issue events
  * (assignments and comments, including follow-ups on agent-created PRs) to the
@@ -47,7 +47,7 @@ import java.util.Set;
 @Service
 public class BotWebhookService {
 
-    private final GiteaClientFactory giteaClientFactory;
+    private final RepositoryApiClientFactory repositoryApiClientFactory;
     private final AgentSessionService agentSessionService;
     private final BotService botService;
     private final PrWorkflowOrchestrator prWorkflowOrchestrator;
@@ -60,7 +60,7 @@ public class BotWebhookService {
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
-    public BotWebhookService(GiteaClientFactory giteaClientFactory,
+    public BotWebhookService(RepositoryApiClientFactory repositoryApiClientFactory,
                              AgentSessionService agentSessionService,
                              BotService botService,
                              PrWorkflowOrchestrator prWorkflowOrchestrator,
@@ -72,7 +72,7 @@ public class BotWebhookService {
                              I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
-        this.giteaClientFactory = giteaClientFactory;
+        this.repositoryApiClientFactory = repositoryApiClientFactory;
         this.agentSessionService = agentSessionService;
         this.botService = botService;
         this.prWorkflowOrchestrator = prWorkflowOrchestrator;
@@ -131,7 +131,7 @@ public class BotWebhookService {
             if (IssueWorkflowOrchestrator.enabledWorkflowKeys(bot, workflowSelectionService).isEmpty()) {
                 return;
             }
-            giteaClientFactory.getApiClient(bot.getGitIntegration())
+            repositoryApiClientFactory.getApiClient(bot.getGitIntegration())
                     .addIssueReaction(owner, repo, issueNumber, Reactions.EYES);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to issue #{}: {}: {}",
@@ -161,7 +161,7 @@ public class BotWebhookService {
             if (PrWorkflowOrchestrator.enabledWorkflowKeys(bot, workflowSelectionService).isEmpty()) {
                 return;
             }
-            giteaClientFactory.getApiClient(bot.getGitIntegration())
+            repositoryApiClientFactory.getApiClient(bot.getGitIntegration())
                     .addPullRequestReaction(owner, repo, pullNumber, Reactions.EYES);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to PR #{}: {}: {}",
@@ -528,9 +528,9 @@ public class BotWebhookService {
             // individual workflow implementations check that the issue is assigned to
             // the bot, so treat this creation event as a virtual assignment to this bot.
             WebhookPayload.Issue issue = payload.getIssue();
-            if (issue != null && bot.getUsername() != null && !bot.getUsername().isBlank()) {
+            if (issue != null) {
                 WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-                assignee.setLogin(bot.getUsername());
+                assignee.setLogin(bot.getGitIntegration().getUsername());
                 issue.setAssignee(assignee);
             }
             try {
@@ -645,9 +645,9 @@ public class BotWebhookService {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         try {
-            RepositoryApiClient client = giteaClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
             String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, client));
-            client.postIssueComment(owner, repo, prNumber, body);
+            client.postPullRequestComment(owner, repo, prNumber, body);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to post unrecognised-command reply on PR #{}: {}",
                     bot.getName(), prNumber, e.getMessage());
@@ -670,7 +670,7 @@ public class BotWebhookService {
                     bot.getName(), e.getMessage());
             return "bot";
         }
-        return bot.getUsername() == null ? "bot" : bot.getUsername();
+        return bot.getGitIntegration().getUsername();
     }
 
     private String buildUnrecognisedCommandReply(Bot bot, String mention) {
@@ -821,10 +821,7 @@ public class BotWebhookService {
      * Checks whether the webhook event was triggered by this bot's own user.
      */
     public boolean isBotUser(Bot bot, WebhookPayload payload) {
-        String botUsername = bot.getUsername();
-        if (botUsername == null || botUsername.isBlank()) {
-            return false;
-        }
+        String botUsername = bot.getGitIntegration().getUsername();
 
         if (payload.getSender() != null && botUsername.equalsIgnoreCase(payload.getSender().getLogin())) {
             return true;
@@ -836,15 +833,11 @@ public class BotWebhookService {
     }
 
     /**
-     * Returns the bot alias used for @-mention detection,
-     * or an empty string if the bot has no username configured.
+     * Returns the bot alias used for @-mention detection, i.e. {@code @} followed by
+     * the username configured on the bot's Git integration.
      */
     public String getBotAlias(Bot bot) {
-        String username = bot.getUsername();
-        if (username == null || username.isBlank()) {
-            return "";
-        }
-        return "@" + username;
+        return "@" + bot.getGitIntegration().getUsername();
     }
 
     public boolean isPullRequestAuthor(WebhookPayload payload) {
