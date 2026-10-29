@@ -1,0 +1,89 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "baseBranches": [
+    "develop"
+  ],
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(build)",
+    ":timezone(Europe/Berlin)"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
+  "rebaseWhen": "behind-base-branch",
+  "rangeStrategy": "replace",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "security"
+    ],
+    "schedule": [
+      "at any time"
+    ]
+  },
+  "osvVulnerabilityAlerts": true,
+  "packageRules": [
+    {
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "groupName": "Spring Boot",
+      "matchPackageNames": [
+        "org.springframework.boot:**"
+      ]
+    },
+    {
+      "groupName": "Spring AI",
+      "matchPackageNames": [
+        "org.springframework.ai:**"
+      ]
+    },
+    {
+      "groupName": "Spring Framework",
+      "matchPackageNames": [
+        "org.springframework:**"
+      ]
+    },
+    {
+      "groupName": "GitHub Actions",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "automerge": true
+    },
+    {
+      "groupName": "Container base images",
+      "matchDatasources": [
+        "docker"
+      ]
+    },
+    {
+      "groupName": "Maven plugins",
+      "matchManagers": [
+        "maven"
+      ],
+      "matchDepTypes": [
+        "plugin"
+      ]
+    }
+  ]
+}

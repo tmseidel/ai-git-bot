@@ -1,0 +1,53 @@
+name: Dependency vulnerability scan (OSV)
+
+# Security gate for third-party dependencies.
+#
+# Two jobs on purpose:
+#   * pull_request -> report only (SARIF + annotations). Non-blocking while the
+#     existing baseline of known findings is still being burned down, so it never
+#     litters unrelated PRs with red checks.
+#   * schedule / push to develop / manual -> blocking. A red scheduled run is the
+#     signal that a dependency has become vulnerable since the last build.
+#
+# Flip `fail-on-vuln` for the pull_request job to `true` once
+# `osv-scanner scan source -r .` is clean on develop.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  push:
+    branches:
+      - develop
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+jobs:
+  scan-report:
+    name: OSV scan (report)
+    if: github.event_name == 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.7.0
+    with:
+      scan-args: |-
+        --recursive
+        --config=osv-scanner.toml
+        ./
+      fail-on-vuln: false
+
+  scan-blocking:
+    name: OSV scan (blocking)
+    if: github.event_name != 'pull_request'
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@v2.7.0
+    with:
+      scan-args: |-
+        --recursive
+        --config=osv-scanner.toml
+        ./
+      fail-on-vuln: true

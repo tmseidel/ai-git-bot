@@ -1,6 +1,6 @@
 name: Guard main branch
 
-# Ensures that only release/* or hotfix/* branches with a non-SNAPSHOT
+# Ensures that only release/*, hotfix/*, renovate/* or dependabot/* branches with a non-SNAPSHOT
 # version in the Maven POM can be merged into `main`. Runs on every pull
 # request that targets `main` and fails fast if either guard is violated.
 #
@@ -28,8 +28,14 @@ jobs:
         run: |
           set -euo pipefail
           echo "Source branch: '${HEAD_REF}'"
+          # Dependency bots are exempt: blocking them would mean patching a
+          # vulnerability has to wait for the next release train.
+          if [[ "${HEAD_REF}" =~ ^(renovate|dependabot)/ ]]; then
+            echo "OK: '${HEAD_REF}' is a dependency bot branch, exempt from the release flow."
+            exit 0
+          fi
           if [[ ! "${HEAD_REF}" =~ ^(release|hotfix)/ ]]; then
-            echo "::error::Only branches starting with 'release/' or 'hotfix/' may be merged into 'main'."
+            echo "::error::Only branches starting with 'release/', 'hotfix/', 'renovate/' or 'dependabot/' may be merged into 'main'."
             echo "::error::Got '${HEAD_REF}'. Rename your branch or target a different base."
             exit 1
           fi
