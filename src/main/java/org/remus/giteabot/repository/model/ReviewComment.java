@@ -20,4 +20,10 @@ public interface ReviewComment {
     Integer getLine();
 
     String getUserLogin();
+
+    /**
+     * The author's stable account id, or {@code null} when the provider does not send one.
+     * Comparable with {@link GitUser#id()}.
+     */
+    String getUserId();
 }

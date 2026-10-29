@@ -35,7 +35,10 @@
                         <tbody>
                             <tr th:each="integration : ${integrations}">
                                 <td th:text="${integration.name}"></td>
-                                <td th:text="${integration.username}"></td>
+                                <td th:with="gitUsername=${gitUsernames[integration.id]}">
+                                    <span th:if="${gitUsername}" th:text="${gitUsername}"></span>
+                                    <span th:unless="${gitUsername}" class="text-muted" th:title="#{help.git.usernameUnresolved}">&mdash;</span>
+                                </td>
                                 <td>
                                     <span class="badge bg-secondary" th:text="${integration.providerType}"></span>
                                 </td>

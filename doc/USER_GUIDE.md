@@ -258,7 +258,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `gitea` | `https://gitea.example.com` | API Token |
      | `github` | `https://github.com` | Personal Access Token (PAT) |
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
-     | `bitbucket` | `https://bitbucket.org` | Atlassian account email + API token |
+     | `bitbucket` | `https://bitbucket.org` | Atlassian account API token |
      | `azure_devops` | `https://dev.azure.com` | Personal Access Token (PAT) |
      
     - **URL**: The Git server URL:
@@ -266,11 +266,12 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
-     - For Azure DevOps: `https://dev.azure.com` (Services), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
-    - **Username**: The username of the Git account the bot acts as (e.g. `ai_bot`) — not an e-mail address or display name. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). It applies to every bot that uses this integration. For Bitbucket Cloud, enter the **Atlassian account email** instead (see below).
+     - For Azure DevOps: `https://dev.azure.com` (Services, token for all accessible organizations), `https://dev.azure.com/yourorg` (Services, one organization), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.
 3. Click **Save**
+
+The bot acts as the account the token belongs to. Its username is read from the provider with the token and cached for 5 minutes (`giteabot.git-user.cache-ttl`), so renaming the account on the provider is picked up without editing the integration. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). If it cannot be read, webhook events are ignored and the failure is shown as the bot's **Last Error**. Saving the integration reads it right away and confirms the account. The username is shown in the Git integration and bot lists and on the dashboard; it is read for every integration at startup, and a dash means it has not been resolved yet.
 
 ### Provider-Specific Notes
 
@@ -305,9 +306,9 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 
 #### Bitbucket Cloud
 
-- API calls use Basic authentication with the Atlassian account email and an API token (`email:api_token`); Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
+- API calls use Bearer authentication with an Atlassian account API token; Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
 - Only Atlassian account API tokens are supported for now; workspace/project/repository access tokens are not.
-- The bot's identity (reviewer requests, mentions, own comments) is the account behind the configured email, resolved via the API. Use a dedicated Atlassian account: all events created by that account are ignored
+- The bot's identity (reviewer requests, mentions, own comments) is the account behind the token, resolved via the API. Use a dedicated Atlassian account: all events created by that account are ignored
 - API endpoint is at `api.bitbucket.org/2.0`
 - Issue-based agent workflows (coding and writer) are not available
 - See [Bitbucket Setup](BITBUCKET_SETUP.md) for token creation instructions

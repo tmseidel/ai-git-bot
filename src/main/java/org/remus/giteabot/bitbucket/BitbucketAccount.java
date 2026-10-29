@@ -16,7 +16,6 @@ import java.util.Map;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record BitbucketAccount(
-        @Nullable String uuid,
         @JsonProperty("account_id") @Nullable String accountId,
         @Nullable String nickname,
         @JsonProperty("display_name") @Nullable String displayName
@@ -24,7 +23,6 @@ public record BitbucketAccount(
 
     /** Treats blank values like missing ones, so an empty id never matches another account. */
     public BitbucketAccount {
-        uuid = blankToNull(uuid);
         accountId = blankToNull(accountId);
         nickname = blankToNull(nickname);
         displayName = blankToNull(displayName);

@@ -1,6 +1,7 @@
 package org.remus.giteabot.github;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.github.model.GitHubAuthenticatedUser;
 import org.remus.giteabot.github.model.GitHubCommit;
 import org.remus.giteabot.github.model.GitHubPullRequest;
 import org.remus.giteabot.github.model.GitHubReview;
@@ -12,6 +13,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
@@ -51,6 +53,15 @@ public class GitHubApiClient implements RepositoryApiClient {
     @Override
     public RepositoryCredentials getCredentials() {
         return credentials;
+    }
+
+    @Override
+    public GitUser getAuthenticatedUser() {
+        GitHubAuthenticatedUser user = restClient.get().uri("/user").retrieve().body(GitHubAuthenticatedUser.class);
+        if (user == null) {
+            throw new IllegalStateException("GitHub returned no authenticated user");
+        }
+        return user.toGitUser();
     }
 
     @Override

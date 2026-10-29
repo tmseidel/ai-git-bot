@@ -39,6 +39,15 @@ public class BitbucketReviewComment implements ReviewComment {
         return user != null ? user.getDisplayName() : null;
     }
 
+    /** Same precedence as {@code BitbucketApiClient#getAuthenticatedUser}: account id, else uuid. */
+    @Override
+    public String getUserId() {
+        if (user == null) {
+            return null;
+        }
+        return user.getAccountId() != null ? user.getAccountId() : user.getUuid();
+    }
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BitbucketContent {

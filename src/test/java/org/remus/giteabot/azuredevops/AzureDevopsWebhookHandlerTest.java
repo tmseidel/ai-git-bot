@@ -7,6 +7,7 @@ import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.GitUser;
 
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,9 @@ class AzureDevopsWebhookHandlerTest {
     private BotWebhookService botWebhookService;
     private RepositoryApiClientFactory repositoryApiClientFactory;
     private AzureDevopsWebhookHandler handler;
+    /** The bot's identity id as webhook payloads carry it: in upper case. */
+    private static final String BOT_ID = "30F57FF1-D0F8-48D9-B000-1FBDCDCC2CC6";
+
     private Bot bot;
 
     @BeforeEach
@@ -36,7 +40,6 @@ class AzureDevopsWebhookHandlerTest {
 
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://dev.azure.com/contoso");
-        integration.setUsername("bot@contoso.com");
 
         bot = new Bot();
         bot.setId(1L);
@@ -44,8 +47,9 @@ class AzureDevopsWebhookHandlerTest {
         bot.setRunOnPrCreation(true);
         bot.setGitIntegration(integration);
 
-        when(botWebhookService.isBotUser(any(), any())).thenReturn(false);
-        when(botWebhookService.getBotAlias(any())).thenReturn("@bot");
+        // connectionData reports the identity id in lower case, payloads use upper case.
+        when(botWebhookService.resolveGitUser(any()))
+                .thenReturn(new GitUser(BOT_ID.toLowerCase(), "bot", "AI Bot", null));
     }
 
     @Test
@@ -77,11 +81,40 @@ class AzureDevopsWebhookHandlerTest {
     }
 
     @Test
-    void eventFromBotItself_isIgnored() {
-        when(botWebhookService.isBotUser(any(), any())).thenReturn(true);
+    void commentMentioningTheBotsIdentityId_isRewrittenToItsNameAndHandled() {
+        var response = handler.handleWebhook(bot, commentPayload("@<" + BOT_ID + "> rerun-tests"));
 
+        assertEquals("command received", response.getBody());
+        var captor = org.mockito.ArgumentCaptor.forClass(WebhookPayload.class);
+        verify(botWebhookService).handleBotCommand(eq(bot), captor.capture());
+        assertEquals("@AI_Bot rerun-tests", captor.getValue().getComment().getBody());
+    }
+
+    @Test
+    void commentMentioningSomebodyElse_isIgnored() {
+        var response = handler.handleWebhook(bot, commentPayload("@<11111111-2222-3333-4444-555555555555> hi"));
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).handleBotCommand(any(), any());
+    }
+
+    @Test
+    void commentByTheBot_isIgnored() {
+        Map<String, Object> payload = commentPayload("@<" + BOT_ID + "> rerun-tests");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> comment = new java.util.HashMap<>(
+                (Map<String, Object>) ((Map<String, Object>) payload.get("resource")).get("comment"));
+        comment.put("author", Map.of("uniqueName", "bot@contoso.com", "id", BOT_ID));
+
+        assertEquals("ignored", handler.handleWebhook(bot, withResource(payload, "comment", comment)).getBody());
+        verify(botWebhookService, never()).handleBotCommand(any(), any());
+    }
+
+    @Test
+    void eventFromBotItself_isIgnored() {
         assertEquals("ignored",
-                handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.created"))
+                handler.handleWebhook(bot, withResource(pullRequestPayload("git.pullrequest.created"),
+                                "createdBy", Map.of("uniqueName", "bot@contoso.com", "id", BOT_ID)))
                         .getBody());
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
@@ -256,7 +289,7 @@ class AzureDevopsWebhookHandlerTest {
 
         var response = handler.handleWebhook(bot, withResource(
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "reviewers",
-                List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 10))));
+                List.of(Map.of("uniqueName", "bot@contoso.com", "id", BOT_ID, "vote", 10))));
 
         assertEquals("ignored", response.getBody());
         verify(botWebhookService, times(1)).reviewPullRequest(any(), any());
@@ -271,7 +304,7 @@ class AzureDevopsWebhookHandlerTest {
 
         var response = handler.handleWebhook(bot, withResource(
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "reviewers",
-                List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 0))));
+                List.of(Map.of("uniqueName", "bot@contoso.com", "id", BOT_ID, "vote", 0))));
 
         assertEquals("review triggered", response.getBody());
     }
@@ -441,7 +474,34 @@ class AzureDevopsWebhookHandlerTest {
     private static Map<String, Object> pullRequestPayloadWithReviewers(String eventType, String sha,
                                                                        String... uniqueNames) {
         return withResource(pullRequestPayloadWithHeadSha(eventType, sha), "reviewers",
-                java.util.Arrays.stream(uniqueNames).map(name -> Map.of("uniqueName", name)).toList());
+                java.util.Arrays.stream(uniqueNames).map(name -> Map.of("uniqueName", name, "id", idOf(name))).toList());
+    }
+
+    /** The bot's identity id for its uniqueName, an arbitrary one for everybody else. */
+    private static String idOf(String uniqueName) {
+        return "bot@contoso.com".equals(uniqueName) ? BOT_ID : "id-" + uniqueName;
+    }
+
+    private static Map<String, Object> commentPayload(String content) {
+        return Map.of("eventType", "ms.vss-code.git-pullrequest-comment-event",
+                "resource", Map.of(
+                        "comment", Map.of("id", 7,
+                                "content", content,
+                                "author", Map.of("uniqueName", "dev@contoso.com", "id", "id-dev")),
+                        "pullRequest", Map.of(
+                                "pullRequestId", 42,
+                                "title", "Add feature",
+                                "sourceRefName", "refs/heads/feature",
+                                "targetRefName", "refs/heads/main",
+                                "createdBy", Map.of("uniqueName", "dev@contoso.com", "id", "id-dev"),
+                                "repository", Map.of("name", "my-service",
+                                        "project", Map.of("name", "MyProject"),
+                                        "url", "https://dev.azure.com/contoso/"
+                                                + "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/_apis/git/"
+                                                + "repositories/my-service"))),
+                "resourceContainers", Map.of(
+                        "collection", Map.of("id", "c12d0eb8-e382-443b-9f9c-c52cba5014c2",
+                                "baseUrl", "https://dev.azure.com/contoso/")));
     }
 
     private static Map<String, Object> pullRequestPayloadWithoutReviewers(String eventType, String sha) {

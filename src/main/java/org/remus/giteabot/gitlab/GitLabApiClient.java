@@ -1,6 +1,7 @@
 package org.remus.giteabot.gitlab;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.gitlab.model.GitLabAuthenticatedUser;
 import org.remus.giteabot.gitlab.model.GitLabCommit;
 import org.remus.giteabot.gitlab.model.GitLabReview;
 import org.remus.giteabot.gitlab.model.GitLabReviewComment;
@@ -13,6 +14,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
@@ -59,6 +61,16 @@ public class GitLabApiClient implements RepositoryApiClient {
     @Override
     public RepositoryCredentials getCredentials() {
         return credentials;
+    }
+
+    @Override
+    public GitUser getAuthenticatedUser() {
+        GitLabAuthenticatedUser user = gitlabRestClient.get().uri("/api/v4/user")
+                .retrieve().body(GitLabAuthenticatedUser.class);
+        if (user == null) {
+            throw new IllegalStateException("GitLab returned no authenticated user");
+        }
+        return user.toGitUser();
     }
 
     @Override

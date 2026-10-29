@@ -6,9 +6,11 @@ import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -20,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
@@ -136,7 +139,6 @@ class BitbucketApiClientTest {
         assertEquals(new BitbucketAccount("{bot-uuid}", "557058:bot", "ai-bot", "AI Bot"), account);
         assertSame(account, client.getAuthenticatedAccount());
         assertEquals("@{557058:bot}", account.mention());
-        assertEquals(java.util.Optional.of("AI Bot"), client.getBotMentionName());
         server.verify();
     }
 
@@ -210,5 +212,46 @@ class BitbucketApiClientTest {
         assertEquals(1, comments.size());
         assertEquals(301, ((Number) comments.getFirst().get("id")).intValue());
         assertInstanceOf(Map.class, comments.getFirst().get("content"));
+    }
+
+    @Test
+    void getAuthenticatedUser_usesNicknameAndPrimaryEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"nickname\":\"ai-bot\","
+                        + "\"display_name\":\"AI Bot\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withSuccess("{\"values\":[{\"email\":\"old@example.com\",\"is_primary\":false},"
+                        + "{\"email\":\"bot@example.com\",\"is_primary\":true}]}", MediaType.APPLICATION_JSON));
+
+        GitUser user = new BitbucketApiClient(builder.build(), creds()).getAuthenticatedUser();
+
+        assertEquals(new GitUser("557058:abc", "ai-bot", "AI Bot", "bot@example.com"), user);
+        server.verify();
+    }
+
+    @Test
+    void getBotMentionName_usesTheDisplayNameElseTheUsername() {
+        BitbucketApiClient client = new BitbucketApiClient(RestClient.builder().build(), creds());
+
+        assertEquals("AI Bot", client.getBotMentionName(new GitUser("557058:abc", "ai-bot", "AI Bot", null)));
+        assertEquals("ai-bot", client.getBotMentionName(new GitUser("557058:abc", "ai-bot", null, null)));
+    }
+
+    @Test
+    void getAuthenticatedUser_leavesEmailOutWhenTheTokenMayNotReadIt() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"display_name\":\"AI Bot\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        GitUser user = new BitbucketApiClient(builder.build(), creds()).getAuthenticatedUser();
+
+        assertEquals(new GitUser("557058:abc", "AI Bot", "AI Bot", null), user);
+        server.verify();
     }
 }

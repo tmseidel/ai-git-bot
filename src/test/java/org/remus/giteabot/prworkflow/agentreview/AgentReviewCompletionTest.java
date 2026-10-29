@@ -104,7 +104,7 @@ class AgentReviewCompletionTest {
         config.getBudget().setMaxRounds(3);
         ToolCatalog catalog = new ToolCatalog(config);
         service = new AgentReviewService(
-                new AgentReviewContext(repositoryClient, aiClient, "Review the change.", "bot",
+                new AgentReviewContext(repositoryClient, aiClient, "Review the change.",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, workspaceService), catalog, workspaceService,

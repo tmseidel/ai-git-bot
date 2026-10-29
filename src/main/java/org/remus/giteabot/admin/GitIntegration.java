@@ -40,14 +40,6 @@ public class GitIntegration {
     @Column(nullable = false)
     private String url;
 
-    /**
-     * A string used to identify the user for the provider.
-     * For most providers, this is the username used with the API token for REST API calls and git operations.
-     * Bitbucket Cloud: the Atlassian account e-mail used with the API token for REST API calls.
-     */
-    @Column(nullable = false)
-    private String username;
-
     @Column(length = 1000)
     @ToString.Exclude
     private String token;

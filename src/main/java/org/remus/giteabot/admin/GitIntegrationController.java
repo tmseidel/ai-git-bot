@@ -23,12 +23,15 @@ public class GitIntegrationController {
 
     private final GitIntegrationService gitIntegrationService;
     private final GiteaSshSetupService giteaSshSetupService;
+    private final GitUserService gitUserService;
     private final MessageSource messageSource;
 
     public GitIntegrationController(GitIntegrationService gitIntegrationService,
-                                    GiteaSshSetupService giteaSshSetupService, MessageSource messageSource) {
+                                    GiteaSshSetupService giteaSshSetupService, GitUserService gitUserService,
+                                    MessageSource messageSource) {
         this.gitIntegrationService = gitIntegrationService;
         this.giteaSshSetupService = giteaSshSetupService;
+        this.gitUserService = gitUserService;
         this.messageSource = messageSource;
     }
 
@@ -36,6 +39,7 @@ public class GitIntegrationController {
     public String list(Model model) {
         List<GitIntegration> integrations = gitIntegrationService.findAll();
         model.addAttribute("integrations", integrations);
+        model.addAttribute("gitUsernames", gitUserService.findCachedUsernames(integrations));
         model.addAttribute("activeNav", "git-integrations");
         return "git-integrations/list";
     }
@@ -165,8 +169,8 @@ public class GitIntegrationController {
                     clearSshCredentials = true;
                 }
             }
-            gitIntegrationService.save(integration, clearToken, clearSshCredentials);
-            redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.gitSaved", null, LocaleContextHolder.getLocale()));
+            GitIntegration saved = gitIntegrationService.save(integration, clearToken, clearSshCredentials);
+            addSavedMessage(saved, redirectAttributes);
         } catch (OptimisticLockException | OptimisticLockingFailureException e) {
             log.warn("Rejected stale save for Git Integration {}: {}", integration.getId(), e.getMessage());
             addStaleVersionError(redirectAttributes);
@@ -226,6 +230,24 @@ public class GitIntegrationController {
                     LocaleContextHolder.getLocale()));
         }
         return "redirect:/git-integrations";
+    }
+
+    /**
+     * Confirms the save with the account the token authenticates as. The integration is saved
+     * either way; when the account cannot be resolved, the plain confirmation is shown.
+     */
+    private void addSavedMessage(GitIntegration saved, RedirectAttributes redirectAttributes) {
+        try {
+            String username = gitUserService.getGitUser(saved).username();
+            redirectAttributes.addFlashAttribute("success", messageSource.getMessage(
+                    "flash.gitSavedAs", new Object[]{username}, LocaleContextHolder.getLocale()));
+        } catch (RuntimeException e) {
+            // Like the other failures here, the provider's message stays out of the log and the
+            // flash message, since it may quote the response body.
+            log.warn("Saved the Git Integration, but could not resolve its Git user ({})", e.getClass().getSimpleName());
+            redirectAttributes.addFlashAttribute("success", messageSource.getMessage(
+                    "flash.gitSaved", null, LocaleContextHolder.getLocale()));
+        }
     }
 
     /** Flash message for a stale optimistic-lock version: reload and retry rather than a generic failure. */

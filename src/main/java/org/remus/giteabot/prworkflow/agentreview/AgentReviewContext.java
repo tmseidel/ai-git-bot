@@ -11,7 +11,6 @@ public record AgentReviewContext(
         RepositoryApiClient repositoryClient,
         AiClient aiClient,
         String reviewAgentSystemPrompt,
-        String botUsername,
         McpConfiguration mcpConfiguration,
         McpToolCatalog mcpToolCatalog,
         Set<String> allowedBuiltinTools,

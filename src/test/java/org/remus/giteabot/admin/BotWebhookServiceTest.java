@@ -25,6 +25,7 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.session.SessionService;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
@@ -52,9 +53,11 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
@@ -67,6 +70,7 @@ class BotWebhookServiceTest {
 
     @Mock private AiClientFactory aiClientFactory;
     @Mock private RepositoryApiClientFactory repositoryApiClientFactory;
+    @Mock private GitUserService gitUserService;
     @Mock private PromptService promptService;
     @Mock private SessionService sessionService;
     @Mock private AgentConfigProperties agentConfig;
@@ -103,6 +107,7 @@ class BotWebhookServiceTest {
         // This legacy-only fixture keeps its String scripts through the default typed fallback.
         lenient().when(aiClient.chatWithTools(any(), any(), eq(java.util.List.of()), any(), any(), any()))
                 .thenCallRealMethod();
+        lenient().when(repositoryApiClient.getBotMentionName(any())).thenCallRealMethod();
         // Real catalog – classification taxonomy is no longer mocked through TES.
         org.remus.giteabot.agent.tools.ToolCatalog toolCatalog =
                 new org.remus.giteabot.agent.tools.ToolCatalog(new AgentConfigProperties());
@@ -110,7 +115,7 @@ class BotWebhookServiceTest {
         // orchestrator, which resolves workflows from the bot's issue-assigned
         // configuration. Workflows and factory are real; the collaborators
         // underneath stay mocked.
-        AgentServiceFactory agentServiceFactory = new AgentServiceFactory(aiClientFactory,
+        AgentServiceFactory agentServiceFactory = new AgentServiceFactory(aiClientFactory, gitUserService,
                 repositoryApiClientFactory, promptService, agentConfig, agentSessionService,
                 toolExecutionService, toolCatalog, workspaceService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService, null);
@@ -122,7 +127,7 @@ class BotWebhookServiceTest {
                 new org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator(
                         issueWorkflowRegistry, workflowSelectionService, botService, eventHookPublisher,
                         retryNotices, commentAcknowledgement, new AiIntegrationConcurrencyLimiter());
-        botWebhookService = new BotWebhookService(repositoryApiClientFactory,
+        botWebhookService = new BotWebhookService(repositoryApiClientFactory, gitUserService,
                 agentSessionService, botService,
                 prWorkflowOrchestrator, e2eTestPrCloseHandler,
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
@@ -174,7 +179,7 @@ class BotWebhookServiceTest {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
                             repositoryApiClient, aiClient, sessionService,
-                            b.getGitIntegration().getUsername(), new ReviewConfigProperties(),
+                            gitUserService.getGitUser(b.getGitIntegration()), new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
                             120000, 8, 60000, "");
@@ -190,31 +195,30 @@ class BotWebhookServiceTest {
 
     // ---- isBotUser tests ----
 
+    private static final GitUser BOT_USER = new GitUser("17", "ai_bot", null, null);
+
     @Test
     void isBotUser_senderMatchesBotUsername_returnsTrue() {
-        Bot bot = createBot("test-bot", "ai_bot");
         WebhookPayload payload = new WebhookPayload();
         WebhookPayload.Owner sender = new WebhookPayload.Owner();
         sender.setLogin("ai_bot");
         payload.setSender(sender);
 
-        assertTrue(botWebhookService.isBotUser(bot, payload));
+        assertTrue(botWebhookService.isBotUser(BOT_USER, payload));
     }
 
     @Test
     void isBotUser_senderDoesNotMatch_returnsFalse() {
-        Bot bot = createBot("test-bot", "ai_bot");
         WebhookPayload payload = new WebhookPayload();
         WebhookPayload.Owner sender = new WebhookPayload.Owner();
         sender.setLogin("human_user");
         payload.setSender(sender);
 
-        assertFalse(botWebhookService.isBotUser(bot, payload));
+        assertFalse(botWebhookService.isBotUser(BOT_USER, payload));
     }
 
     @Test
     void isBotUser_commentUserMatchesBotUsername_returnsTrue() {
-        Bot bot = createBot("test-bot", "ai_bot");
         WebhookPayload payload = new WebhookPayload();
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
         WebhookPayload.Owner user = new WebhookPayload.Owner();
@@ -222,15 +226,71 @@ class BotWebhookServiceTest {
         comment.setUser(user);
         payload.setComment(comment);
 
-        assertTrue(botWebhookService.isBotUser(bot, payload));
+        assertTrue(botWebhookService.isBotUser(BOT_USER, payload));
+    }
+
+    @Test
+    void isBotUser_senderWithTheBotsIdButAnOldLogin_returnsTrue() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("ai_bot_before_rename");
+        sender.setId("17");
+        payload.setSender(sender);
+
+        assertTrue(botWebhookService.isBotUser(BOT_USER, payload));
+    }
+
+    @Test
+    void isBotUser_senderWithTheBotsLoginButAnotherId_returnsFalse() {
+        // Another account took over the bot's former login.
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("ai_bot");
+        sender.setId("42");
+        payload.setSender(sender);
+
+        assertFalse(botWebhookService.isBotUser(BOT_USER, payload));
+    }
+
+    @Test
+    void isBotUser_commentUserWithTheBotsId_returnsTrue() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        WebhookPayload.Owner user = new WebhookPayload.Owner();
+        user.setLogin("someone_else");
+        user.setId("17");
+        comment.setUser(user);
+        payload.setComment(comment);
+
+        assertTrue(botWebhookService.isBotUser(BOT_USER, payload));
+    }
+
+    @Test
+    void isBotUser_botWithoutId_comparesTheLogin() {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Owner sender = new WebhookPayload.Owner();
+        sender.setLogin("ai_bot");
+        sender.setId("42");
+        payload.setSender(sender);
+
+        assertTrue(botWebhookService.isBotUser(new GitUser(null, "ai_bot", null, null), payload));
     }
 
     // ---- getBotAlias tests ----
 
     @Test
     void getBotAlias_returnsMentionFormat() {
+        assertEquals("@ai_bot", botWebhookService.getBotAlias("ai_bot"));
+    }
+
+    @Test
+    void resolveGitUser_recordsErrorWhenTheProviderCannotTell() {
         Bot bot = createBot("test-bot", "ai_bot");
-        assertEquals("@ai_bot", botWebhookService.getBotAlias(bot));
+        when(gitUserService.getGitUser(same(bot.getGitIntegration())))
+                .thenThrow(new IllegalStateException("Could not determine the Git user"));
+
+        assertNull(botWebhookService.resolveGitUser(bot));
+        verify(botService).recordError(bot, "Could not determine the Git user");
     }
 
     @Test
@@ -1235,12 +1295,30 @@ class BotWebhookServiceTest {
         }
 
         @Test
+        void unrecognisedCommandReply_usesBotUsernameByDefault() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postPullRequestComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@claude_bot rerun-tests`");
+        }
+
+        @Test
         void unrecognisedCommandReply_usesProviderMentionNameOverBotUsername() {
             when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
                     .thenReturn(Optional.empty());
             when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
                     .thenReturn(Optional.empty());
-            when(repositoryApiClient.getBotMentionName()).thenReturn(Optional.of("AI Bot"));
+            // doReturn: when(...) would invoke the real default method (stubbed in setUp) with null.
+            doReturn("AI Bot").when(repositoryApiClient).getBotMentionName(any());
 
             Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
                     java.util.List.of("e2e-test"));
@@ -1258,10 +1336,9 @@ class BotWebhookServiceTest {
                     .thenReturn(Optional.empty());
             when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
                     .thenReturn(Optional.empty());
-            when(repositoryApiClient.getBotMentionName()).thenThrow(new IllegalStateException("401"));
-
             Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
                     java.util.List.of("e2e-test"));
+            when(gitUserService.getGitUser(same(bot.getGitIntegration()))).thenThrow(new IllegalStateException("401"));
 
             botWebhookService.handlePrComment(bot, prCommentPayload);
 
@@ -1755,8 +1832,9 @@ class BotWebhookServiceTest {
         Bot bot = new Bot();
         bot.setName(name);
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername(username);
         bot.setGitIntegration(gitIntegration);
+        lenient().when(gitUserService.getBotUsername(same(bot))).thenReturn(username);
+        lenient().when(gitUserService.getGitUser(same(gitIntegration))).thenReturn(new GitUser(null, username, null, null));
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);
         systemPrompt.setReviewSystemPrompt("Review prompt");

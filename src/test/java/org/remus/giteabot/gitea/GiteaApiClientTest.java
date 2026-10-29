@@ -10,6 +10,7 @@ import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -521,6 +522,21 @@ class GiteaApiClientTest {
 
         client.addIssueReaction("owner", "repo", 12L, "eyes");
 
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_readsLoginFullNameAndEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v1/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":17,\"login\":\"ai_bot\",\"full_name\":\"AI Bot\","
+                        + "\"email\":\"bot@example.com\"}", MediaType.APPLICATION_JSON));
+
+        GitUser user = new GiteaApiClient(builder.build(), CREDS).getAuthenticatedUser();
+
+        assertEquals(new GitUser("17", "ai_bot", "AI Bot", "bot@example.com"), user);
         server.verify();
     }
 }

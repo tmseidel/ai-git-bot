@@ -43,10 +43,6 @@ async function createGitIntegration(page: any, uniqueName: string) {
   await tokenInput.waitFor({ state: 'visible', timeout: 30_000 });
   await tokenInput.fill('initial-token');
 
-  const username = page.locator('#username').first();
-  await username.waitFor({ state: 'visible', timeout: 30_000 });
-  await username.fill('ai-git-bot');
-
   const submit = page.locator('button[type="submit"]:has-text("Save")').first();
   await submit.waitFor({ state: 'visible', timeout: 30_000 });
   await submit.click();

@@ -4,6 +4,7 @@ import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
 import java.util.Set;
@@ -21,7 +22,7 @@ public record IssueImplementationContext(
         RepositoryApiClient repositoryClient,
         AiClient aiClient,
         String issueAgentSystemPrompt,
-        String botUsername,
+        GitUser botUser,
         McpOrchestrationService mcpOrchestrationService,
         McpConfiguration mcpConfiguration,
         McpToolCatalog mcpToolCatalog,

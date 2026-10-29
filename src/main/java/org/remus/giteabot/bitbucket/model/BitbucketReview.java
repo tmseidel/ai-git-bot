@@ -51,5 +51,8 @@ public class BitbucketReview implements Review {
         private String nickname;
 
         private String uuid;
+
+        @JsonProperty("account_id")
+        private String accountId;
     }
 }

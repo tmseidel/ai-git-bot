@@ -48,7 +48,6 @@ class BitbucketWebhookHandlerTest {
     void setUp() {
         handler = new BitbucketWebhookHandler(botWebhookService, repositoryApiClientFactory, botService);
         GitIntegration integration = new GitIntegration();
-        integration.setUsername("bot@example.com");
         bot = new Bot();
         bot.setName("test-bot");
         bot.setGitIntegration(integration);

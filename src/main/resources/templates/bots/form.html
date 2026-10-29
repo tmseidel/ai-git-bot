@@ -69,7 +69,8 @@
                             <select class="form-select" id="gitIntegrationId" name="gitIntegrationId" required>
                                 <option value="" th:text="#{message.selectGitIntegration}">Select a Git integration...</option>
                                 <option th:each="git : ${gitIntegrations}"
-                                        th:value="${git.id}" th:text="|${git.name} (${git.username})|"
+                                        th:value="${git.id}"
+                                        th:text="${gitUsernames[git.id] != null} ? |${git.name} (${gitUsernames[git.id]})| : ${git.name}"
                                         th:selected="${bot.gitIntegration != null and bot.gitIntegration.id == git.id}">
                                 </option>
                             </select>

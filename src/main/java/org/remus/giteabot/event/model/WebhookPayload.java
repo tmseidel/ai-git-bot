@@ -68,6 +68,11 @@ public class WebhookPayload {
     @Data
     public static class Owner {
         private String login;
+        /**
+         * Stable account id (Gitea, GitHub, GitLab: the numeric user id; Azure DevOps: the identity
+         * GUID); {@code null} when the payload carries none.
+         */
+        private String id;
         /** Reviewer vote (Azure DevOps only); {@code null} when the payload carries none. */
         private Integer vote;
     }

@@ -11,4 +11,6 @@ import lombok.Data;
 public class IdentityRef {
     private String displayName;
     private String uniqueName;
+    /** The identity GUID. */
+    private String id;
 }

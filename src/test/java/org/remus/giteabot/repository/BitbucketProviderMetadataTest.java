@@ -110,11 +110,10 @@ class BitbucketProviderMetadataTest {
     }
 
     @Test
-    void createCredentials_usesStaticGitUsernameInsteadOfEmail() {
+    void createCredentials_usesStaticGitUsername() {
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://bitbucket.org");
         integration.setProviderType(RepositoryType.BITBUCKET);
-        integration.setUsername("bot@example.com");
 
         RepositoryCredentials credentials = metadata.createCredentials(integration, "api-token");
 
