@@ -6,6 +6,7 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -25,6 +26,7 @@ import static org.mockito.Mockito.when;
  * deletes, unless the delete is flushed first.
  */
 @SpringBootTest
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 class McpToolSelectionServiceIntegrationTest {
 
@@ -39,6 +41,28 @@ class McpToolSelectionServiceIntegrationTest {
 
     @MockitoBean
     private McpOrchestrationService mcpOrchestrationService;
+
+    @Test
+    void ordinarySelectionDoesNotApproveButExplicitApprovalSurvivesReplacement() {
+        McpConfiguration configuration = new McpConfiguration();
+        configuration.setName("itest-mcp-explicit-approval");
+        configuration.setJsonContent("[{\"name\":\"github\",\"url\":\"https://example.test/mcp\"}]");
+        Long id = mcpConfigurationRepository.save(configuration).getId();
+        String name = "mcp:github:get_commit";
+        when(mcpOrchestrationService.discoverTools(any(McpConfiguration.class))).thenReturn(new McpToolCatalog(List.of(
+                new McpToolDefinition("github", "get_commit", "get_commit", "desc", Map.of(), name))));
+
+        service.saveSelection(id, List.of(name));
+        assertTrue(service.readReviewReadOnlyApprovals(configuration,
+                mcpOrchestrationService.discoverTools(configuration)).isEmpty());
+
+        service.saveSelection(id, List.of(name), List.of(name), List.of(), service.loadSelectionSnapshot(id).approvalCandidates());
+        var approved = service.readReviewReadOnlyApprovals(configuration, mcpOrchestrationService.discoverTools(configuration));
+        assertEquals(1, approved.size());
+        service.saveSelection(id, List.of(name));
+        assertEquals(approved, service.readReviewReadOnlyApprovals(configuration,
+                mcpOrchestrationService.discoverTools(configuration)));
+    }
 
     @Test
     void saveSelection_savingAgainWithOverlappingSelection_persistsWithoutUniqueViolation() {
