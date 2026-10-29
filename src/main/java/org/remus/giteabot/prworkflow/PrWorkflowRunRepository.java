@@ -1,13 +1,23 @@
 package org.remus.giteabot.prworkflow;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Long> {
+
+    /** Serializes required completion/audit/outbox writers within the caller's transaction. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT r FROM PrWorkflowRun r WHERE r.id = :id")
+    Optional<PrWorkflowRun> findByIdForUpdate(@Param("id") Long id);
 
     List<PrWorkflowRun> findByBotIdAndRepoOwnerAndRepoNameAndPrNumberAndWorkflowKeyAndStatusIn(
             Long botId,
@@ -33,4 +43,3 @@ public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Lo
      */
     List<PrWorkflowRun> findByFollowUpPrNumberIsNotNullAndFinishedAtBefore(Instant cutoff);
 }
-

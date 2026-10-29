@@ -20,7 +20,8 @@ import java.time.Instant;
 @Data
 @NoArgsConstructor
 @Entity
-@Table(name = "event_hook_delivery")
+@Table(name = "event_hook_delivery", uniqueConstraints =
+        @UniqueConstraint(name = "uk_event_hook_delivery_endpoint_event", columnNames = {"endpoint_id", "event_key"}))
 public class EventHookDelivery {
 
     @Id
@@ -31,12 +32,16 @@ public class EventHookDelivery {
     @Column(nullable = false, length = 36)
     private String deliveryUuid;
 
-    @Column(nullable = false)
+    @Column(name = "endpoint_id", nullable = false)
     private Long endpointId;
 
     /** Wire value of the event type, e.g. {@code prworkflow.completed}. */
     @Column(nullable = false, length = 80)
     private String eventType;
+
+    /** Stable logical event key for required deliveries; null for legacy publications. */
+    @Column(name = "event_key", length = 256)
+    private String eventKey;
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String payloadJson;

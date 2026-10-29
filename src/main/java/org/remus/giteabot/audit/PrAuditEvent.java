@@ -31,6 +31,10 @@ public class PrAuditEvent {
     @Column(name = "event_type", nullable = false, length = 64)
     private AuditEventType eventType;
 
+    /** Null for legacy best-effort events. Required events use a stable run-scoped key. */
+    @Column(name = "event_key", length = 256, unique = true)
+    private String eventKey;
+
     @Column(name = "event_timestamp", nullable = false)
     @Builder.Default
     private Instant eventTimestamp = Instant.now();
