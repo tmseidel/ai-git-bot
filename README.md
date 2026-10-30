@@ -438,6 +438,39 @@ Then:
 6. Configure the webhook
 7. You're done
 
+### Preconfigured start (from a configuration document)
+
+Instead of clicking through the admin UI, an instance can boot from a configuration
+document. The generator on **[gitbot.eu/trial](https://gitbot.eu/trial)** builds that
+document in your browser from the AI provider, Git platform and workflows you pick, and
+hands you a `docker-compose.yml` that carries it as `APP_CONFIG_JSON` — together with the
+exact webhook URL and secret to paste into your repository. Nothing you type there leaves
+the browser.
+
+The document is a projection of the entity model: one array per configuration table
+(`adminUsers`, `aiIntegrations`, `gitIntegrations`, `workflowConfigurations`, `bots`, and
+the optional `systemPrompts`, `botToolConfigurations`, `mcpConfigurations`,
+`deploymentTargets`, `eventHookEndpoints`), using the entities' own field names. There is
+no separate schema to learn or keep in sync.
+
+- It is applied **only into an empty database** — no admin user exists yet. On a
+  throw-away instance (in-memory H2) that is every start; on a persistent instance it is
+  the first start of an empty volume and never again, so a restart can never overwrite
+  what you changed in the UI.
+- Rows whose unique name already exists are kept, which is how the seeded `Default`
+  prompt, tool configuration and workflow configurations stay authoritative.
+- Credentials are plaintext in the document and encrypted at rest on import
+  (`APP_ENCRYPTION_KEY`).
+- `GET /config/export` returns the current instance in the same shape — use it to turn a
+  UI-configured instance into a document.
+
+Set `APP_CONFIG_JSON` (inline) or `APP_CONFIG_FILE` (path) to use it; leave both unset and
+the instance behaves exactly as before — you create the administrator account, the AI and
+Git integrations and the bot in the admin UI. With a document, the admin UI shows a banner
+that states which situation applies: rebuilt from the document on every start, initialised
+once into an empty database, or document present but ignored because the database already
+holds data.
+
 ### Production deployment
 
 For a configured production or long-term deployment, we recommend the Docker Compose approach, which gives you full control over configuration:

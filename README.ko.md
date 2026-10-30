@@ -429,6 +429,34 @@ docker run -p 8080:8080 tmseidel/ai-git-bot:latest
 6. webhook 설정
 7. 완료
 
+### 설정 문서로 시작하기
+
+관리 UI를 직접 클릭하는 대신, 인스턴스를 설정 문서에서 시작할 수 있습니다.
+**[gitbot.eu/trial](https://gitbot.eu/trial)** 생성기는 선택한 AI 제공자, Git 플랫폼,
+워크플로로부터 브라우저에서 문서를 만들고, 이를 `APP_CONFIG_JSON`으로 담은
+`docker-compose.yml`과 저장소에 붙여 넣을 웹훅 URL·시크릿을 함께 출력합니다. 입력한 값은
+브라우저를 벗어나지 않습니다.
+
+문서는 엔티티 모델의 투영입니다. 설정 테이블마다 배열이 하나씩 있고
+(`adminUsers`, `aiIntegrations`, `gitIntegrations`, `workflowConfigurations`, `bots`, 그리고
+선택적인 `systemPrompts`, `botToolConfigurations`, `mcpConfigurations`, `deploymentTargets`,
+`eventHookEndpoints`), 필드 이름은 엔티티의 이름을 그대로 사용합니다. 따로 배우거나 동기화해야
+하는 스키마는 없습니다.
+
+- 문서는 **빈 데이터베이스에만** 적용됩니다. 즉 아직 관리 사용자가 없는 상태입니다.
+  일회용 인스턴스(인메모리 H2)에서는 매 시작 시, 영구 인스턴스에서는 빈 볼륨의 첫 시작 시에만
+  적용되고 그 이후에는 적용되지 않습니다. 따라서 재시작이 UI에서 바꾼 내용을 덮어쓰지 않습니다.
+- 고유 이름이 이미 존재하는 행은 유지됩니다. 시드된 `Default` 프롬프트, 도구 구성,
+  워크플로 구성이 우선하는 방식입니다.
+- 자격 증명은 문서에서는 평문이고, 가져올 때 암호화되어 저장됩니다(`APP_ENCRYPTION_KEY`).
+- `GET /config/export`는 현재 인스턴스를 같은 형식으로 반환합니다. UI로 구성한 인스턴스를
+  문서로 바꿀 때 사용합니다.
+
+`APP_CONFIG_JSON`(인라인) 또는 `APP_CONFIG_FILE`(경로)을 설정하면 사용할 수 있습니다.
+둘 다 설정하지 않으면 동작은 지금과 완전히 같습니다. 관리자 계정과 AI·Git 통합, 봇은 관리 UI에서
+만듭니다. 문서를 설정하면 관리 UI의 배너가 매 시작 시 문서에서 재구성되는지, 빈 데이터베이스에
+한 번만 초기화되었는지, 아니면 데이터베이스에 이미 데이터가 있어 무시되었는지를 알려 줍니다.
+
 ### 프로덕션 배포
 
 설정된 프로덕션 또는 장기 배포의 경우, 구성에 대한 완전한 제어 권한을 제공하는 Docker Compose 접근 방식을 권장합니다:

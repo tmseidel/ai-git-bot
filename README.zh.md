@@ -425,6 +425,29 @@ docker run -p 8080:8080 tmseidel/ai-git-bot:latest
 6. 配置 webhook
 7. 完成
 
+### 从配置文档启动
+
+除了在管理界面中逐项操作，实例也可以直接从配置文档启动。
+**[gitbot.eu/trial](https://gitbot.eu/trial)** 的生成器在浏览器内根据所选的 AI 提供商、
+Git 平台与工作流生成该文档，并输出包含 `APP_CONFIG_JSON` 的 `docker-compose.yml`，以及要粘贴
+到仓库中的 Webhook 地址与密钥。输入的凭据不会离开浏览器。
+
+文档就是实体模型的投影：每个配置表对应一个数组（`adminUsers`、`aiIntegrations`、
+`gitIntegrations`、`workflowConfigurations`、`bots`，以及可选的 `systemPrompts`、
+`botToolConfigurations`、`mcpConfigurations`、`deploymentTargets`、`eventHookEndpoints`），
+字段名与实体完全一致，因此不需要单独的模式定义来学习或同步。
+
+- 只有在**空数据库**（尚不存在管理员用户）时才会应用。一次性实例（内存 H2）在每次启动时
+  应用；持久实例仅在空数据卷的首次启动时应用，之后不再应用，因此重启不会覆盖在界面中做的修改。
+- 唯一名称已存在的行会被保留，种子数据中的 `Default` 提示词、工具配置与工作流配置因此保持权威。
+- 凭据在文档中是明文，导入时按存储加密（`APP_ENCRYPTION_KEY`）。
+- `GET /config/export` 以相同格式返回当前实例，用于把在界面中配置好的实例转换为文档。
+
+设置 `APP_CONFIG_JSON`（内联）或 `APP_CONFIG_FILE`（路径）即可启用。两者都不设置时，行为与以前
+完全一致：管理员账户、AI 与 Git 集成、机器人都由管理界面创建。设置了文档后，管理界面的横幅会
+说明实例处于哪种状态：每次启动都从文档重建、仅在空数据库上初始化过一次，还是因数据库已有数据
+而忽略该文档。
+
 ### 生产部署
 
 对于经过配置的生产或长期部署，我们推荐使用 Docker Compose 方式，以便对配置拥有完全控制权：

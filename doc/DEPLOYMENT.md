@@ -92,6 +92,49 @@ volumes:
 | `DATABASE_USERNAME` | Database username (default: `giteabot`) |
 | `DATABASE_PASSWORD` | Database password |
 
+### Configuration Document (Optional)
+
+Boot an instance from a configuration document instead of clicking through the admin UI.
+The generator on [gitbot.eu/trial](https://gitbot.eu/trial) writes one, together with a
+compose file that sets these variables.
+
+| Variable | Description |
+|----------|-------------|
+| `APP_CONFIG_JSON` | The document itself, inline (a YAML literal block in a compose file). |
+| `APP_CONFIG_FILE` | Path to the document. Wins over `APP_CONFIG_JSON` when both are set. |
+
+Without either variable the application behaves exactly as before: the administrator account,
+the AI and Git integrations and the bot are created in the admin UI, and no banner appears.
+With a document, these rules apply:
+
+- The import runs **only while no admin user exists**, i.e. only into an empty database.
+  On an in-memory database (`jdbc:h2:mem:…`) that is every start; on a persistent database
+  it is the first start of an empty volume and never again. A restart therefore cannot
+  overwrite changes made in the UI.
+- The document is the entity model — one array per configuration table, entities with
+  their own field names, `@ManyToOne` references as `{"name": …}`. Unknown keys are
+  ignored, so an older image tolerates a newer generator.
+- Rows whose unique name already exists are kept. That is how the seeded `Default` system
+  prompt, the default tool configuration and the seeded workflow configurations stay
+  authoritative; a document cannot override them.
+- `adminUsers` entries carry a plaintext `password` (hashed on import). An entry without a
+  password is skipped with a warning — exported documents never contain one.
+- Credentials are plaintext in the document and encrypted on import
+  (`APP_ENCRYPTION_KEY`); the document itself is a secret file. Remove the variable after
+  the first start.
+- `workflowConfigurations[*].selectedWorkflows[*].workflowKey` is validated against the
+  registered workflows of that kind; an unknown key fails the import instead of silently
+  disabling a workflow.
+- `eventHookEndpoints[*].botId` is an internal reference and is dropped on import; a
+  restored endpoint is not bound to a bot.
+- `GET /config/export` (authenticated, admin UI session) returns the running instance in
+  the same shape.
+
+A failure is logged at ERROR and never aborts the container: the instance starts
+unconfigured and `/setup` remains available. The admin UI shows a banner stating whether
+the document is applied on every start (in-memory database), was applied once
+(persistent), or is present but ignored because the database already has data.
+
 ### Secret References (Optional)
 
 Configuration fields that support [secret references](SECRET_REFERENCES.md) can pull values from the environment with `${env:NAME}` instead of holding the credential itself. Only explicitly whitelisted variables are readable:
