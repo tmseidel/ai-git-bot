@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentBudget;
 import org.remus.giteabot.agent.loop.AgentLoop;
@@ -201,7 +202,7 @@ class ReviewRoundBudgetReminderTest {
                 null, Set.of("cat"), new AiResponseParser(), new BranchSwitcher(mock(ToolExecutionService.class)),
                 (owner, repo, ref, files) -> fileContent, scenario.maxContextRounds(), scenario.maxToolRounds());
         var session = new AgentSession("owner", "repo", 76L, "Review example");
-        var context = new AgentRunContext(session, "owner", "repo", 76L, Path.of("/tmp/ws"), "main");
+        var context = new AgentRunContext(session, "owner", "repo", 76L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         var loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                 new AgentBudget(scenario.maxRounds(), scenario.maxContextRounds(), 2, 4000, 8000, 120000, 200000, 0.7));
         return loop.run(context, "Review the change", strategy);

@@ -20,6 +20,7 @@ import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
@@ -31,7 +32,6 @@ import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 
-import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -210,7 +210,7 @@ public class AgentReviewService {
         ReviewProgress progress = enableProgressComments
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
         boolean completed = false;
-        Path workspaceDir = null;
+        Workspace workspace = null;
         try {
             if (progress != null) {
                 progress.start();
@@ -226,7 +226,7 @@ public class AgentReviewService {
                                 + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
-            workspaceDir = wsResult.workspacePath();
+            workspace = wsResult.workspace();
 
             String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
             String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
@@ -234,7 +234,7 @@ public class AgentReviewService {
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
+                    workspace, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
                     runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {
@@ -284,8 +284,8 @@ public class AgentReviewService {
             return ReviewResult.FAILED;
         } finally {
             try {
-                if (workspaceDir != null) {
-                    workspaceService.cleanupWorkspace(workspaceDir);
+                if (workspace != null) {
+                    workspace.close();
                 }
             } finally {
                 if (progress != null) {
@@ -330,7 +330,7 @@ public class AgentReviewService {
         ReviewProgress progress = enableProgressComments
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
         boolean completed = false;
-        Path workspaceDir = null;
+        Workspace workspace = null;
         try {
             if (progress != null) {
                 progress.start();
@@ -346,7 +346,7 @@ public class AgentReviewService {
                                 + "could not be answered. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
-            workspaceDir = wsResult.workspacePath();
+            workspace = wsResult.workspace();
 
             String systemPrompt = resolveSystemPrompt(false, null);
             String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary, userQuestion);
@@ -355,7 +355,7 @@ public class AgentReviewService {
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage,
+                    workspace, headBranch, systemPrompt, userMessage,
                     maxToolRounds, diffSummary, null, null, progress);
 
             if (!outcome.success()) {
@@ -382,8 +382,8 @@ public class AgentReviewService {
             return ReviewResult.FAILED;
         } finally {
             try {
-                if (workspaceDir != null) {
-                    workspaceService.cleanupWorkspace(workspaceDir);
+                if (workspace != null) {
+                    workspace.close();
                 }
             } finally {
                 if (progress != null) {
@@ -645,7 +645,7 @@ public class AgentReviewService {
     }
 
     private LoopOutcome runReviewLoop(AgentSession session, String owner, String repo, Long prNumber,
-                                      Path workspaceDir, String headBranch,
+                                      Workspace workspace, String headBranch,
                                       String systemPrompt, String userMessage, int maxToolRounds,
                                       DiffSummary diffSummary, Long runId,
                                       Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
@@ -665,7 +665,7 @@ public class AgentReviewService {
                 context.contextWindowTokens(), budgetCfg.getProactiveCompactionThreshold());
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspaceDir, headBranch);
+        AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspace, headBranch);
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
         ctx.setProgressConsumer(progressConsumer);

@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.e2e.promotion;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
@@ -47,11 +48,14 @@ class SuitePromotionServiceTest {
     private SuitePromotionService service;
 
     private Path workspace;
+    private Workspace managedWorkspace;
 
     @BeforeEach
     void setUp(@TempDir Path tmp) throws IOException {
         workspace = Files.createDirectories(tmp.resolve("ws"));
         workspaceService = mock(WorkspaceService.class);
+        managedWorkspace = mock(Workspace.class);
+        when(managedWorkspace.path()).thenReturn(workspace);
         RepositoryApiClientFactory repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
         PrWorkflowRunRepository runRepository = mock(PrWorkflowRunRepository.class);
         repoClient = mock(RepositoryApiClient.class);
@@ -60,12 +64,12 @@ class SuitePromotionServiceTest {
         when(repoClient.getDefaultBranch(anyString(), anyString())).thenReturn("main");
         when(workspaceService.prepareWorkspace(any(RepositoryApiClient.class),
                 anyString(), anyString(), anyString(), any()))
-                .thenReturn(WorkspaceResult.success(workspace));
+                .thenReturn(WorkspaceResult.success(managedWorkspace));
         when(workspaceService.preparePullRequestWorkspace(any(RepositoryApiClient.class),
                 anyString(), anyString(), anyString(), any(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK)))
-                .thenReturn(WorkspaceResult.success(workspace));
-        lenient().when(workspaceService.commitAndPush(any(), anyString(), anyString(), anyBoolean()))
+                .thenReturn(WorkspaceResult.success(managedWorkspace));
+        lenient().when(managedWorkspace.commitAndPush(anyString(), anyString(), anyBoolean()))
                 .thenReturn(true);
         lenient().when(runRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -106,7 +110,7 @@ class SuitePromotionServiceTest {
         assertThat(workspace.resolve("tests/e2e/pr-7/login.spec.ts")).exists();
         verify(workspaceService).prepareWorkspace(
                 repoClient, "acme", "web", "feature/login", 7L);
-        verify(workspaceService).commitAndPush(eq(workspace), eq(expectedBranch),
+        verify(managedWorkspace).commitAndPush(eq(expectedBranch),
                 anyString(), eq(true));
     }
 
@@ -171,7 +175,7 @@ class SuitePromotionServiceTest {
         verify(workspaceService).preparePullRequestWorkspace(
                 repoClient, "acme", "web", "feature/x", 3L,
                 PullRequestWorkspaceMode.PUSH_BACK);
-        verify(workspaceService).commitAndPush(eq(workspace), eq("feature/x"),
+        verify(managedWorkspace).commitAndPush(eq("feature/x"),
                 anyString(), eq(false));
         verify(repoClient, never()).createPullRequest(any(), any(), any(), any(), any(), any());
         // Idempotency: COMMIT_TO_PR records parent prNumber so a re-run no-ops.
@@ -206,8 +210,7 @@ class SuitePromotionServiceTest {
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         verify(workspaceService, never()).prepareWorkspace(any(), any(), any(), any(), any());
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -264,7 +267,7 @@ class SuitePromotionServiceTest {
 
     @Test
     void pushFailure_surfacesAsOutcomeFailure_andDoesNotOpenPr() {
-        when(workspaceService.commitAndPush(any(), anyString(), anyString(), anyBoolean())).thenReturn(false);
+        when(managedWorkspace.commitAndPush(anyString(), anyString(), anyBoolean())).thenReturn(false);
 
         PrTestSuite suite = suite(SuiteLifecycleMode.OFFER_AS_PR, 7L,
                 caseAt("login.spec.ts", "// hi"));
@@ -286,8 +289,7 @@ class SuitePromotionServiceTest {
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         assertThat(out.message()).contains("write");
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -303,8 +305,7 @@ class SuitePromotionServiceTest {
 
         assertThat(out.kind()).isEqualTo(SuitePromotionService.Outcome.Kind.FAILED);
         assertThat(out.message()).contains("write");
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
     }
 
     @Test

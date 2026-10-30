@@ -9,6 +9,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.loop.AgentRunContext;
@@ -78,6 +79,7 @@ class AgentReviewCompletionTest {
     @Mock private AiClient aiClient;
     @Mock private RepositoryApiClient repositoryClient;
     @Mock private WorkspaceService workspaceService;
+    @Mock private Workspace workspace;
     @Mock private EventHookPublisher eventHooks;
 
     private AgentReviewService service;
@@ -107,13 +109,14 @@ class AgentReviewCompletionTest {
                 new AgentReviewContext(repositoryClient, aiClient, "Review the change.", "bot",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
-                new ToolExecutionService(config, catalog, workspaceService), catalog, workspaceService,
+                new ToolExecutionService(config, catalog), catalog, workspaceService,
                 config, null, new Bot(), eventHooks, null);
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
         when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
         lenient().when(workspaceService.preparePullRequestWorkspace(repositoryClient, "owner", "repo",
                         "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
-                .thenReturn(WorkspaceResult.success(WORKSPACE));
+                .thenReturn(WorkspaceResult.success(workspace));
+        lenient().when(workspace.path()).thenReturn(WORKSPACE);
     }
 
     @ParameterizedTest
@@ -278,7 +281,7 @@ class AgentReviewCompletionTest {
         verify(repositoryClient, never()).postReviewComment(anyString(), anyString(), anyLong(), anyString());
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(), anyString());
         verifyNoInteractions(eventHooks);
-        verify(workspaceService).cleanupWorkspace(WORKSPACE);
+        verify(workspace).close();
     }
 
     @ParameterizedTest
@@ -339,7 +342,7 @@ class AgentReviewCompletionTest {
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
                 argThat(body -> body.contains("No correctness issues found.") && !body.contains("Let me check")),
                 eq(PostReviewAction.NONE));
-        verify(workspaceService).cleanupWorkspace(WORKSPACE);
+        verify(workspace).close();
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(), anyString());
         verify(repositoryClient, never()).updatePullRequestComment(anyString(), anyString(), anyLong(), any(CommentId.class), anyString());
     }

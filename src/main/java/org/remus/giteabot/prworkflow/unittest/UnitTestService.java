@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -106,7 +107,7 @@ public class UnitTestService {
         }
         String headRef = headSha(payload) != null ? headSha(payload) : headBranch;
 
-        Path workspace = null;
+        Workspace workspace = null;
         try {
             context.requireActive("before preparing unit-test workspace");
             WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
@@ -121,9 +122,9 @@ public class UnitTestService {
                                 "failed to prepare workspace: " + ws.error()));
                 return Result.failed("Workspace preparation failed");
             }
-            workspace = ws.workspacePath();
+            workspace = ws.workspace();
 
-            UnitTestFramework framework = resolveFramework(request, workspace);
+            UnitTestFramework framework = resolveFramework(request, workspace.path());
             if (framework == null) {
                 postComment(owner, repo, prNumber,
                         UnitTestSummaryRenderer.renderSkipped(prNumber,
@@ -150,7 +151,7 @@ public class UnitTestService {
             suite = suiteRepository.save(suite);
 
             String kickoff = buildKickoffMessage(owner, repo, headRef, framework, prTitle, prBody, diff);
-            UnitTestToolContext toolContext = new UnitTestToolContext(suite, workspace, framework);
+            UnitTestToolContext toolContext = new UnitTestToolContext(suite, workspace.path(), framework);
             WorkflowToolSurface surface = surfaceFactory.create(context.bot(), repositoryClient,
                     UnitTestAuthorAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
 
@@ -173,7 +174,7 @@ public class UnitTestService {
             boolean committed = false;
             boolean commitFailed = false;
             if (request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR) {
-                if (!workspaceService.hasUncommittedChanges(workspace)) {
+                if (!workspace.hasUncommittedChanges()) {
                     context.appendStep("unit-test-commit", "Commit failed — no workspace changes found");
                     commitFailed = true;
                 } else {
@@ -183,7 +184,7 @@ public class UnitTestService {
                     // framework. If anything outside a test location was touched we
                     // must not push it — the workflow's "production code is never
                     // touched" guarantee takes precedence over committing the tests.
-                    java.util.List<String> offending = workspaceService.listChangedFiles(workspace).stream()
+                    java.util.List<String> offending = workspace.listChangedFiles().stream()
                             .filter(p -> !UnitTestPathGuard.isAllowedTestPath(framework, p))
                             .toList();
                     if (!offending.isEmpty()) {
@@ -193,7 +194,7 @@ public class UnitTestService {
                                 "Commit aborted — non-test files changed: " + offending);
                         commitFailed = true;
                     } else {
-                        committed = workspaceService.commitAndPush(workspace, headBranch,
+                        committed = workspace.commitAndPush(headBranch,
                                 "test: add AI-generated unit tests for PR #" + prNumber, false);
                         context.appendStep("unit-test-commit",
                                 committed ? "Committed generated tests to " + headBranch
@@ -237,12 +238,12 @@ public class UnitTestService {
             return Result.failed(e.getMessage());
         } finally {
             if (workspace != null) {
-                workspaceService.cleanupWorkspace(workspace);
+                workspace.close();
             }
         }
     }
 
-    private UnitTestOutcome runTests(UnitTestSuite suite, Path workspace,
+    private UnitTestOutcome runTests(UnitTestSuite suite, Workspace workspace,
                                      UnitTestFramework framework, int maxRetries) {
         try {
             return runner.run(new UnitTestRunRequest(suite, workspace, framework, maxRetries, null));

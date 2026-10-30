@@ -134,7 +134,7 @@ PR opened ──▶ E2ETestWorkflow ──▶ Planner / Author / Runner
                                        ▼
               WorkspaceService.prepareWorkspace(repo, featureBranch)
               Files.write tests/e2e/pr-{n}/*.spec.ts
-              WorkspaceService.commitAndPush(branch=ai-tests/pr-{n}-r{runId})
+              Workspace.commitAndPush(branch=ai-tests/pr-{n}-r{runId})
               RepositoryApiClient.createPullRequest(title, body,
                                                    head=ai-tests/pr-{n}-r{runId},
                                                    base=featureBranch)

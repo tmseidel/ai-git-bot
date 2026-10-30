@@ -9,7 +9,7 @@ import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import tools.jackson.databind.JsonNode;
 
-import java.nio.file.Path;
+import org.remus.giteabot.agent.validation.Workspace;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -63,7 +63,7 @@ public final class WorkflowToolSurface {
     private final String owner;
     private final String repo;
     private final Long number;
-    private final Path workspace;
+    private final Workspace workspace;
 
     public WorkflowToolSurface(Set<String> workflowTools,
                                ToolCatalog catalog,
@@ -73,7 +73,7 @@ public final class WorkflowToolSurface {
                                String owner,
                                String repo,
                                Long number,
-                               Path workspace) {
+                               Workspace workspace) {
         this.workflowTools = Set.copyOf(workflowTools);
         this.catalog = catalog;
         this.mcpCatalog = mcpCatalog == null ? McpToolCatalog.empty() : mcpCatalog;

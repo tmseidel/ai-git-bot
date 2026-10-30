@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -103,7 +104,7 @@ public class I18nCoverageService {
             return Result.skipped("Unresolved PR head branch");
         }
 
-        Path workspace = null;
+        Workspace workspace = null;
         try {
             if (request.lifecycleMode() == SuiteLifecycleMode.OFFER_AS_PR
                     && workspaceService.isAuthoritativePullRequestFromFork(
@@ -124,7 +125,7 @@ public class I18nCoverageService {
                         "failed to prepare workspace: " + ws.error()));
                 return Result.failed("Workspace preparation failed");
             }
-            workspace = ws.workspacePath();
+            workspace = ws.workspace();
 
             postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderStarting(
                     prNumber, request.includePatterns(), request.baselineLocale(), request.lifecycleMode()));
@@ -135,7 +136,7 @@ public class I18nCoverageService {
 
             // ---- Detection: scan the whole checkout, diff each locale against the baseline.
             I18nCoverageDetector.Report report = I18nCoverageDetector.detect(
-                    workspace, request.includePatterns(), request.baselineLocale());
+                    workspace.path(), request.includePatterns(), request.baselineLocale());
             context.appendStep("i18n-coverage-detect",
                     report.hasGaps()
                             ? report.totalMissingKeys() + " missing / " + report.totalStaleKeys()
@@ -150,9 +151,9 @@ public class I18nCoverageService {
             }
 
             I18nCoverageToolContext toolContext =
-                    new I18nCoverageToolContext(workspace, request.includePatterns());
+                    new I18nCoverageToolContext(workspace.path(), request.includePatterns());
             String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-            String kickoff = buildKickoffMessage(workspace, request, prTitle, prBody, diff, report);
+            String kickoff = buildKickoffMessage(workspace.path(), request, prTitle, prBody, diff, report);
             WorkflowToolSurface surface = surfaceFactory.create(request.context().bot(), repositoryClient,
                     I18nCoverageAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
 
@@ -172,7 +173,7 @@ public class I18nCoverageService {
 
             // Pre-commit guard (defence-in-depth behind the write-time guard):
             // re-verify every changed file is inside the configured i18n scope.
-            List<String> offending = workspaceService.listChangedFiles(workspace).stream()
+            List<String> offending = workspace.listChangedFiles().stream()
                     .filter(p -> !I18nPathGuard.isAllowedI18nPath(request.includePatterns(), p))
                     .toList();
             if (!offending.isEmpty()) {
@@ -197,13 +198,13 @@ public class I18nCoverageService {
             return Result.failed(e.getMessage());
         } finally {
             if (workspace != null) {
-                workspaceService.cleanupWorkspace(workspace);
+                workspace.close();
             }
         }
     }
 
     private Result applyLifecycle(PrWorkflowContext context, String owner, String repo, long prNumber,
-                                  String headBranch, Path workspace, Request request,
+                                  String headBranch, Workspace workspace, Request request,
                                   I18nCoverageToolContext toolContext, I18nCoverageDetector.Report report) {
         SuiteLifecycleMode mode = request.lifecycleMode();
 
@@ -219,7 +220,7 @@ public class I18nCoverageService {
 
         if (mode == SuiteLifecycleMode.OFFER_AS_PR) {
             String workBranch = "ai-i18n/pr-" + prNumber + "-" + System.currentTimeMillis();
-            boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
+            boolean pushed = workspace.commitAndPush(workBranch,
                     "i18n: sync translation coverage for PR #" + prNumber, true);
             if (!pushed) {
                 postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
@@ -250,7 +251,7 @@ public class I18nCoverageService {
         }
 
         // COMMIT_TO_PR (default): commit straight onto the PR head branch.
-        boolean committed = workspaceService.commitAndPush(workspace, headBranch,
+        boolean committed = workspace.commitAndPush(headBranch,
                 "i18n: sync translation coverage for PR #" + prNumber, false);
         postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
                 prNumber, toolContext, report, committed,

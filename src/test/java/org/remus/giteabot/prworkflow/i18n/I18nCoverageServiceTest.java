@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
@@ -37,6 +38,7 @@ class I18nCoverageServiceTest {
 
     private RepositoryApiClient repoClient;
     private WorkspaceService workspaceService;
+    private final Workspace managedWorkspace = org.mockito.Mockito.mock(Workspace.class);
     private I18nCoverageAgent agent;
     private I18nCoverageService service;
 
@@ -117,7 +119,8 @@ class I18nCoverageServiceTest {
         when(workspaceService.preparePullRequestWorkspace(
                 eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK)))
-                .thenReturn(WorkspaceResult.success(ws));
+                .thenReturn(WorkspaceResult.success(managedWorkspace));
+        when(managedWorkspace.path()).thenReturn(ws);
 
         I18nCoverageService.Result result = service.run(
                 request(payloadWithHead("feature/x"), SuiteLifecycleMode.COMMIT_TO_PR));
@@ -125,9 +128,8 @@ class I18nCoverageServiceTest {
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.SUCCESS);
         verify(agent, never()).generate(any(), any(), any(), anyString(), any(), any(), anyString(),
                 org.mockito.ArgumentMatchers.anyInt());
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
-        verify(workspaceService).cleanupWorkspace(ws);
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace).close();
     }
 
     @Test
@@ -154,8 +156,7 @@ class I18nCoverageServiceTest {
 
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.FAILED);
         verify(workspaceService, never()).prepareWorkspace(any(), anyString(), anyString(), anyString(), anyLong());
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -165,7 +166,8 @@ class I18nCoverageServiceTest {
         Files.writeString(workspace.resolve("i18n/messages_de.properties"), "a=1");
         when(workspaceService.prepareWorkspace(
                 repoClient, "acme", "my-repo", "feature/i18n", 42L))
-                .thenReturn(WorkspaceResult.success(workspace));
+                .thenReturn(WorkspaceResult.success(managedWorkspace));
+        when(managedWorkspace.path()).thenReturn(workspace);
         when(repoClient.getPullRequestDiff("acme", "my-repo", 42L)).thenReturn("diff");
         when(agent.generate(any(), any(), any(), anyString(), any(), any(), anyString(),
                 org.mockito.ArgumentMatchers.anyInt())).thenAnswer(invocation -> {
@@ -174,9 +176,9 @@ class I18nCoverageServiceTest {
                     toolContext.recordUpdated("i18n/messages_de.properties");
                     return new I18nCoverageAgent.Result(1, "updated", false);
                 });
-        when(workspaceService.listChangedFiles(workspace))
+        when(managedWorkspace.listChangedFiles())
                 .thenReturn(List.of("i18n/messages_de.properties"));
-        when(workspaceService.commitAndPush(eq(workspace), anyString(), anyString(), eq(true))).thenReturn(true);
+        when(managedWorkspace.commitAndPush(anyString(), anyString(), eq(true))).thenReturn(true);
         when(repoClient.createPullRequest(eq("acme"), eq("my-repo"), anyString(), anyString(),
                 anyString(), eq("feature/i18n"))).thenReturn(null);
 

@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -112,7 +113,7 @@ public class ReadmeSyncService {
             return Result.skipped("Unresolved PR head branch");
         }
 
-        Path workspace = null;
+        Workspace workspace = null;
         String generatedDiff = null;
         try {
             if (request.lifecycleMode() == SuiteLifecycleMode.OFFER_AS_PR
@@ -134,7 +135,7 @@ public class ReadmeSyncService {
                         "failed to prepare workspace: " + ws.error()));
                 return Result.failed("Workspace preparation failed");
             }
-            workspace = ws.workspacePath();
+            workspace = ws.workspace();
 
             postComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderStarting(
                     prNumber, request.includePatterns(), request.lifecycleMode()));
@@ -142,10 +143,10 @@ public class ReadmeSyncService {
                     "Checking documentation drift (patterns=" + request.includePatterns()
                             + ", lifecycle=" + request.lifecycleMode().key() + ")");
 
-            ReadmeSyncToolContext toolContext = new ReadmeSyncToolContext(workspace, request.includePatterns());
+            ReadmeSyncToolContext toolContext = new ReadmeSyncToolContext(workspace.path(), request.includePatterns());
             WorkflowToolSurface surface = surfaceFactory.create(request.context().bot(), repositoryClient,
                     ReadmeSyncAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
-            String kickoff = buildKickoffMessage(workspace, request, prTitle, prBody, diff);
+            String kickoff = buildKickoffMessage(workspace.path(), request, prTitle, prBody, diff);
 
             context.requireActive("before running readme-sync agent");
             ReadmeSyncAgent.Result authored = agent.write(
@@ -163,7 +164,7 @@ public class ReadmeSyncService {
             // Pre-commit guard (defence-in-depth behind the write-time guard):
             // re-verify every changed file is inside the configured documentation
             // scope. If anything else was touched we must not push it.
-            List<String> offending = workspaceService.listChangedFiles(workspace).stream()
+            List<String> offending = workspace.listChangedFiles().stream()
                     .filter(p -> !DocPathGuard.isAllowedDocPath(request.includePatterns(), p))
                     .toList();
             if (!offending.isEmpty()) {
@@ -177,7 +178,7 @@ public class ReadmeSyncService {
             }
 
             if (request.lifecycleMode() != SuiteLifecycleMode.EPHEMERAL) {
-                generatedDiff = workspaceService.stagedDiff(workspace);
+                generatedDiff = workspace.stagedDiff();
             }
             Result result = applyLifecycle(context, owner, repo, prNumber, headBranch, workspace, request, toolContext);
             if (result.status() == Result.Status.FAILED) {
@@ -199,13 +200,13 @@ public class ReadmeSyncService {
             return Result.failed(e.getMessage());
         } finally {
             if (workspace != null) {
-                workspaceService.cleanupWorkspace(workspace);
+                workspace.close();
             }
         }
     }
 
     private Result applyLifecycle(PrWorkflowContext context, String owner, String repo, long prNumber,
-                                  String headBranch, Path workspace, Request request,
+                                  String headBranch, Workspace workspace, Request request,
                                   ReadmeSyncToolContext toolContext) {
         SuiteLifecycleMode mode = request.lifecycleMode();
 
@@ -230,7 +231,7 @@ public class ReadmeSyncService {
 
         if (mode == SuiteLifecycleMode.OFFER_AS_PR) {
             String workBranch = "ai-docs/pr-" + prNumber + "-" + System.currentTimeMillis();
-            boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
+            boolean pushed = workspace.commitAndPush(workBranch,
                     "docs: sync documentation for PR #" + prNumber, true, beforeWrite);
             if (!pushed) {
                 context.appendStep("readme-sync-commit", "commit/push failed for branch " + workBranch);
@@ -260,7 +261,7 @@ public class ReadmeSyncService {
         }
 
         // COMMIT_TO_PR (default): commit straight onto the PR head branch.
-        boolean committed = workspaceService.commitAndPush(workspace, headBranch,
+        boolean committed = workspace.commitAndPush(headBranch,
                 "docs: sync documentation for PR #" + prNumber, false, beforeWrite);
         if (committed) {
             postReviewComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderCompletion(
