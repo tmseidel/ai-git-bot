@@ -128,7 +128,6 @@ public class WriterAgentService {
         AgentSession session = null;
         String baseBranch = issueRef != null && !issueRef.isBlank()
                 ? issueRef : repositoryClient.getDefaultBranch(owner, repo);
-        Workspace workspace = null;
         try {
             session = sessionService.createSession(owner, repo, issueNumber, issueTitle,
                     AgentSession.AgentSessionType.WRITER, issueAuthor);
@@ -146,11 +145,12 @@ public class WriterAgentService {
                                 + wsResult.error());
                 return;
             }
-            workspace = wsResult.workspace();
-            String treeContext = promptBuilder.buildTreeContext(
-                    repositoryClient.getRepositoryTree(owner, repo, baseBranch), maxInitialTreeFiles());
-            runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
-                    promptBuilder.buildInitialPrompt(issueNumber, issueTitle, issueBody, treeContext));
+            try (Workspace workspace = wsResult.workspace()) {
+                String treeContext = promptBuilder.buildTreeContext(
+                        repositoryClient.getRepositoryTree(owner, repo, baseBranch), maxInitialTreeFiles());
+                runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
+                        promptBuilder.buildInitialPrompt(issueNumber, issueTitle, issueBody, treeContext));
+            }
         } catch (DataIntegrityViolationException e) {
             log.info("Writer session was created concurrently for issue #{} in {}/{}", issueNumber, owner, repo);
         } catch (Exception e) {
@@ -158,10 +158,6 @@ public class WriterAgentService {
                     issueNumber, owner, repo, e.getMessage(), e);
             handleWriterFailure(session, owner, repo, issueNumber,
                     AgentSession.AgentSessionStatus.FAILED, e);
-        } finally {
-            if (workspace != null) {
-                workspace.close();
-            }
         }
     }
 
@@ -211,7 +207,6 @@ public class WriterAgentService {
         // rows compaction deleted, which would break the loop with
         // ObjectNotFoundException.
         session = sessionService.compactContextWindow(session.getId());
-        Workspace workspace = null;
         try {
             String baseBranch = resolveBaseBranch(owner, repo, payload, session);
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
@@ -223,18 +218,15 @@ public class WriterAgentService {
                                 + wsResult.error());
                 return;
             }
-            workspace = wsResult.workspace();
-            runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
-                    promptBuilder.buildContinuationPrompt(payload.getComment().getBody()));
+            try (Workspace workspace = wsResult.workspace()) {
+                runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
+                        promptBuilder.buildContinuationPrompt(payload.getComment().getBody()));
+            }
         } catch (Exception e) {
             log.error("Writer failed while handling follow-up for issue #{} in {}/{}: {}",
                     issueNumber, owner, repo, e.getMessage(), e);
             handleWriterFailure(session, owner, repo, issueNumber,
                     AgentSession.AgentSessionStatus.IN_PROGRESS, e);
-        } finally {
-            if (workspace != null) {
-                workspace.close();
-            }
         }
     }
 

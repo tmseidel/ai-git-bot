@@ -145,8 +145,7 @@ public class SuitePromotionService {
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());
         }
-        Workspace workspace = ws.workspace();
-        try {
+        try (Workspace workspace = ws.workspace()) {
             final List<String> writtenPaths;
             try {
                 writtenPaths = writeCases(workspace.path(), targetDir, suite.getCases());
@@ -190,8 +189,6 @@ public class SuitePromotionService {
             log.info("M7 promotion: opened follow-up PR #{} on {}/{} (mode={}, branch={})",
                     followUpPr, repoOwner, repoName, mode, workBranch);
             return Outcome.promoted(followUpPr, workBranch, writtenPaths);
-        } finally {
-            workspace.close();
         }
     }
 

@@ -210,7 +210,6 @@ public class AgentReviewService {
         ReviewProgress progress = enableProgressComments
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
         boolean completed = false;
-        Workspace workspace = null;
         try {
             if (progress != null) {
                 progress.start();
@@ -226,16 +225,17 @@ public class AgentReviewService {
                                 + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
-            workspace = wsResult.workspace();
+            LoopOutcome outcome;
+            try (Workspace workspace = wsResult.workspace()) {
+                String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
+                String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
 
-            String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
-            String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
+                AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
-            AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
-
-            LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspace, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
-                    runId, toolCallConsumer, progress);
+                outcome = runReviewLoop(session, owner, repo, prNumber,
+                        workspace, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
+                        runId, toolCallConsumer, progress);
+            }
 
             if (!outcome.success()) {
                 log.warn("Agentic review for PR #{} failed; no review will be published", prNumber);
@@ -283,14 +283,8 @@ public class AgentReviewService {
                             + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
-            try {
-                if (workspace != null) {
-                    workspace.close();
-                }
-            } finally {
-                if (progress != null) {
-                    progress.finish(completed);
-                }
+            if (progress != null) {
+                progress.finish(completed);
             }
         }
     }
@@ -330,7 +324,6 @@ public class AgentReviewService {
         ReviewProgress progress = enableProgressComments
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
         boolean completed = false;
-        Workspace workspace = null;
         try {
             if (progress != null) {
                 progress.start();
@@ -346,17 +339,18 @@ public class AgentReviewService {
                                 + "could not be answered. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
-            workspace = wsResult.workspace();
+            LoopOutcome outcome;
+            try (Workspace workspace = wsResult.workspace()) {
+                String systemPrompt = resolveSystemPrompt(false, null);
+                String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary, userQuestion);
 
-            String systemPrompt = resolveSystemPrompt(false, null);
-            String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary, userQuestion);
 
+                AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
-            AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
-
-            LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspace, headBranch, systemPrompt, userMessage,
-                    maxToolRounds, diffSummary, null, null, progress);
+                outcome = runReviewLoop(session, owner, repo, prNumber,
+                        workspace, headBranch, systemPrompt, userMessage,
+                        maxToolRounds, diffSummary, null, null, progress);
+            }
 
             if (!outcome.success()) {
                 log.warn("Clarification for PR #{} failed; no answer will be published", prNumber);
@@ -381,14 +375,8 @@ public class AgentReviewService {
                             + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
-            try {
-                if (workspace != null) {
-                    workspace.close();
-                }
-            } finally {
-                if (progress != null) {
-                    progress.finish(completed);
-                }
+            if (progress != null) {
+                progress.finish(completed);
             }
         }
     }

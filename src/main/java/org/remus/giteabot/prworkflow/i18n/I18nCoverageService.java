@@ -104,7 +104,6 @@ public class I18nCoverageService {
             return Result.skipped("Unresolved PR head branch");
         }
 
-        Workspace workspace = null;
         try {
             if (request.lifecycleMode() == SuiteLifecycleMode.OFFER_AS_PR
                     && workspaceService.isAuthoritativePullRequestFromFork(
@@ -125,69 +124,69 @@ public class I18nCoverageService {
                         "failed to prepare workspace: " + ws.error()));
                 return Result.failed("Workspace preparation failed");
             }
-            workspace = ws.workspace();
+            try (Workspace workspace = ws.workspace()) {
+                postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderStarting(
+                        prNumber, request.includePatterns(), request.baselineLocale(), request.lifecycleMode()));
+                context.appendStep("i18n-coverage-start",
+                        "Checking translation coverage (patterns=" + request.includePatterns()
+                                + ", baseline=" + request.baselineLocale()
+                                + ", lifecycle=" + request.lifecycleMode().key() + ")");
 
-            postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderStarting(
-                    prNumber, request.includePatterns(), request.baselineLocale(), request.lifecycleMode()));
-            context.appendStep("i18n-coverage-start",
-                    "Checking translation coverage (patterns=" + request.includePatterns()
-                            + ", baseline=" + request.baselineLocale()
-                            + ", lifecycle=" + request.lifecycleMode().key() + ")");
+                // ---- Detection: scan the whole checkout, diff each locale against the baseline.
+                I18nCoverageDetector.Report report = I18nCoverageDetector.detect(
+                        workspace.path(), request.includePatterns(), request.baselineLocale());
+                context.appendStep("i18n-coverage-detect",
+                        report.hasGaps()
+                                ? report.totalMissingKeys() + " missing / " + report.totalStaleKeys()
+                                        + " stale key(s) across " + report.affectedLocaleFileCount() + " locale file(s)"
+                                : "No coverage gaps detected");
 
-            // ---- Detection: scan the whole checkout, diff each locale against the baseline.
-            I18nCoverageDetector.Report report = I18nCoverageDetector.detect(
-                    workspace.path(), request.includePatterns(), request.baselineLocale());
-            context.appendStep("i18n-coverage-detect",
-                    report.hasGaps()
-                            ? report.totalMissingKeys() + " missing / " + report.totalStaleKeys()
-                                    + " stale key(s) across " + report.affectedLocaleFileCount() + " locale file(s)"
-                            : "No coverage gaps detected");
+                if (!report.hasGaps()) {
+                    postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
+                            prNumber, null, report, false, null,
+                            "All in-scope locale files are already in sync with the baseline."));
+                    return Result.success("No translation coverage gaps detected");
+                }
 
-            if (!report.hasGaps()) {
-                postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
-                        prNumber, null, report, false, null,
-                        "All in-scope locale files are already in sync with the baseline."));
-                return Result.success("No translation coverage gaps detected");
+                I18nCoverageToolContext toolContext =
+                        new I18nCoverageToolContext(workspace.path(), request.includePatterns());
+                String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+                String kickoff = buildKickoffMessage(workspace.path(), request, prTitle, prBody, diff, report);
+                WorkflowToolSurface surface = surfaceFactory.create(request.context().bot(), repositoryClient,
+                        I18nCoverageAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
+
+                context.requireActive("before running i18n-coverage agent");
+                I18nCoverageAgent.Result authored = agent.generate(
+                        aiClient, surface, toolContext, kickoff, systemPrompt,
+                        request.includePatterns(), request.baselineLocale(), request.maxToolRounds());
+
+                if (!toolContext.touchedAnything()) {
+                    postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
+                            prNumber, toolContext, report, false, null, authored.finalAssistantText()));
+                    context.appendStep("i18n-coverage-agent", "Agent produced no translation changes");
+                    return Result.success("No translation changes applied");
+                }
+                context.appendStep("i18n-coverage-agent",
+                        "Applied " + toolContext.changeCount() + " translation change(s)");
+
+                // Pre-commit guard (defence-in-depth behind the write-time guard):
+                // re-verify every changed file is inside the configured i18n scope.
+                List<String> offending = workspace.listChangedFiles().stream()
+                        .filter(p -> !I18nPathGuard.isAllowedI18nPath(request.includePatterns(), p))
+                        .toList();
+                if (!offending.isEmpty()) {
+                    log.warn("Aborting i18n-coverage commit for PR #{}: changed files outside i18n "
+                            + "scope {}: {}", prNumber, request.includePatterns(), offending);
+                    postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderFailed(prNumber,
+                            "the agent touched files outside the configured i18n scope "
+                                    + "(" + offending + ") — no changes were committed."));
+                    context.appendStep("i18n-coverage-commit", "Aborted — out-of-scope files: " + offending);
+                    return Result.failed("Out-of-scope files changed");
+                }
+
+                return applyLifecycle(context, owner, repo, prNumber, headBranch, workspace, request,
+                        toolContext, report);
             }
-
-            I18nCoverageToolContext toolContext =
-                    new I18nCoverageToolContext(workspace.path(), request.includePatterns());
-            String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-            String kickoff = buildKickoffMessage(workspace.path(), request, prTitle, prBody, diff, report);
-            WorkflowToolSurface surface = surfaceFactory.create(request.context().bot(), repositoryClient,
-                    I18nCoverageAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
-
-            context.requireActive("before running i18n-coverage agent");
-            I18nCoverageAgent.Result authored = agent.generate(
-                    aiClient, surface, toolContext, kickoff, systemPrompt,
-                    request.includePatterns(), request.baselineLocale(), request.maxToolRounds());
-
-            if (!toolContext.touchedAnything()) {
-                postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderCompletion(
-                        prNumber, toolContext, report, false, null, authored.finalAssistantText()));
-                context.appendStep("i18n-coverage-agent", "Agent produced no translation changes");
-                return Result.success("No translation changes applied");
-            }
-            context.appendStep("i18n-coverage-agent",
-                    "Applied " + toolContext.changeCount() + " translation change(s)");
-
-            // Pre-commit guard (defence-in-depth behind the write-time guard):
-            // re-verify every changed file is inside the configured i18n scope.
-            List<String> offending = workspace.listChangedFiles().stream()
-                    .filter(p -> !I18nPathGuard.isAllowedI18nPath(request.includePatterns(), p))
-                    .toList();
-            if (!offending.isEmpty()) {
-                log.warn("Aborting i18n-coverage commit for PR #{}: changed files outside i18n "
-                        + "scope {}: {}", prNumber, request.includePatterns(), offending);
-                postReviewComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderFailed(prNumber,
-                        "the agent touched files outside the configured i18n scope "
-                                + "(" + offending + ") — no changes were committed."));
-                context.appendStep("i18n-coverage-commit", "Aborted — out-of-scope files: " + offending);
-                return Result.failed("Out-of-scope files changed");
-            }
-
-            return applyLifecycle(context, owner, repo, prNumber, headBranch, workspace, request,
-                    toolContext, report);
         } catch (WorkflowCancelledException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -196,10 +195,6 @@ public class I18nCoverageService {
             postComment(owner, repo, prNumber, I18nCoverageSummaryRenderer.renderFailed(prNumber,
                     "unexpected error: " + e.getMessage()));
             return Result.failed(e.getMessage());
-        } finally {
-            if (workspace != null) {
-                workspace.close();
-            }
         }
     }
 

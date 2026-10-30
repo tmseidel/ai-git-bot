@@ -156,29 +156,22 @@ public class IssueTriageService {
         String baseBranch = issueRef != null && !issueRef.isBlank()
                 ? issueRef : repoClient.getDefaultBranch(owner, repo);
 
-        Workspace workspace = null;
-        try {
-            WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repoClient, owner, repo, baseBranch, null);
-            if (!wsResult.success()) {
-                postErrorComment(repoClient, owner, repo, issue.getNumber(),
-                        "Issue triage failed: could not prepare the read-only repository context ("
-                                + wsResult.error() + "). No assignment was made.");
-                throw new TriageRoutingException(
-                        "Issue triage could not prepare the workspace: " + wsResult.error());
-            }
-            workspace = wsResult.workspace();
-
+        WorkspaceResult wsResult = workspaceService.prepareWorkspace(
+                repoClient, owner, repo, baseBranch, null);
+        if (!wsResult.success()) {
+            postErrorComment(repoClient, owner, repo, issue.getNumber(),
+                    "Issue triage failed: could not prepare the read-only repository context ("
+                            + wsResult.error() + "). No assignment was made.");
+            throw new TriageRoutingException(
+                    "Issue triage could not prepare the workspace: " + wsResult.error());
+        }
+        try (Workspace workspace = wsResult.workspace()) {
             RoutingDecision decision = runTriageLoop(bot, issue, owner, repo, baseBranch,
                     workspace, aiClient, repoClient, configuredPrompt, allowed);
 
             log.info("[Bot '{}'] Triage routed issue #{} to '{}': {}", bot.getName(), issue.getNumber(),
                     decision.assignee(), decision.reason());
             executeDecision(repoClient, owner, repo, issue.getNumber(), decision);
-        } finally {
-            if (workspace != null) {
-                workspace.close();
-            }
         }
     }
 

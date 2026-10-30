@@ -82,8 +82,6 @@ public class UnitTestService {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         long prNumber = PrPayloadHydrator.resolvePrNumberOrZero(payload);
-        String prTitle = payload.getPullRequest() == null ? null : payload.getPullRequest().getTitle();
-        String prBody = payload.getPullRequest() == null ? null : payload.getPullRequest().getBody();
 
         String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
         if (diff == null || diff.isBlank()) {
@@ -105,9 +103,7 @@ public class UnitTestService {
                             + "to avoid committing tests to the wrong branch."));
             return Result.skipped("Unresolved PR head branch");
         }
-        String headRef = headSha(payload) != null ? headSha(payload) : headBranch;
 
-        Workspace workspace = null;
         try {
             context.requireActive("before preparing unit-test workspace");
             WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
@@ -122,111 +118,9 @@ public class UnitTestService {
                                 "failed to prepare workspace: " + ws.error()));
                 return Result.failed("Workspace preparation failed");
             }
-            workspace = ws.workspace();
-
-            UnitTestFramework framework = resolveFramework(request, workspace.path());
-            if (framework == null) {
-                postComment(owner, repo, prNumber,
-                        UnitTestSummaryRenderer.renderSkipped(prNumber,
-                                "could not detect a supported build/test toolchain "
-                                        + "(maven, gradle, npm, pytest, go, cargo, dotnet, bundle, make, gcc, g++). "
-                                        + "Set the framework explicitly in the workflow configuration."));
-                return Result.skipped("No framework detected");
+            try (Workspace workspace = ws.workspace()) {
+                return generateInWorkspace(workspace, request, owner, repo, prNumber, headBranch, diff);
             }
-
-            postComment(owner, repo, prNumber,
-                    UnitTestSummaryRenderer.renderStarting(prNumber, framework));
-            context.appendStep("unit-test-start",
-                    "Generating unit tests (framework=" + framework.key() + ")");
-
-            // Persist the suite first so the writer tool can attach cases to it.
-            context.requireActive("before persisting unit-test suite");
-            UnitTestSuite suite = new UnitTestSuite();
-            suite.setRunId(context.runId());
-            suite.setPrNumber(prNumber);
-            suite.setFramework(framework);
-            suite.setSourceTreeRef(headSha(payload));
-            suite.setLifecycleMode(request.lifecycleMode());
-            suite.setCreatedAt(Instant.now());
-            suite = suiteRepository.save(suite);
-
-            String kickoff = buildKickoffMessage(owner, repo, headRef, framework, prTitle, prBody, diff);
-            UnitTestToolContext toolContext = new UnitTestToolContext(suite, workspace.path(), framework);
-            WorkflowToolSurface surface = surfaceFactory.create(context.bot(), repositoryClient,
-                    UnitTestAuthorAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
-
-            context.requireActive("before running unit-test author agent");
-            UnitTestAuthorAgent.Result authored = authorAgent.write(
-                    aiClient, surface, toolContext, kickoff, systemPrompt, request.maxTestCases());
-
-            if (!authored.wroteAnything()) {
-                postComment(owner, repo, prNumber,
-                        UnitTestSummaryRenderer.renderFailed(prNumber,
-                                "the author agent did not produce any runnable test files."));
-                context.appendStep("unit-test-author", "No files written");
-                return Result.failed("No tests generated");
-            }
-            context.appendStep("unit-test-author", "Wrote " + authored.filesWritten() + " test file(s)");
-
-            // Commit the freshly written tests onto the PR branch *before* running
-            // them: at this point the working tree only contains the new test
-            // files, so the commit stays clean (no build artefacts).
-            boolean committed = false;
-            boolean commitFailed = false;
-            if (request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR) {
-                if (!workspace.hasUncommittedChanges()) {
-                    context.appendStep("unit-test-commit", "Commit failed — no workspace changes found");
-                    commitFailed = true;
-                } else {
-                    context.requireActive("before committing generated unit tests");
-                    // Pre-commit guard (defence-in-depth behind the write-time guard):
-                    // re-verify every changed file is an allowed test location for the
-                    // framework. If anything outside a test location was touched we
-                    // must not push it — the workflow's "production code is never
-                    // touched" guarantee takes precedence over committing the tests.
-                    java.util.List<String> offending = workspace.listChangedFiles().stream()
-                            .filter(p -> !UnitTestPathGuard.isAllowedTestPath(framework, p))
-                            .toList();
-                    if (!offending.isEmpty()) {
-                        log.warn("Aborting unit-test commit for PR #{}: changed files outside allowed "
-                                + "test locations for {}: {}", prNumber, framework.key(), offending);
-                        context.appendStep("unit-test-commit",
-                                "Commit aborted — non-test files changed: " + offending);
-                        commitFailed = true;
-                    } else {
-                        committed = workspace.commitAndPush(headBranch,
-                                "test: add AI-generated unit tests for PR #" + prNumber, false);
-                        context.appendStep("unit-test-commit",
-                                committed ? "Committed generated tests to " + headBranch
-                                        : "Commit skipped / failed");
-                        commitFailed = !committed;
-                    }
-                }
-            }
-
-            // Run the project's own test runner for the report (after committing,
-            // so build artefacts never pollute the commit).
-            UnitTestOutcome outcome = runTests(suite, workspace, framework, request.maxRetries());
-            context.appendStep("unit-test-run", outcome.status() + " — " + outcome.summary());
-
-            UnitTestSuite withCases = suiteRepository.findByIdWithCases(suite.getId()).orElse(suite);
-            String comment = UnitTestSummaryRenderer.render(withCases, outcome, CoverageResult.unknown());
-            postReviewComment(owner, repo, prNumber, comment);
-
-            if (commitFailed) {
-                return Result.failed("Generated tests could not be committed to the PR branch");
-            }
-
-            return switch (outcome.status()) {
-                case PASSED -> Result.success(
-                        authored.filesWritten() + " test(s) generated and passing"
-                                + (committed ? ", committed to PR" : ""));
-                case FAILED -> Result.success(
-                        authored.filesWritten() + " test(s) generated; " + outcome.failed()
-                                + " failing — review required");
-                case SKIPPED -> Result.skipped(outcome.summary());
-                case ERROR -> Result.failed(outcome.summary());
-            };
         } catch (org.remus.giteabot.prworkflow.WorkflowCancelledException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -236,11 +130,121 @@ public class UnitTestService {
                     UnitTestSummaryRenderer.renderFailed(prNumber,
                             "unexpected error: " + e.getMessage()));
             return Result.failed(e.getMessage());
-        } finally {
-            if (workspace != null) {
-                workspace.close();
+        }
+    }
+
+    /** Authors the tests in the prepared workspace, commits them if requested, and runs them. */
+    private Result generateInWorkspace(Workspace workspace, Request request, String owner, String repo,
+                                       long prNumber, String headBranch, String diff) {
+        PrWorkflowContext context = request.context();
+        WebhookPayload payload = context.payload();
+        String prTitle = payload.getPullRequest() == null ? null : payload.getPullRequest().getTitle();
+        String prBody = payload.getPullRequest() == null ? null : payload.getPullRequest().getBody();
+        String headRef = headSha(payload) != null ? headSha(payload) : headBranch;
+
+        UnitTestFramework framework = resolveFramework(request, workspace.path());
+        if (framework == null) {
+            postComment(owner, repo, prNumber,
+                    UnitTestSummaryRenderer.renderSkipped(prNumber,
+                            "could not detect a supported build/test toolchain "
+                                    + "(maven, gradle, npm, pytest, go, cargo, dotnet, bundle, make, gcc, g++). "
+                                    + "Set the framework explicitly in the workflow configuration."));
+            return Result.skipped("No framework detected");
+        }
+
+        postComment(owner, repo, prNumber,
+                UnitTestSummaryRenderer.renderStarting(prNumber, framework));
+        context.appendStep("unit-test-start",
+                "Generating unit tests (framework=" + framework.key() + ")");
+
+        // Persist the suite first so the writer tool can attach cases to it.
+        context.requireActive("before persisting unit-test suite");
+        UnitTestSuite suite = new UnitTestSuite();
+        suite.setRunId(context.runId());
+        suite.setPrNumber(prNumber);
+        suite.setFramework(framework);
+        suite.setSourceTreeRef(headSha(payload));
+        suite.setLifecycleMode(request.lifecycleMode());
+        suite.setCreatedAt(Instant.now());
+        suite = suiteRepository.save(suite);
+
+        String kickoff = buildKickoffMessage(owner, repo, headRef, framework, prTitle, prBody, diff);
+        UnitTestToolContext toolContext = new UnitTestToolContext(suite, workspace.path(), framework);
+        WorkflowToolSurface surface = surfaceFactory.create(context.bot(), repositoryClient,
+                UnitTestAuthorAgent.WORKFLOW_TOOLS, owner, repo, prNumber, workspace);
+
+        context.requireActive("before running unit-test author agent");
+        UnitTestAuthorAgent.Result authored = authorAgent.write(
+                aiClient, surface, toolContext, kickoff, systemPrompt, request.maxTestCases());
+
+        if (!authored.wroteAnything()) {
+            postComment(owner, repo, prNumber,
+                    UnitTestSummaryRenderer.renderFailed(prNumber,
+                            "the author agent did not produce any runnable test files."));
+            context.appendStep("unit-test-author", "No files written");
+            return Result.failed("No tests generated");
+        }
+        context.appendStep("unit-test-author", "Wrote " + authored.filesWritten() + " test file(s)");
+
+        // Commit the freshly written tests onto the PR branch *before* running
+        // them: at this point the working tree only contains the new test
+        // files, so the commit stays clean (no build artefacts).
+        boolean committed = false;
+        boolean commitFailed = false;
+        if (request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR) {
+            if (!workspace.hasUncommittedChanges()) {
+                context.appendStep("unit-test-commit", "Commit failed — no workspace changes found");
+                commitFailed = true;
+            } else {
+                context.requireActive("before committing generated unit tests");
+                // Pre-commit guard (defence-in-depth behind the write-time guard):
+                // re-verify every changed file is an allowed test location for the
+                // framework. If anything outside a test location was touched we
+                // must not push it — the workflow's "production code is never
+                // touched" guarantee takes precedence over committing the tests.
+                java.util.List<String> offending = workspace.listChangedFiles().stream()
+                        .filter(p -> !UnitTestPathGuard.isAllowedTestPath(framework, p))
+                        .toList();
+                if (!offending.isEmpty()) {
+                    log.warn("Aborting unit-test commit for PR #{}: changed files outside allowed "
+                            + "test locations for {}: {}", prNumber, framework.key(), offending);
+                    context.appendStep("unit-test-commit",
+                            "Commit aborted — non-test files changed: " + offending);
+                    commitFailed = true;
+                } else {
+                    committed = workspace.commitAndPush(headBranch,
+                            "test: add AI-generated unit tests for PR #" + prNumber, false);
+                    context.appendStep("unit-test-commit",
+                            committed ? "Committed generated tests to " + headBranch
+                                    : "Commit skipped / failed");
+                    commitFailed = !committed;
+                }
             }
         }
+
+        // Run the project's own test runner for the report (after committing,
+        // so build artefacts never pollute the commit).
+        UnitTestOutcome outcome = runTests(suite, workspace, framework, request.maxRetries());
+        context.appendStep("unit-test-run", outcome.status() + " — " + outcome.summary());
+
+        UnitTestSuite withCases = suiteRepository.findByIdWithCases(suite.getId()).orElse(suite);
+        String comment = UnitTestSummaryRenderer.render(withCases, outcome, CoverageResult.unknown());
+        postReviewComment(owner, repo, prNumber, comment);
+
+        if (commitFailed) {
+            return Result.failed("Generated tests could not be committed to the PR branch");
+        }
+
+        return switch (outcome.status()) {
+            case PASSED -> Result.success(
+                    authored.filesWritten() + " test(s) generated and passing"
+                            + (committed ? ", committed to PR" : ""));
+            case FAILED -> Result.success(
+                    authored.filesWritten() + " test(s) generated; " + outcome.failed()
+                            + " failing — review required");
+            case SKIPPED -> Result.skipped(outcome.summary());
+            case ERROR -> Result.failed(outcome.summary());
+        };
     }
 
     private UnitTestOutcome runTests(UnitTestSuite suite, Workspace workspace,
