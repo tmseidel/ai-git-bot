@@ -101,6 +101,23 @@
     </nav>
 
     <main class="container mt-4">
+        <!-- Configuration-document banner. The three states come from the runtime
+             facts ConfigMode derives (document present, import applied, in-memory
+             database); there is no feature flag to keep in sync. -->
+        <div th:if="${configState == 'APPLIED_EPHEMERAL'}" class="alert alert-warning" role="alert">
+            <i class="bi bi-arrow-repeat"></i>
+            <span th:text="#{banner.config.ephemeral}">This instance is rebuilt from the configuration document on every start.</span>
+            <a class="alert-link ms-1" th:href="@{/config/export}" th:text="#{banner.config.export}">Download current configuration</a>
+        </div>
+        <div th:if="${configState == 'APPLIED_PERSISTENT'}" class="alert alert-info" role="alert">
+            <i class="bi bi-hdd-check"></i>
+            <span th:text="#{banner.config.persistent}">This database was initialised from the configuration document.</span>
+            <a class="alert-link ms-1" th:href="@{/config/export}" th:text="#{banner.config.export}">Download current configuration</a>
+        </div>
+        <div th:if="${configState == 'IGNORED_DATABASE_NOT_EMPTY'}" class="alert alert-secondary" role="alert">
+            <i class="bi bi-info-circle"></i>
+            <span th:text="#{banner.config.ignored}">The configuration document was not applied because the database already contains data.</span>
+        </div>
         <div th:if="${success}" class="alert alert-success alert-dismissible fade show" role="alert">
             <i class="bi bi-check-circle"></i> <span th:text="${success}"></span>
             <button type="button" class="btn-close" data-bs-dismiss="alert" th:aria-label="#{button.close}"></button>
