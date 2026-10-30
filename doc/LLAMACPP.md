@@ -35,7 +35,7 @@ docker compose -f systemtest/docker-compose-llamacpp.yml logs -f model-downloade
 Then start the bot and configure the AI Integration in the **web UI**:
 
 1. Go to **AI Integrations → New Integration**
-2. Select **llamacpp** as the provider type
+2. Select **llama.cpp** as the provider type
 3. Set the **API URL** to `http://localhost:8081`
 4. Enter the **Model** identifier (e.g., `qwen2.5-coder-7b-instruct`)
 5. Click **Save**
@@ -47,20 +47,19 @@ Then start the bot and configure the AI Integration in the **web UI**:
 All AI provider settings are configured through the **web UI** under **AI Integrations**:
 
 1. Go to **AI Integrations → New Integration**
-2. Select **llamacpp** as the provider type
+2. Select **llama.cpp** as the provider type
 3. Set the **API URL** to your llama.cpp server (e.g., `http://localhost:8081` or `http://llamacpp:8081` if using Docker networking)
 4. Enter the model name configured in the server. With a single model launched using `--model`, llama.cpp ignores this value; in router mode, enter the exact model ID returned by `GET /v1/models` because it selects the model for each request.
 5. Adjust settings as needed:
 
 | Setting | Recommended Value | Why |
 |---------|-------------------|-----|
-| **Max Tokens** | `4096` | Default, increase for longer responses |
-| **Max Diff Chars Per Chunk** | `30000` | Fits in smaller context windows (use `120000` for large contexts) |
-| **Max Diff Chunks** | `4` | Reduces processing time (use `8` for large contexts) |
+| **Max Tokens** | `4096` | Default for llama.cpp, increase for longer responses |
+| **Context Window (tokens)** | Your server's `--ctx-size` | Lets the bot compact history before it overflows the context |
 
 6. Click **Save**
 
-> **Tip:** For the agent feature with a 16k context model, reduce **Max Diff Chars Per Chunk** to `20000` to leave room for issue descriptions and file contents.
+> **Tip:** With a small context (e.g. 16k), also lower **Max diff chars per chunk** (e.g. `20000`) and **Max diff chunks** (e.g. `4`) on the review workflow to leave room for issue descriptions and file contents.
 
 ## Recommended Models for Coding
 
@@ -319,7 +318,7 @@ docker compose -f systemtest/docker-compose-llamacpp.yml logs llamacpp
 
 - Enable GPU acceleration (`--n-gpu-layers -1`)
 - Use a smaller model (7B instead of 13B)
-- Reduce **Max Diff Chars Per Chunk** in the AI Integration settings via the web UI
+- Reduce **Max diff chars per chunk** in the review workflow settings via the web UI
 
 ### Connection Refused
 

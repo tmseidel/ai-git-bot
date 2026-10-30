@@ -1,5 +1,6 @@
 package org.remus.giteabot.ai.openrouter;
 
+import org.remus.giteabot.ai.AiProviderType;
 import com.sun.net.httpserver.HttpServer;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
@@ -394,7 +395,7 @@ class OpenRouterConfigurationTest {
 
     private static AiIntegration integration() {
         AiIntegration integration = new AiIntegration();
-        integration.setProviderType("openrouter");
+        integration.setProviderType(AiProviderType.OPENROUTER);
         integration.setName("OpenRouter test");
         integration.setModel("author/test-model");
         integration.setApiUrl("https://untrusted.example");

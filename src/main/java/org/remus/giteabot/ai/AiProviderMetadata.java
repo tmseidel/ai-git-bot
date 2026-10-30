@@ -13,16 +13,9 @@ import java.util.List;
 public interface AiProviderMetadata {
 
     /**
-     * Returns the unique provider type identifier (e.g., "anthropic", "openai").
+     * Returns the provider type this metadata implements.
      */
-    String getProviderType();
-
-    /**
-     * Returns the human-readable provider name shown in the admin UI.
-     */
-    default String getDisplayName() {
-        return getProviderType();
-    }
+    AiProviderType getProviderType();
 
     /**
      * Returns the default API URL for this provider.

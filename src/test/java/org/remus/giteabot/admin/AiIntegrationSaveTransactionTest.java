@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.ai.AiProviderMetadata;
@@ -28,7 +29,7 @@ class AiIntegrationSaveTransactionTest {
         var encryption = mock(EncryptionService.class);
         var registry = mock(AiProviderRegistry.class);
         var provider = mock(AiProviderMetadata.class);
-        when(registry.getProviderOrThrow("openrouter")).thenReturn(provider);
+        when(registry.getProviderOrThrow(AiProviderType.OPENROUTER)).thenReturn(provider);
         when(encryption.encrypt("new-key")).thenReturn("ciphertext");
         when(repository.save(any())).thenAnswer(call -> call.getArgument(0));
         doAnswer(call -> {
@@ -48,7 +49,7 @@ class AiIntegrationSaveTransactionTest {
             context.refresh();
             var service = context.getBean(AiIntegrationService.class);
             var integration = new AiIntegration();
-            integration.setProviderType("openrouter");
+            integration.setProviderType(AiProviderType.OPENROUTER);
             integration.setApiKey("new-key");
 
             new TransactionTemplate(transactions).executeWithoutResult(status -> {

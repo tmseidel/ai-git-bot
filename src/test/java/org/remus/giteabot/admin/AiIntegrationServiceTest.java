@@ -1,11 +1,12 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.NullSource;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -87,12 +88,12 @@ class AiIntegrationServiceTest {
     @Test
     void save_providerChangeCannotReuseAStoredKey() {
         AiIntegration existing = new AiIntegration();
-        existing.setProviderType("openai");
+        existing.setProviderType(AiProviderType.OPENAI);
         existing.setApiKey("stored-encrypted-key");
         when(aiIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
         AiIntegration changed = new AiIntegration();
         changed.setId(7L);
-        changed.setProviderType("openrouter");
+        changed.setProviderType(AiProviderType.OPENROUTER);
 
         assertThrows(IllegalArgumentException.class, () -> aiIntegrationService.save(changed));
 
@@ -103,12 +104,12 @@ class AiIntegrationServiceTest {
     @Test
     void save_switchToKeylessOllamaStillRequiresExplicitClear() {
         AiIntegration existing = new AiIntegration();
-        existing.setProviderType("openai");
+        existing.setProviderType(AiProviderType.OPENAI);
         existing.setApiKey("stored-encrypted-key");
         when(aiIntegrationRepository.findById(7L)).thenReturn(Optional.of(existing));
         AiIntegration changed = new AiIntegration();
         changed.setId(7L);
-        changed.setProviderType("ollama");
+        changed.setProviderType(AiProviderType.OLLAMA);
 
         IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
                 () -> ollamaService().save(changed));
@@ -122,7 +123,7 @@ class AiIntegrationServiceTest {
     void save_switchToKeylessOllamaWithExplicitClearSavesWithoutACredential() {
         AiIntegration changed = new AiIntegration();
         changed.setId(7L);
-        changed.setProviderType("ollama");
+        changed.setProviderType(AiProviderType.OLLAMA);
         changed.setApiUrl("http://localhost:11434");
         changed.setModel("local-model");
         changed.setApiKey("");
@@ -130,15 +131,16 @@ class AiIntegrationServiceTest {
 
         AiIntegration saved = ollamaService().save(changed, true);
 
-        assertEquals("ollama", saved.getProviderType());
+        assertEquals(AiProviderType.OLLAMA, saved.getProviderType());
         assertNull(saved.getApiKey());
         verifyNoInteractions(encryptionService);
     }
 
     @ParameterizedTest
     @NullSource
-    @ValueSource(strings = {"", "unknown-provider"})
-    void save_requiresARegisteredProvider(String providerType) {
+    // Only Ollama is registered in ollamaService(), so OpenRouter stands in for an unregistered provider.
+    @EnumSource(value = AiProviderType.class, names = "OPENROUTER")
+    void save_requiresARegisteredProvider(AiProviderType providerType) {
         AiIntegration integration = new AiIntegration();
         integration.setProviderType(providerType);
 
@@ -156,7 +158,7 @@ class AiIntegrationServiceTest {
     void save_replacementKeyWinsOverClearAndDoesNotReadTheOldProviderKey() {
         AiIntegration integration = new AiIntegration();
         integration.setId(7L);
-        integration.setProviderType("openrouter");
+        integration.setProviderType(AiProviderType.OPENROUTER);
         integration.setApiKey("new-provider-key");
         when(encryptionService.encrypt("new-provider-key")).thenReturn("new-ciphertext");
         when(aiIntegrationRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));

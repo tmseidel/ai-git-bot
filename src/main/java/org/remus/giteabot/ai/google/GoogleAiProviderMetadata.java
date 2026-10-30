@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.AiProviderType;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,23 +18,19 @@ import java.util.List;
 @RequiredArgsConstructor
 public class GoogleAiProviderMetadata implements AiProviderMetadata {
 
-    public static final String PROVIDER_TYPE = "google";
+    public static final AiProviderType PROVIDER_TYPE = AiProviderType.GOOGLE;
     public static final String DEFAULT_API_URL = "https://generativelanguage.googleapis.com";
+    // Stable models checked at https://ai.google.dev/gemini-api/docs/models on 2026-10-18.
     public static final List<String> SUGGESTED_MODELS = List.of(
-            "gemini-3.1-pro-preview",
-            "gemini-3.5-flash",
-            "gemini-3.1-flash-lite"
+            "gemini-4-argon",
+            "gemini-3.8-flash",
+            "gemini-3.5-flash-lite"
     );
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
-    public String getProviderType() {
+    public AiProviderType getProviderType() {
         return PROVIDER_TYPE;
-    }
-
-    @Override
-    public String getDisplayName() {
-        return "gemini";
     }
 
     @Override

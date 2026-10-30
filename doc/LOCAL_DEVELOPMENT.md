@@ -215,25 +215,26 @@ prompts/            # Bundled prompt seed files copied into the container image
 
 To add support for a new AI provider:
 
-1. Create a new package under `org.remus.giteabot.ai.{provider}/`
-2. Implement `AiProviderMetadata`:
+1. Add the new type and its display name to the `AiProviderType` enum in `org.remus.giteabot.ai`
+2. Create a new package under `org.remus.giteabot.ai.{provider}/`
+3. Implement `AiProviderMetadata`:
    ```java
    @Component
    public class NewProviderMetadata implements AiProviderMetadata {
-       public static final String PROVIDER_TYPE = "newprovider";
+       public static final AiProviderType PROVIDER_TYPE = AiProviderType.NEW_PROVIDER;
        public static final String DEFAULT_API_URL = "https://api.newprovider.com";
        public static final List<String> SUGGESTED_MODELS = List.of("model-a", "model-b");
        
        // Implement all interface methods...
    }
    ```
-3. Extend `AbstractAiClient`:
+4. Extend `AbstractAiClient`:
    ```java
    public class NewProviderClient extends AbstractAiClient {
        // Implement sendReviewRequest() and sendChatRequest()
    }
    ```
-4. The provider will automatically be discovered by `AiProviderRegistry` via Spring's component scanning
+5. The provider will automatically be discovered by `AiProviderRegistry` via Spring's component scanning
 
 ## Adding a New Git Provider
 

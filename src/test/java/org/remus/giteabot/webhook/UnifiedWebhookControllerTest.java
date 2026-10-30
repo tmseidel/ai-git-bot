@@ -1,5 +1,6 @@
 package org.remus.giteabot.webhook;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.*;
 import org.remus.giteabot.azuredevops.AzureDevopsWebhookHandler;
@@ -217,7 +218,7 @@ class UnifiedWebhookControllerTest {
         AiIntegration ai = new AiIntegration();
         ai.setId(1L);
         ai.setName("Test AI");
-        ai.setProviderType("anthropic");
+        ai.setProviderType(AiProviderType.ANTHROPIC);
         ai.setApiUrl("http://localhost:8081");
         ai.setModel("claude-sonnet-4-20250514");
         ai.setMaxTokens(4096);

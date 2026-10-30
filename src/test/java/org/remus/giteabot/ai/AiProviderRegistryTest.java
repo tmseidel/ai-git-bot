@@ -25,19 +25,30 @@ class AiProviderRegistryTest {
     }
 
     @Test
-    void googleMetadataExposesDisplayNameAndApiKeyRequirement() {
+    void providerTypesFollowEnumOrderRegardlessOfRegistrationOrder() {
+        AiProviderRegistry registry = new AiProviderRegistry(List.of(
+                new OllamaProviderMetadata(builderProvider()),
+                new GoogleAiProviderMetadata(builderProvider())
+        ));
+
+        assertEquals(List.of(AiProviderType.GOOGLE, AiProviderType.OLLAMA), registry.getProviderTypes());
+        assertEquals(List.of(AiProviderType.GOOGLE, AiProviderType.OLLAMA),
+                List.copyOf(registry.getDefaultApiUrls().keySet()));
+    }
+
+    @Test
+    void googleMetadataExposesApiKeyRequirement() {
         AiProviderRegistry registry = new AiProviderRegistry(List.of(
                 new GoogleAiProviderMetadata(builderProvider()),
                 new OllamaProviderMetadata(builderProvider())
         ));
 
-        assertEquals("gemini", registry.getDisplayNames().get("google"));
-        assertTrue(registry.getApiKeyRequirements().get("google"));
-        assertFalse(registry.getApiKeyRequirements().get("ollama"));
+        assertTrue(registry.getApiKeyRequirements().get(AiProviderType.GOOGLE));
+        assertFalse(registry.getApiKeyRequirements().get(AiProviderType.OLLAMA));
 
         // Providers without flavor support expose an empty list (form hides the field).
-        assertTrue(registry.getFlavors().get("google").isEmpty());
-        assertTrue(registry.getFlavors().get("ollama").isEmpty());
+        assertTrue(registry.getFlavors().get(AiProviderType.GOOGLE).isEmpty());
+        assertTrue(registry.getFlavors().get(AiProviderType.OLLAMA).isEmpty());
     }
 
     @Test
@@ -47,12 +58,12 @@ class AiProviderRegistryTest {
                         new org.remus.giteabot.config.OpenAiProperties())
         ));
 
-        java.util.List<ModelFlavor> flavors = registry.getFlavors().get("openai");
+        java.util.List<ModelFlavor> flavors = registry.getFlavors().get(AiProviderType.OPENAI);
         assertEquals(2, flavors.size());
         assertEquals("standard", flavors.get(0).id());
         assertEquals("no_reasoning", flavors.get(1).id());
         // Each flavor is stamped with its provider type so ids are unique across providers.
-        assertEquals("openai", flavors.get(0).providerType());
-        assertEquals("openai", flavors.get(1).providerType());
+        assertEquals(AiProviderType.OPENAI, flavors.get(0).providerType());
+        assertEquals(AiProviderType.OPENAI, flavors.get(1).providerType());
     }
 }
