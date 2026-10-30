@@ -34,6 +34,11 @@ public class ConfigMode {
         IGNORED_DATABASE_NOT_EMPTY
     }
 
+    /**
+     * -- GETTER --
+     * True when the database is thrown away on restart (in-memory H2).
+     */
+    @Getter
     private final boolean ephemeral;
 
     private volatile boolean documentPresent;
@@ -54,11 +59,6 @@ public class ConfigMode {
     public void markApplied(int rows) {
         this.applied = true;
         this.importedRows = rows;
-    }
-
-    /** True when the database is thrown away on restart (in-memory H2). */
-    public boolean isEphemeral() {
-        return ephemeral;
     }
 
     public State state() {

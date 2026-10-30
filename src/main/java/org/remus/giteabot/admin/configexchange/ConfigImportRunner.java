@@ -2,6 +2,7 @@ package org.remus.giteabot.admin.configexchange;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.admin.AdminService;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -36,7 +37,7 @@ public class ConfigImportRunner implements ApplicationRunner {
     private final ConfigMode configMode;
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void run(@NonNull ApplicationArguments args) {
         source.read().ifPresent(this::apply);
     }
 

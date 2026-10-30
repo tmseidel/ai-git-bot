@@ -8,7 +8,6 @@ import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationKind;
 import org.remus.giteabot.prworkflow.config.WorkflowSelection;
-import org.remus.giteabot.prworkflow.config.WorkflowSelectionParam;
 import org.remus.giteabot.systemsettings.BotToolConfiguration;
 import org.remus.giteabot.systemsettings.BotToolSelection;
 import tools.jackson.databind.JsonNode;
