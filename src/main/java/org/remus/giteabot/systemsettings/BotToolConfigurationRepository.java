@@ -13,4 +13,6 @@ public interface BotToolConfigurationRepository extends JpaRepository<BotToolCon
     boolean existsByNameAndIdNot(String name, Long id);
 
     Optional<BotToolConfiguration> findByDefaultEntryTrue();
+
+    Optional<BotToolConfiguration> findByName(String name);
 }
