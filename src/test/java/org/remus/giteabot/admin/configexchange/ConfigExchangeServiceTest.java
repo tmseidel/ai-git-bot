@@ -94,7 +94,7 @@ class ConfigExchangeServiceTest {
         WorkflowConfiguration pr = workflowConfigurationRepository
                 .findByName("Trial PR").orElseThrow();
         assertEquals(WorkflowConfigurationKind.PR, pr.getKind());
-        assertEquals(List.of("review"), keys(pr.getId()));
+        assertEquals(List.of("agentic-review"), keys(pr.getId()));
         WorkflowConfiguration issues = workflowConfigurationRepository
                 .findByName("Trial issues").orElseThrow();
         assertEquals(WorkflowConfigurationKind.ISSUE, issues.getKind());
