@@ -5,7 +5,7 @@ import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
 
-import java.nio.file.Path;
+import org.remus.giteabot.agent.validation.Workspace;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -33,7 +33,7 @@ public final class BranchSwitcher {
         this.toolExecutionService = toolExecutionService;
     }
 
-    public Result apply(Path workspaceDir,
+    public Result apply(Workspace workspace,
                         String baseBranch,
                         List<ImplementationPlan.ToolRequest> toolRequests,
                         Long issueNumber) {
@@ -52,7 +52,7 @@ public final class BranchSwitcher {
 
             if (BRANCH_SWITCHER_TOOL.equalsIgnoreCase(toolRequest.getTool()) && !switched) {
                 ToolResult result = toolExecutionService.executeContextTool(
-                        workspaceDir, BRANCH_SWITCHER_TOOL, toolRequest.getArgs());
+                        workspace, BRANCH_SWITCHER_TOOL, toolRequest.getArgs());
                 String switchedBranch = BranchRefs.extractSwitchedBranch(result);
                 if (switchedBranch != null && !switchedBranch.isBlank()) {
                     selectedBranch = switchedBranch;

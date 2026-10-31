@@ -2,6 +2,7 @@ package org.remus.giteabot.prworkflow.e2e.runner;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
@@ -81,7 +82,7 @@ public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
         Set<String> workflowTools = new LinkedHashSet<>(TestAuthorAgent.WORKFLOW_TOOLS);
         workflowTools.addAll(TestRunnerAgent.WORKFLOW_TOOLS);
         return surfaceFactory.create(bot, apiClient, workflowTools,
-                addr.owner(), addr.repo(), addr.prNumber(), request.workspace());
+                addr.owner(), addr.repo(), addr.prNumber(), Workspace.unmanaged(request.workspace()));
     }
 
     @Override

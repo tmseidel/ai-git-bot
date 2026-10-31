@@ -23,7 +23,7 @@ class ToolExecutionServiceTruncationTest {
 
     private final AgentConfigProperties config = new AgentConfigProperties();
     private final ToolExecutionService service = new ToolExecutionService(config,
-            new ToolCatalog(config), new WorkspaceService(null, 60));
+            new ToolCatalog(config));
 
     @ParameterizedTest
     @ValueSource(strings = {"ctags-signatures", "ctags-deps"})
@@ -40,7 +40,7 @@ class ToolExecutionServiceTruncationTest {
         source.append("}\n");
         Files.writeString(workspace.resolve("Many.java"), source);
 
-        ToolResult result = service.executeContextTool(workspace, tool, List.of("Many.java", "500"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(workspace), tool, List.of("Many.java", "500"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.output()).contains(tool.equals("ctags-deps") ? "Dependency" : "class Many");
@@ -54,7 +54,7 @@ class ToolExecutionServiceTruncationTest {
         Assumptions.assumeTrue(jsonCtagsAvailable(), "Universal Ctags with JSON support is not installed");
         Files.writeString(workspace.resolve("Small.java"), "import java.util.List;\npublic class Small {}\n");
 
-        ToolResult result = service.executeContextTool(workspace, tool, List.of("Small.java"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(workspace), tool, List.of("Small.java"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.outputTruncated()).isFalse();
@@ -66,7 +66,7 @@ class ToolExecutionServiceTruncationTest {
     void contextToolsReportCharacterPresentationTruncation(boolean truncated) throws Exception {
         Files.writeString(workspace.resolve("Content.txt"), truncated ? "x".repeat(11_000) : "complete content");
 
-        ToolResult result = service.executeContextTool(workspace, "cat", List.of("Content.txt"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(workspace), "cat", List.of("Content.txt"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.outputTruncated()).isEqualTo(truncated);
@@ -77,7 +77,7 @@ class ToolExecutionServiceTruncationTest {
     void processToolsRetainByteTruncationBelowTheCharacterPresentationCap() {
         Assumptions.assumeTrue(Files.isExecutable(Path.of("/usr/bin/python3")), "python3 is not installed");
 
-        ToolResult result = service.executeTool(workspace, "python3",
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "python3",
                 List.of("-c", "print('x' + chr(0x4e00) * 4000, end='')"));
 
         assertThat(result.success()).isTrue();

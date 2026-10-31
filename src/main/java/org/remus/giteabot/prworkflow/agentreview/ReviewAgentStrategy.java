@@ -321,7 +321,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         for (ImplementationPlan.ToolRequest req : requests) {
             results.add(toolRouter.execute(AgentToolRouter.Mode.REVIEW,
                     new ToolCallContext(ctx.owner(), ctx.repo(), ctx.issueNumber(),
-                            ctx.workspaceDir(), req, ctx.diffSummary())));
+                            ctx.workspace(), req, ctx.diffSummary())));
         }
         return results;
     }

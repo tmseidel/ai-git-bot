@@ -89,10 +89,10 @@ class GiteaSshEndToEndTest {
             WorkspaceResult ws = workspaceService.prepareWorkspace(client, owner, repo, "main", null);
             assertTrue(ws.success(), "SSH clone via bot workspace: " + ws.error());
             try {
-                assertTrue(Files.exists(ws.workspacePath().resolve("README.md")),
+                assertTrue(Files.exists(ws.workspace().path().resolve("README.md")),
                         "expected auto_init README in SSH clone");
             } finally {
-                workspaceService.cleanupWorkspace(ws.workspacePath());
+                ws.workspace().close();
             }
 
             GitIntegration pending = gitIntegrationService.prepareManagedSshKeyRemoval(

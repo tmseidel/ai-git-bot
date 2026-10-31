@@ -1,18 +1,16 @@
 package org.remus.giteabot.agent.validation;
 
-import java.nio.file.Path;
-
 /**
- * Result of workspace preparation — either a path to the ready workspace
+ * Result of workspace preparation — either the ready workspace
  * or an error description.
  */
 public record WorkspaceResult(
         boolean success,
-        Path workspacePath,
+        Workspace workspace,
         String error
 ) {
-    public static WorkspaceResult success(Path path) {
-        return new WorkspaceResult(true, path, null);
+    public static WorkspaceResult success(Workspace workspace) {
+        return new WorkspaceResult(true, workspace, null);
     }
 
     public static WorkspaceResult failure(String error) {

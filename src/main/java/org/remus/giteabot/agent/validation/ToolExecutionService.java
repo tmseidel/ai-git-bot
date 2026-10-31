@@ -47,7 +47,6 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
-    private final WorkspaceService workspaceService;
 
     /**
      * Executes a configured validation tool in the given workspace directory:
@@ -55,7 +54,8 @@ public class ToolExecutionService {
      * a script committed inside the repository. Rejects tools not in
      * {@link ToolCatalog#validationToolNames()}.
      */
-    public ToolResult executeTool(Path workspaceDir, String tool, List<String> arguments) {
+    public ToolResult executeTool(Workspace workspace, String tool, List<String> arguments) {
+        Path workspaceDir = workspace.path();
         List<String> availableTools = catalog.validationToolNames();
         if (!availableTools.contains(tool)) {
             return new ToolResult(false, -1,
@@ -171,7 +171,8 @@ public class ToolExecutionService {
     /**
      * Executes a read-only repository exploration tool in the given workspace.
      */
-    public ToolResult executeContextTool(Path workspaceDir, String tool, List<String> arguments) {
+    public ToolResult executeContextTool(Workspace workspace, String tool, List<String> arguments) {
+        Path workspaceDir = workspace.path();
         String normalizedTool = tool != null ? tool.strip().toLowerCase() : "";
         if (!catalog.contextToolNames().contains(normalizedTool)) {
             return new ToolResult(false, -1, "",
@@ -187,7 +188,7 @@ public class ToolExecutionService {
             case "git-log" -> executeGitLogTool(workspaceDir, arguments);
             case "git-blame" -> executeGitBlameTool(workspaceDir, arguments);
             case "tree" -> executeTreeTool(workspaceDir, arguments);
-            case "branch-switcher" -> executeBranchSwitcherTool(workspaceDir, arguments);
+            case "branch-switcher" -> executeBranchSwitcherTool(workspace, arguments);
             case "ctags-signatures" -> executeCtagsSignaturesTool(workspaceDir, arguments);
             case "ctags-deps"       -> executeCtagsDepsTool(workspaceDir, arguments);
             default -> new ToolResult(false, -1, "",
@@ -195,7 +196,8 @@ public class ToolExecutionService {
         };
     }
 
-    private ToolResult executeBranchSwitcherTool(Path workspaceDir, List<String> arguments) {
+    private ToolResult executeBranchSwitcherTool(Workspace workspace, List<String> arguments) {
+        Path workspaceDir = workspace.path();
         if (arguments == null || arguments.isEmpty()) {
             return new ToolResult(false, -1, "", "branch-switcher requires a branch name argument");
         }
@@ -217,7 +219,7 @@ public class ToolExecutionService {
                     "Invalid branch name for git: " + branch);
         }
 
-        CommandResult fetch = workspaceService.fetchBranch(workspaceDir, branch);
+        CommandResult fetch = workspace.fetchBranch(branch);
         if (!fetch.success()) {
             return new ToolResult(false, -1, "",
                     "Failed to fetch branch '" + branch + "' from origin: "
@@ -269,12 +271,13 @@ public class ToolExecutionService {
      * in the given workspace.  Results are passed back to the AI but never posted as
      * public issue comments.
      *
-     * @param workspaceDir The workspace directory (cloned repo root)
-     * @param tool         One of {@link ToolCatalog#fileToolNames()}
-     * @param arguments    Tool-specific arguments
+     * @param workspace The workspace (cloned repo root)
+     * @param tool      One of {@link ToolCatalog#fileToolNames()}
+     * @param arguments Tool-specific arguments
      * @return The execution result
      */
-    public ToolResult executeFileTool(Path workspaceDir, String tool, List<String> arguments) {
+    public ToolResult executeFileTool(Workspace workspace, String tool, List<String> arguments) {
+        Path workspaceDir = workspace.path();
         String normalizedTool = tool != null ? tool.strip().toLowerCase() : "";
         if (!catalog.fileToolNames().contains(normalizedTool)) {
             return new ToolResult(false, -1, "",

@@ -1,6 +1,7 @@
 package org.remus.giteabot.agent.tools;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
@@ -80,7 +81,7 @@ class AgentToolRouterWhitelistTest {
     }
 
     private static ToolCallContext ctx(String tool, List<String> args) {
-        return new ToolCallContext(null, null, null, Path.of("/tmp/ws"),
+        return new ToolCallContext(null, null, null, Workspace.unmanaged(Path.of("/tmp/ws")),
                 ImplementationPlan.ToolRequest.builder().id("id-1").tool(tool).args(args).build());
     }
 

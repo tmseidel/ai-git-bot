@@ -25,6 +25,7 @@ import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
@@ -37,7 +38,6 @@ import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -143,7 +143,6 @@ public class IssueImplementationService {
         }
 
         AgentSession session = sessionService.createSession(owner, repo, issueNumber, issueTitle);
-        Path workspaceDir = null;
 
         try {
             String issueCommentsContext = fetchIssueCommentsContext(owner, repo, issueNumber);
@@ -170,118 +169,114 @@ public class IssueImplementationService {
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
                 return;
             }
-            workspaceDir = wsResult.workspacePath();
+            try (Workspace workspace = wsResult.workspace()) {
+                // Fetch repository tree for context
+                List<RepositoryTreeEntry> tree = repositoryClient.getRepositoryTree(owner, repo, baseBranch);
+                String treeContext  = promptBuilder.buildTreeContext(tree);
+                String systemPrompt = resolveAgentSystemPrompt();
 
-            // Fetch repository tree for context
-            List<RepositoryTreeEntry> tree = repositoryClient.getRepositoryTree(owner, repo, baseBranch);
-            String treeContext  = promptBuilder.buildTreeContext(tree);
-            String systemPrompt = resolveAgentSystemPrompt();
+                // Single implementation loop — symmetric to WriterAgentService#handleIssueAssigned.
+                // The previous "Step 1" (separate one-shot AI call to ask which files were needed)
+                // has been folded into the AgentLoop: the CodingAgentStrategy already supports
+                // context-only rounds (`requestFiles`/`requestTools` in legacy mode, or `cat`/`rg`
+                // tool calls in native mode), so a dedicated pre-loop turn was redundant and
+                // diverged from the writer flow.
+                String implementationPrompt = promptBuilder.buildImplementationPromptWithContext(
+                        issueTitle, issueBody, issueCommentsContext, treeContext,
+                        "(no files preloaded — request more via `requestFiles`/`requestTools` or "
+                                + "use context tools like `cat`, `rg`, `find`, `tree` if you need to inspect specific files)");
 
-            // Single implementation loop — symmetric to WriterAgentService#handleIssueAssigned.
-            // The previous "Step 1" (separate one-shot AI call to ask which files were needed)
-            // has been folded into the AgentLoop: the CodingAgentStrategy already supports
-            // context-only rounds (`requestFiles`/`requestTools` in legacy mode, or `cat`/`rg`
-            // tool calls in native mode), so a dedicated pre-loop turn was redundant and
-            // diverged from the writer flow.
-            String implementationPrompt = promptBuilder.buildImplementationPromptWithContext(
-                    issueTitle, issueBody, issueCommentsContext, treeContext,
-                    "(no files preloaded — request more via `requestFiles`/`requestTools` or "
-                            + "use context tools like `cat`, `rg`, `find`, `tree` if you need to inspect specific files)");
+                // Tool listings are now part of the system prompt (rendered dynamically
+                // by SystemPromptAssembler in LEGACY mode / advertised via the function-calling
+                // API in NATIVE mode), so the implementation prompt no longer duplicates them.
+                log.info("Starting implementation loop for issue #{}", issueNumber);
+                ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
+                        session, implementationPrompt, systemPrompt, workspace, owner, repo, issueNumber, baseBranch);
+                boolean implementationSucceeded = implementationResult.success();
+                baseBranch = implementationResult.selectedBranch();
 
-            // Tool listings are now part of the system prompt (rendered dynamically
-            // by SystemPromptAssembler in LEGACY mode / advertised via the function-calling
-            // API in NATIVE mode), so the implementation prompt no longer duplicates them.
-            log.info("Starting implementation loop for issue #{}", issueNumber);
-            ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                    session, implementationPrompt, systemPrompt, workspaceDir, owner, repo, issueNumber, baseBranch);
-            boolean implementationSucceeded = implementationResult.success();
-            baseBranch = implementationResult.selectedBranch();
+                // Answer-only run: the issue needed no repository change. Publish the
+                // model's answer and stop — no commit, no push, no PR, and no critic
+                // (there is no diff to reflect on).
+                if (implementationResult.answer() != null) {
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.ANSWERED);
+                    notificationService.postAnswerComment(owner, repo, issueNumber,
+                            implementationResult.answer().text());
+                    log.info("Issue #{} answered without repository changes; no PR opened", issueNumber);
+                    return;
+                }
 
-            // Answer-only run: the issue needed no repository change. Publish the
-            // model's answer and stop — no commit, no push, no PR, and no critic
-            // (there is no diff to reflect on).
-            if (implementationResult.answer() != null) {
-                sessionService.setStatus(session, AgentSession.AgentSessionStatus.ANSWERED);
-                notificationService.postAnswerComment(owner, repo, issueNumber,
-                        implementationResult.answer().text());
-                log.info("Issue #{} answered without repository changes; no PR opened", issueNumber);
-                return;
+                if (!implementationSucceeded) {
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            """
+                            🤖 **AI Agent**: I was unable to produce a valid implementation for this issue. \
+                            The issue may be too complex or ambiguous for automated implementation.
+
+                            You can mention me in a comment to provide more details or clarification.""");
+                    return;
+                }
+
+                // Commit and push to new feature branch
+                String branchName = agentConfig.getBranchPrefix() + "issue-" + issueNumber;
+                sessionService.setBranchName(session, branchName);
+
+                // Step 7.3 — optional Critic / Reflection step. With critic.enabled=false
+                // (default) this short-circuits without an LLM call.
+                ImplementationPlan plannedPlan = implementationResult.plan();
+                ReflectionResult reflection = criticAgent.review(
+                        issueTitle, issueBody,
+                        plannedPlan != null ? plannedPlan.getSummary() : null,
+                        workspace.diffStat(),
+                        aiClient);
+                if (reflection.outcome() == ReflectionResult.Outcome.ABORT) {
+                    log.warn("Critic aborted implementation for issue #{}: {}",
+                            issueNumber, reflection.feedback());
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "🤖 **AI Agent (Critic)**: I reviewed my own implementation and decided not to "
+                                    + "open a PR. Reason: " + reflection.feedback());
+                    return;
+                }
+                if (reflection.outcome() == ReflectionResult.Outcome.ITERATE) {
+                    log.info("Critic requested another iteration for issue #{}: {}",
+                            issueNumber, reflection.feedback());
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "🤖 **AI Agent (Critic)**: My implementation needs another iteration. "
+                                    + "Mention me to retry. Feedback: " + reflection.feedback());
+                    return;
+                }
+
+                String commitMessage = String.format("agent: implement #%d - %s", issueNumber, issueTitle);
+                boolean pushed = workspace.commitAndPush(branchName, commitMessage, true);
+
+                if (!pushed) {
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "🤖 **AI Agent**: Implementation succeeded but pushing the branch failed. Please check the logs.");
+                    return;
+                }
+
+                // Create pull request
+                ImplementationPlan lastPlan = implementationResult.plan();
+                String prTitle = String.format("AI Agent: %s (fixes #%d)", issueTitle, issueNumber);
+                String prBody  = promptBuilder.buildPrBody(issueNumber, lastPlan != null ? lastPlan
+                        : ImplementationPlan.builder().summary("Automated implementation").build());
+                Long prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
+                        branchName, baseBranch);
+
+                sessionService.setPrNumber(session, prNumber);
+                notificationService.postSuccessComment(owner, repo, issueNumber, lastPlan, prNumber);
+                log.info("Successfully created PR #{} for issue #{} in {}", prNumber, issueNumber, repoFullName);
+
             }
-
-            if (!implementationSucceeded) {
-                sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postIssueComment(owner, repo, issueNumber,
-                        """
-                        🤖 **AI Agent**: I was unable to produce a valid implementation for this issue. \
-                        The issue may be too complex or ambiguous for automated implementation.
-
-                        You can mention me in a comment to provide more details or clarification.""");
-                return;
-            }
-
-            // Commit and push to new feature branch
-            String branchName = agentConfig.getBranchPrefix() + "issue-" + issueNumber;
-            sessionService.setBranchName(session, branchName);
-
-            // Step 7.3 — optional Critic / Reflection step. With critic.enabled=false
-            // (default) this short-circuits without an LLM call.
-            ImplementationPlan plannedPlan = implementationResult.plan();
-            ReflectionResult reflection = criticAgent.review(
-                    issueTitle, issueBody,
-                    plannedPlan != null ? plannedPlan.getSummary() : null,
-                    workspaceService.diffStat(workspaceDir),
-                    aiClient);
-            if (reflection.outcome() == ReflectionResult.Outcome.ABORT) {
-                log.warn("Critic aborted implementation for issue #{}: {}",
-                        issueNumber, reflection.feedback());
-                sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postIssueComment(owner, repo, issueNumber,
-                        "🤖 **AI Agent (Critic)**: I reviewed my own implementation and decided not to "
-                                + "open a PR. Reason: " + reflection.feedback());
-                return;
-            }
-            if (reflection.outcome() == ReflectionResult.Outcome.ITERATE) {
-                log.info("Critic requested another iteration for issue #{}: {}",
-                        issueNumber, reflection.feedback());
-                sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postIssueComment(owner, repo, issueNumber,
-                        "🤖 **AI Agent (Critic)**: My implementation needs another iteration. "
-                                + "Mention me to retry. Feedback: " + reflection.feedback());
-                return;
-            }
-
-            String commitMessage = String.format("agent: implement #%d - %s", issueNumber, issueTitle);
-            boolean pushed = workspaceService.commitAndPush(workspaceDir, branchName, commitMessage, true);
-
-            if (!pushed) {
-                sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
-                repositoryClient.postIssueComment(owner, repo, issueNumber,
-                        "🤖 **AI Agent**: Implementation succeeded but pushing the branch failed. Please check the logs.");
-                return;
-            }
-
-            // Create pull request
-            ImplementationPlan lastPlan = implementationResult.plan();
-            String prTitle = String.format("AI Agent: %s (fixes #%d)", issueTitle, issueNumber);
-            String prBody  = promptBuilder.buildPrBody(issueNumber, lastPlan != null ? lastPlan
-                    : ImplementationPlan.builder().summary("Automated implementation").build());
-            Long prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
-                    branchName, baseBranch);
-
-            sessionService.setPrNumber(session, prNumber);
-            notificationService.postSuccessComment(owner, repo, issueNumber, lastPlan, prNumber);
-            log.info("Successfully created PR #{} for issue #{} in {}", prNumber, issueNumber, repoFullName);
-
         } catch (Exception e) {
             log.error("Failed to implement issue #{} in {}: {}", issueNumber, repoFullName, e.getMessage(), e);
             sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
             errorNotificationService.postInternalErrorComment(owner, repo, issueNumber,
                     "AI Agent",
                     "Please try again or mention me again with more details.", e);
-        } finally {
-            if (workspaceDir != null) {
-                workspaceService.cleanupWorkspace(workspaceDir);
-            }
         }
     }
 
@@ -296,7 +291,7 @@ public class IssueImplementationService {
      */
     private ToolImplementationLoopResult runToolImplementationLoop(
             AgentSession session, String userMessage, String systemPrompt,
-            Path workspaceDir, String owner, String repo, Long issueNumber,
+            Workspace workspace, String owner, String repo, Long issueNumber,
             String initialContextBranch) {
 
         CodingAgentStrategy strategy = new CodingAgentStrategy(
@@ -308,7 +303,6 @@ public class IssueImplementationService {
                 branchSwitcher,
                 toolRouter,
                 toolCatalog,
-                workspaceService,
                 agentConfig,
                 mcpOrchestrationService,
                 mcpToolCatalog,
@@ -329,7 +323,7 @@ public class IssueImplementationService {
                 contextWindowTokens, budgetCfg.getProactiveCompactionThreshold());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
         AgentRunContext ctx = new AgentRunContext(
-                session, owner, repo, issueNumber, workspaceDir, initialContextBranch);
+                session, owner, repo, issueNumber, workspace, initialContextBranch);
         LoopOutcome outcome = loop.run(ctx, userMessage, strategy);
         // The strategy returns the final ImplementationPlan as the outcome payload.
         // Read it from here rather than from the (detached) session object, whose
@@ -371,7 +365,6 @@ public class IssueImplementationService {
                             + "Please clone the issue if you want the coding agent to implement it separately.");
             return;
         }
-        Path workspaceDir = null;
 
         try {
             // The 👀 acknowledgment is owned by the webhook entry points
@@ -398,72 +391,72 @@ public class IssueImplementationService {
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());
                 return;
             }
-            workspaceDir = wsResult.workspacePath();
+            try (Workspace workspace = wsResult.workspace()) {
+                String systemPrompt = resolveAgentSystemPrompt();
+                String issueCommentsContext = fetchIssueCommentsContext(owner, repo, issueNumber);
+                String userMessage  = promptBuilder.buildContinuationPrompt(commentBody, issueCommentsContext);
 
-            String systemPrompt = resolveAgentSystemPrompt();
-            String issueCommentsContext = fetchIssueCommentsContext(owner, repo, issueNumber);
-            String userMessage  = promptBuilder.buildContinuationPrompt(commentBody, issueCommentsContext);
+                log.info("Requesting AI to continue implementation for issue #{}", issueNumber);
+                // runToolImplementationLoop handles: AI call, context rounds, tool execution, retries
+                ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
+                        session, userMessage, systemPrompt, workspace, owner, repo, issueNumber, workingBranch);
+                boolean success = implementationResult.success();
+                String selectedContextBranch = implementationResult.selectedBranch();
 
-            log.info("Requesting AI to continue implementation for issue #{}", issueNumber);
-            // runToolImplementationLoop handles: AI call, context rounds, tool execution, retries
-            ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                    session, userMessage, systemPrompt, workspaceDir, owner, repo, issueNumber, workingBranch);
-            boolean success = implementationResult.success();
-            String selectedContextBranch = implementationResult.selectedBranch();
+                // Answer-only follow-up. The session keeps PR_CREATED when it already
+                // has a pull request: an answer to a question must not erase that state.
+                if (implementationResult.answer() != null) {
+                    sessionService.setStatus(session, session.getPrNumber() != null
+                            ? AgentSession.AgentSessionStatus.PR_CREATED
+                            : AgentSession.AgentSessionStatus.ANSWERED);
+                    notificationService.postAnswerComment(owner, repo, issueNumber,
+                            implementationResult.answer().text());
+                    log.info("Answered follow-up on issue #{} without repository changes", issueNumber);
+                    return;
+                }
 
-            // Answer-only follow-up. The session keeps PR_CREATED when it already
-            // has a pull request: an answer to a question must not erase that state.
-            if (implementationResult.answer() != null) {
-                sessionService.setStatus(session, session.getPrNumber() != null
-                        ? AgentSession.AgentSessionStatus.PR_CREATED
-                        : AgentSession.AgentSessionStatus.ANSWERED);
-                notificationService.postAnswerComment(owner, repo, issueNumber,
-                        implementationResult.answer().text());
-                log.info("Answered follow-up on issue #{} without repository changes", issueNumber);
-                return;
-            }
+                if (!success) {
+                    sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "🤖 **AI Agent**: Validation failed and I couldn't fix the issues. " +
+                            "Please check the tool output above and provide more guidance.");
+                    return;
+                }
 
-            if (!success) {
+                // Commit and push
+                boolean createNew = (branchName == null);
+                if (createNew) {
+                    branchName = agentConfig.getBranchPrefix() + "issue-" + issueNumber;
+                    sessionService.setBranchName(session, branchName);
+                }
+                String commitMessage = String.format("agent: follow-up for #%d", issueNumber);
+                boolean pushed = workspace.commitAndPush(branchName, commitMessage, createNew);
+                if (!pushed) {
+                    repositoryClient.postIssueComment(owner, repo, issueNumber,
+                            "🤖 **AI Agent**: Tool execution succeeded but pushing changes failed.");
+                    return;
+                }
+
+                // Create PR if not yet existing. Track the effective PR number in a
+                // local: setPrNumber persists to the DB but does not mutate our
+                // detached session, so session.getPrNumber() would read stale below.
+                ImplementationPlan latestPlan = implementationResult.plan();
+                Long prNumber = session.getPrNumber();
+                if (prNumber == null) {
+                    String prTitle = String.format("AI Agent: %s (fixes #%d)", session.getIssueTitle(), issueNumber);
+                    String prBody = promptBuilder.buildPrBody(issueNumber, latestPlan != null ? latestPlan
+                            : ImplementationPlan.builder().summary("Automated implementation").build());
+                    prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
+                            branchName, createNew ? selectedContextBranch : defaultBranch);
+                    sessionService.setPrNumber(session, prNumber);
+                }
+
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
-                repositoryClient.postIssueComment(owner, repo, issueNumber,
-                        "🤖 **AI Agent**: Validation failed and I couldn't fix the issues. " +
-                        "Please check the tool output above and provide more guidance.");
-                return;
-            }
+                notificationService.postFollowUpSuccessComment(owner, repo, issueNumber,
+                        latestPlan, prNumber);
+                log.info("Successfully applied follow-up changes for issue #{}", issueNumber);
 
-            // Commit and push
-            boolean createNew = (branchName == null);
-            if (createNew) {
-                branchName = agentConfig.getBranchPrefix() + "issue-" + issueNumber;
-                sessionService.setBranchName(session, branchName);
             }
-            String commitMessage = String.format("agent: follow-up for #%d", issueNumber);
-            boolean pushed = workspaceService.commitAndPush(workspaceDir, branchName, commitMessage, createNew);
-            if (!pushed) {
-                repositoryClient.postIssueComment(owner, repo, issueNumber,
-                        "🤖 **AI Agent**: Tool execution succeeded but pushing changes failed.");
-                return;
-            }
-
-            // Create PR if not yet existing. Track the effective PR number in a
-            // local: setPrNumber persists to the DB but does not mutate our
-            // detached session, so session.getPrNumber() would read stale below.
-            ImplementationPlan latestPlan = implementationResult.plan();
-            Long prNumber = session.getPrNumber();
-            if (prNumber == null) {
-                String prTitle = String.format("AI Agent: %s (fixes #%d)", session.getIssueTitle(), issueNumber);
-                String prBody = promptBuilder.buildPrBody(issueNumber, latestPlan != null ? latestPlan
-                        : ImplementationPlan.builder().summary("Automated implementation").build());
-                prNumber = repositoryClient.createPullRequest(owner, repo, prTitle, prBody,
-                        branchName, createNew ? selectedContextBranch : defaultBranch);
-                sessionService.setPrNumber(session, prNumber);
-            }
-
-            sessionService.setStatus(session, AgentSession.AgentSessionStatus.PR_CREATED);
-            notificationService.postFollowUpSuccessComment(owner, repo, issueNumber,
-                    latestPlan, prNumber);
-            log.info("Successfully applied follow-up changes for issue #{}", issueNumber);
-
         } catch (Exception e) {
             log.error("Failed to handle comment on issue #{}: {}", issueNumber, e.getMessage(), e);
             errorNotificationService.postInternalErrorComment(owner, repo, issueNumber,
@@ -473,10 +466,6 @@ public class IssueImplementationService {
                 sessionService.setStatus(session,
                         session.getPrNumber() != null ? AgentSession.AgentSessionStatus.PR_CREATED
                                                       : AgentSession.AgentSessionStatus.FAILED);
-            }
-        } finally {
-            if (workspaceDir != null) {
-                workspaceService.cleanupWorkspace(workspaceDir);
             }
         }
     }
@@ -568,12 +557,12 @@ public class IssueImplementationService {
 
     /**
      * Fetches any additional repository context requested by the AI.
-     * Context tools are run against the already-cloned {@code workspaceDir}.
+     * Context tools are run against the already-cloned {@code workspace}.
      */
     private String fetchRequestedContext(String owner, String repo, String ref,
                                          List<String> filePaths,
                                          List<ImplementationPlan.ToolRequest> toolRequests,
-                                         Path workspaceDir) {
+                                         Workspace workspace) {
         StringBuilder sb = new StringBuilder();
 
         if (filePaths != null && !filePaths.isEmpty()) {
@@ -581,7 +570,7 @@ public class IssueImplementationService {
             sb.append(fetchSpecificFiles(owner, repo, ref, filePaths));
         }
 
-        String toolOutput = executeRequestedContextTools(workspaceDir, toolRequests);
+        String toolOutput = executeRequestedContextTools(workspace, toolRequests);
         if (!toolOutput.isBlank()) {
             if (!sb.isEmpty()) sb.append("\n");
             sb.append("## Repository Tool Results\n").append(toolOutput);
@@ -591,7 +580,7 @@ public class IssueImplementationService {
     }
 
 
-    private String executeRequestedContextTools(Path workspaceDir,
+    private String executeRequestedContextTools(Workspace workspace,
                                                 List<ImplementationPlan.ToolRequest> toolRequests) {
         if (toolRequests == null || toolRequests.isEmpty()) {
             return "";
@@ -611,7 +600,7 @@ public class IssueImplementationService {
             ToolResult result = isMcpTool(toolRequest.getTool())
                     ? mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog,
                     toolRequest.getTool(), toolRequest.getArgs())
-                    : toolExecutionService.executeContextTool(workspaceDir, toolRequest.getTool(), toolRequest.getArgs());
+                    : toolExecutionService.executeContextTool(workspace, toolRequest.getTool(), toolRequest.getArgs());
             sb.append("### `").append(toolRequest.getTool());
             if (toolRequest.getArgs() != null && !toolRequest.getArgs().isEmpty()) {
                 sb.append(" ").append(String.join(" ", toolRequest.getArgs()));

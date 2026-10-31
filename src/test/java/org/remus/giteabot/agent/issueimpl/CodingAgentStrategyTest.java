@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.loop.AgentRunContext;
 import org.remus.giteabot.agent.loop.LoopOutcome;
 import org.remus.giteabot.agent.loop.StepDecision;
@@ -16,7 +17,6 @@ import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.tools.ToolCallContext;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
-import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
@@ -25,7 +25,6 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import tools.jackson.databind.node.JsonNodeFactory;
 
-import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,7 +53,7 @@ class CodingAgentStrategyTest {
 
     @Mock private RepositoryApiClient repositoryClient;
     @Mock private AgentSessionService sessionService;
-    @Mock private WorkspaceService workspaceService;
+    @Mock private Workspace workspace;
     @Mock private IssueNotificationService notificationService;
     @Mock private BranchSwitcher branchSwitcher;
     @Mock private AgentToolRouter toolRouter;
@@ -76,7 +75,7 @@ class CodingAgentStrategyTest {
         promptBuilder = new AgentPromptBuilder();
         responseParser = new AiResponseParser();
         AgentSession session = new AgentSession("o", "r", 1L, "t");
-        ctx = new AgentRunContext(session, "o", "r", 1L, Path.of("/tmp/ws"), "main");
+        ctx = new AgentRunContext(session, "o", "r", 1L, workspace, "main");
         // The native tool path consults the branch switcher on every round.
         lenient().when(branchSwitcher.apply(any(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> new BranchSwitcher.Result("main", "main", inv.getArgument(2)));
@@ -85,7 +84,7 @@ class CodingAgentStrategyTest {
     private CodingAgentStrategy newStrategy() {
         return new CodingAgentStrategy("sys", promptBuilder, responseParser, notificationService,
                 sessionService, branchSwitcher, toolRouter, toolCatalog,
-                workspaceService, agentConfig, null, McpToolCatalog.empty(), null,
+                agentConfig, null, McpToolCatalog.empty(), null,
                 (owner, repo, branch, files, tools, ws) -> "fetched-context");
     }
 
@@ -140,7 +139,7 @@ class CodingAgentStrategyTest {
                 .thenReturn(new ToolResult(false, 1, "", "compile error")) // mvn fail
                 .thenReturn(new ToolResult(true, 0, "ok", ""))   // write-file
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", "")); // mvn pass
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
 
         CodingAgentStrategy strategy = newStrategy();
 
@@ -167,7 +166,7 @@ class CodingAgentStrategyTest {
         lenient().when(orchestration.isMcpTool(any(), eq("write-file"))).thenReturn(false);
         CodingAgentStrategy strategy = new CodingAgentStrategy("sys", promptBuilder, responseParser,
                 notificationService, sessionService, branchSwitcher, toolRouter,
-                toolCatalog, workspaceService, agentConfig, orchestration, catalog, null,
+                toolCatalog, agentConfig, orchestration, catalog, null,
                 (a, b, c, d, e, f) -> "ctx");
 
         String response = """
@@ -181,7 +180,7 @@ class CodingAgentStrategyTest {
                 .thenReturn(new ToolResult(true, 0, "ok", ""))   // write-file
                 .thenReturn(new ToolResult(true, 0, "ok", ""))   // mvn pass
                 .thenReturn(new ToolResult(false, 1, "", "mcp boom")); // mcp fail
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
 
         StepDecision d = strategy.step(ctx, response, 1);
 
@@ -195,7 +194,7 @@ class CodingAgentStrategyTest {
         // that carries no tool_calls and is NOT a JSON plan. When the agent has
         // already produced workspace changes, such a turn means "I'm done" and
         // must finish successfully — not be fed to the JSON parser and hard-fail.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
         ctx.setToolingMode(org.remus.giteabot.agent.loop.ToolingMode.NATIVE);
         org.remus.giteabot.ai.ChatTurn textOnly = new org.remus.giteabot.ai.ChatTurn(
                 "I've implemented the feature and the build passes.",
@@ -212,7 +211,7 @@ class CodingAgentStrategyTest {
         // A plain-language turn before any work is done (no tool_calls, no
         // workspace changes) must not fail the run, and must not loop either:
         // one nudge names both exits — call tools, or answer without tools.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         ctx.setToolingMode(ToolingMode.NATIVE);
 
         StepDecision d = newStrategy().step(ctx,
@@ -235,7 +234,7 @@ class CodingAgentStrategyTest {
     void step_nativeAnswerAfterNudge_finishesWithAnswerPayload() {
         // The reported bug: the model answers a read-only issue and the run must
         // end by publishing that answer instead of nudging until the round cap.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         ctx.setToolingMode(ToolingMode.NATIVE);
         CodingAgentStrategy strategy = newStrategy();
         String answer = """
@@ -264,7 +263,7 @@ class CodingAgentStrategyTest {
         // published — a shorter restatement beats a longer earlier turn, and it never
         // resolves to the pre-nudge narration. The nudge asks for the full answer again,
         // so a complying model does not lose anything by this rule.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         ctx.setToolingMode(ToolingMode.NATIVE);
         CodingAgentStrategy strategy = newStrategy();
         String narration = "Let me look into how the Docker setup works and then decide what to change.";
@@ -285,7 +284,7 @@ class CodingAgentStrategyTest {
         // which then asks for it again. When that second reply is empty or truncated the
         // earlier complete answer is published rather than failing a run that answered —
         // and when there is no complete turn at all the run still fails.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         ctx.setToolingMode(ToolingMode.NATIVE);
         String answer = "docker-compose.yaml starts with version, services, then the ollama service.";
 
@@ -312,7 +311,7 @@ class CodingAgentStrategyTest {
     void step_nativeTruncatedTurnsOnly_failsWithoutPublishingAnAnswer() {
         // A MAX_TOKENS turn is truncated, so it must never be posted as the answer, and a
         // run whose every turn was truncated has no complete turn to fall back to.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         ctx.setToolingMode(ToolingMode.NATIVE);
         CodingAgentStrategy strategy = newStrategy();
 
@@ -333,7 +332,7 @@ class CodingAgentStrategyTest {
         // it, so with a single retry configured the next real tool round was
         // rejected by `attempt > maxRetries` before executing anything.
         agentConfig.getBudget().setMaxValidationRetries(1);
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false, true);
+        when(workspace.hasUncommittedChanges()).thenReturn(false, true);
         when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
                 .thenReturn(new ToolResult(true, 0, "ok", ""))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
@@ -353,7 +352,7 @@ class CodingAgentStrategyTest {
     void step_proseAfterAttemptedImplementationWithoutDiff_failsInsteadOfAnswering() {
         // An implementation attempt that leaves no diff must keep reporting failure:
         // answering "no changes needed" after trying to change files would hide it.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
                 .thenReturn(new ToolResult(true, 0, "ok", ""));
         ctx.setToolingMode(ToolingMode.NATIVE);
@@ -376,7 +375,7 @@ class CodingAgentStrategyTest {
     void step_fileOnlyRoundWithoutDiffThenProse_failsInsteadOfAnswering() {
         // A file write that left no diff is still an implementation attempt, so the run
         // must report failure rather than publish "nothing needed changing".
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
                 .thenReturn(new ToolResult(true, 0, "File written", ""));
         ctx.setToolingMode(ToolingMode.NATIVE);
@@ -398,7 +397,7 @@ class CodingAgentStrategyTest {
         // "run the tests and tell me whether they pass": the model runs the suite, reports
         // the result and changes no file. A validation call is not an implementation
         // attempt, so the answer exit stays open and the report is published.
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
         when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
                 .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
         ctx.setToolingMode(ToolingMode.NATIVE);
@@ -427,13 +426,13 @@ class CodingAgentStrategyTest {
                 ```""";
         when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
                 .thenReturn(new ToolResult(true, 0, "ok", ""));
-        when(workspaceService.hasUncommittedChanges(any())).thenReturn(true);
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
 
         StepDecision d = newStrategy().step(ctx, response, 1);
 
         assertThat(d).isInstanceOf(StepDecision.Finish.class);
         assertThat(((StepDecision.Finish) d).outcome().success()).isTrue();
-        verify(workspaceService).hasUncommittedChanges(any());
+        verify(workspace).hasUncommittedChanges();
     }
 }
 

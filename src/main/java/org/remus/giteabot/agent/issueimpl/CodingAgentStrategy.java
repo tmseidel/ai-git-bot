@@ -15,7 +15,7 @@ import org.remus.giteabot.agent.tools.ToolArguments;
 import org.remus.giteabot.agent.tools.ToolCallContext;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
-import org.remus.giteabot.agent.validation.WorkspaceService;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
@@ -55,7 +55,6 @@ public final class CodingAgentStrategy implements AgentStrategy {
     private final BranchSwitcher branchSwitcher;
     private final AgentToolRouter toolRouter;
     private final ToolCatalog catalog;
-    private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpToolCatalog mcpToolCatalog;
@@ -102,7 +101,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
     public interface ContextFetcher {
         String fetch(String owner, String repo, String branch,
                      List<String> files, List<ImplementationPlan.ToolRequest> tools,
-                     java.nio.file.Path workspaceDir);
+                     Workspace workspace);
     }
 
 
@@ -114,7 +113,6 @@ public final class CodingAgentStrategy implements AgentStrategy {
                                BranchSwitcher branchSwitcher,
                                AgentToolRouter toolRouter,
                                ToolCatalog catalog,
-                               WorkspaceService workspaceService,
                                AgentConfigProperties agentConfig,
                                McpOrchestrationService mcpOrchestrationService,
                                McpToolCatalog mcpToolCatalog,
@@ -128,7 +126,6 @@ public final class CodingAgentStrategy implements AgentStrategy {
         this.branchSwitcher = branchSwitcher;
         this.toolRouter = toolRouter;
         this.catalog = catalog;
-        this.workspaceService = workspaceService;
         this.agentConfig = agentConfig;
         this.mcpOrchestrationService = mcpOrchestrationService;
         this.mcpToolCatalog = mcpToolCatalog;
@@ -214,7 +211,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
                 turn.assistantText(), requests);
 
         BranchSwitcher.Result branchSwitchResult = branchSwitcher.apply(
-                ctx.workspaceDir(), ctx.baseBranch(), requests, ctx.issueNumber());
+                ctx.workspace(), ctx.baseBranch(), requests, ctx.issueNumber());
         ctx.setBaseBranch(branchSwitchResult.selectedBranch());
         List<ImplementationPlan.ToolRequest> remaining = branchSwitchResult.remainingToolRequests();
 
@@ -239,7 +236,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         }
         toolRounds++;
 
-        List<ToolResult> rawResults = executeAllTools(ctx.workspaceDir(), remaining);
+        List<ToolResult> rawResults = executeAllTools(ctx.workspace(), remaining);
         boolean hasValidationTools = hasValidationTools(remaining);
         boolean validationPassed = !hasValidationTools || allValidationToolsPassed(remaining, rawResults);
 
@@ -267,7 +264,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
             if (hasValidationTools && validationPassed) {
                 log.info("All validation tools passed on attempt {} (native)", attempt);
             }
-            if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+            if (ctx.workspace().hasUncommittedChanges()) {
                 // Validation is mandatory: if validation is enabled but the model
                 // never called a build/test tool, do NOT finish silently. Hand the
                 // tool results back together with an explicit instruction to run
@@ -322,7 +319,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
      * to exhaust the validation budget of a later, genuine tool round.</p>
      */
     private StepDecision nativeTextOnlyStep(AgentRunContext ctx, ChatTurn turn) {
-        if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+        if (ctx.workspace().hasUncommittedChanges()) {
             ImplementationPlan plan = ImplementationPlan.builder()
                     .summary(turn.assistantText() == null || turn.assistantText().isBlank()
                             ? "Implementation produced workspace changes."
@@ -413,7 +410,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
     private List<StepDecision.ToolCallResult> executeAndPackage(AgentRunContext ctx,
                                                                 List<ImplementationPlan.ToolRequest> requests,
                                                                 List<ToolCall> originalCalls) {
-        List<ToolResult> raw = executeAllTools(ctx.workspaceDir(), requests);
+        List<ToolResult> raw = executeAllTools(ctx.workspace(), requests);
         return packageResults(requests, raw, originalCalls);
     }
 
@@ -462,10 +459,10 @@ public final class CodingAgentStrategy implements AgentStrategy {
             fileRequestRounds++;
             log.info("AI requesting additional context (round {}/{})", fileRequestRounds, maxContextRounds);
             BranchSwitcher.Result branchSwitchResult = branchSwitcher.apply(
-                    ctx.workspaceDir(), ctx.baseBranch(), plan.getRequestTools(), ctx.issueNumber());
+                    ctx.workspace(), ctx.baseBranch(), plan.getRequestTools(), ctx.issueNumber());
             ctx.setBaseBranch(branchSwitchResult.selectedBranch());
             String fetched = fetchContext.fetch(ctx.owner(), ctx.repo(), ctx.baseBranch(),
-                    plan.getRequestFiles(), branchSwitchResult.remainingToolRequests(), ctx.workspaceDir());
+                    plan.getRequestFiles(), branchSwitchResult.remainingToolRequests(), ctx.workspace());
             String ctxMsg = "Here is the requested repository context:\n" + fetched
                     + "\n\nNow implement the issue using `runTools`. "
                     + "Use write-file/patch-file for changes and include validation tools.";
@@ -491,7 +488,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         if (requests.stream().anyMatch(this::isMutation)) {
             implementationAttempted = true;
         }
-        List<ToolResult> results = executeAllTools(ctx.workspaceDir(), requests);
+        List<ToolResult> results = executeAllTools(ctx.workspace(), requests);
         boolean hasValidationTools = hasValidationTools(requests);
         boolean validationPassed = !hasValidationTools || allValidationToolsPassed(requests, results);
 
@@ -537,7 +534,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
                                          ImplementationPlan plan,
                                          List<ImplementationPlan.ToolRequest> requests,
                                          List<ToolResult> results) {
-        if (workspaceService.hasUncommittedChanges(ctx.workspaceDir())) {
+        if (ctx.workspace().hasUncommittedChanges()) {
             return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
         }
         log.info("Tool execution produced no Git-detectable workspace changes; asking AI to correct");
@@ -553,12 +550,12 @@ public final class CodingAgentStrategy implements AgentStrategy {
                 + "Inspect the files with context tools if needed, then use write-file or patch-file so Git has actual changes to commit.";
     }
 
-    private List<ToolResult> executeAllTools(java.nio.file.Path workspaceDir,
+    private List<ToolResult> executeAllTools(Workspace workspace,
                                              List<ImplementationPlan.ToolRequest> requests) {
         List<ToolResult> results = new ArrayList<>();
         for (ImplementationPlan.ToolRequest req : requests) {
             results.add(toolRouter.execute(AgentToolRouter.Mode.CODING,
-                    new ToolCallContext(null, null, null, workspaceDir, req)));
+                    new ToolCallContext(null, null, null, workspace, req)));
         }
         return results;
     }

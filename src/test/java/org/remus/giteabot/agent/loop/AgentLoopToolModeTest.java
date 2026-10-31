@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.AiClient;
@@ -42,7 +43,7 @@ class AgentLoopToolModeTest {
     @BeforeEach
     void setUp() {
         AgentSession session = new AgentSession("owner", "repo", 7L, "title");
-        ctx = new AgentRunContext(session, "owner", "repo", 7L, Path.of("/tmp/ws"), "main");
+        ctx = new AgentRunContext(session, "owner", "repo", 7L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
 

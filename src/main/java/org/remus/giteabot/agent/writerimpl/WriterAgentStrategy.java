@@ -136,7 +136,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
             requests.add(toRequest(call));
         }
         BranchSwitcher.Result branchSwitch = branchSwitcher.apply(
-                ctx.workspaceDir(), ctx.baseBranch(), requests, ctx.issueNumber());
+                ctx.workspace(), ctx.baseBranch(), requests, ctx.issueNumber());
         if (branchSwitch.selectedBranch() != null
                 && !branchSwitch.selectedBranch().equals(ctx.baseBranch())) {
             sessionService.setBranchName(ctx.session(), branchSwitch.selectedBranch());
@@ -197,7 +197,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
         if (plan.hasContextRequests() && writerRound < maxToolRounds) {
             List<ImplementationPlan.ToolRequest> contextRequests = buildContextRequests(plan);
             BranchSwitcher.Result branchSwitch = branchSwitcher.apply(
-                    ctx.workspaceDir(), ctx.baseBranch(), contextRequests, ctx.issueNumber());
+                    ctx.workspace(), ctx.baseBranch(), contextRequests, ctx.issueNumber());
             if (branchSwitch.selectedBranch() != null
                     && !branchSwitch.selectedBranch().equals(ctx.baseBranch())) {
                 sessionService.setBranchName(ctx.session(), branchSwitch.selectedBranch());
@@ -279,7 +279,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
         for (ImplementationPlan.ToolRequest request : requests) {
             results.add(toolRouter.execute(AgentToolRouter.Mode.WRITER,
                     new ToolCallContext(ctx.owner(), ctx.repo(), ctx.issueNumber(),
-                            ctx.workspaceDir(), request)));
+                            ctx.workspace(), request)));
         }
         return results;
     }

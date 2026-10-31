@@ -25,8 +25,7 @@ class ToolExecutionServiceCtagsTest {
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
-                new org.remus.giteabot.agent.tools.ToolCatalog(config),
-                new WorkspaceService(null, 60));
+                new org.remus.giteabot.agent.tools.ToolCatalog(config));
     }
 
     // ---------------------------------------------------------------
@@ -229,7 +228,7 @@ class ToolExecutionServiceCtagsTest {
 
     @Test
     void executeCtagsSignaturesTool_missingArgs_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "ctags-signatures", List.of());
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-signatures", List.of());
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("requires a file path");
@@ -237,7 +236,7 @@ class ToolExecutionServiceCtagsTest {
 
     @Test
     void executeCtagsSignaturesTool_fileNotFound_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "ctags-signatures",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-signatures",
                 List.of("nonexistent.java"));
 
         assertThat(result.success()).isFalse();
@@ -246,7 +245,7 @@ class ToolExecutionServiceCtagsTest {
 
     @Test
     void executeCtagsSignaturesTool_pathTraversal_returnsError() {
-        ToolResult result = service.executeContextTool(tempDir, "ctags-signatures",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-signatures",
                 List.of("../../etc/passwd"));
 
         assertThat(result.success()).isFalse();
@@ -264,7 +263,7 @@ class ToolExecutionServiceCtagsTest {
         // Verify the limit arg is parsed and doesn't cause a pre-execution failure.
         // The limit should be clamped to MAX_CTAGS_SIGNATURES_LIMIT (500).
         // Whether ctags is available or not, this must not crash.
-        ToolResult result = service.executeContextTool(tempDir, "ctags-signatures",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-signatures",
                 List.of("src/Demo.java", "9999"));
 
         // Result must not be null (i.e. limit parsing didn't crash).
@@ -279,7 +278,7 @@ class ToolExecutionServiceCtagsTest {
 
     @Test
     void executeCtagsDepsTool_missingArgs_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "ctags-deps", List.of());
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-deps", List.of());
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("requires a file path");
@@ -287,7 +286,7 @@ class ToolExecutionServiceCtagsTest {
 
     @Test
     void executeCtagsDepsTool_fileNotFound_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "ctags-deps",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-deps",
                 List.of("nonexistent.tsx"));
 
         assertThat(result.success()).isFalse();
@@ -296,7 +295,7 @@ class ToolExecutionServiceCtagsTest {
 
     @Test
     void executeCtagsDepsTool_pathTraversal_returnsError() {
-        ToolResult result = service.executeContextTool(tempDir, "ctags-deps",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "ctags-deps",
                 List.of("../etc/shadow"));
 
         assertThat(result.success()).isFalse();

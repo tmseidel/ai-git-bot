@@ -7,6 +7,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
@@ -105,7 +106,7 @@ class IssueTriageServiceTest {
         lenient().when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
         lenient().when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
                 anyString(), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/triage-ws")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/triage-ws"))));
         lenient().when(repoClient.getDefaultBranch("owner", "repo")).thenReturn("main");
         lenient().when(repoClient.getRepositoryTree("owner", "repo", "main"))
                 .thenReturn(List.of(new RepositoryTreeEntry("src/App.java", RepositoryTreeEntry.Type.FILE)));

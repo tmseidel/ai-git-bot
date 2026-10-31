@@ -14,7 +14,7 @@ import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Component;
 
-import java.nio.file.Path;
+import org.remus.giteabot.agent.validation.Workspace;
 import java.util.Set;
 
 /**
@@ -44,7 +44,7 @@ public class WorkflowToolSurfaceFactory {
                                       String owner,
                                       String repo,
                                       Long number,
-                                      Path workspace) {
+                                      Workspace workspace) {
         Set<String> botTools = botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration());
         McpConfiguration mcpConfiguration = bot.getMcpConfiguration();
         McpToolCatalog mcpCatalog = mcpToolSelectionService.filterCatalogForPrompt(mcpConfiguration,

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentRunContext;
 import org.remus.giteabot.agent.loop.LoopOutcome;
@@ -66,7 +67,7 @@ class TriageAgentStrategyTest {
                 new ToolCatalog(new AgentConfigProperties()), McpToolCatalog.empty(), null,
                 ALLOWED, "triage-bot", new AiResponseParser(), branchSwitcher, 2);
         ctx = new AgentRunContext(new AgentSession("owner", "repo", 42L, "Issue"),
-                "owner", "repo", 42L, Path.of("/tmp/ws"), "main");
+                "owner", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         lenient().when(branchSwitcher.apply(any(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> new BranchSwitcher.Result("main", "main", inv.getArgument(2)));
     }

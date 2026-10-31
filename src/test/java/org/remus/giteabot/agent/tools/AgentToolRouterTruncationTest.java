@@ -5,11 +5,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.codeexecution.ProcessPythonExecutionService;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
-import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.mcp.McpToolCatalog;
 
@@ -92,10 +92,10 @@ class AgentToolRouterTruncationTest {
 
     private ToolResult executeCode(AgentConfigProperties config, String code) {
         ToolCatalog catalog = new ToolCatalog(config);
-        ToolExecutionService tools = new ToolExecutionService(config, catalog, new WorkspaceService(null, 60));
+        ToolExecutionService tools = new ToolExecutionService(config, catalog);
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, Set.of("execute-code", "cat"), new ProcessPythonExecutionService(config));
-        ToolCallContext context = new ToolCallContext("owner", "repo", 1L, workspace,
+        ToolCallContext context = new ToolCallContext("owner", "repo", 1L, Workspace.unmanaged(workspace),
                 ImplementationPlan.ToolRequest.builder().id("run-1").tool("execute-code")
                         .args(List.of(code)).build(), null);
         return router.execute(AgentToolRouter.Mode.CODING, context);

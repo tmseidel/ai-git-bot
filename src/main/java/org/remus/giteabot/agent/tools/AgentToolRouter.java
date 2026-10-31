@@ -179,7 +179,7 @@ public class AgentToolRouter {
                     + "call this one directly, where the round accounting sees it");
         }
         ToolCallContext nested = new ToolCallContext(base.owner(), base.repo(), base.issueNumber(),
-                base.workspaceDir(),
+                base.workspace(),
                 ImplementationPlan.ToolRequest.builder()
                         .id("execute-code-nested")
                         .tool(tool)
@@ -265,15 +265,15 @@ public class AgentToolRouter {
         // historic in-line dispatch but driven by the central ToolCatalog
         // instead of stacking three boolean checks.
         if (catalog.isFile(tool)) {
-            return toolExecutionService.executeFileTool(ctx.workspaceDir(), tool, args);
+            return toolExecutionService.executeFileTool(ctx.workspace(), tool, args);
         }
         if (isMcpTool(tool)) {
             return mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog, tool, args);
         }
         if (catalog.isContext(tool)) {
-            return toolExecutionService.executeContextTool(ctx.workspaceDir(), tool, args);
+            return toolExecutionService.executeContextTool(ctx.workspace(), tool, args);
         }
-        return toolExecutionService.executeTool(ctx.workspaceDir(), tool, args);
+        return toolExecutionService.executeTool(ctx.workspace(), tool, args);
     }
 
     private ToolResult executeWriter(ToolCallContext ctx) {
@@ -302,7 +302,7 @@ public class AgentToolRouter {
             return mcpOrchestrationService.executeTool(mcpConfiguration, mcpToolCatalog, original, args);
         }
         if (catalog.isContext(lower)) {
-            return toolExecutionService.executeContextTool(ctx.workspaceDir(), lower, args);
+            return toolExecutionService.executeContextTool(ctx.workspace(), lower, args);
         }
         return new ToolResult(false, -1, "",
                 "Writer tool '" + original + "' is not available. Available tools: get-issue, "

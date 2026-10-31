@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.unittest.runner;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.prworkflow.unittest.UnitTestCase;
 import org.remus.giteabot.prworkflow.unittest.UnitTestCaseRepository;
 import org.remus.giteabot.prworkflow.unittest.UnitTestFramework;
@@ -31,7 +32,7 @@ class UnitTestRunnerTest {
     private UnitTestRunRequest request(UnitTestFramework framework) {
         UnitTestSuite suite = new UnitTestSuite();
         suite.setFramework(framework);
-        return new UnitTestRunRequest(suite, Path.of("."), framework, 0, null);
+        return new UnitTestRunRequest(suite, Workspace.unmanaged(Path.of(".")), framework, 0, null);
     }
 
     private UnitTestCase aCase() {
