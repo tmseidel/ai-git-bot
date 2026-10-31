@@ -94,9 +94,11 @@ volumes:
 
 ### Configuration Document (Optional)
 
-Boot an instance from a configuration document instead of clicking through the admin UI.
+Back an instance from a configuration document instead of clicking through the admin UI.
 The generator on [gitbot.eu/trial](https://gitbot.eu/trial) writes one, together with a
-compose file that sets these variables.
+compose file that sets these variables. A complete reference — every editable property of
+every entity — is in
+[`doc/examples/full-configuration`](examples/full-configuration/docker-compose.yml).
 
 | Variable | Description |
 |----------|-------------|

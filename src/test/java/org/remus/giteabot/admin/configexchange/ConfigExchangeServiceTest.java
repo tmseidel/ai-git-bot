@@ -173,6 +173,10 @@ class ConfigExchangeServiceTest {
         assertEquals("Trial AI",
                 exported.path("bots").get(0).path("aiIntegration").path("name").asString(),
                 "associations are flattened to name references");
+        // The PR-kind view of findAll() must not hide the issue configuration: a bot references
+        // it, so a document without it cannot be re-imported anywhere else.
+        assertTrue(exported.path("workflowConfigurations").toString().contains("\"Trial issues\""),
+                "the ISSUE-kind configuration belongs in the export too");
 
         // Re-importing the export into the instance it came from adds nothing.
         assertEquals(0, configExchangeService.importDocument(exported));

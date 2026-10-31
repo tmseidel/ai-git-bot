@@ -448,6 +448,8 @@ Git 平台与工作流生成该文档，并输出包含 `APP_CONFIG_JSON` 的 `d
   工具配置。
 - 凭据在文档中是明文，导入时按存储加密（`APP_ENCRYPTION_KEY`）。
 - `GET /config/export` 以相同格式返回当前实例，用于把在界面中配置好的实例转换为文档。
+- [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) 是
+  完整示例：设置了每个实体的全部可编辑属性，并对需要解释的取值加了说明。
 
 设置 `APP_CONFIG_JSON`（内联）或 `APP_CONFIG_FILE`（路径）即可启用。两者都不设置时，行为与以前
 完全一致：管理员账户、AI 与 Git 集成、机器人都由管理界面创建。设置了文档后，管理界面的横幅会

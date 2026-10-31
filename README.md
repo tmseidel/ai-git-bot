@@ -471,6 +471,9 @@ no separate schema to learn or keep in sync.
   (`APP_ENCRYPTION_KEY`).
 - `GET /config/export` returns the current instance in the same shape — use it to turn a
   UI-configured instance into a document.
+- [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) is
+  a complete example: every editable property of every entity set, with notes on the values
+  that need explaining.
 
 Set `APP_CONFIG_JSON` (inline) or `APP_CONFIG_FILE` (path) to use it; leave both unset and
 the instance behaves exactly as before — you create the administrator account, the AI and

@@ -148,13 +148,25 @@ public class ConfigExchangeRegistry {
                 gitIntegrationService::findAll,
                 gitIntegrationRepository::findByName,
                 integration -> gitIntegrationService.save(integration, false),
-                (integration, node) -> put(node, "token",
-                        gitIntegrationService.decryptToken(integration)),
+                (integration, node) -> {
+                    put(node, "token", gitIntegrationService.decryptToken(integration));
+                    // Encrypted at rest like the token: exporting the stored value would hand the
+                    // next instance ciphertext it cannot decrypt with its own APP_ENCRYPTION_KEY.
+                    put(node, "sshPrivateKey", gitIntegrationService.decryptSshPrivateKey(integration));
+                },
                 null));
 
         declared.add(new ConfigTable<>("workflowConfigurations", WorkflowConfiguration.class,
                 WorkflowConfiguration::getName,
-                workflowConfigurationService::findAll,
+                // Both kinds: the no-arg findAll() is the PR-kind view, and a document without
+                // the ISSUE rows cannot be re-imported — a bot references its issue configuration,
+                // which then cannot be resolved.
+                () -> {
+                    List<WorkflowConfiguration> bothKinds = new ArrayList<>(
+                            workflowConfigurationService.findAll(WorkflowConfigurationKind.PR));
+                    bothKinds.addAll(workflowConfigurationService.findAll(WorkflowConfigurationKind.ISSUE));
+                    return bothKinds;
+                },
                 workflowConfigurationRepository::findByName,
                 workflowConfigurationService::save,
                 null,

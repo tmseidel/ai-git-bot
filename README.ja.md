@@ -461,6 +461,9 @@ URL とシークレットを出力します。入力内容がブラウザの外�
   (`APP_ENCRYPTION_KEY`)。
 - `GET /config/export` は現在のインスタンスを同じ形式で返します。UI で設定したインスタンスを
   ドキュメントに変換するときに使います。
+- [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) は
+  完全な例です。すべてのエンティティの編集可能なプロパティを設定し、説明が必要な値には注記を
+  付けています。
 
 `APP_CONFIG_JSON`（インライン）または `APP_CONFIG_FILE`（パス）を設定すると有効になります。
 どちらも設定しなければ、動作はこれまでとまったく同じです。管理者アカウント、AI と Git の統合、
