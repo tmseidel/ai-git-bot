@@ -114,9 +114,17 @@ With a document, these rules apply:
 - The document is the entity model — one array per configuration table, entities with
   their own field names, `@ManyToOne` references as `{"name": …}`. Unknown keys are
   ignored, so an older image tolerates a newer generator.
-- Rows whose unique name already exists are kept. That is how the seeded `Default` system
-  prompt, the default tool configuration and the seeded workflow configurations stay
-  authoritative; a document cannot override them.
+- A row the document declares **overrides** the seeded row of the same name, field by
+  field: omitted values keep their stored value, and a declared `selectedTools` /
+  `selectedWorkflows` list replaces the existing selection. The import only runs on an
+  empty database, so the only rows it can meet are Flyway seeds — operator-created data is
+  never modified. The `defaultEntry` flag is never taken from a document.
+- The default tool configuration is extended at startup with every built-in tool the
+  running build ships, `execute-code` included (see `DefaultToolSetInitializer`). That tool
+  runs model-written code as the container user, so a bot that must not have it needs a tool
+  configuration of its own; the migrations keep it out of the seed on purpose. An instance
+  upgraded from an older image gains the tool on the next start — narrow the default before
+  upgrading if that is not wanted.
 - `adminUsers` entries carry a plaintext `password` (hashed on import). An entry without a
   password is skipped with a warning — exported documents never contain one.
 - Credentials are plaintext in the document and encrypted on import

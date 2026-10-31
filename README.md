@@ -457,8 +457,16 @@ no separate schema to learn or keep in sync.
   throw-away instance (in-memory H2) that is every start; on a persistent instance it is
   the first start of an empty volume and never again, so a restart can never overwrite
   what you changed in the UI.
-- Rows whose unique name already exists are kept, which is how the seeded `Default`
-  prompt, tool configuration and workflow configurations stay authoritative.
+- A row the document declares **overrides** the seeded row of the same name — field by
+  field: values it omits keep their stored value, and a declared `selectedTools` /
+  `selectedWorkflows` list replaces the existing selection. Because the import only runs
+  on an empty database, the rows it can meet are the Flyway seeds (`Default` prompt,
+  default tool configuration, seeded workflow configurations); user data is never touched.
+  The `defaultEntry` flag itself is never taken from a document.
+- The default tool configuration is extended at startup with every built-in tool the
+  running build ships — `execute-code` included — because the seed can only list the tools
+  that existed when it was written and the default row cannot be edited in the UI. A bot
+  that must not run model-written code gets a tool configuration of its own.
 - Credentials are plaintext in the document and encrypted at rest on import
   (`APP_ENCRYPTION_KEY`).
 - `GET /config/export` returns the current instance in the same shape — use it to turn a

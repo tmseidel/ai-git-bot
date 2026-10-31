@@ -5,6 +5,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AdminService;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.systemsettings.McpConfiguration;
+import org.remus.giteabot.systemsettings.McpConfigurationService;
 import org.remus.giteabot.systemsettings.SystemPromptService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -14,7 +16,9 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.lang.reflect.Field;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.Map;
 
@@ -41,6 +45,7 @@ public class ConfigExchangeService {
 
     private final ConfigExchangeRegistry registry;
     private final AdminService adminService;
+    private final McpConfigurationService mcpConfigurationService;
     private final SystemPromptService systemPromptService;
 
     /**
@@ -54,18 +59,20 @@ public class ConfigExchangeService {
     public int importDocument(JsonNode root) {
         int created = 0;
         Map<Class<?>, Function<String, Optional<Object>>> lookups = registry.lookups();
+        Set<String> declared = new HashSet<>();
         for (ConfigTable<?> table : registry.tables()) {
             JsonNode section = root.path(table.jsonKey());
             if (!section.isArray()) {
                 continue;
             }
-            created += importSection(table, section, lookups);
+            created += importSection(table, section, lookups, declared);
         }
         return created;
     }
 
     private <T> int importSection(ConfigTable<T> table, JsonNode section,
-                                  Map<Class<?>, Function<String, Optional<Object>>> lookups) {
+                                  Map<Class<?>, Function<String, Optional<Object>>> lookups,
+                                  Set<String> declared) {
         int created = 0;
         int index = 0;
         for (JsonNode node : section) {
@@ -73,7 +80,7 @@ public class ConfigExchangeService {
             try {
                 if (table.save() == null) {
                     created += importAdminUser(node);
-                } else if (importOne(table, node, lookups)) {
+                } else if (importOne(table, node, lookups, declared)) {
                     created++;
                 }
             } catch (RuntimeException e) {
@@ -85,7 +92,8 @@ public class ConfigExchangeService {
     }
 
     private <T> boolean importOne(ConfigTable<T> table, JsonNode node,
-                                  Map<Class<?>, Function<String, Optional<Object>>> lookups) {
+                                  Map<Class<?>, Function<String, Optional<Object>>> lookups,
+                                  Set<String> declared) {
         T entity = MAPPER.treeToValue(node, table.type());
         EntityIdentity.strip(entity);
         AssociationResolver.resolve(entity, lookups);
@@ -94,16 +102,43 @@ public class ConfigExchangeService {
         if (table.validate() != null) {
             table.validate().accept(entity);
         }
+
         String name = table.name().apply(entity);
-        if (table.findByName() != null && name != null
-                && table.findByName().apply(name).isPresent()) {
-            log.info("Config import: {} '{}' already exists (seeded) — keeping the existing row",
+        Optional<T> existing = table.findByName() == null || name == null
+                ? Optional.empty()
+                : table.findByName().apply(name);
+        if (existing.isEmpty()) {
+            table.save().accept(entity);
+            remember(declared, table, name);
+            log.debug("Config import: {} '{}' created", table.jsonKey(), name);
+            return true;
+        }
+
+        if (!remember(declared, table, name)) {
+            log.info("Config import: {} '{}' is declared more than once — keeping the first entry",
                     table.jsonKey(), name);
             return false;
         }
-        table.save().accept(entity);
-        log.debug("Config import: {} '{}' created", table.jsonKey(), name);
-        return true;
+
+        T target = existing.get();
+        if (target instanceof McpConfiguration mcpConfiguration) {
+            // The service always encrypts on save, so the stored ciphertext has to be
+            // turned back into plaintext before it is handed to it again.
+            mcpConfiguration.setJsonContent(mcpConfigurationService.getDecryptedJsonContent(mcpConfiguration));
+        }
+        if (EntityIdentity.isDefaultEntry(target)) {
+            log.warn("Config import: overriding the seeded default {} '{}' from the document",
+                    table.jsonKey(), name);
+        }
+        EntityMerge.apply(entity, target, node);
+        table.save().accept(target);
+        log.info("Config import: {} '{}' overridden by the document", table.jsonKey(), name);
+        return false;
+    }
+
+    /** @return {@code false} when the document already declared this row earlier in the run */
+    private static boolean remember(Set<String> declared, ConfigTable<?> table, String name) {
+        return name == null || declared.add(table.jsonKey() + ":" + name);
     }
 
     /**

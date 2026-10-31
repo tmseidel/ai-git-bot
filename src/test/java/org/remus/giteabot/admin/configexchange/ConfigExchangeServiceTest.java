@@ -16,6 +16,10 @@ import org.remus.giteabot.prworkflow.config.WorkflowConfigurationKind;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationRepository;
 import org.remus.giteabot.prworkflow.config.WorkflowSelection;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionRepository;
+import org.remus.giteabot.systemsettings.BotToolConfiguration;
+import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
+import org.remus.giteabot.systemsettings.BotToolSelection;
+import org.remus.giteabot.systemsettings.BotToolSelectionRepository;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 import org.remus.giteabot.systemsettings.SystemPromptRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +62,8 @@ class ConfigExchangeServiceTest {
     @Autowired private WorkflowSelectionRepository workflowSelectionRepository;
     @Autowired private BotRepository botRepository;
     @Autowired private SystemPromptRepository systemPromptRepository;
+    @Autowired private BotToolConfigurationRepository botToolConfigurationRepository;
+    @Autowired private BotToolSelectionRepository botToolSelectionRepository;
     @Autowired private EncryptionService encryptionService;
 
     @BeforeEach
@@ -67,10 +73,13 @@ class ConfigExchangeServiceTest {
         aiIntegrationRepository.deleteAll();
         gitIntegrationRepository.deleteAll();
         adminUserRepository.deleteAll();
-        if (systemPromptRepository.findByDefaultEntryTrue().isEmpty()) {
-            systemPromptRepository.deleteAll();
-            systemPromptRepository.save(defaultPrompt());
-        }
+        // Rows a document may create must not leak into the next test: prompts are
+        // rebuilt from the seed, non-default tool configurations are removed.
+        systemPromptRepository.deleteAll();
+        systemPromptRepository.save(defaultPrompt());
+        botToolConfigurationRepository.findAll().stream()
+                .filter(configuration -> !configuration.isDefaultEntry())
+                .forEach(botToolConfigurationRepository::delete);
     }
 
     @Test
@@ -168,6 +177,70 @@ class ConfigExchangeServiceTest {
 
         // Re-importing the export into the instance it came from adds nothing.
         assertEquals(0, configExchangeService.importDocument(exported));
+    }
+
+    @Test
+    void aDocumentCanDeclareItsOwnSystemPromptAndToolConfiguration() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        root.putArray("systemPrompts").addObject()
+                .put("name", "Trial prompt")
+                .put("reviewSystemPrompt", "custom review")
+                .put("reviewAgentSystemPrompt", "custom agent review")
+                .put("issueAgentSystemPrompt", "custom issue")
+                .put("writerAgentSystemPrompt", "custom writer")
+                .put("e2ePlannerSystemPrompt", "custom planner")
+                .put("e2eAuthorSystemPrompt", "custom author")
+                .put("e2eRunnerSystemPrompt", "custom runner")
+                .put("unitTestAuthorSystemPrompt", "custom unit test")
+                .put("readmeSyncSystemPrompt", "custom readme")
+                .put("i18nCoverageSystemPrompt", "custom i18n");
+        ObjectNode tools = root.putArray("botToolConfigurations").addObject();
+        tools.put("name", "Trial tools");
+        tools.putArray("selectedTools").addObject().put("toolName", "rg").put("toolKind", "CONTEXT");
+
+        ObjectNode bot = (ObjectNode) root.path("bots").get(0);
+        bot.putObject("systemPrompt").put("name", "Trial prompt");
+        bot.putObject("toolConfiguration").put("name", "Trial tools");
+
+        configExchangeService.importDocument(root);
+
+        Bot saved = botRepository.findByName("trial").orElseThrow();
+        assertEquals("Trial prompt", saved.getSystemPrompt().getName());
+        assertEquals("custom review", saved.getSystemPrompt().getReviewSystemPrompt());
+        assertEquals("Trial tools", saved.getToolConfiguration().getName());
+        assertEquals(List.of("rg"), toolNames(saved.getToolConfiguration().getId()));
+    }
+
+    @Test
+    void aDocumentOverridesTheSeededRowItDeclares() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        root.putArray("systemPrompts").addObject()
+                .put("name", "Default")
+                .put("reviewSystemPrompt", "document review prompt");
+        ObjectNode tools = root.putArray("botToolConfigurations").addObject();
+        tools.put("name", "Default");
+        tools.putArray("selectedTools").addObject()
+                .put("toolName", "injected-tool").put("toolKind", "CONTEXT");
+
+        configExchangeService.importDocument(root);
+
+        SystemPrompt prompt = systemPromptRepository.findByDefaultEntryTrue().orElseThrow();
+        assertEquals("document review prompt", prompt.getReviewSystemPrompt(),
+                "a declared field overrides the seeded value");
+        assertEquals("review-agent", prompt.getReviewAgentSystemPrompt(),
+                "fields the document does not declare keep their seeded value");
+        assertTrue(prompt.isDefaultEntry(), "a document cannot move the default flag");
+
+        Bot saved = botRepository.findByName("trial").orElseThrow();
+        assertTrue(saved.getToolConfiguration().isDefaultEntry());
+        assertEquals(List.of("injected-tool"), toolNames(saved.getToolConfiguration().getId()),
+                "declared selectedTools replace the seeded tool set");
+    }
+
+    private List<String> toolNames(Long configurationId) {
+        return botToolSelectionRepository.findByConfigurationId(configurationId).stream()
+                .map(BotToolSelection::getToolName)
+                .toList();
     }
 
     private JsonNode document() throws IOException {

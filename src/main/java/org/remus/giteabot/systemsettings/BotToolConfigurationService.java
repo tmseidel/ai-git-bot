@@ -8,8 +8,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * CRUD + clone for reusable bot built-in tool configurations. Analogous to
@@ -37,6 +40,41 @@ public class BotToolConfigurationService {
     @Transactional(readOnly = true)
     public Optional<BotToolConfiguration> findById(Long id) {
         return configurationRepository.findById(id);
+    }
+
+    /**
+     * Adds every catalog tool the configuration does not yet select.
+     *
+     * <p>Used at startup for the default configuration: the Flyway seed can only list the
+     * tools that existed when it was written, and the default configuration cannot be
+     * edited through the UI, so without this step a bot that never customised its tool
+     * set would silently lose every tool added after the seed.</p>
+     *
+     * @return the number of tools added; {@code 0} when the configuration is complete
+     */
+    @Transactional
+    public int addMissingTools(Long configurationId, List<BuiltinToolRegistry.BuiltinTool> catalog) {
+        BotToolConfiguration configuration = configurationRepository.findById(configurationId)
+                .orElseThrow(() -> new IllegalArgumentException("Tool configuration not found"));
+        Set<String> present = configuration.getSelectedTools().stream()
+                .map(BotToolSelection::getToolName)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        int added = 0;
+        for (BuiltinToolRegistry.BuiltinTool tool : catalog) {
+            if (present.contains(tool.name())) {
+                continue;
+            }
+            BotToolSelection selection = new BotToolSelection();
+            selection.setConfiguration(configuration);
+            selection.setToolName(tool.name());
+            selection.setToolKind(tool.kind().name());
+            configuration.getSelectedTools().add(selection);
+            added++;
+        }
+        if (added > 0) {
+            configurationRepository.save(configuration);
+        }
+        return added;
     }
 
     @Transactional(readOnly = true)

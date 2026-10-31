@@ -69,17 +69,22 @@ final class AssociationResolver {
                     if (child == null) {
                         continue;
                     }
-                    for (Field childField : child.getClass().getDeclaredFields()) {
-                        if (!childField.isAnnotationPresent(ManyToOne.class)
-                                || Modifier.isStatic(childField.getModifiers())
-                                || !childField.getType().isInstance(parent)) {
-                            continue;
-                        }
-                        EntityIdentity.write(child, childField, parent);
-                    }
+                    linkParent(child, parent);
                     linkChildren(child);
                 }
             }
+        }
+    }
+
+    /** Points one child's owning {@code @ManyToOne} at its parent. */
+    static void linkParent(Object child, Object parent) {
+        for (Field childField : child.getClass().getDeclaredFields()) {
+            if (!childField.isAnnotationPresent(ManyToOne.class)
+                    || Modifier.isStatic(childField.getModifiers())
+                    || !childField.getType().isInstance(parent)) {
+                continue;
+            }
+            EntityIdentity.write(child, childField, parent);
         }
     }
 

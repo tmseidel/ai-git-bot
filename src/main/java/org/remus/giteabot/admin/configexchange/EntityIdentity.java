@@ -4,6 +4,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.Collection;
 
@@ -34,7 +35,7 @@ final class EntityIdentity {
                 continue;
             }
             String name = field.getName();
-            if (field.isAnnotationPresent(Id.class) || ConfigExchangeJson.RUNTIME_FIELDS.contains(name)) {
+            if (isIdentityField(field)) {
                 write(entity, field, null);
             } else if ("defaultEntry".equals(name)) {
                 // Only the Flyway seeds are defaults; an imported row never is.
@@ -45,6 +46,27 @@ final class EntityIdentity {
                     collection.forEach(EntityIdentity::strip);
                 }
             }
+        }
+    }
+
+    /**
+     * Persistence identity, bookkeeping or the protected default flag: never taken from a
+     * document, neither on creation nor when a document overrides a seeded row.
+     */
+    static boolean isIdentityField(Field field) {
+        return field.isAnnotationPresent(Id.class)
+                || ConfigExchangeJson.RUNTIME_FIELDS.contains(field.getName());
+    }
+
+    /** True for a seeded row that owns the {@code defaultEntry} flag, e.g. the Default prompt. */
+    static boolean isDefaultEntry(Object entity) {
+        try {
+            Method getter = entity.getClass().getMethod("isDefaultEntry");
+            return (boolean) getter.invoke(entity);
+        } catch (NoSuchMethodException e) {
+            return false;
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Cannot read isDefaultEntry on " + entity.getClass(), e);
         }
     }
 
