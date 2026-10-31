@@ -16,7 +16,6 @@ import org.remus.giteabot.prworkflow.config.WorkflowConfigurationKind;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationRepository;
 import org.remus.giteabot.prworkflow.config.WorkflowSelection;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionRepository;
-import org.remus.giteabot.systemsettings.BotToolConfiguration;
 import org.remus.giteabot.systemsettings.BotToolConfigurationRepository;
 import org.remus.giteabot.systemsettings.BotToolSelection;
 import org.remus.giteabot.systemsettings.BotToolSelectionRepository;

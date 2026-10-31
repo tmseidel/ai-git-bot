@@ -2,6 +2,7 @@ package org.remus.giteabot.systemsettings;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.NonNull;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
@@ -39,7 +40,7 @@ public class DefaultToolSetInitializer implements ApplicationRunner {
     private final BuiltinToolRegistry builtinToolRegistry;
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void run(@NonNull ApplicationArguments args) {
         List<BuiltinToolRegistry.BuiltinTool> selectable = builtinToolRegistry.builtinTools();
         botToolConfigurationService.findDefault().ifPresent(configuration -> {
             int added = botToolConfigurationService.addMissingTools(configuration.getId(), selectable);
