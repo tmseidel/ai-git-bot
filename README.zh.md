@@ -447,7 +447,8 @@ Git 平台与工作流生成该文档，并输出包含 `APP_CONFIG_JSON` 的 `d
   列出其编写时存在的工具，而默认行无法在 UI 中编辑。不希望运行模型生成代码的机器人应使用自己的
   工具配置。
 - 凭据在文档中是明文，导入时按存储加密（`APP_ENCRYPTION_KEY`）。
-- `GET /config/export` 以相同格式返回当前实例，用于把在界面中配置好的实例转换为文档。
+- `GET /config/export` 以相同格式返回当前实例，用于把在界面中配置好的实例转换为文档。管理界面在
+  “系统设置” → “应用通用设置”中也提供同样的下载按钮，不依赖横幅提示。
 - [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) 是
   完整示例：设置了每个实体的全部可编辑属性，并对需要解释的取值加了说明。
 

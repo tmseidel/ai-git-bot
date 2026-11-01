@@ -138,7 +138,8 @@ With a document, these rules apply:
 - `eventHookEndpoints[*].botId` is an internal reference and is dropped on import; a
   restored endpoint is not bound to a bot.
 - `GET /config/export` (authenticated, admin UI session) returns the running instance in
-  the same shape.
+  the same shape. The same download is a button in the admin UI under **System settings →
+  General application settings**, so it is always reachable — not only through the banner.
 
 A failure is logged at ERROR and never aborts the container: the instance starts
 unconfigured and `/setup` remains available. The admin UI shows a banner stating whether

@@ -456,7 +456,8 @@ docker run -p 8080:8080 tmseidel/ai-git-bot:latest
   때문입니다. 모델이 작성한 코드를 실행하지 않아야 하는 봇에는 전용 도구 구성을 할당하십시오.
 - 자격 증명은 문서에서는 평문이고, 가져올 때 암호화되어 저장됩니다(`APP_ENCRYPTION_KEY`).
 - `GET /config/export`는 현재 인스턴스를 같은 형식으로 반환합니다. UI로 구성한 인스턴스를
-  문서로 바꿀 때 사용합니다.
+  문서로 바꿀 때 사용합니다. 동일한 다운로드는 관리 UI의 "시스템 설정" → "애플리케이션 일반
+  설정"에 버튼으로도 있어 배너에 의존하지 않습니다.
 - [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml)는
   완전한 예제입니다. 모든 엔티티의 편집 가능한 속성을 설정하고, 설명이 필요한 값에는 주석을
   달았습니다.

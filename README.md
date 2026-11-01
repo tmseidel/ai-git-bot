@@ -470,7 +470,8 @@ no separate schema to learn or keep in sync.
 - Credentials are plaintext in the document and encrypted at rest on import
   (`APP_ENCRYPTION_KEY`).
 - `GET /config/export` returns the current instance in the same shape — use it to turn a
-  UI-configured instance into a document.
+  UI-configured instance into a document. The admin UI offers the same download under
+  **System settings → General application settings**, so it does not depend on the banner.
 - [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) is
   a complete example: every editable property of every entity set, with notes on the values
   that need explaining.
