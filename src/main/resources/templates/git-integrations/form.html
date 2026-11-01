@@ -88,20 +88,6 @@
                             </div>
                         </div>
 
-                        <!--
-                            Username field - always shown.
-                            For Bitbucket this is the e-mail address of the Atlassian account the bot acts as,
-                            so label, placeholder, input type and hint are switched in updateFormFields().
-                        -->
-                        <div class="col-md-6" id="usernameField">
-                            <label for="username" class="form-label" id="usernameLabel" th:text="#{label.username}">Username</label>
-                            <input type="text" class="form-control" id="username" th:field="*{username}" autocomplete="off"
-                                   th:placeholder="#{placeholder.gitUsername}" placeholder="e.g. ai_bot" required/>
-                            <div class="form-text" id="usernameDescription" th:text="#{help.git.username}">
-                                The username of the account the bot acts as on the Git platform.
-                            </div>
-                        </div>
-
                         <!-- Token field - always shown -->
                         <div class="col-md-6" id="tokenField">
                             <label for="token" class="form-label" id="tokenLabel" th:text="#{label.token}">Token</label>
@@ -246,9 +232,6 @@
                 const urlField = document.getElementById('urlField');
                 const urlInput = document.getElementById('url');
                 const urlDescription = document.getElementById('urlDescription');
-                const usernameLabel = document.getElementById('usernameLabel');
-                const usernameInput = document.getElementById('username');
-                const usernameDescription = document.getElementById('usernameDescription');
                 const tokenLabel = document.getElementById('tokenLabel');
                 const tokenDescription = document.getElementById('tokenDescription');
                 const reviewTriggerNotice = document.getElementById('reviewTriggerNotice');
@@ -290,7 +273,7 @@
                     reviewTriggerNotice.style.display = 'block';
                     postReviewActionField.style.display = 'block';
                 } else if (providerType === 'BITBUCKET') {
-                    // Bitbucket: account e-mail + Atlassian API token
+                    // Bitbucket: Atlassian API token (URL is fixed)
                     urlField.style.display = 'none';
                     urlInput.required = false;
                     tokenLabel.textContent = /*[[#{label.apiToken}]]*/ 'API Token';
@@ -301,7 +284,7 @@
                     urlField.style.display = 'block';
                     urlInput.required = true;
                     urlInput.placeholder = 'e.g. https://dev.azure.com or https://tfs.example.com/tfs';
-                    urlDescription.textContent = /*[[#{help.git.azureDevopsUrl}]]*/ 'https://dev.azure.com for Azure DevOps Services (without your organization), or your Azure DevOps Server URL, e.g. https://tfs.example.com/tfs. On Azure DevOps Server the collection is optional: without it one integration serves every collection, with it (…/tfs/DefaultCollection) only that one.';
+                    urlDescription.textContent = /*[[#{help.git.azureDevopsUrl}]]*/ 'https://dev.azure.com for Azure DevOps Services with a token for all accessible organizations, https://dev.azure.com/your-organization with a token for one organization, or your Azure DevOps Server URL, e.g. https://tfs.example.com/tfs. On Azure DevOps Server the collection is optional: without it one integration serves every collection, with it (…/tfs/DefaultCollection) only that one.';
                     tokenLabel.textContent = /*[[#{label.personalAccessToken}]]*/ 'Personal Access Token';
                     tokenDescription.textContent = /*[[#{help.git.azureDevopsToken}]]*/ 'An Azure DevOps Personal Access Token with Code (read & write) and Pull Request Threads (read & write) scopes. Create one under User settings → Personal access tokens.';
                     reviewTriggerNotice.style.display = 'block';
@@ -313,19 +296,6 @@
                     urlDescription.textContent = /*[[#{help.git.genericUrl}]]*/ 'The base URL of your Git server.';
                     tokenLabel.textContent = /*[[#{label.token}]]*/ 'Token';
                     tokenDescription.textContent = /*[[#{help.git.tokenDescription}]]*/ 'The access token for API authentication.';
-                }
-
-                // Bitbucket identifies the bot by the Atlassian account e-mail; all other providers by the username.
-                if (providerType === 'BITBUCKET') {
-                    usernameLabel.textContent = /*[[#{label.bitbucketEmail}]]*/ 'Atlassian Account Email';
-                    usernameInput.type = 'email';
-                    usernameInput.placeholder = /*[[#{placeholder.bitbucketEmail}]]*/ 'e.g. bot@example.com';
-                    usernameDescription.textContent = /*[[#{help.git.bitbucketEmail}]]*/ 'Email address of the Atlassian account the bot acts as.';
-                } else {
-                    usernameLabel.textContent = /*[[#{label.username}]]*/ 'Username';
-                    usernameInput.type = 'text';
-                    usernameInput.placeholder = /*[[#{placeholder.gitUsername}]]*/ 'e.g. ai_bot';
-                    usernameDescription.textContent = /*[[#{help.git.username}]]*/ 'The username of the account the bot acts as on the Git platform.';
                 }
 
                 if (providerType !== 'GITEA') {

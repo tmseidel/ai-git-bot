@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.review;
 import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GitUserService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -29,6 +30,7 @@ import org.springframework.stereotype.Component;
 public class CodeReviewServiceFactory {
 
     private final AiClientFactory aiClientFactory;
+    private final GitUserService gitUserService;
     private final SessionService sessionService;
     private final ReviewConfigProperties reviewConfig;
 
@@ -48,7 +50,7 @@ public class CodeReviewServiceFactory {
         }
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
         String sessionPromptKey = "system-prompt:" + bot.getSystemPrompt().getId();
-        return new CodeReviewService(repoClient, aiClient, sessionService, bot.getGitIntegration().getUsername(),
+        return new CodeReviewService(repoClient, aiClient, sessionService, gitUserService.getGitUser(bot.getGitIntegration()),
                 reviewConfig, sessionPromptKey, bot.getSystemPrompt().getReviewSystemPrompt(),
                 maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
     }

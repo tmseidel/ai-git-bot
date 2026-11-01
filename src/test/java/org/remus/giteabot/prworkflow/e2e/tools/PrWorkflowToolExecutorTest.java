@@ -417,6 +417,9 @@ class PrWorkflowToolExecutorTest {
         @Override public RepositoryCredentials getCredentials() {
             return new RepositoryCredentials("http://x", "http://x", "u", "t");
         }
+        @Override public org.remus.giteabot.repository.model.GitUser getAuthenticatedUser() {
+            throw new UnsupportedOperationException();
+        }
         @Override public String getPullRequestDiff(String o, String r, Long p) { return ""; }
         @Override public void postReviewComment(String o, String r, Long p, String b) { }
         @Override public CommentId postPullRequestComment(String o, String r, Long p, String b) { return null; }

@@ -14,6 +14,7 @@ import org.remus.giteabot.gitea.model.GiteaReviewComment;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.session.SessionService;
 
@@ -57,7 +58,7 @@ class CodeReviewServiceTest {
     @BeforeEach
     void setUp() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                sessionService, new GitUser(null, "ai_bot", null, null), new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
                 120000, 8, 60000, "");
     }
 
@@ -84,7 +85,7 @@ class CodeReviewServiceTest {
     @Test
     void reviewPullRequest_excludedFilePatterns_stripsMatchingFilesFromDiff() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                sessionService, new GitUser(null, "ai_bot", null, null), new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
                 120000, 8, 60000, "package-lock.json, *.min.js");
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
@@ -147,7 +148,7 @@ class CodeReviewServiceTest {
     @Test
     void reviewPullRequest_withConfiguredSystemPrompt_usesBotPrompt() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt",
+                sessionService, new GitUser(null, "ai_bot", null, null), new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt",
                 120000, 8, 60000, "");
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);

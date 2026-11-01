@@ -7,6 +7,7 @@ import org.remus.giteabot.azuredevops.model.AzureDevopsReviewComment;
 import org.remus.giteabot.azuredevops.model.Comment;
 import org.remus.giteabot.azuredevops.model.CommentPosition;
 import org.remus.giteabot.azuredevops.model.CommentThreadContext;
+import org.remus.giteabot.azuredevops.model.ConnectionData;
 import org.remus.giteabot.azuredevops.model.GitCommitRef;
 import org.remus.giteabot.azuredevops.model.GitPullRequestCommentThread;
 import org.remus.giteabot.azuredevops.model.GitPullRequestIteration;
@@ -16,6 +17,7 @@ import org.remus.giteabot.azuredevops.model.ThreadCommentId;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
@@ -25,6 +27,7 @@ import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -59,6 +62,9 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     /** {@code connectionData} exists only as a preview API and rejects a release version. */
     static final String API_VERSION_CONNECTION_DATA = "6.0-preview.1";
 
+    /** Account-level {@code connectionData}, answering for tokens scoped to all accessible organizations. */
+    static final String ACCOUNT_CONNECTION_DATA_URL = "https://app.vssps.visualstudio.com/_apis/connectionData";
+
     private static final int VOTE_APPROVE = 10;
     /** "Waiting for author": the closest match to "request changes"; -10 would hard-reject. */
     private static final int VOTE_WAITING_FOR_AUTHOR = -5;
@@ -70,30 +76,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     private final RepositoryCredentials credentials;
     private final GitDiffService gitDiffService;
 
-    /**
-     * Cached identity GUID of the authenticated bot, resolved lazily for voting, keyed by
-     * organization. {@link #NO_IDENTITY} marks an organization where the lookup came back
-     * empty, so the request behind it is not repeated for every vote.
-     * <p>
-     * One key, not one field: on {@code https://dev.azure.com} a single integration serves
-     * any number of organizations — the organization is resolved per event from the
-     * webhook payload — and an Azure DevOps identity id is issued per organization. Caching
-     * one GUID for the client would send the first organization's id to every other one,
-     * where it addresses no reviewer. The map is bounded by the number of organizations a
-     * single Personal Access Token can reach, and the client itself is discarded whenever
-     * the integration (and with it the token) changes.
-     */
-    private final Map<String, String> cachedReviewerIds = new ConcurrentHashMap<>();
-
-    /**
-     * Cache entry for an organization the bot has no resolvable identity in.
-     * <p>
-     * Only a definitive answer is remembered — a {@code connectionData} response that
-     * carried no authenticated identity. A lookup that failed with an exception is left
-     * uncached, so a timeout or a 503 costs one extra request on the next vote rather
-     * than silently dropping every vote until the integration is next edited.
-     */
-    private static final String NO_IDENTITY = "";
+    private String cachedReviewerId;
 
     public AzureDevopsApiClient(RestClient restClient, RepositoryCredentials credentials,
                                 GitDiffService gitDiffService) {
@@ -148,8 +131,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      *       the hostname, so without it a host like {@code tfs.example.com} serving a
      *       collection named {@code tfs} would wrongly look already-scoped.</li>
      *   <li>the organization as the URL path's last segment — an Azure DevOps Server
-     *       collection, and also the {@code https://dev.azure.com/contoso} misconfiguration
-     *       the setup guide warns against, which this makes harmless.</li>
+     *       collection, or {@code https://dev.azure.com/contoso} for a single organization.</li>
      * </ul>
      */
     private static boolean scopesOrganization(String url, String organization) {
@@ -195,11 +177,11 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     }
 
     /** The path prefix addressing the organization itself, for organization-level APIs. */
-    private Scope organizationScope(AzureDevopsAddress addr) {
-        if (scopesOrganization(credentials.baseUrl(), addr.organization())) {
+    private Scope organizationScope(String organization) {
+        if (scopesOrganization(credentials.baseUrl(), organization)) {
             return new Scope("/_apis", new Object[0]);
         }
-        return new Scope("/{org}/_apis", new Object[]{addr.organization()});
+        return new Scope("/{org}/_apis", new Object[]{organization});
     }
 
     /** Appends trailing URI template values to a scope's leading ones. */
@@ -453,7 +435,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
             return;
         }
         AzureDevopsAddress addr = AzureDevopsAddress.parse(owner, repo);
-        String reviewerId = resolveReviewerId(addr);
+        String reviewerId = resolveReviewerId();
         if (reviewerId == null) {
             return;
         }
@@ -565,10 +547,11 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         reviewComment.setBody(comment.getContent());
         reviewComment.setPath(path);
         reviewComment.setLine(line);
-        // Only uniqueName identifies the author: displayName is user-editable, so falling
-        // back to it would let anyone pass for the bot by renaming themselves.
-        IdentityRef author = comment.getAuthor();
-        reviewComment.setUserLogin(author != null ? author.getUniqueName() : null);
+        if (comment.getAuthor() != null) {
+            IdentityRef author = comment.getAuthor();
+            reviewComment.setUserLogin(author.getUniqueName());
+            reviewComment.setUserId(author.getId());
+        }
         return reviewComment;
     }
 
@@ -861,48 +844,90 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      * resolvable identity in this organization, in which case the vote is skipped — the
      * review comment has already been posted by then, so only the vote is lost.
      * <p>
-     * {@code connectionData} is the only lookup. Matching {@code credentials.username()}
-     * against the pull request's existing reviewers would be an obvious second source,
-     * but Azure DevOps Personal Access Tokens authenticate as HTTP Basic with an
-     * <em>empty</em> username, so the integration form deliberately has no username field
-     * and {@code credentials.username()} is always null here — a fallback on it could
-     * never run.
-     * <p>
-     * The lookup is organization-scoped, and so is the cache that holds its result; see
-     * {@link #cachedReviewerIds}.
+     * {@code connectionData} is the only lookup: Azure DevOps Personal Access Tokens
+     * authenticate as HTTP Basic with an <em>empty</em> username, so the credentials carry
+     * no identity to fall back on.
      */
-    private String resolveReviewerId(AzureDevopsAddress addr) {
-        String cacheKey = addr.organization().toLowerCase(Locale.ROOT);
-        String cached = cachedReviewerIds.get(cacheKey);
+    private String resolveReviewerId() {
+        String cached = cachedReviewerId;
         if (cached != null) {
-            return NO_IDENTITY.equals(cached) ? null : cached;
+            return cached;
         }
-        Scope scope = organizationScope(addr);
         try {
-            Map<String, Object> data = restClient.get()
-                    .uri(builder -> builder
-                            .path(scope.path() + "/connectionData")
-                            .queryParam("api-version", API_VERSION_CONNECTION_DATA)
-                            .build(scope.vars()))
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<>() {});
-            if (data != null && data.get("authenticatedUser") instanceof Map<?, ?> user
-                    && user.get("id") instanceof String id && !id.isBlank()) {
-                cachedReviewerIds.put(cacheKey, id);
-                return id;
+            GitUser identity = getAuthenticatedUser();
+            if (identity != null && identity.id() != null && !identity.id().isBlank()) {
+                cachedReviewerId = identity.id();
+                return cachedReviewerId;
             }
         } catch (Exception e) {
             // A timeout or a 503 says nothing about whether this token has an identity
-            // here, so it is left uncached and the next vote looks again.
+            // here, so it is left uncached, and the next vote looks again.
             log.debug("connectionData lookup failed; skipping vote: {}", e.getMessage());
             return null;
         }
-        // An answered-but-empty connectionData is a definitive "no identity here" and is
-        // worth remembering: the client outlives many events.
-        log.warn("Azure DevOps returned no authenticated identity for organization '{}'; "
-                + "skipping vote", addr.organization());
-        cachedReviewerIds.put(cacheKey, NO_IDENTITY);
         return null;
+    }
+
+    /**
+     * Resolves the identity from {@code connectionData}. Its {@code id} is the same at account
+     * and organization level and is what webhook payloads and {@code @<id>} mentions identify the
+     * bot by. The username is the {@code Account} property, which on Azure DevOps Server lacks
+     * the domain of the {@code uniqueName}, so it is only informational. It is a UPN or an account
+     * name rather than a mailbox, so no e-mail address is reported.
+     * <p>
+     * {@code connectionData} only answers inside a scope the token may access. An integration on
+     * bare {@code https://dev.azure.com} serves any organization, so it asks the account-level
+     * host, which only accepts tokens scoped to all accessible organizations. Every other
+     * integration URL already names its organization or server, so it asks that.
+     */
+    @Override
+    public GitUser getAuthenticatedUser() {
+        boolean accountLevel = servesAnyOrganization(credentials.baseUrl());
+        RestClient.RequestHeadersSpec<?> request = accountLevel
+                ? restClient.get().uri(URI.create(
+                        ACCOUNT_CONNECTION_DATA_URL + "?api-version=" + API_VERSION_CONNECTION_DATA))
+                : restClient.get().uri(builder -> builder
+                        .path("/_apis/connectionData")
+                        .queryParam("api-version", API_VERSION_CONNECTION_DATA)
+                        .build());
+        ConnectionData data;
+        try {
+            data = request.retrieve().body(ConnectionData.class);
+        } catch (RestClientException e) {
+            if (accountLevel) {
+                throw new IllegalStateException("Azure DevOps did not identify the token on "
+                        + "https://dev.azure.com: use a token scoped to all accessible organizations, "
+                        + "or add the organization to the integration URL (" + e.getMessage() + ")", e);
+            }
+            throw e;
+        }
+        ConnectionData.Identity identity = data == null ? null : data.getAuthenticatedUser();
+        if (identity != null && identity.getId() != null && !identity.getId().isBlank()
+                && identity.getDisplayName() != null) {
+            return new GitUser(identity.getId(), identity.getDisplayName(), identity.getProviderDisplayName(), null);
+        }
+        throw new IllegalStateException("Azure DevOps returned no authenticated identity");
+    }
+
+    /**
+     * Azure DevOps mentions are picked via the {@code @} autocomplete, which searches by display
+     * name, so that name is what users should type.
+     */
+    @Override
+    public String getBotMentionName(GitUser gitUser) {
+        return gitUser.displayName() != null ? gitUser.displayName() : gitUser.username();
+    }
+
+    /** Whether {@code url} is bare {@code https://dev.azure.com}, which names no organization. */
+    private static boolean servesAnyOrganization(String url) {
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+        String path = uri.getPath();
+        return "dev.azure.com".equalsIgnoreCase(uri.getHost()) && (path == null || path.isBlank() || "/".equals(path));
     }
 
     record DiffRange(String baseSha, String headSha) {

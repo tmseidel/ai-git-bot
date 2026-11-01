@@ -10,6 +10,7 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.GitUser;
 import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
@@ -34,6 +35,7 @@ class GiteaWebhookHandlerTest {
 
     private static final String BOT_USERNAME = "claude_bot";
     private static final String BOT_ALIAS = "@claude_bot";
+    private static final GitUser BOT_USER = new GitUser("17", BOT_USERNAME, null, null);
 
     @BeforeEach
     void setUp() {
@@ -41,14 +43,28 @@ class GiteaWebhookHandlerTest {
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername(BOT_USERNAME);
         bot.setGitIntegration(gitIntegration);
 
         // Default stubs used by most tests – declared lenient because a few tests override
         // isBotUser to return true and never reach getBotAlias.
-        lenient().when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(false);
-        lenient().when(botWebhookService.getBotAlias(bot)).thenReturn(BOT_ALIAS);
+        lenient().when(botWebhookService.resolveGitUser(bot)).thenReturn(BOT_USER);
+        lenient().when(botWebhookService.isBotUser(eq(BOT_USER), any(WebhookPayload.class))).thenReturn(false);
+        lenient().when(botWebhookService.getBotAlias(BOT_USERNAME)).thenReturn(BOT_ALIAS);
         lenient().when(botWebhookService.isPullRequestAuthor(any(WebhookPayload.class))).thenReturn(true);
+    }
+
+    // ---- Unhandled events ----
+
+    @Test
+    void eventWithoutPullRequestIssueOrComment_isIgnoredWithoutResolvingTheBotUser() {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("ref", "refs/heads/main");
+        payload.put("sender", Map.of("login", "alice"));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).resolveGitUser(any());
     }
 
     // ---- PR comment routing ----
@@ -140,8 +156,19 @@ class GiteaWebhookHandlerTest {
     // ---- Bot's own events are ignored ----
 
     @Test
+    void unresolvableBotUsername_ignoresEvent() {
+        when(botWebhookService.resolveGitUser(bot)).thenReturn(null);
+        Map<String, Object> payload = buildPrCommentPayload(BOT_ALIAS + " please fix this");
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, payload);
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
+    }
+
+    @Test
     void ownBotComment_isIgnored() {
-        when(botWebhookService.isBotUser(eq(bot), any(WebhookPayload.class))).thenReturn(true);
+        when(botWebhookService.isBotUser(eq(BOT_USER), any(WebhookPayload.class))).thenReturn(true);
         Map<String, Object> payload = buildPrCommentPayload(BOT_ALIAS + " something");
 
         ResponseEntity<String> response = handler.handleWebhook(bot, payload);

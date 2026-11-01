@@ -21,6 +21,7 @@ import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.review.CodeReviewService;
 import org.remus.giteabot.util.BotMention;
 import org.remus.giteabot.util.BranchFilter;
@@ -48,6 +49,7 @@ import java.util.Set;
 public class BotWebhookService {
 
     private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final GitUserService gitUserService;
     private final AgentSessionService agentSessionService;
     private final BotService botService;
     private final PrWorkflowOrchestrator prWorkflowOrchestrator;
@@ -61,6 +63,7 @@ public class BotWebhookService {
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
     public BotWebhookService(RepositoryApiClientFactory repositoryApiClientFactory,
+                             GitUserService gitUserService,
                              AgentSessionService agentSessionService,
                              BotService botService,
                              PrWorkflowOrchestrator prWorkflowOrchestrator,
@@ -73,6 +76,7 @@ public class BotWebhookService {
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
         this.repositoryApiClientFactory = repositoryApiClientFactory;
+        this.gitUserService = gitUserService;
         this.agentSessionService = agentSessionService;
         this.botService = botService;
         this.prWorkflowOrchestrator = prWorkflowOrchestrator;
@@ -415,7 +419,7 @@ public class BotWebhookService {
             try {
                 if (agenticEnabled) {
                     String question = extractReviewBody(payload);
-                    if (!BotMention.isMentioned(question, getBotAlias(bot))) {
+                    if (!BotMention.isMentioned(question, getBotAlias(gitUserService.getBotUsername(bot)))) {
                         log.debug("[Bot '{}'] Submitted review does not mention the bot — ignoring (agentic-review only responds when addressed)",
                                 bot.getName());
                         return;
@@ -527,13 +531,15 @@ public class BotWebhookService {
             // Issue creation is handled by reusing the issue-assigned workflow. The
             // individual workflow implementations check that the issue is assigned to
             // the bot, so treat this creation event as a virtual assignment to this bot.
-            WebhookPayload.Issue issue = payload.getIssue();
-            if (issue != null) {
-                WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-                assignee.setLogin(bot.getGitIntegration().getUsername());
-                issue.setAssignee(assignee);
-            }
             try {
+                WebhookPayload.Issue issue = payload.getIssue();
+                if (issue != null) {
+                    GitUser botUser = gitUserService.getGitUser(bot.getGitIntegration());
+                    WebhookPayload.Owner assignee = new WebhookPayload.Owner();
+                    assignee.setLogin(botUser.username());
+                    assignee.setId(botUser.id());
+                    issue.setAssignee(assignee);
+                }
                 issueWorkflowOrchestrator.runAssigned(bot, payload);
             } catch (Exception e) {
                 // Defense-in-depth: the orchestrator already records errors per workflow.
@@ -655,22 +661,17 @@ public class BotWebhookService {
     }
 
     /**
-     * Name to show after {@code @} in replies: the provider's mention name if it has one,
-     * otherwise the bot username. Falls back to "bot" when the provider lookup fails, since
-     * the bot username may not identify the bot on that provider (e.g. Bitbucket).
+     * Name to show after {@code @} in replies, see {@link RepositoryApiClient#getBotMentionName}.
+     * Falls back to "bot" when the bot's Git user cannot be resolved.
      */
     private String resolveMentionName(Bot bot, RepositoryApiClient client) {
         try {
-            var providerName = client.getBotMentionName();
-            if (providerName.isPresent()) {
-                return providerName.get();
-            }
+            return client.getBotMentionName(gitUserService.getGitUser(bot.getGitIntegration()));
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Could not resolve the bot's mention name from the Git provider: {}",
                     bot.getName(), e.getMessage());
             return "bot";
         }
-        return bot.getGitIntegration().getUsername();
     }
 
     private String buildUnrecognisedCommandReply(Bot bot, String mention) {
@@ -818,26 +819,44 @@ public class BotWebhookService {
     }
 
     /**
-     * Checks whether the webhook event was triggered by this bot's own user.
+     * Resolves the bot's Git user for a webhook event, or returns {@code null} when the Git
+     * provider cannot tell. The event should then be ignored, because without the bot's
+     * identity its own comments could re-trigger it. The failure is recorded as the bot's
+     * last error so a broken token is visible in the admin UI.
      */
-    public boolean isBotUser(Bot bot, WebhookPayload payload) {
-        String botUsername = bot.getGitIntegration().getUsername();
+    public GitUser resolveGitUser(Bot bot) {
+        try {
+            return gitUserService.getGitUser(bot.getGitIntegration());
+        } catch (RuntimeException e) {
+            log.error("[Bot '{}'] {}", bot.getName(), e.getMessage());
+            botService.recordError(bot, e.getMessage());
+            return null;
+        }
+    }
 
-        if (payload.getSender() != null && botUsername.equalsIgnoreCase(payload.getSender().getLogin())) {
+    /**
+     * Checks whether the webhook event was triggered by the bot's own user.
+     */
+    public boolean isBotUser(GitUser botUser, WebhookPayload payload) {
+        if (isBot(botUser, payload.getSender())) {
             return true;
         }
+        return payload.getComment() != null && isBot(botUser, payload.getComment().getUser());
+    }
 
-        return payload.getComment() != null
-                && payload.getComment().getUser() != null
-                && botUsername.equalsIgnoreCase(payload.getComment().getUser().getLogin());
+    /**
+     * Whether the payload user is the bot, see {@link GitUser#matches}.
+     */
+    public static boolean isBot(GitUser botUser, WebhookPayload.Owner owner) {
+        return owner != null && botUser.matches(owner.getId(), owner.getLogin());
     }
 
     /**
      * Returns the bot alias used for @-mention detection, i.e. {@code @} followed by
-     * the username configured on the bot's Git integration.
+     * the bot's username.
      */
-    public String getBotAlias(Bot bot) {
-        return "@" + bot.getGitIntegration().getUsername();
+    public String getBotAlias(String botUsername) {
+        return "@" + botUsername;
     }
 
     public boolean isPullRequestAuthor(WebhookPayload payload) {

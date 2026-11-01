@@ -8,6 +8,7 @@ import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.remus.giteabot.review.enrichment.PrContextEnricher;
@@ -32,7 +33,7 @@ public class CodeReviewService {
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SessionService sessionService;
-    private final String botUsername;
+    private final GitUser botUser;
     private final String sessionPromptKey;
     private final String reviewSystemPrompt;
     private final PrContextEnricher contextEnricher;
@@ -42,7 +43,7 @@ public class CodeReviewService {
     private final List<String> excludedFilePatterns;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
-                             SessionService sessionService, String botUsername, ReviewConfigProperties reviewConfig,
+                             SessionService sessionService, GitUser botUser, ReviewConfigProperties reviewConfig,
                              String sessionPromptKey, String reviewSystemPrompt,
                              int maxDiffCharsPerChunk, int maxDiffChunks, int retryTruncatedChunkChars,
                              String excludedFilePatterns) {
@@ -55,7 +56,7 @@ public class CodeReviewService {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.sessionService = sessionService;
-        this.botUsername = botUsername;
+        this.botUser = botUser;
         this.sessionPromptKey = sessionPromptKey;
         this.reviewSystemPrompt = reviewSystemPrompt;
         this.contextEnricher = new PrContextEnricher(repositoryClient, reviewConfig);
@@ -421,10 +422,10 @@ public class CodeReviewService {
                     owner, repo, prNumber, latestReview.getId());
 
             // Filter for comments that mention the bot, excluding the bot's own comments
-            String botAlias = (botUsername != null && !botUsername.isBlank()) ? "@" + botUsername : "";
+            String botAlias = botUser != null ? "@" + botUser.username() : "";
             List<ReviewComment> botMentionComments = comments.stream()
                     .filter(c -> BotMention.isMentioned(c.getBody(), botAlias))
-                    .filter(c -> !isBotComment(c, botUsername))
+                    .filter(c -> !isBotComment(c))
                     .toList();
 
             if (botMentionComments.isEmpty()) {
@@ -584,12 +585,8 @@ public class CodeReviewService {
      * Checks whether a review comment was written by the bot itself.
      * Prevents the bot from responding to its own comments in review-submitted events.
      */
-    private boolean isBotComment(ReviewComment comment, String botUsername) {
-        if (botUsername == null || botUsername.isBlank()) {
-            return false;
-        }
-        return comment.getUserLogin() != null
-                && botUsername.equalsIgnoreCase(comment.getUserLogin());
+    private boolean isBotComment(ReviewComment comment) {
+        return botUser != null && botUser.matches(comment.getUserId(), comment.getUserLogin());
     }
 
     /**

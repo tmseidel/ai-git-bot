@@ -1,6 +1,7 @@
 package org.remus.giteabot.repository;
 
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
@@ -124,12 +125,19 @@ public interface RepositoryApiClient {
     }
 
     /**
-     * Returns the name users type after {@code @} to address the bot, for providers that
-     * derive the bot's identity from the integration credentials rather than from the
-     * bot's configured username (e.g. Bitbucket). Empty means "use the bot username".
+     * Fetches the account this client's token authenticates as. Callers should go through
+     * {@code GitUserService}, which caches the result for a limited time.
      */
-    default Optional<String> getBotMentionName() {
-        return Optional.empty();
+    GitUser getAuthenticatedUser();
+
+    /**
+     * Returns the name users type after {@code @} to address the bot: its username, unless the
+     * provider's mentions use another name (e.g. Bitbucket, Azure DevOps).
+     *
+     * @param gitUser the account this client's token authenticates as, see {@code GitUserService}
+     */
+    default String getBotMentionName(GitUser gitUser) {
+        return gitUser.username();
     }
 
     /**

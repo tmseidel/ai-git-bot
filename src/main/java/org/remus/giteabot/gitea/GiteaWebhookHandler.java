@@ -5,12 +5,14 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Handler for Gitea webhook events.
@@ -97,6 +99,7 @@ public class GiteaWebhookHandler {
         String login = (String) owner.get("login");
         // Fallback to username if login is not present
         o.setLogin(login != null ? login : (String) owner.get("username"));
+        o.setId(Objects.toString(toLong(owner.get("id")), null));
         return o;
     }
 
@@ -211,13 +214,24 @@ public class GiteaWebhookHandler {
      * Routes a webhook event for a specific persisted bot through its own AI and Git integrations.
      */
     private ResponseEntity<String> handleBotWebhookEvent(Bot bot, WebhookPayload payload) {
-        // Ignore events triggered by the bot itself
-        if (botWebhookService.isBotUser(bot, payload)) {
-            log.debug("Ignoring Gitea webhook event from bot's own user '{}'", bot.getGitIntegration().getUsername());
+        // Every event handled below carries a pull request, an issue or a comment. Anything else
+        // (push, ping, ...) is ignored before asking the provider for the bot's username.
+        if (payload.getPullRequest() == null && payload.getIssue() == null && payload.getComment() == null) {
+            log.debug("Gitea webhook event carries no pull request, issue or comment, ignoring");
             return ResponseEntity.ok("ignored");
         }
 
-        String botAlias = botWebhookService.getBotAlias(bot);
+        GitUser botUser = botWebhookService.resolveGitUser(bot);
+        if (botUser == null) {
+            return ResponseEntity.ok("ignored");
+        }
+        // Ignore events triggered by the bot itself
+        if (botWebhookService.isBotUser(botUser, payload)) {
+            log.debug("Ignoring Gitea webhook event from bot's own user '{}'", botUser.username());
+            return ResponseEntity.ok("ignored");
+        }
+
+        String botAlias = botWebhookService.getBotAlias(botUser.username());
 
         // Handle inline review comments
         if (payload.getComment() != null && payload.getComment().getPath() != null
@@ -269,8 +283,7 @@ public class GiteaWebhookHandler {
         if ("assigned".equals(payload.getAction()) && payload.getIssue() != null
                 && payload.getPullRequest() == null) {
             // Check if the assignee is the bot
-            if (payload.getIssue().getAssignee() != null
-                    && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getIssue().getAssignee().getLogin())) {
+            if (BotWebhookService.isBot(botUser, payload.getIssue().getAssignee())) {
                 botWebhookService.handleIssueAssigned(bot, payload);
                 return ResponseEntity.ok("agent triggered");
             }
@@ -304,11 +317,11 @@ public class GiteaWebhookHandler {
             return ResponseEntity.ok("session closed");
         }
 
-        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
-                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
+        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(botUser, payload)))
+                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(botUser, payload)))
                 || ("synchronized".equals(action) && bot.isRunOnPrUpdate())
-                || ("assigned".equals(action) && isBotAssignee(bot, payload))
-                || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
+                || ("assigned".equals(action) && isBotAssignee(botUser, payload))
+                || ("review_requested".equals(action) && isRequestedReviewer(botUser, payload))) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
         }
@@ -317,28 +330,26 @@ public class GiteaWebhookHandler {
         return ResponseEntity.ok("ignored");
     }
 
-    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
+    private boolean hasBotReviewer(GitUser botUser, WebhookPayload payload) {
         return payload.getPullRequest() != null
                 && payload.getPullRequest().getRequestedReviewers() != null
                 && payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin()));
+                .anyMatch(reviewer -> BotWebhookService.isBot(botUser, reviewer));
     }
 
-    private boolean isRequestedReviewer(Bot bot, WebhookPayload payload) {
-        return payload.getRequestedReviewer() != null
-                && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getRequestedReviewer().getLogin());
+    private boolean isRequestedReviewer(GitUser botUser, WebhookPayload payload) {
+        return BotWebhookService.isBot(botUser, payload.getRequestedReviewer());
     }
 
-    private boolean isBotAssignee(Bot bot, WebhookPayload payload) {
+    private boolean isBotAssignee(GitUser botUser, WebhookPayload payload) {
         if (payload.getPullRequest() == null) {
             return false;
         }
-        if (payload.getPullRequest().getAssignee() != null
-                && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getPullRequest().getAssignee().getLogin())) {
+        if (BotWebhookService.isBot(botUser, payload.getPullRequest().getAssignee())) {
             return true;
         }
         return payload.getPullRequest().getAssignees() != null
                 && payload.getPullRequest().getAssignees().stream()
-                .anyMatch(assignee -> bot.getGitIntegration().getUsername().equalsIgnoreCase(assignee.getLogin()));
+                .anyMatch(assignee -> BotWebhookService.isBot(botUser, assignee));
     }
 }

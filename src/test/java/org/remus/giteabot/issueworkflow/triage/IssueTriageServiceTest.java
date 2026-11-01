@@ -10,6 +10,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.admin.GitUserService;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
@@ -75,6 +76,8 @@ class IssueTriageServiceTest {
     @Mock
     private RepositoryApiClientFactory repositoryApiClientFactory;
     @Mock
+    private GitUserService gitUserService;
+    @Mock
     private AgentSessionService sessionService;
     @Mock
     private ToolExecutionService toolExecutionService;
@@ -97,12 +100,13 @@ class IssueTriageServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IssueTriageService(aiClientFactory, repositoryApiClientFactory, sessionService,
+        service = new IssueTriageService(aiClientFactory, repositoryApiClientFactory, gitUserService, sessionService,
                 toolExecutionService, new ToolCatalog(new AgentConfigProperties()), workspaceService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
                 new AgentConfigProperties(), null);
         lenient().when(aiClientFactory.getClient(any())).thenReturn(aiClient);
         lenient().when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
+        lenient().when(gitUserService.getBotUsername(any())).thenReturn("triage-bot");
         lenient().when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
                 anyString(), any()))
                 .thenReturn(WorkspaceResult.success(Path.of("/tmp/triage-ws")));
@@ -121,7 +125,6 @@ class IssueTriageServiceTest {
         bot = new Bot();
         bot.setName("Triage Bot");
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername("triage-bot");
         bot.setGitIntegration(gitIntegration);
 
         WebhookPayload.Owner owner = new WebhookPayload.Owner();

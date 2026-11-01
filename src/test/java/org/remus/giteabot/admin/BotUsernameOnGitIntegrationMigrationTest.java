@@ -104,11 +104,21 @@ class BotUsernameOnGitIntegrationMigrationTest {
     @Test
     void usernameIsNotNullableAfterTheMigration() throws Exception {
         String url = "jdbc:h2:mem:bot-username-schema;DB_CLOSE_DELAY=-1";
-        migrateTo(url, null);
+        migrateTo(url, "59");
 
         try (Connection c = DriverManager.getConnection(url, "sa", "")) {
             assertFalse(columnExists(c, "BOTS", "USERNAME"), "bots.username must be dropped");
             assertEquals("NO", isNullable(c, "GIT_INTEGRATIONS", "USERNAME"));
+        }
+    }
+
+    @Test
+    void usernameIsDroppedOnceItIsResolvedFromTheProvider() throws Exception {
+        String url = "jdbc:h2:mem:git-username-dropped;DB_CLOSE_DELAY=-1";
+        migrateTo(url, null);
+
+        try (Connection c = DriverManager.getConnection(url, "sa", "")) {
+            assertFalse(columnExists(c, "GIT_INTEGRATIONS", "USERNAME"), "git_integrations.username must be dropped");
         }
     }
 

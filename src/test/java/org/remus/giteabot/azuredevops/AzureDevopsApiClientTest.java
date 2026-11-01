@@ -6,6 +6,7 @@ import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
@@ -773,5 +774,84 @@ class AzureDevopsApiClientTest {
                         PostReviewAction.REQUEST_CHANGES);
 
         server.verify();
+    }
+
+    private static final String IDENTITY = "{\"authenticatedUser\":{\"id\":\"guid-1\","
+            + "\"providerDisplayName\":\"AI Bot\","
+            + "\"properties\":{\"Account\":{\"$type\":\"System.String\",\"$value\":\"bot@contoso.com\"}}}}";
+
+    @Test
+    void getAuthenticatedUser_asksTheAccountLevelHostForBareDevAzureCom() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://app.vssps.visualstudio.com/_apis/connectionData?api-version=6.0-preview.1"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+
+        GitUser user = new AzureDevopsApiClient(builder.build(), creds(), null).getAuthenticatedUser();
+
+        assertEquals(new GitUser("guid-1", "bot@contoso.com", "AI Bot", null), user);
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_asksTheOrganizationNamedInTheUrl() {
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+
+        GitUser user = new AzureDevopsApiClient(builder.build(), credsFor(base), null).getAuthenticatedUser();
+
+        assertEquals("bot@contoso.com", user.username());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_asksTheServerUrl() {
+        String base = "https://tfs.example.com/tfs";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+
+        GitUser user = new AzureDevopsApiClient(builder.build(), credsFor(base), null).getAuthenticatedUser();
+
+        assertEquals("bot@contoso.com", user.username());
+        server.verify();
+    }
+
+    @Test
+    void getBotMentionName_usesTheDisplayNameElseTheUsername() {
+        AzureDevopsApiClient client = new AzureDevopsApiClient(RestClient.builder().build(), creds(), null);
+
+        assertEquals("AI Bot", client.getBotMentionName(new GitUser("g1", "bot@contoso.com", "AI Bot", null)));
+        assertEquals("bot@contoso.com", client.getBotMentionName(new GitUser("g1", "bot@contoso.com", null, null)));
+    }
+
+    @Test
+    void getAuthenticatedUser_explainsAnOrganizationScopedTokenOnBareDevAzureCom() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://app.vssps.visualstudio.com/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> new AzureDevopsApiClient(builder.build(), creds(), null).getAuthenticatedUser());
+
+        assertTrue(error.getMessage().contains("all accessible organizations"), error.getMessage());
+    }
+
+    @Test
+    void getAuthenticatedUser_failsWithoutAnIdentity() {
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        assertThrows(IllegalStateException.class,
+                () -> new AzureDevopsApiClient(builder.build(), credsFor(base), null).getAuthenticatedUser());
     }
 }

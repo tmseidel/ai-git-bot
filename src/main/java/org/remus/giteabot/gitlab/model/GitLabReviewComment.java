@@ -47,6 +47,11 @@ public class GitLabReviewComment implements ReviewComment {
         return author != null ? author.getUsername() : null;
     }
 
+    @Override
+    public String getUserId() {
+        return author != null && author.getId() != null ? author.getId().toString() : null;
+    }
+
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class GitLabPosition {

@@ -135,7 +135,10 @@
                         <tbody>
                             <tr th:each="bot : ${bots}">
                                 <td th:text="${bot.name}"></td>
-                                <td th:text="${bot.gitIntegration.username}"></td>
+                                <td th:with="gitUsername=${gitUsernames[bot.gitIntegration.id]}">
+                                    <span th:if="${gitUsername}" th:text="${gitUsername}"></span>
+                                    <span th:unless="${gitUsername}" class="text-muted" th:title="#{help.git.usernameUnresolved}">&mdash;</span>
+                                </td>
                                 <td th:text="${bot.aiIntegration.name}"></td>
                                 <td th:text="${bot.gitIntegration.name}"></td>
                                 <td>

@@ -81,6 +81,9 @@ class BotControllerMvcTest {
     @MockitoBean
     private AdminUserRepository adminUserRepository;
 
+    @MockitoBean
+    private GitUserService gitUserService;
+
     @Test
     void newForm_issueWorkflowDetailsButtonTargetsTheIssueKindEndpoint() throws Exception {
         mockMvc.perform(get("/bots/new").with(user("admin").roles("ADMIN")))

@@ -1,6 +1,7 @@
 package org.remus.giteabot.gitea;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.gitea.model.GiteaAuthenticatedUser;
 import org.remus.giteabot.gitea.model.GiteaCommit;
 import org.remus.giteabot.gitea.model.GiteaPullRequest;
 import org.remus.giteabot.gitea.model.GiteaReview;
@@ -15,6 +16,7 @@ import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
@@ -137,13 +139,24 @@ public class GiteaApiClient implements RepositoryApiClient {
 
     /** Returns the immutable ID of the user authenticated by this client's token. */
     public long getCurrentUserId() {
-        Map<String, Object> user = giteaRestClient.get().uri("/api/v1/user")
-                .retrieve().body(new ParameterizedTypeReference<>() {});
-        Object id = user == null ? null : user.get("id");
-        if (id instanceof Number userId && userId.longValue() > 0) {
-            return userId.longValue();
+        GiteaAuthenticatedUser user = fetchAuthenticatedUser();
+        if (user != null && user.getId() != null && user.getId() > 0) {
+            return user.getId();
         }
         throw new IllegalStateException("Gitea did not provide the authenticated user's ID");
+    }
+
+    @Override
+    public GitUser getAuthenticatedUser() {
+        GiteaAuthenticatedUser user = fetchAuthenticatedUser();
+        if (user == null) {
+            throw new IllegalStateException("Gitea returned no authenticated user");
+        }
+        return user.toGitUser();
+    }
+
+    private GiteaAuthenticatedUser fetchAuthenticatedUser() {
+        return giteaRestClient.get().uri("/api/v1/user").retrieve().body(GiteaAuthenticatedUser.class);
     }
 
     /** Returns all SSH key IDs with the exact title, across paginated user keys. */

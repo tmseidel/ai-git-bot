@@ -5,6 +5,7 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
@@ -413,6 +414,22 @@ class GitLabApiClientTest {
                 () -> client.getPullRequestHead("group", "project", 7L, "feature/login"));
 
         assertTrue(error.getMessage().contains("did not report a source project id"));
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_prefersCommitEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(CREDS.baseUrl() + "/api/v4/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":7,\"username\":\"ai_bot\",\"name\":\"AI Bot\","
+                        + "\"email\":\"private@example.com\",\"commit_email\":\"commits@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        GitUser user = new GitLabApiClient(builder.build(), CREDS).getAuthenticatedUser();
+
+        assertEquals(new GitUser("7", "ai_bot", "AI Bot", "commits@example.com"), user);
         server.verify();
     }
 }

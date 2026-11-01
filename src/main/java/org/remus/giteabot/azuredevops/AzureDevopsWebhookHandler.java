@@ -7,6 +7,7 @@ import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.GitUser;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
@@ -52,10 +53,7 @@ import java.util.regex.Pattern;
  *       session moments after every PR is opened. It is ignored.</li>
  *   <li>{@code ms.vss-code.git-pullrequest-comment-event} — comment added.</li>
  * </ul>
- * Azure DevOps sends no actor on pull request events — only the pull request's
- * author — so {@link BotWebhookService#isBotUser(Bot, WebhookPayload)} can only
- * suppress self-triggered events for comments (which do carry their author) and
- * for {@code git.pullrequest.created}. The bot's own reviewer vote arrives as a
+ * The bot's own reviewer vote arrives as a
  * {@code git.pullrequest.updated} event and is filtered by {@link #sourceBranchMoved}
  * instead, on the grounds that a vote leaves the source branch where it was.
  */
@@ -143,17 +141,21 @@ public class AzureDevopsWebhookHandler {
             return ResponseEntity.ok("ignored");
         }
 
-        // Ignore events triggered by the bot itself (e.g. the bot casting its own
-        // reviewer vote produces an inbound git.pullrequest.updated event).
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            String senderLogin = webhookPayload.getSender() != null ? webhookPayload.getSender().getLogin() : "null";
-            log.info("Ignoring Azure DevOps webhook event from bot's own user. Bot username='{}', sender='{}'",
-                    bot.getGitIntegration().getUsername(), senderLogin);
+        GitUser botUser = botWebhookService.resolveGitUser(bot);
+        if (botUser == null) {
             return ResponseEntity.ok("ignored");
         }
 
-        String botAlias = botWebhookService.getBotAlias(bot);
-        log.debug("Event passed all checks, processing {} with botAlias='{}'", eventType, botAlias);
+        // Ignore events triggered by the bot itself (e.g. the bot casting its own
+        // reviewer vote produces an inbound git.pullrequest.updated event).
+        if (botWebhookService.isBotUser(botUser, webhookPayload)) {
+            String senderLogin = webhookPayload.getSender() != null ? webhookPayload.getSender().getLogin() : "null";
+            log.info("Ignoring Azure DevOps webhook event from bot's own user. Bot id='{}', sender='{}'",
+                    botUser.id(), senderLogin);
+            return ResponseEntity.ok("ignored");
+        }
+
+        log.debug("Event passed all checks, processing {} for bot id '{}'", eventType, botUser.id());
 
         return switch (eventType) {
             case "git.pullrequest.created" -> {
@@ -161,8 +163,8 @@ public class AzureDevopsWebhookHandler {
                 // event Azure DevOps fires moments after creation is mistaken neither for
                 // a push nor for a fresh review request.
                 sourceBranchMoved(bot, webhookPayload);
-                botReviewerAdded(bot, webhookPayload);
-                yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
+                botReviewerAdded(bot, botUser.id(), webhookPayload);
+                yield handlePullRequestOpenedOrUpdated(bot, botUser.id(), eventType, webhookPayload);
             }
             case "git.pullrequest.updated" -> {
                 // Completion and abandonment arrive here, not on git.pullrequest.merged.
@@ -173,14 +175,14 @@ public class AzureDevopsWebhookHandler {
                 // All three record what they saw, so none may be short-circuited away.
                 boolean reopened = consumeReopened(bot, webhookPayload);
                 boolean moved = sourceBranchMoved(bot, webhookPayload);
-                boolean reviewerAdded = botReviewerAdded(bot, webhookPayload);
+                boolean reviewerAdded = botReviewerAdded(bot, botUser.id(), webhookPayload);
                 if (reopened) {
                     // Azure DevOps has no reopened event: reactivation is an update whose
                     // status is active again. Relabelled so the dispatch below gives it
                     // the treatment the other providers give "reopened" — reviewed when
                     // the bot is a requested reviewer, not only when run-on-update is on.
                     webhookPayload.setAction("reopened");
-                    yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
+                    yield handlePullRequestOpenedOrUpdated(bot, botUser.id(), eventType, webhookPayload);
                 }
                 if (reviewerAdded) {
                     // The Azure DevOps equivalent of the review_requested arm in the
@@ -198,20 +200,21 @@ public class AzureDevopsWebhookHandler {
                             webhookPayload.getNumber());
                     yield ResponseEntity.ok("ignored");
                 }
-                yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
+                yield handlePullRequestOpenedOrUpdated(bot, botUser.id(), eventType, webhookPayload);
             }
             case "ms.vss-code.git-pullrequest-comment-event" ->
-                    handlePullRequestComment(bot, webhookPayload, botAlias);
+                    handlePullRequestComment(bot, webhookPayload, botUser);
             // Required for exhaustiveness only: anything else already left via the null
             // payload above.
             default -> ResponseEntity.ok("ignored");
         };
     }
 
-    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, String eventType, WebhookPayload payload) {
+    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, String botId, String eventType,
+                                                                     WebhookPayload payload) {
         String action = payload.getAction();
-        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
-                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
+        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(botId, payload)))
+                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(botId, payload)))
                 || ("synchronized".equals(action) && bot.isRunOnPrUpdate())) {
             botWebhookService.reviewPullRequest(bot, payload);
             return ResponseEntity.ok("review triggered");
@@ -225,11 +228,20 @@ public class AzureDevopsWebhookHandler {
     }
 
     private ResponseEntity<String> handlePullRequestComment(Bot bot, WebhookPayload payload,
-                                                            String botAlias) {
+                                                            GitUser botUser) {
         String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (body == null || !body.contains(botAlias)) {
+        // Mentions are stored as @<identity id>, with the id in upper case, while
+        // connectionData reports it in lower case.
+        Pattern rawMention = Pattern.compile(Pattern.quote("@<" + botUser.id() + ">"), Pattern.CASE_INSENSITIVE);
+        if (body == null || !rawMention.matcher(body).find()) {
             return ResponseEntity.ok("ignored");
         }
+
+        // Replace the opaque @<id> markup so downstream handlers and the AI see a readable name.
+        // Whitespace becomes _ so that slash-command parsing (@\S+ command) still works.
+        String name = botUser.displayName() != null ? botUser.displayName() : botUser.username();
+        String botAlias = "@" + name.trim().replaceAll("\\s+", "_");
+        payload.getComment().setBody(rawMention.matcher(body).replaceAll(Matcher.quoteReplacement(botAlias)));
 
         // Only now — once the comment is known to address the bot — is it worth spending
         // an API call to find out whether it is anchored to a file. Azure DevOps fires
@@ -348,14 +360,14 @@ public class AzureDevopsWebhookHandler {
      * its own post-review vote would otherwise arrive as a review request and trigger a
      * second review of the commit it has just reviewed.
      */
-    private boolean botReviewerAdded(Bot bot, WebhookPayload payload) {
+    private boolean botReviewerAdded(Bot bot, String botUserId, WebhookPayload payload) {
         if (payload.getPullRequest() == null
                 || payload.getPullRequest().getRequestedReviewers() == null) {
             return false;
         }
         String key = trackingKey(bot, payload);
-        boolean isReviewer = hasBotReviewer(bot, payload);
-        boolean selfAdded = isReviewer && botHasVoted(bot, payload);
+        boolean isReviewer = hasBotReviewer(botUserId, payload);
+        boolean selfAdded = isReviewer && botHasVoted(botUserId, payload);
         synchronized (trackedPullRequests) {
             Tracked previous = trackedPullRequests.getOrDefault(key, Tracked.NOTHING);
             trackedPullRequests.put(key,
@@ -364,9 +376,9 @@ public class AzureDevopsWebhookHandler {
         }
     }
 
-    private boolean botHasVoted(Bot bot, WebhookPayload payload) {
+    private boolean botHasVoted(String botId, WebhookPayload payload) {
         return payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin())
+                .anyMatch(reviewer -> botId.equalsIgnoreCase(reviewer.getId())
                         && reviewer.getVote() != null && reviewer.getVote() != 0);
     }
 
@@ -665,6 +677,8 @@ public class AzureDevopsWebhookHandler {
         // feeds the bot-user, whitelist and PR-author checks, so falling back to it would
         // let anyone match those by renaming themselves.
         owner.setLogin((String) user.get("uniqueName"));
+        // The identity id is what the bot is recognised by; see #isBotEvent.
+        owner.setId((String) user.get("id"));
         return owner;
     }
 
@@ -869,10 +883,10 @@ public class AzureDevopsWebhookHandler {
         return null;
     }
 
-    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
+    private boolean hasBotReviewer(String botId, WebhookPayload payload) {
         return payload.getPullRequest() != null
                 && payload.getPullRequest().getRequestedReviewers() != null
                 && payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin()));
+                .anyMatch(reviewer -> botId.equalsIgnoreCase(reviewer.getId()));
     }
 }

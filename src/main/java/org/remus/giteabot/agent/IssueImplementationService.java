@@ -34,6 +34,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
@@ -66,7 +67,7 @@ public class IssueImplementationService {
     private final ToolCatalog toolCatalog;
     private final WorkspaceService workspaceService;
     private final String issueAgentSystemPrompt;
-    private final String botUsername;
+    private final GitUser botUser;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
@@ -97,7 +98,7 @@ public class IssueImplementationService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = collaborators.workspaceService();
         this.issueAgentSystemPrompt = context.issueAgentSystemPrompt();
-        this.botUsername = context.botUsername();
+        this.botUser = context.botUser();
         this.mcpOrchestrationService = context.mcpOrchestrationService();
         this.mcpConfiguration = context.mcpConfiguration();
         this.mcpToolCatalog = context.mcpToolCatalog();
@@ -505,23 +506,39 @@ public class IssueImplementationService {
         if (issueComments == null || issueComments.isEmpty()) {
             return List.of();
         }
-        if (botUsername == null || botUsername.isBlank()) {
+        if (botUser == null) {
             return issueComments;
         }
         return issueComments.stream()
-                .filter(comment -> !botUsername.equalsIgnoreCase(extractCommentAuthor(comment)))
+                .filter(comment -> !isBotAuthored(comment))
                 .toList();
     }
 
-    private String extractCommentAuthor(Map<String, Object> comment) {
+    private boolean isBotAuthored(Map<String, Object> comment) {
         if (comment == null) {
-            return "";
+            return false;
         }
-        String user = extractActorName(comment.get("user"));
-        if (!user.isBlank()) {
-            return user;
+        Object actor = comment.get("user");
+        if (extractActorName(actor).isBlank()) {
+            actor = comment.get("author");
         }
-        return extractActorName(comment.get("author"));
+        return botUser.matches(extractActorId(actor), extractActorName(actor));
+    }
+
+    /**
+     * The author's stable account id: Bitbucket's {@code account_id} (else {@code uuid}), as in
+     * {@code BitbucketApiClient#getAuthenticatedUser}, or the numeric {@code id} elsewhere.
+     */
+    private String extractActorId(Object actor) {
+        if (actor instanceof Map<?, ?> actorMap) {
+            for (String key : List.of("account_id", "id", "uuid")) {
+                Object value = actorMap.get(key);
+                if (value != null && !value.toString().isBlank()) {
+                    return value.toString();
+                }
+            }
+        }
+        return null;
     }
 
     private String extractActorName(Object actor) {

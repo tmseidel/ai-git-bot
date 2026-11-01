@@ -26,9 +26,8 @@ import java.util.Map;
  * pullrequest:fulfilled, pullrequest:rejected, pullrequest:merged,
  * pullrequest:declined, pullrequest:comment_created.
  * <p>
- * The bot's identity is the Bitbucket account behind the e-mail/API token configured on
- * the Git integration (the bot username is not used). Since webhook payloads carry no
- * e-mail addresses, that account is resolved via {@code GET /user} and matched against
+ * The bot's identity is the Bitbucket account behind the API token configured on the
+ * Git integration. That account is resolved via {@code GET /user} and matched against
  * payload users by {@code account_id}/{@code uuid}; mentions are detected via
  * Bitbucket's raw {@code @{account_id}} markup.
  */
@@ -97,7 +96,7 @@ public class BitbucketWebhookHandler {
     }
 
     /**
-     * Resolves the Bitbucket account of the integration's e-mail/API token, or returns
+     * Resolves the Bitbucket account of the integration's API token, or returns
      * {@code null} when it cannot be determined. Events are then ignored, because without
      * the bot's identity its own comments could re-trigger it. The failure is recorded as
      * the bot's last error so a misconfigured integration is visible in the admin UI.
@@ -107,7 +106,7 @@ public class BitbucketWebhookHandler {
             BitbucketApiClient client = (BitbucketApiClient) repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
             return client.getAuthenticatedAccount();
         } catch (RuntimeException e) {
-            String error = "Could not resolve the Bitbucket account for the configured Atlassian account email/API token: "
+            String error = "Could not resolve the Bitbucket account for the configured API token: "
                     + e.getMessage();
             log.error("[Bot '{}'] {}", bot.getName(), error);
             botService.recordError(bot, error);

@@ -13,6 +13,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -45,6 +46,9 @@ class DashboardControllerTest {
     @MockitoBean
     private AdminUserRepository adminUserRepository;
 
+    @MockitoBean
+    private GitUserService gitUserService;
+
     @Test
     void dashboard_rendersFaviconInsideTheDocumentHead() throws Exception {
         when(botService.findAll()).thenReturn(List.of());
@@ -59,6 +63,26 @@ class DashboardControllerTest {
         assertThat(html.indexOf("rel=\"icon\"")).isGreaterThan(html.indexOf("<head"));
         assertThat(html.indexOf("rel=\"icon\"")).isLessThan(html.indexOf("</head>"));
         assertThat(html.indexOf("<head")).isLessThan(html.indexOf("<body"));
+    }
+
+    @Test
+    void dashboard_showsTheBotsCachedUsername() throws Exception {
+        GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setId(3L);
+        gitIntegration.setName("Gitea");
+        AiIntegration aiIntegration = new AiIntegration();
+        aiIntegration.setName("Claude");
+        Bot bot = new Bot();
+        bot.setId(1L);
+        bot.setName("Reviewer");
+        bot.setGitIntegration(gitIntegration);
+        bot.setAiIntegration(aiIntegration);
+        when(botService.findAll()).thenReturn(List.of(bot));
+        when(gitUserService.findCachedUsernames(List.of(gitIntegration))).thenReturn(Map.of(3L, "ai_bot"));
+
+        mockMvc.perform(get("/dashboard").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("ai_bot")));
     }
 
     @Test

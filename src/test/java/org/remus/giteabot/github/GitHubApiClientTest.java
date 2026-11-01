@@ -7,6 +7,7 @@ import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.PullRequestState;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
@@ -310,6 +311,21 @@ class GitHubApiClientTest {
 
         assertThrows(IllegalStateException.class,
                 () -> client.getPullRequestHead("base", "project", 7L, "main"));
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_readsLoginNameAndPublicEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(CREDS.baseUrl() + "/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":42,\"login\":\"ai-bot\",\"name\":\"AI Bot\",\"email\":null}",
+                        MediaType.APPLICATION_JSON));
+
+        GitUser user = new GitHubApiClient(builder.build(), CREDS).getAuthenticatedUser();
+
+        assertEquals(new GitUser("42", "ai-bot", "AI Bot", null), user);
         server.verify();
     }
 }

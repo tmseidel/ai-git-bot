@@ -1,7 +1,9 @@
 package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.bitbucket.model.BitbucketCommit;
+import org.remus.giteabot.bitbucket.model.BitbucketEmail;
 import org.remus.giteabot.bitbucket.model.BitbucketReviewComment;
 import org.remus.giteabot.bitbucket.model.BitbucketTreeEntry;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
@@ -10,6 +12,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
@@ -23,11 +26,11 @@ import org.springframework.http.MediaType;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Bitbucket Cloud implementation of {@link RepositoryApiClient}.
@@ -67,16 +70,53 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public BitbucketAccount getAuthenticatedAccount() {
         BitbucketAccount account = authenticatedAccount;
         if (account == null) {
-            account = restClient.get()
-                    .uri("/user")
-                    .retrieve()
-                    .body(BitbucketAccount.class);
-            if (account == null || (account.accountId() == null && account.uuid() == null)) {
-                throw new IllegalStateException("Bitbucket /user returned neither account_id nor uuid");
-            }
+            account = fetchAuthenticatedAccount();
             authenticatedAccount = account;
         }
         return account;
+    }
+
+    private BitbucketAccount fetchAuthenticatedAccount() {
+        BitbucketAccount account = restClient.get()
+                .uri("/user")
+                .retrieve()
+                .body(BitbucketAccount.class);
+        if (account == null || (account.accountId() == null && account.uuid() == null)) {
+            throw new IllegalStateException("Bitbucket /user returned neither account_id nor uuid");
+        }
+        return account;
+    }
+
+    /**
+     * The username is the nickname (else the display name), matching how webhook payload users
+     * are translated. Bitbucket only returns the e-mail address from a second endpoint; when the
+     * token may not read it, the e-mail is left out.
+     */
+    @Override
+    public GitUser getAuthenticatedUser() {
+        BitbucketAccount account = fetchAuthenticatedAccount();
+        String username = account.nickname() != null ? account.nickname() : account.displayName();
+        String id = account.accountId() != null ? account.accountId() : account.uuid();
+        return new GitUser(id, username, account.displayName(), fetchPrimaryEmail());
+    }
+
+    private @Nullable String fetchPrimaryEmail() {
+        try {
+            BitbucketEmail.Page page = restClient.get()
+                    .uri("/user/emails")
+                    .retrieve()
+                    .body(BitbucketEmail.Page.class);
+            if (page != null && page.getValues() != null) {
+                for (BitbucketEmail email : page.getValues()) {
+                    if (email.isPrimary() && email.getEmail() != null) {
+                        return email.getEmail();
+                    }
+                }
+            }
+        } catch (RestClientException e) {
+            log.debug("Could not fetch the Bitbucket account e-mail: {}", e.getMessage());
+        }
+        return null;
     }
 
     /**
@@ -84,8 +124,8 @@ public class BitbucketApiClient implements RepositoryApiClient {
      * display name, so that name (or the nickname) is what users should type.
      */
     @Override
-    public Optional<String> getBotMentionName() {
-        return Optional.ofNullable(getAuthenticatedAccount().name());
+    public String getBotMentionName(GitUser gitUser) {
+        return gitUser.displayName() != null ? gitUser.displayName() : gitUser.username();
     }
 
     // ---- Pull request operations ----

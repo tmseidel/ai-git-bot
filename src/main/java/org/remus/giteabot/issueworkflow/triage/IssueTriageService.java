@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.GitUserService;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
@@ -114,6 +115,7 @@ public class IssueTriageService {
 
     private final AiClientFactory aiClientFactory;
     private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final GitUserService gitUserService;
     private final AgentSessionService sessionService;
     private final ToolExecutionService toolExecutionService;
     private final ToolCatalog toolCatalog;
@@ -209,7 +211,7 @@ public class IssueTriageService {
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 repoClient, allowedBuiltinTools, pythonExecution);
         TriageAgentStrategy strategy = new TriageAgentStrategy(systemPrompt, toolRouter, toolCatalog,
-                mcpToolCatalog, allowedBuiltinTools, allowed, bot.getGitIntegration().getUsername(),
+                mcpToolCatalog, allowedBuiltinTools, allowed, gitUserService.getBotUsername(bot),
                 new AiResponseParser(), new BranchSwitcher(toolExecutionService), maxToolRounds());
 
         // Mirror the writer: one extra iteration beyond the context-round limit so the model

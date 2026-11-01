@@ -24,6 +24,7 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -51,7 +52,7 @@ public class WriterAgentService {
     private final AgentSessionService sessionService;
     private final WorkspaceService workspaceService;
     private final String writerAgentSystemPrompt;
-    private final String botUsername;
+    private final GitUser botUser;
     private final McpToolCatalog mcpToolCatalog;
     private final AgentErrorNotificationService errorNotificationService;
     private final BranchSwitcher branchSwitcher;
@@ -73,7 +74,7 @@ public class WriterAgentService {
                               ToolCatalog toolCatalog,
                               WorkspaceService workspaceService,
                               String writerAgentSystemPrompt,
-                              String botUsername,
+                              GitUser botUser,
                               McpOrchestrationService mcpOrchestrationService,
                               McpConfiguration mcpConfiguration,
                               McpToolCatalog mcpToolCatalog,
@@ -87,7 +88,7 @@ public class WriterAgentService {
         this.sessionService = sessionService;
         this.workspaceService = workspaceService;
         this.writerAgentSystemPrompt = writerAgentSystemPrompt;
-        this.botUsername = botUsername;
+        this.botUser = botUser;
         this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
         this.toolCatalog = toolCatalog;
         this.allowedBuiltinTools = allowedBuiltinTools;
@@ -109,7 +110,7 @@ public class WriterAgentService {
 
         if (!isAssignedToThisBot(payload)) {
             log.debug("Ignoring writer assignment for issue #{} because assignee does not match bot '{}'",
-                    issueNumber, botUsername);
+                    issueNumber, botUser != null ? botUser.username() : null);
             return;
         }
 
@@ -289,19 +290,20 @@ public class WriterAgentService {
     }
 
     private boolean isAssignedToThisBot(WebhookPayload payload) {
-        if (botUsername == null || botUsername.isBlank() || payload.getIssue() == null) {
+        if (botUser == null || payload.getIssue() == null) {
             return false;
         }
-        if (payload.getIssue().getAssignee() != null
-                && botUsername.equalsIgnoreCase(payload.getIssue().getAssignee().getLogin())) {
+        if (isBot(payload.getIssue().getAssignee())) {
             return true;
         }
         if (payload.getIssue().getAssignees() != null) {
-            return payload.getIssue().getAssignees().stream()
-                    .anyMatch(assignee -> assignee != null
-                            && botUsername.equalsIgnoreCase(assignee.getLogin()));
+            return payload.getIssue().getAssignees().stream().anyMatch(this::isBot);
         }
         return false;
+    }
+
+    private boolean isBot(WebhookPayload.Owner owner) {
+        return owner != null && botUser.matches(owner.getId(), owner.getLogin());
     }
 
     private String findIssueAuthor(String owner, String repo, Long issueNumber) {

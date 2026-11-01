@@ -24,6 +24,7 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.GitUser;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 
 import java.nio.file.Path;
@@ -171,7 +172,7 @@ class IssueImplementationServiceTest {
 
     @Test
     void handleIssueAssigned_excludesBotAuthoredIssueCommentsFromPromptContext() {
-        IssueImplementationService serviceWithBotUsername = createServiceWithBotUsername("ai_bot");
+        IssueImplementationService serviceWithBotUser = createServiceWithBotUser(new GitUser("17", "ai_bot", null, null));
         WebhookPayload payload = createIssuePayload();
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
@@ -180,7 +181,9 @@ class IssueImplementationServiceTest {
         when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
                 .thenReturn(List.of(
                         Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
-                                "user", Map.of("login", "ai_bot")),
+                                "user", Map.of("login", "ai_bot_renamed", "id", 17)),
+                        Map.of("body", "Impostor reusing the bot's old login",
+                                "user", Map.of("login", "ai_bot", "id", 99)),
                         Map.of("body", "Human clarification that must be implemented",
                                 "user", Map.of("login", "alice"))));
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
@@ -211,12 +214,13 @@ class IssueImplementationServiceTest {
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
 
-        serviceWithBotUsername.handleIssueAssigned(payload);
+        serviceWithBotUser.handleIssueAssigned(payload);
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(aiClient, times(1)).chat(anyList(), promptCaptor.capture(), anyString(), isNull(), anyInt());
         assertThat(promptCaptor.getAllValues().getFirst()).contains("Human clarification that must be implemented");
         assertThat(promptCaptor.getAllValues().getFirst()).doesNotContain("I've been assigned to this issue");
+        assertThat(promptCaptor.getAllValues().getFirst()).contains("Impostor reusing the bot's old login");
     }
 
     @Test
@@ -1062,13 +1066,13 @@ class IssueImplementationServiceTest {
         return new IssueImplementationService(context, collaborators(agentConfig));
     }
 
-    private IssueImplementationService createServiceWithBotUsername(String botUsername) {
+    private IssueImplementationService createServiceWithBotUser(GitUser botUser) {
         AgentConfigProperties agentConfig = new AgentConfigProperties();
         agentConfig.setEnabled(true);
         agentConfig.setMaxFiles(10);
         agentConfig.setBranchPrefix("ai-agent/");
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryClient, aiClient, null, botUsername, null, null, McpToolCatalog.empty(), null, 200_000);
+                repositoryClient, aiClient, null, botUser, null, null, McpToolCatalog.empty(), null, 200_000);
         return new IssueImplementationService(context, collaborators(agentConfig));
     }
 
