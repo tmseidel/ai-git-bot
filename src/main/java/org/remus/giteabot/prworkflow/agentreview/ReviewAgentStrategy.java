@@ -147,6 +147,16 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         return ledger.requiredContext();
     }
 
+    /** Findings recorded during the run, in recording order. */
+    List<ReviewFindingsLedger.Finding> recordedFindings() {
+        return ledger.findings();
+    }
+
+    /** Whether the model confirmed the recorded findings as complete after its last change. */
+    boolean recordedFindingsComplete() {
+        return ledger.isComplete();
+    }
+
 
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {

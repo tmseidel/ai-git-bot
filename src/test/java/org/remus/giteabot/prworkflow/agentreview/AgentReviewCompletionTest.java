@@ -134,11 +134,17 @@ class AgentReviewCompletionTest {
         when(repositoryClient.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), contains("Agentic Review Progress")))
                 .thenReturn(CommentId.NumericCommentId.of(42L));
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
-                .thenReturn(exploration(1), ChatTurn.text("Review complete.\n{\"blocker\":2,\"medium\":0,\"low\":0}"));
+                .thenReturn(explorationRecording("{\"add\":[{\"severity\":\"blocker\",\"title\":\"Race\"}]}"),
+                        ChatTurn.text("Review complete.\n{\"blocker\":0,\"medium\":0,\"low\":0}"));
 
         assertThat(service.reviewPullRequest(payload, 1, true, null,
                 new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, true))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+        verify(aiClient, org.mockito.Mockito.atLeastOnce()).chatWithTools(anyList(), any(), anyList(),
+                argThat(prompt -> prompt.contains("`record_findings` tool") && !prompt.contains("MUST be exactly one JSON")),
+                isNull(), anyInt());
+        verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(),
+                contains("\"blocker\""), any());
 
         verify(repositoryClient).postPullRequestComment(eq("owner"), eq("repo"), eq(1L),
                 argThat(body -> body.contains("Preparing repository")));
@@ -429,6 +435,28 @@ class AgentReviewCompletionTest {
                 .contains("F1 [BLOCKER] Missing ownership check — Example.java:1: Any user can cancel any order"));
         assertThat(histories.getLast()).noneSatisfy(message -> assertThat(String.valueOf(message.getContent())
                 + message.getToolResult()).contains("Recorded review findings"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,NONE", "true,APPROVE"})
+    void approvalFromRecordedFindingsRequiresConfirmedCompleteness(boolean complete, PostReviewAction expected) {
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(explorationRecording("{\"add\":[{\"severity\":\"low\",\"title\":\"Typo\"}],\"complete\":"
+                                + complete + "}"),
+                        ChatTurn.text("Review complete."));
+
+        assertThat(service.reviewPullRequest(payload, 1, true, null,
+                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(), eq(expected));
+    }
+
+    private ChatTurn explorationRecording(String recordArgs) {
+        return new ChatTurn("", List.of(
+                new ToolCall("read-diff", "pr-diff", AgentJackson.mapper().createObjectNode().put("path", "Example.java")),
+                new ToolCall("record", ReviewFindingsLedger.TOOL, AgentJackson.mapper().readTree(recordArgs))),
+                StopReason.TOOL_USE, 100, 20);
     }
 
     private ChatTurn exploration(int round) {

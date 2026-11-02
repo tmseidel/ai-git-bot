@@ -50,6 +50,20 @@ class ReviewFindingsLedgerTest {
     }
 
     @Test
+    void completenessHoldsOnlyUntilTheNextChange() {
+        assertThat(ledger.apply(json("{\"complete\":true}"))).isEqualTo("Recorded. Current findings: none (confirmed complete)");
+        assertThat(ledger.isComplete()).isTrue();
+
+        ledger.apply(json("{\"add\":[{\"severity\":\"medium\",\"title\":\"Late find\"}]}"));
+        assertThat(ledger.isComplete()).isFalse();
+        assertThat(ledger.findings()).extracting(ReviewFindingsLedger.Finding::id).containsExactly("F1");
+
+        assertThat(ledger.apply(json("{\"complete\":\"yes\"}"))).startsWith("Rejected");
+        assertThat(ledger.apply(json("{\"complete\":false}"))).startsWith("Rejected");
+        assertThat(ledger.isComplete()).isFalse();
+    }
+
+    @Test
     void boundsAreReportedSoTheModelCanShortenOrMerge() {
         String finding = "{\"severity\":\"low\",\"title\":\"T\",\"description\":\"" + "d".repeat(600) + "\"}";
         String batch = "{\"add\":[" + String.join(",", java.util.Collections.nCopies(15, finding)) + "]}";

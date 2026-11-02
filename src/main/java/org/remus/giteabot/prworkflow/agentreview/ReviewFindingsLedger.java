@@ -37,6 +37,7 @@ final class ReviewFindingsLedger {
 
     private final Map<String, Finding> findings = new LinkedHashMap<>();
     private int nextId = 1;
+    private boolean complete;
 
     static ToolDescriptor descriptor() {
         return new ToolDescriptor(TOOL, """
@@ -44,7 +45,9 @@ final class ReviewFindingsLedger {
                 are kept even when older conversation is shortened. Send only changes: "add" new \
                 findings, "remove" recorded ones by id with a reason (e.g. disproved or duplicate). \
                 To reword a finding, remove it and add the new version. The current record is shown \
-                with every request; your final review must cover every recorded finding.""",
+                with every request; your final review must cover every recorded finding. Once the \
+                record lists every finding of your final review (or there are none), send \
+                "complete": true; any later change withdraws that confirmation.""",
                 AgentJackson.mapper().readTree("""
                         {"type":"object","properties":{
                           "add":{"type":"array","items":{"type":"object","properties":{
@@ -57,7 +60,9 @@ final class ReviewFindingsLedger {
                             "required":["severity","title"]}},
                           "remove":{"type":"array","items":{"type":"object","properties":{
                             "id":{"type":"string"},"reason":{"type":"string"}},
-                            "required":["id","reason"]}}}}
+                            "required":["id","reason"]}},
+                          "complete":{"type":"boolean",
+                            "description":"The record now lists every finding of your final review"}}}
                         """));
     }
 
@@ -69,8 +74,9 @@ final class ReviewFindingsLedger {
         try {
             List<String> removals = removals(args);
             List<Finding> additions = additions(args);
-            if (removals.isEmpty() && additions.isEmpty()) {
-                return reject("send at least one entry in \"add\" or \"remove\"");
+            boolean confirmed = completeFlag(args);
+            if (removals.isEmpty() && additions.isEmpty() && !confirmed) {
+                return reject("send at least one entry in \"add\" or \"remove\", or \"complete\": true");
             }
             Map<String, Finding> next = new LinkedHashMap<>(findings);
             removals.forEach(next::remove);
@@ -91,10 +97,31 @@ final class ReviewFindingsLedger {
             findings.clear();
             findings.putAll(next);
             nextId = id;
-            return "Recorded. Current findings: " + (findings.isEmpty() ? "none" : String.join(", ", findings.keySet()));
+            complete = confirmed;
+            return "Recorded. Current findings: " + (findings.isEmpty() ? "none" : String.join(", ", findings.keySet()))
+                    + (complete ? " (confirmed complete)" : "");
         } catch (IllegalArgumentException e) {
             return reject(e.getMessage());
         }
+    }
+
+    List<Finding> findings() {
+        return List.copyOf(findings.values());
+    }
+
+    /** Whether the model confirmed the current record as complete after its last change. */
+    boolean isComplete() {
+        return complete;
+    }
+
+    private static boolean completeFlag(JsonNode args) {
+        require(args != null && args.isObject(), "arguments must be a JSON object");
+        JsonNode node = args.get("complete");
+        if (node == null || node.isNull()) {
+            return false;
+        }
+        require(node.isBoolean(), "\"complete\" must be true or false");
+        return node.booleanValue();
     }
 
     /** The record as non-instructive data for the next request, or {@code null} while empty. */

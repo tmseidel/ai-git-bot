@@ -58,9 +58,11 @@ apart, even after a failed update; terminal updates are attempted once immediate
 ### Formal review decision
 
 When `enableFormalReviewDecision` is on, the model classifies its findings as
-`BLOCKER`, `MEDIUM`, or `LOW` and emits a JSON object such as
-`{"blocker": 0, "medium": 1, "low": 2}`. The application then compares each
-count to the configured thresholds:
+`BLOCKER`, `MEDIUM`, or `LOW`. With native tool calling it records each finding
+with the `record_findings` tool, and the application counts the recorded
+findings; findings mentioned only in the text do not count. In legacy mode the
+model instead emits a JSON object such as `{"blocker": 0, "medium": 1, "low": 2}`.
+The application then compares each count to the configured thresholds:
 
 - If **all configured thresholds** are satisfied, the bot submits `APPROVE`.
 - If **any configured threshold** is exceeded, the bot submits `REQUEST_CHANGES`.
@@ -68,6 +70,10 @@ count to the configured thresholds:
   (`NONE`) while still posting the review text.
 - An unset threshold is ignored entirely, so you can enforce only the severities
   that matter to you (for example, only `BLOCKER`).
+- With native tool calling, `APPROVE` additionally requires the model to confirm
+  that its record is complete (`"complete": true`, also when there are no
+  findings). Without that confirmation the bot posts the review without a formal
+  action, so a model that never records findings cannot approve by omission.
 
 If the model fails to emit a clean classification, the bot falls back to posting
 a plain review comment so the findings are never lost.

@@ -59,7 +59,25 @@ public class AgentReviewService {
 
     /**
      * Fixed instruction appended to the system prompt when formal review decisions
-     * are enabled. Defines the exact structured return format.
+     * are enabled in native tool mode, where the decision is computed from the
+     * findings recorded with {@value ReviewFindingsLedger#TOOL}.
+     */
+    static final String RECORDED_FINDINGS_DECISION_INSTRUCTION = """
+
+
+            ## Formal Review Decision
+
+            The formal decision is computed only from the findings you record with the \
+            `record_findings` tool, using the severity criteria above. Findings that are not \
+            recorded do not count. Do not append a JSON block to your review.
+
+            Before writing your final review, call `record_findings` with "complete": true once \
+            the record lists every finding of the review, including when there are none. Without \
+            that confirmation the review cannot approve the pull request.""";
+
+    /**
+     * Fixed instruction appended to the system prompt when formal review decisions
+     * are enabled in legacy tool mode. Defines the exact structured return format.
      */
     static final String DECISION_FORMAT_INSTRUCTION = """
 
@@ -233,8 +251,9 @@ public class AgentReviewService {
 
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
+            ReviewAgentStrategy strategy = newStrategy(systemPrompt, maxToolRounds);
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
+                    workspaceDir, headBranch, strategy, userMessage, maxToolRounds, diffSummary,
                     runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {
@@ -248,8 +267,10 @@ public class AgentReviewService {
                 return ReviewResult.FAILED;
             }
 
-            ParseResult parsed = enableFormalDecision
-                    ? parseFormalReviewResult(review, severityThresholds) : ParseResult.noDecision(review);
+            ParseResult parsed = !enableFormalDecision ? ParseResult.noDecision(review)
+                    : nativeTools() ? decisionFromRecordedFindings(review, strategy.recordedFindings(),
+                            strategy.recordedFindingsComplete(), severityThresholds)
+                    : parseFormalReviewResult(review, severityThresholds);
 
             PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
             String reviewBody = formatReview(parsed.reviewText());
@@ -355,7 +376,7 @@ public class AgentReviewService {
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage,
+                    workspaceDir, headBranch, newStrategy(systemPrompt, maxToolRounds), userMessage,
                     maxToolRounds, diffSummary, null, null, progress);
 
             if (!outcome.success()) {
@@ -420,6 +441,39 @@ public class AgentReviewService {
         }
 
         return ParseResult.noDecision(review);
+    }
+
+    /**
+     * Computes the formal action from the recorded findings. REQUEST_CHANGES needs no
+     * confirmation; APPROVE requires the model to have confirmed the record as complete,
+     * so a model that never records findings cannot approve by omission. A stray trailing
+     * classification block is stripped from the text but never counted.
+     */
+    static ParseResult decisionFromRecordedFindings(String review, List<ReviewFindingsLedger.Finding> findings,
+                                                    boolean complete, SeverityThresholds thresholds) {
+        String text = parseFormalReviewResult(review, null).reviewText();
+        SeverityClassification counts = new SeverityClassification(
+                count(findings, "blocker"), count(findings, "medium"), count(findings, "low"));
+        PostReviewAction action = evaluateAction(counts, thresholds);
+        if (action == PostReviewAction.APPROVE && !complete) {
+            log.info("Recorded findings were not confirmed complete; withholding formal approval");
+            action = PostReviewAction.NONE;
+        }
+        List<Map<String, Object>> events = new ArrayList<>();
+        for (ReviewFindingsLedger.Finding f : findings) {
+            Map<String, Object> event = new LinkedHashMap<>();
+            event.put("severity", f.severity());
+            if (f.category() != null) event.put("category", f.category());
+            event.put("title", f.title());
+            if (f.file() != null) event.put("file", f.file());
+            if (f.line() != null) event.put("line", f.line());
+            events.add(event);
+        }
+        return new ParseResult(text, action, counts, events);
+    }
+
+    private static int count(List<ReviewFindingsLedger.Finding> findings, String severity) {
+        return (int) findings.stream().filter(f -> f.severity().equals(severity)).count();
     }
 
     /** A trailing JSON block only counts as a classification when it names a severity count. */
@@ -644,18 +698,21 @@ public class AgentReviewService {
         return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
+    private ReviewAgentStrategy newStrategy(String systemPrompt, int maxToolRounds) {
+        return new ReviewAgentStrategy(
+                systemPrompt, toolRouter, toolCatalog,
+                context.mcpToolCatalog(), context.allowedBuiltinTools(),
+                responseParser, branchSwitcher, this::fetchFiles,
+                agentConfig.getBudget().getMaxContextRounds(), Math.max(1, maxToolRounds));
+    }
+
     private LoopOutcome runReviewLoop(AgentSession session, String owner, String repo, Long prNumber,
                                       Path workspaceDir, String headBranch,
-                                      String systemPrompt, String userMessage, int maxToolRounds,
+                                      ReviewAgentStrategy strategy, String userMessage, int maxToolRounds,
                                       DiffSummary diffSummary, Long runId,
                                       Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
                                       Consumer<AgentRunContext.ProgressUpdate> progressConsumer) {
         int rounds = Math.max(1, maxToolRounds);
-        ReviewAgentStrategy strategy = new ReviewAgentStrategy(
-                systemPrompt, toolRouter, toolCatalog,
-                context.mcpToolCatalog(), context.allowedBuiltinTools(),
-                responseParser, branchSwitcher, this::fetchFiles,
-                agentConfig.getBudget().getMaxContextRounds(), rounds);
 
         AgentConfigProperties.BudgetConfig budgetCfg = agentConfig.getBudget();
         int hardCap = Math.max(budgetCfg.getMaxRounds(), Math.addExact(rounds, 2));
@@ -672,9 +729,13 @@ public class AgentReviewService {
         return loop.run(ctx, userMessage, strategy);
     }
 
+    /** Matches the loop's resolution: the review strategy always prefers native tools and offers some. */
+    private boolean nativeTools() {
+        return aiClient != null && aiClient.supportsNativeTools();
+    }
+
     private String resolveSystemPrompt(boolean enableFormalDecision, String decisionPrompt) {
-        ToolingMode mode = (aiClient != null && aiClient.supportsNativeTools())
-                ? ToolingMode.NATIVE : ToolingMode.LEGACY;
+        ToolingMode mode = nativeTools() ? ToolingMode.NATIVE : ToolingMode.LEGACY;
         String base = systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
                 toolCatalog.reviewToolNames(context.allowedBuiltinTools()), context.mcpToolCatalog(), mode,
                 SystemPromptAssembler.PromptKind.AGENT_REVIEW_AGENT);
@@ -685,7 +746,8 @@ public class AgentReviewService {
 
         String prompt = decisionPrompt != null && !decisionPrompt.isBlank()
                 ? decisionPrompt : AgentReviewWorkflow.DEFAULT_FORMAL_REVIEW_DECISION_PROMPT;
-        return base + "\n\n" + prompt + DECISION_FORMAT_INSTRUCTION;
+        return base + "\n\n" + prompt
+                + (mode == ToolingMode.NATIVE ? RECORDED_FINDINGS_DECISION_INSTRUCTION : DECISION_FORMAT_INSTRUCTION);
     }
 
     private String buildKickoffMessage(String prTitle, String prBody, DiffSummary diffSummary) {
