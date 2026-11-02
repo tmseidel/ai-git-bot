@@ -44,6 +44,8 @@ class ReviewDraftPersistenceTest {
         assertThat(service.loadReviewDraft(id, revision)).isEqualTo(sealed);
         assertThat(service.getById(id).getStatus()).isEqualTo(PrWorkflowRunStatus.SHADOW);
         assertThat(service.getById(id).getFinishedAt()).isNotNull();
+        assertThat(runs.finishIfActive(id, PrWorkflowRunStatus.CANCELLED, Instant.now(), "racing cancellation")).isZero();
+        assertThat(service.loadReviewDraft(id, revision)).isEqualTo(sealed);
         service.complete(id, PrWorkflowRunStatus.SUCCESS, "must not publish");
         assertThat(service.getById(id).getStatus()).isEqualTo(PrWorkflowRunStatus.SHADOW);
         var third = new ReviewDraft(1, 3, ReviewDraft.Status.DRAFT, 2, false, "", List.of(), draft.findings(), null);
