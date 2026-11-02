@@ -11,6 +11,8 @@ import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
@@ -89,6 +91,30 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     // ---- Pull request operations ----
+
+    @Override
+    public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        Map<String, Object> pr = restClient.get()
+                .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}", owner, repo, pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (pr == null) return Optional.empty();
+        PullRequestState state = switch (String.valueOf(pr.get("state"))) {
+            case "OPEN" -> PullRequestState.OPEN;
+            case "MERGED" -> PullRequestState.MERGED;
+            case "DECLINED", "SUPERSEDED" -> PullRequestState.CLOSED_WITHOUT_MERGE;
+            default -> null;
+        };
+        Map<?, ?> source = pr.get("source") instanceof Map<?, ?> value ? value : Map.of();
+        Map<?, ?> target = pr.get("destination") instanceof Map<?, ?> value ? value : Map.of();
+        Map<?, ?> sourceBranch = source.get("branch") instanceof Map<?, ?> value ? value : Map.of();
+        Map<?, ?> sourceCommit = source.get("commit") instanceof Map<?, ?> value ? value : Map.of();
+        Map<?, ?> targetBranch = target.get("branch") instanceof Map<?, ?> value ? value : Map.of();
+        Map<?, ?> targetCommit = target.get("commit") instanceof Map<?, ?> value ? value : Map.of();
+        return Optional.of(new PullRequestDetails((String) pr.get("title"), (String) pr.get("description"), state,
+                (String) sourceBranch.get("name"), (String) sourceCommit.get("hash"),
+                (String) targetBranch.get("name"), (String) targetCommit.get("hash")));
+    }
 
     @Override
     public boolean isPullRequestOpen(String owner, String repo, Long pullNumber) {

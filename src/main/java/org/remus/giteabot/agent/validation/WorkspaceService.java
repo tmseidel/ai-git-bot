@@ -283,18 +283,37 @@ public class WorkspaceService {
                 + ": " + fallback.error() + ")");
     }
 
-    /** Pins a read-only review workspace to its captured commit, never a moving branch tip. */
-    public boolean pinReviewRevision(Path workspaceDir, String headSha) {
+    /** Returns a read-only PR workspace only after its captured commit has been checked out. */
+    public WorkspaceResult preparePinnedPullRequestWorkspace(RepositoryApiClient repositoryClient,
+                                                             String owner, String repo, String branch,
+                                                             Long prNumber, String headSha) {
         if (headSha == null || !headSha.matches("[0-9a-f]{40}|[0-9a-f]{64}")) {
-            throw new IllegalArgumentException("Invalid review commit");
+            throw new IllegalArgumentException("Invalid commit");
         }
-        return runCommand(workspaceDir.toFile(),
-                new String[]{"git", "checkout", "--detach", headSha}, cloneTimeoutSeconds).success()
-                && isReviewRevision(workspaceDir, headSha);
+        WorkspaceResult result = preparePullRequestWorkspace(repositoryClient, owner, repo, branch, prNumber,
+                PullRequestWorkspaceMode.READ_ONLY);
+        if (!result.success()) return result;
+        Path workspaceDir = result.workspacePath();
+        boolean pinned = false;
+        try {
+            // A depth-1 branch clone may no longer contain the commit captured before a push.
+            if (!runCommand(workspaceDir.toFile(),
+                    new String[]{"git", "cat-file", "-e", headSha + "^{commit}"}, 15).success()
+                    && !runRemoteCommand(setupsByWorkspace.get(workspaceKey(workspaceDir)),
+                    workspaceDir.toFile(), cloneTimeoutSeconds, "fetch", "--depth", "1", "origin", headSha).success()) {
+                return WorkspaceResult.failure("Could not fetch the captured pull-request commit");
+            }
+            pinned = runCommand(workspaceDir.toFile(),
+                    new String[]{"git", "checkout", "--detach", headSha}, cloneTimeoutSeconds).success()
+                    && isRevision(workspaceDir, headSha);
+            return pinned ? result : WorkspaceResult.failure("Could not check out the captured pull-request commit");
+        } finally {
+            if (!pinned) cleanupWorkspace(workspaceDir);
+        }
     }
 
-    /** Verifies the local commit again before publishing a revision-labelled review. */
-    public boolean isReviewRevision(Path workspaceDir, String headSha) {
+    /** Compares HEAD with the expected commit; this does not verify working-tree contents. */
+    public boolean isRevision(Path workspaceDir, String headSha) {
         CommandResult result = runCommand(workspaceDir.toFile(),
                 new String[]{"git", "rev-parse", "--verify", "HEAD"}, 15);
         return result.success() && headSha != null && headSha.equals(result.output().strip());
@@ -981,7 +1000,16 @@ public class WorkspaceService {
         IOException failure = null;
         for (Path path : paths) {
             try {
-                Files.delete(path);
+                try {
+                    Files.delete(path);
+                } catch (java.nio.file.AccessDeniedException denied) {
+                    // Git object files carry the DOS read-only flag on Windows.
+                    var attributes = Files.getFileAttributeView(path,
+                            java.nio.file.attribute.DosFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+                    if (attributes == null || !attributes.readAttributes().isReadOnly()) throw denied;
+                    attributes.setReadOnly(false);
+                    Files.delete(path);
+                }
             } catch (IOException e) {
                 log.warn("Failed to delete {}: {}", path, e.getMessage());
                 if (failure == null) {

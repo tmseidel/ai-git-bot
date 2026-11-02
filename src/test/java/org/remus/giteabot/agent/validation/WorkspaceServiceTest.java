@@ -221,6 +221,44 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    void pinnedWorkspaceFetchesCapturedCommitMissingFromTheShallowBranchClone() throws Exception {
+        Path remote = createBareRepository("moving", "captured content");
+        Path source = tempDir.resolve("moving-source");
+        String capturedSha = runGitCapture(source, "rev-parse", "HEAD");
+        Files.writeString(source.resolve("README.md"), "new branch content");
+        runGit(source, "commit", "-am", "advance branch");
+        runGit(source, "push", "origin", "main");
+        // file:// is required: Git ignores --depth for a plain local path.
+        RepositoryApiClient client = repositoryClient(remote.toUri().toString());
+        WorkspaceResult result = workspaceService.preparePinnedPullRequestWorkspace(
+                client, "any", "any", "main", 42L, capturedSha);
+        assertThat(result.success()).isTrue();
+        try {
+            assertThat(runGitCapture(result.workspacePath(), "rev-parse", "--is-shallow-repository")).isEqualTo("true");
+            assertThat(runGitCapture(result.workspacePath(), "rev-parse", "--abbrev-ref", "HEAD")).isEqualTo("HEAD");
+            assertThat(workspaceService.isRevision(result.workspacePath(), capturedSha)).isTrue();
+            assertThat(Files.readString(result.workspacePath().resolve("README.md"))).isEqualTo("captured content");
+        } finally {
+            workspaceService.cleanupWorkspace(result.workspacePath());
+        }
+    }
+
+    @Test
+    void unavailableCapturedCommitFailsAndCleansUpTheWorkspace() throws Exception {
+        Path base = tempDir.resolve("pinned-workspaces");
+        workspaceService = new WorkspaceService(base.toString(), CLONE_TIMEOUT_SECONDS);
+        Path remote = createBareRepository("unavailable", "content");
+        WorkspaceResult result = workspaceService.preparePinnedPullRequestWorkspace(
+                repositoryClient(remote.toUri().toString()), "any", "any", "main", 42L, "a".repeat(40));
+        assertThat(result.success()).isFalse();
+        assertThat(result.workspacePath()).isNull();
+        assertThat(result.error()).isEqualTo("Could not fetch the captured pull-request commit");
+        try (var children = Files.list(base)) {
+            assertThat(children.toList()).isEmpty();
+        }
+    }
+
+    @Test
     void preparePullRequestWorkspace_fallsBackToTargetPrRefWhenForkHeadIsGone() throws Exception {
         // The contributor deleted the branch but the PR is still open: the target
         // repository's refs/pull/<n>/head still carries the reviewed commit.
