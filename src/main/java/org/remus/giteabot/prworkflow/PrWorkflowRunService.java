@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
+import org.remus.giteabot.prworkflow.agentreview.ReviewDraft;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -23,6 +25,56 @@ public class PrWorkflowRunService {
 
     private final PrWorkflowRunRepository runRepository;
     private final PrWorkflowStepRepository stepRepository;
+
+    /** Captures the immutable revision once, only while the owning run is active. */
+    @Transactional
+    public void captureReviewRevision(Long runId, ReviewRevision revision) {
+        if (runId == null || revision == null || runRepository.captureReviewRevision(runId,
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Review revision could not be captured for an active run");
+        }
+    }
+
+    /** Atomically writes a validated snapshot, rejecting stale versions, revisions, cancelled or sealed runs. */
+    @Transactional
+    public void saveReviewDraft(Long runId, ReviewRevision revision, long expected, ReviewDraft draft) {
+        if (runId == null || revision == null || draft == null || draft.status() != ReviewDraft.Status.DRAFT
+                || expected < 0 || draft.version() != expected + 1
+                || runRepository.saveReviewDraft(runId, expected, draft.version(), draft.json(), draft.status().name(),
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Review draft write lost its active run, version or revision");
+        }
+    }
+
+    /** Reloads the supported snapshot and verifies its application-owned metadata before use. */
+    @Transactional(readOnly = true)
+    public ReviewDraft loadReviewDraft(Long runId, ReviewRevision revision) {
+        PrWorkflowRun run = getById(runId);
+        ReviewDraft draft = ReviewDraft.read(run.getReviewDraftJson());
+        if (!revision.headSha().equals(run.getReviewHeadSha()) || !revision.baseSha().equals(run.getReviewBaseSha())
+                || !revision.diffHash().equals(run.getReviewDiffHash()) || draft.version() != run.getReviewDraftVersion()
+                || !draft.status().name().equals(run.getReviewDraftStatus())) {
+            throw new IllegalStateException("Stored review draft binding does not match");
+        }
+        return draft;
+    }
+
+    /** Atomically seals a diagnostic review and terminates its run without a publishable state. */
+    @Transactional
+    public void sealReviewShadow(Long runId, ReviewRevision revision, long expected, ReviewDraft draft) {
+        if (runId == null || revision == null || draft == null || expected < 0 || draft.version() != expected + 1
+                || draft.status() == ReviewDraft.Status.DRAFT) {
+            throw new IllegalArgumentException("Invalid shadow seal");
+        }
+        boolean complete = draft.status() == ReviewDraft.Status.COMPLETE;
+        if (complete) draft.render();
+        if (runRepository.sealReviewShadow(runId, expected, draft.version(), draft.json(), draft.status().name(),
+                complete ? PrWorkflowRunStatus.SHADOW : PrWorkflowRunStatus.FAILED,
+                complete ? "Structured review sealed in shadow mode; not published" : "insufficient_context",
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Shadow seal lost its active run, version or revision");
+        }
+    }
 
     @Transactional
     public PrWorkflowRun start(Long botId, String repoOwner, String repoName, Long prNumber,

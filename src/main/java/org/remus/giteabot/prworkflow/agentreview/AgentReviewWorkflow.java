@@ -75,6 +75,10 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         WorkflowParamField.ParamType.BOOLEAN, false,
                         "false",
                         "Creates one progress comment and updates it during review or clarification."),
+                new WorkflowParamField(AgentReviewParam.STRUCTURED_REVIEW_SHADOW,
+                        "Structured review shadow mode",
+                        WorkflowParamField.ParamType.BOOLEAN, false, "false",
+                        "Tests persisted structured completion without posting reviews, progress comments or formal actions."),
                 new WorkflowParamField(AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION,
                         "Enable formal review decision",
                         WorkflowParamField.ParamType.BOOLEAN, false,
@@ -125,14 +129,20 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         context.requireActive("before running agentic review");
 
-        AgentReviewService.ReviewResult reviewed = serviceFactory.create(bot)
-                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
+        AgentReviewService service = serviceFactory.create(bot);
+        AgentReviewService.ReviewResult reviewed = boolParam(params, AgentReviewParam.STRUCTURED_REVIEW_SHADOW, false)
+                ? service.reviewPullRequestShadow(payload, maxToolRounds, context.runId(), context.auditToolCallConsumer())
+                : service.reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
                         context.runId(), context.auditToolCallConsumer(), enableProgressComments);
 
         WorkflowResult result = switch (reviewed) {
             case POSTED -> WorkflowResult.success("Agentic review posted");
+            case SHADOW_RECORDED -> new WorkflowResult(org.remus.giteabot.prworkflow.WorkflowResultStatus.SHADOW,
+                    "Structured review sealed in shadow mode; not published");
             case NO_DIFF -> WorkflowResult.skipped("No diff to review");
             case FAILED -> WorkflowResult.failed("Agentic review failed; no complete review was produced");
+            case STALE_REVISION -> WorkflowResult.failed(
+                    "Pull request changed during the review; no review posted for the outdated commit");
         };
         context.appendStep("agentic-review", result.summary());
         return result;
@@ -143,6 +153,9 @@ public class AgentReviewWorkflow implements PrWorkflow {
         context.requireActive("before running agentic clarification");
 
         Map<String, Object> params = resolveParams(bot);
+        if (boolParam(params, AgentReviewParam.STRUCTURED_REVIEW_SHADOW, false)) {
+            return WorkflowResult.failed("Structured clarification is not qualified; shadow mode never publishes answers");
+        }
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
 
         AgentReviewService.ReviewResult answered = serviceFactory.create(bot)
@@ -152,7 +165,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
         WorkflowResult result = switch (answered) {
             case POSTED -> WorkflowResult.success("Clarification posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to answer clarification");
-            case FAILED -> WorkflowResult.failed("No clarification produced");
+            case FAILED, STALE_REVISION, SHADOW_RECORDED -> WorkflowResult.failed("No clarification produced");
         };
         context.appendStep("agentic-clarification", result.summary());
         return result;

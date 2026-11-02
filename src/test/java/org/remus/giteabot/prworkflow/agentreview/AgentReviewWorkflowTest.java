@@ -22,6 +22,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -57,13 +58,16 @@ class AgentReviewWorkflowTest {
         AgentReviewWorkflow wf = workflow();
         assertEquals("agentic-review", wf.key());
         assertEquals(PrWorkflowCategory.REVIEW, wf.category());
-        assertEquals(7, wf.paramsSchema().fields().size());
+        assertEquals(8, wf.paramsSchema().fields().size());
         assertFalse(wf.paramsSchema().isEmpty());
         var progress = wf.paramsSchema().fields().stream()
                 .filter(field -> field.name().equals("enableProgressComments")).findFirst().orElseThrow();
         assertEquals(WorkflowParamField.ParamType.BOOLEAN, progress.type());
         assertEquals("false", progress.defaultValue());
         org.assertj.core.api.Assertions.assertThat(progress.description()).contains("review or clarification");
+        var shadow = wf.paramsSchema().fields().stream()
+                .filter(field -> field.name().equals("structuredReviewShadow")).findFirst().orElseThrow();
+        assertEquals("false", shadow.defaultValue());
     }
 
     @ParameterizedTest
@@ -148,6 +152,36 @@ class AgentReviewWorkflowTest {
         WorkflowResult result = workflow().run(context(new Bot()));
 
         assertEquals(WorkflowResultStatus.FAILED, result.status());
+    }
+
+    @Test
+    void run_failsWithReason_whenHeadMovedDuringReview() {
+        AgentReviewService service = mock(AgentReviewService.class);
+        when(serviceFactory.create(any())).thenReturn(service);
+        when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
+                any(AgentReviewService.SeverityThresholds.class), anyLong(), any(), anyBoolean()))
+                .thenReturn(AgentReviewService.ReviewResult.STALE_REVISION);
+
+        WorkflowResult result = workflow().run(context(new Bot()));
+
+        assertEquals(WorkflowResultStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("changed during the review"));
+    }
+
+    @Test
+    void shadowSelectionCannotFallThroughToThePublishingService() {
+        var bot = new Bot();
+        var cfg = new org.remus.giteabot.prworkflow.config.WorkflowConfiguration();
+        cfg.setId(7L);
+        bot.setWorkflowConfiguration(cfg);
+        when(selectionService.resolveParams(7L, "agentic-review"))
+                .thenReturn(Map.of("structuredReviewShadow", true, "enableFormalReviewDecision", true, "enableProgressComments", true));
+        var service = mock(AgentReviewService.class);
+        when(serviceFactory.create(any())).thenReturn(service);
+        when(service.reviewPullRequestShadow(any(), anyInt(), anyLong(), any()))
+                .thenReturn(AgentReviewService.ReviewResult.SHADOW_RECORDED);
+        assertEquals(WorkflowResultStatus.SHADOW, workflow().run(context(bot)).status());
+        verify(service, org.mockito.Mockito.never()).reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(), any(), anyLong(), any(), anyBoolean());
     }
 
     @ParameterizedTest

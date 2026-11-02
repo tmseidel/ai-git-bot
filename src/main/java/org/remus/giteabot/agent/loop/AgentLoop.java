@@ -86,6 +86,10 @@ public final class AgentLoop {
                 ctx.issueNumber(), providerTag, resolvedMode, tools.size());
 
         for (int round = 1; round <= budget.maxRounds(); round++) {
+            if (round > budget.maxRounds() - strategy.reservedFinalizationRounds()) {
+                strategy.beginFinalization();
+            }
+            if (resolvedMode == ToolingMode.NATIVE) tools = strategy.toolDescriptors();
             if (ctx.progressConsumer() != null) {
                 ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
                         round, "Waiting for model", 0));
@@ -111,9 +115,9 @@ public final class AgentLoop {
             }
             long started = System.nanoTime();
             ChatTurn turn;
+            String requestMessage = withRequiredContext(currentMessage, strategy.requiredContext());
             try {
-                turn = callAiWithRetry(history, withRequiredContext(currentMessage, strategy.requiredContext()),
-                        tools, systemPrompt, round, closingReminder);
+                turn = callAiWithRetry(history, requestMessage, tools, systemPrompt, round, closingReminder, ctx);
             } finally {
                 AgentMetricsHolder.recordLatency(modeTag(resolvedMode), providerTag,
                         Duration.ofNanos(System.nanoTime() - started));
@@ -137,7 +141,7 @@ public final class AgentLoop {
             // history (content + toolResult) + systemPrompt + currentMessage
             // + native tool descriptors. When the provider reports actual
             // inputTokens, those take precedence in TokenUsageTracker.record().
-            int promptChars = computePromptChars(history, systemPrompt, currentMessage, tools);
+            int promptChars = computePromptChars(history, systemPrompt, requestMessage, tools);
             tokenTracker.record(ctx.session(), turn, promptChars);
             if (tokenTracker.shouldCompactProactively(ctx.session())) {
                 log.info("AgentLoop round {}/{} for issue #{}: context budget exceeded (usage: {}%),"
@@ -168,7 +172,7 @@ public final class AgentLoop {
                         .mapToInt(HistoryCompactor::messageChars)
                         .sum();
                 int systemPromptChars = systemPrompt != null ? systemPrompt.length() : 0;
-                int currentMessageChars = currentMessage != null ? currentMessage.length() : 0;
+                int currentMessageChars = requestMessage != null ? requestMessage.length() : 0;
                 int toolDescChars = computeToolDescChars(tools);
                 long estimatedPromptTokens = TokenUsageTracker.estimateTokens(
                         historyChars + systemPromptChars + currentMessageChars + toolDescChars);
@@ -378,10 +382,11 @@ public final class AgentLoop {
      * @throws RuntimeException if the failure is not retryable or the retry fails
      */
     private ChatTurn callAiWithRetry(List<AiMessage> history, String currentMessage,
-                                     List<ToolDescriptor> tools, String systemPrompt, int round,
-                                     AiMessage closingReminder) {
+                                      List<ToolDescriptor> tools, String systemPrompt, int round,
+                                      AiMessage closingReminder, AgentRunContext ctx) {
         int maxAttempts = 2;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            ctx.requireActive();
             try {
                 AiAuditContext.setRound(round);
                 return aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,

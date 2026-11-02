@@ -1,6 +1,8 @@
 package org.remus.giteabot.prworkflow;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -8,6 +10,37 @@ import java.util.List;
 
 @Repository
 public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Long> {
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update PrWorkflowRun r set r.reviewHeadSha = :head, r.reviewBaseSha = :base, r.reviewDiffHash = :diff
+            where r.id = :id and r.status = org.remus.giteabot.prworkflow.PrWorkflowRunStatus.RUNNING
+            and r.reviewHeadSha is null and r.reviewBaseSha is null and r.reviewDiffHash is null
+            """)
+    int captureReviewRevision(Long id, String head, String base, String diff);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update PrWorkflowRun r set r.reviewDraftJson = :json, r.reviewDraftVersion = :next,
+            r.reviewDraftStatus = :draftStatus where r.id = :id
+            and r.status = org.remus.giteabot.prworkflow.PrWorkflowRunStatus.RUNNING
+            and r.reviewDraftVersion = :expected and (r.reviewDraftStatus is null or r.reviewDraftStatus = 'DRAFT')
+            and r.reviewHeadSha = :head and r.reviewBaseSha = :base and r.reviewDiffHash = :diff
+            """)
+    int saveReviewDraft(Long id, long expected, long next, String json, String draftStatus,
+                        String head, String base, String diff);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update PrWorkflowRun r set r.reviewDraftJson = :json, r.reviewDraftVersion = :next,
+            r.reviewDraftStatus = :draftStatus, r.status = :runStatus, r.finishedAt = CURRENT_INSTANT,
+            r.summary = :summary where r.id = :id
+            and r.status = org.remus.giteabot.prworkflow.PrWorkflowRunStatus.RUNNING
+            and r.reviewDraftVersion = :expected and (r.reviewDraftStatus is null or r.reviewDraftStatus = 'DRAFT')
+            and r.reviewHeadSha = :head and r.reviewBaseSha = :base and r.reviewDiffHash = :diff
+            """)
+    int sealReviewShadow(Long id, long expected, long next, String json, String draftStatus,
+                         PrWorkflowRunStatus runStatus, String summary, String head, String base, String diff);
 
     List<PrWorkflowRun> findByBotIdAndRepoOwnerAndRepoNameAndPrNumberAndWorkflowKeyAndStatusIn(
             Long botId,
@@ -33,4 +66,3 @@ public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Lo
      */
     List<PrWorkflowRun> findByFollowUpPrNumberIsNotNullAndFinishedAtBefore(Instant cutoff);
 }
-

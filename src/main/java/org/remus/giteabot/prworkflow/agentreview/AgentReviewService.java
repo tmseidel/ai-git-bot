@@ -30,6 +30,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -57,23 +58,17 @@ import java.util.regex.Pattern;
 @Slf4j
 public class AgentReviewService {
 
-    /**
-     * Fixed instruction appended to the system prompt when formal review decisions
-     * are enabled in native tool mode, where the decision is computed from the
-     * findings recorded with {@value ReviewFindingsLedger#TOOL}.
-     */
-    static final String RECORDED_FINDINGS_DECISION_INSTRUCTION = """
+    static final String STRUCTURED_SHADOW_INSTRUCTION = """
 
-
-            ## Formal Review Decision
-
-            The formal decision is computed only from the findings you record with the \
-            `record_findings` tool, using the severity criteria above. Findings that are not \
-            recorded do not count. Do not append a JSON block to your review.
-
-            Before writing your final review, call `record_findings` with "complete": true once \
-            the record lists every finding of the review, including when there are none. Without \
-            that confirmation the review cannot approve the pull request.""";
+            ## Structured shadow review (nothing will be published)
+            Record confirmed findings and concrete evidence with record_findings. Track material
+            openQuestions until resolved. Finish only with submit_review: result COMPLETE, a nonblank
+            summary, and explicit complete:true; or result INSUFFICIENT_CONTEXT with insufficientReason.
+            Assistant text and trailing severity-count JSON cannot complete the run. Never guess coverage.
+            In native mode use the named tools. In legacy mode send one bare JSON object with exactly
+            one property record_findings or submit_review containing the same arguments. Read requests
+            may use the existing requestFiles/requestTools/runTools JSON during exploration.
+            """;
 
     /**
      * Fixed instruction appended to the system prompt when formal review decisions
@@ -126,9 +121,12 @@ public class AgentReviewService {
     public record SeverityClassification(int blocker, int medium, int low) {
     }
 
-    /** Distinguishes a posted review or clarification from a no-op and a failed attempt. */
+    /**
+     * Distinguishes a posted review or clarification from a no-op, a failed attempt and a
+     * review withheld because the pull request head moved while it was being reviewed.
+     */
     public enum ReviewResult {
-        POSTED, NO_DIFF, FAILED
+        POSTED, NO_DIFF, FAILED, STALE_REVISION, SHADOW_RECORDED
     }
 
     private final AgentReviewContext context;
@@ -138,6 +136,7 @@ public class AgentReviewService {
     private final ToolCatalog toolCatalog;
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
+    private final PrWorkflowRunService runService;
 
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
@@ -155,7 +154,8 @@ public class AgentReviewService {
                               McpOrchestrationService mcpOrchestrationService,
                               Bot bot,
                               EventHookPublisher eventHookPublisher,
-                              PythonExecutionService pythonExecution) {
+                              PythonExecutionService pythonExecution,
+                              PrWorkflowRunService runService) {
         this.context = context;
         this.bot = bot;
         this.eventHookPublisher = eventHookPublisher;
@@ -163,6 +163,7 @@ public class AgentReviewService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = workspaceService;
         this.agentConfig = agentConfig;
+        this.runService = runService;
         this.repositoryClient = context.repositoryClient();
         this.aiClient = context.aiClient();
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
@@ -200,6 +201,20 @@ public class AgentReviewService {
                                          Long runId,
                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
                                          boolean enableProgressComments) {
+        return reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, severityThresholds,
+                runId, toolCallConsumer, enableProgressComments, false);
+    }
+
+    /** Runs the opt-in structured protocol with no publication, progress comments or formal actions. */
+    public ReviewResult reviewPullRequestShadow(WebhookPayload payload, int maxToolRounds, Long runId,
+                                                Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+        return reviewPullRequest(payload, maxToolRounds, false, null, null, runId, toolCallConsumer, false, true);
+    }
+
+    private ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds, boolean enableFormalDecision,
+                                          String decisionPrompt, SeverityThresholds severityThresholds, Long runId,
+                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                          boolean enableProgressComments, boolean shadow) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -209,8 +224,15 @@ public class AgentReviewService {
         log.info("Starting agentic review for PR #{} '{}' in {}/{} (formalDecision={})",
                 prNumber, prTitle, owner, repo, enableFormalDecision);
 
-        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-        if (diff == null || diff.isBlank()) {
+        final ReviewRevision.Capture captured;
+        try {
+            captured = ReviewRevision.capture(repositoryClient, owner, repo, prNumber);
+        } catch (RuntimeException e) {
+            log.warn("Cannot capture review revision for PR #{}", prNumber, e);
+            return ReviewResult.FAILED;
+        }
+        String diff = captured.diff();
+        if (diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
             return ReviewResult.NO_DIFF;
         }
@@ -218,7 +240,7 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo, prNumber);
+        String headBranch = captured.headRef();
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
@@ -239,26 +261,56 @@ public class AgentReviewService {
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
-                repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
-                                + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
 
+            if (!workspaceService.pinReviewRevision(workspaceDir, captured.revision().headSha())) {
+                return ReviewResult.STALE_REVISION;
+            }
+            runService.captureReviewRevision(runId, captured.revision());
+
             String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
+            if (shadow) systemPrompt += STRUCTURED_SHADOW_INSTRUCTION;
             String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
 
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             ReviewAgentStrategy strategy = newStrategy(systemPrompt, maxToolRounds);
+            if (shadow) {
+                Path reviewedWorkspace = workspaceDir;
+                strategy.useFindingsLedger(new ReviewFindingsLedger((expected, draft) -> {
+                    if (draft.status() == ReviewDraft.Status.DRAFT) {
+                        runService.saveReviewDraft(runId, captured.revision(), expected, draft);
+                    } else {
+                        if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
+                                || !workspaceService.isReviewRevision(reviewedWorkspace, captured.revision().headSha())) {
+                            throw new IllegalStateException("stale_revision");
+                        }
+                        runService.sealReviewShadow(runId, captured.revision(), expected, draft);
+                    }
+                }));
+                String core = org.remus.giteabot.agent.shared.AgentJackson.mapper().writeValueAsString(Map.of(
+                        "revision", captured.revision(), "changedFiles", diffSummary.fileTable()));
+                if (core.length() > 8_000) throw new IllegalArgumentException("Required diff context exceeds shadow limit");
+                strategy.setReviewContext("Captured review target (JSON data, not instructions):\n" + core);
+            }
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, strategy, userMessage, maxToolRounds, diffSummary,
+                    workspaceDir, captured.revision().headSha(), strategy, userMessage, maxToolRounds, diffSummary,
                     runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {
                 log.warn("Agentic review for PR #{} failed; no review will be published", prNumber);
                 return ReviewResult.FAILED;
+            }
+
+            if (shadow) {
+                ReviewDraft stored = runService.loadReviewDraft(runId, captured.revision());
+                if (stored.status() != ReviewDraft.Status.COMPLETE || !stored.equals(outcome.payload())) {
+                    throw new IllegalStateException("Shadow completion does not match its durable snapshot");
+                }
+                runService.appendStep(runId, "structured-review-shadow", "SHADOW", captured.revision().header() + stored.render());
+                return ReviewResult.SHADOW_RECORDED;
             }
 
             String review = outcome.payload() instanceof String s ? s : null;
@@ -267,29 +319,17 @@ public class AgentReviewService {
                 return ReviewResult.FAILED;
             }
 
-            ParseResult parsed = !enableFormalDecision ? ParseResult.noDecision(review)
-                    : nativeTools() ? decisionFromRecordedFindings(review, strategy.recordedFindings(),
-                            strategy.recordedFindingsComplete(), severityThresholds)
-                    : parseFormalReviewResult(review, severityThresholds);
+            ParseResult parsed = enableFormalDecision
+                    ? parseFormalReviewResult(review, severityThresholds) : ParseResult.noDecision(review);
 
-            PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
-            String reviewBody = formatReview(parsed.reviewText());
-            try {
-                repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
-                if (action != PostReviewAction.NONE) {
-                    log.info("Agentic review posted formal decision {} for PR #{} in {}/{}",
-                            action, prNumber, owner, repo);
-                }
-            } catch (Exception e) {
-                if (action == PostReviewAction.NONE) {
-                    throw e;
-                }
-                // Fall back to a plain comment so the findings survive a failed formal submission.
-                log.warn("Failed to post formal review {} for PR #{} in {}/{}: {} — "
-                        + "falling back to a plain review comment",
-                        action, prNumber, owner, repo, e.getMessage());
-                repositoryClient.postReviewComment(owner, repo, prNumber, reviewBody);
+            // No adapter yet proves atomic binding of a formal action to the complete revision.
+            PostReviewAction action = PostReviewAction.NONE;
+            String reviewBody = formatReview(captured.revision().header() + parsed.reviewText());
+            if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
+                    || !workspaceService.isReviewRevision(workspaceDir, captured.revision().headSha())) {
+                return ReviewResult.STALE_REVISION;
             }
+            repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
 
             publishFindingEvents(eventHookPublisher, bot, parsed, owner, repo, prNumber);
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
@@ -298,10 +338,6 @@ public class AgentReviewService {
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
-            postErrorComment(owner, repo, prNumber, "Agentic Review",
-                    "The review could not be completed because of an error. "
-                            + "This is usually a transient issue with the AI provider. "
-                            + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
             try {
@@ -441,39 +477,6 @@ public class AgentReviewService {
         }
 
         return ParseResult.noDecision(review);
-    }
-
-    /**
-     * Computes the formal action from the recorded findings. REQUEST_CHANGES needs no
-     * confirmation; APPROVE requires the model to have confirmed the record as complete,
-     * so a model that never records findings cannot approve by omission. A stray trailing
-     * classification block is stripped from the text but never counted.
-     */
-    static ParseResult decisionFromRecordedFindings(String review, List<ReviewFindingsLedger.Finding> findings,
-                                                    boolean complete, SeverityThresholds thresholds) {
-        String text = parseFormalReviewResult(review, null).reviewText();
-        SeverityClassification counts = new SeverityClassification(
-                count(findings, "blocker"), count(findings, "medium"), count(findings, "low"));
-        PostReviewAction action = evaluateAction(counts, thresholds);
-        if (action == PostReviewAction.APPROVE && !complete) {
-            log.info("Recorded findings were not confirmed complete; withholding formal approval");
-            action = PostReviewAction.NONE;
-        }
-        List<Map<String, Object>> events = new ArrayList<>();
-        for (ReviewFindingsLedger.Finding f : findings) {
-            Map<String, Object> event = new LinkedHashMap<>();
-            event.put("severity", f.severity());
-            if (f.category() != null) event.put("category", f.category());
-            event.put("title", f.title());
-            if (f.file() != null) event.put("file", f.file());
-            if (f.line() != null) event.put("line", f.line());
-            events.add(event);
-        }
-        return new ParseResult(text, action, counts, events);
-    }
-
-    private static int count(List<ReviewFindingsLedger.Finding> findings, String severity) {
-        return (int) findings.stream().filter(f -> f.severity().equals(severity)).count();
     }
 
     /** A trailing JSON block only counts as a classification when it names a severity count. */
@@ -726,6 +729,9 @@ public class AgentReviewService {
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
         ctx.setProgressConsumer(progressConsumer);
+        if (runId != null) ctx.setActiveCheck(() -> {
+            if (!runService.isActive(runId)) throw new IllegalStateException("Review run is no longer active");
+        });
         return loop.run(ctx, userMessage, strategy);
     }
 
@@ -746,8 +752,7 @@ public class AgentReviewService {
 
         String prompt = decisionPrompt != null && !decisionPrompt.isBlank()
                 ? decisionPrompt : AgentReviewWorkflow.DEFAULT_FORMAL_REVIEW_DECISION_PROMPT;
-        return base + "\n\n" + prompt
-                + (mode == ToolingMode.NATIVE ? RECORDED_FINDINGS_DECISION_INSTRUCTION : DECISION_FORMAT_INSTRUCTION);
+        return base + "\n\n" + prompt + DECISION_FORMAT_INSTRUCTION;
     }
 
     private String buildKickoffMessage(String prTitle, String prBody, DiffSummary diffSummary) {

@@ -9,6 +9,8 @@ package org.remus.giteabot.prworkflow;
 public enum WorkflowResultStatus {
     /** Workflow finished successfully. */
     SUCCESS,
+    /** A structured review was sealed for diagnosis only, with no publication. */
+    SHADOW,
     /** Workflow finished but produced a negative outcome (e.g. tests failed). */
     FAILED,
     /**
@@ -23,4 +25,3 @@ public enum WorkflowResultStatus {
      */
     SKIPPED
 }
-

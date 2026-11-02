@@ -32,15 +32,19 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
+import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 import org.remus.giteabot.prworkflow.WorkflowResultStatus;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -79,6 +83,7 @@ class AgentReviewCompletionTest {
     @Mock private RepositoryApiClient repositoryClient;
     @Mock private WorkspaceService workspaceService;
     @Mock private EventHookPublisher eventHooks;
+    @Mock private PrWorkflowRunService runService;
 
     private AgentReviewService service;
     private WebhookPayload payload;
@@ -108,9 +113,14 @@ class AgentReviewCompletionTest {
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, workspaceService), catalog, workspaceService,
-                config, null, new Bot(), eventHooks, null);
+                config, null, new Bot(), eventHooks, null, runService);
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
-        when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
+        lenient().when(runService.isActive(1L)).thenReturn(true);
+        lenient().when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
+        lenient().when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
+                .thenReturn(Optional.of(details("a".repeat(40))));
+        lenient().when(workspaceService.pinReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
+        lenient().when(workspaceService.isReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
         lenient().when(workspaceService.preparePullRequestWorkspace(repositoryClient, "owner", "repo",
                         "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
                 .thenReturn(WorkspaceResult.success(WORKSPACE));
@@ -134,15 +144,12 @@ class AgentReviewCompletionTest {
         when(repositoryClient.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), contains("Agentic Review Progress")))
                 .thenReturn(CommentId.NumericCommentId.of(42L));
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
-                .thenReturn(explorationRecording("{\"add\":[{\"severity\":\"blocker\",\"title\":\"Race\"}]}"),
+                .thenReturn(exploration(1),
                         ChatTurn.text("Review complete.\n{\"blocker\":0,\"medium\":0,\"low\":0}"));
 
         assertThat(service.reviewPullRequest(payload, 1, true, null,
                 new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, true))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
-        verify(aiClient, org.mockito.Mockito.atLeastOnce()).chatWithTools(anyList(), any(), anyList(),
-                argThat(prompt -> prompt.contains("`record_findings` tool") && !prompt.contains("MUST be exactly one JSON")),
-                isNull(), anyInt());
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(),
                 contains("\"blocker\""), any());
 
@@ -152,7 +159,87 @@ class AgentReviewCompletionTest {
                 argThat(body -> body.contains("- Latest activity: Completed")
                         && body.contains("Rounds: 2") && body.contains("Inspection tool calls completed: 1")));
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
-                argThat(body -> body.contains("Review complete.")), eq(PostReviewAction.REQUEST_CHANGES));
+                argThat(body -> body.contains("Review complete.")), eq(PostReviewAction.NONE));
+    }
+
+    @Test
+    void reviewOfACommitThatWasReplacedDuringTheRunIsNotPublished() {
+        when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
+                .thenReturn(Optional.of(details("a".repeat(40))), Optional.of(details("a".repeat(40))),
+                        Optional.of(details("b".repeat(40))));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("Review complete."));
+
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.STALE_REVISION);
+
+        assertNothingPublished();
+    }
+
+    @Test
+    void reviewOfAnUnchangedHeadIsPublished() {
+        when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
+                .thenReturn(Optional.of(details("a".repeat(40))));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("Review complete."));
+
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(), eq(PostReviewAction.NONE));
+        verify(runService).captureReviewRevision(eq(1L), any(ReviewRevision.class));
+        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
+                argThat(body -> body.contains("head `" + "a".repeat(40))
+                        && body.contains("base `" + "c".repeat(40)) && body.contains("diff `sha256:")
+                        && body.contains("not an approval")), eq(PostReviewAction.NONE));
+    }
+
+    @Test
+    void aChangedBaseOrDiffCannotPublishEvenWhenTheHeadIsUnchanged() {
+        when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF, DIFF + "changed");
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("Review complete."));
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.STALE_REVISION);
+        assertNothingPublished();
+    }
+
+    @Test
+    void unsupportedRevisionCaptureFailsBeforeInferenceOrCheckout() {
+        when(repositoryClient.getPullRequestDetails("owner", "repo", 1L)).thenReturn(Optional.empty());
+        assertThat(service.reviewPullRequest(payload, 1, true, null,
+                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.FAILED);
+        verifyNoInteractions(aiClient, workspaceService, runService, eventHooks);
+    }
+
+    @Test
+    void checkoutMustMatchTheCapturedCommit() {
+        when(workspaceService.pinReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(false);
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.STALE_REVISION);
+        verifyNoInteractions(aiClient, runService, eventHooks);
+        assertNothingPublished();
+    }
+
+    @Test
+    void capturePersistenceFailureCannotContinueOrPublish() {
+        doThrow(new IllegalStateException("DB unavailable")).when(runService)
+                .captureReviewRevision(eq(1L), any());
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.FAILED);
+        verifyNoInteractions(aiClient);
+        assertNothingPublished();
+    }
+
+    private static PullRequestDetails details(String headSha) {
+        return new PullRequestDetails("Update example", null, PullRequestState.OPEN,
+                "feature", headSha, "main", "c".repeat(40));
     }
 
     @Test
@@ -407,56 +494,30 @@ class AgentReviewCompletionTest {
     }
 
     @Test
-    void recordedFindingsAreSentWithLaterRequestsWithoutEnteringHistoryOrToolBudget() {
-        ChatTurn record = new ChatTurn("", List.of(new ToolCall("record-1", ReviewFindingsLedger.TOOL,
-                AgentJackson.mapper().readTree("""
-                        {"add":[{"severity":"blocker","title":"Missing ownership check",
-                                 "file":"Example.java","line":1,"description":"Any user can cancel any order"}]}
-                        """))), StopReason.TOOL_USE, 100, 20);
-        List<String> requestMessages = new ArrayList<>();
-        List<List<AiMessage>> histories = new ArrayList<>();
+    void theIncompleteStructuredProtocolIsNotActivatedInThePublishingPath() {
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
                 .thenAnswer(invocation -> {
-                    histories.add(List.copyOf(invocation.<List<AiMessage>>getArgument(0)));
-                    requestMessages.add(invocation.getArgument(1));
-                    return switch (requestMessages.size()) {
-                        case 1 -> record;
-                        case 2 -> exploration(1);
-                        default -> ChatTurn.text("Review complete.");
-                    };
+                    List<org.remus.giteabot.ai.ToolDescriptor> tools = invocation.getArgument(2);
+                    assertThat(tools).noneMatch(tool -> tool.name().equals(ReviewFindingsLedger.TOOL));
+                    return ChatTurn.text("Review complete.");
                 });
 
         assertThat(service.reviewPullRequest(payload, 1, false, null,
                 new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
-        assertThat(requestMessages.getFirst()).doesNotContain("Recorded review findings");
-        assertThat(requestMessages.subList(1, 3)).allSatisfy(message -> assertThat(message)
-                .contains("F1 [BLOCKER] Missing ownership check — Example.java:1: Any user can cancel any order"));
-        assertThat(histories.getLast()).noneSatisfy(message -> assertThat(String.valueOf(message.getContent())
-                + message.getToolResult()).contains("Recorded review findings"));
     }
 
-    @ParameterizedTest
-    @CsvSource({"false,NONE", "true,APPROVE"})
-    void approvalFromRecordedFindingsRequiresConfirmedCompleteness(boolean complete, PostReviewAction expected) {
+    @Test
+    void formalApprovalRemainsDisabledUntilTheAdapterAndCoverageGatesAreQualified() {
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
-                .thenReturn(explorationRecording("{\"add\":[{\"severity\":\"low\",\"title\":\"Typo\"}],\"complete\":"
-                                + complete + "}"),
-                        ChatTurn.text("Review complete."));
+                .thenReturn(ChatTurn.text("Review complete.\n{\"blocker\":0,\"medium\":0,\"low\":0}"));
 
         assertThat(service.reviewPullRequest(payload, 1, true, null,
                 new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
-        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(), eq(expected));
-    }
-
-    private ChatTurn explorationRecording(String recordArgs) {
-        return new ChatTurn("", List.of(
-                new ToolCall("read-diff", "pr-diff", AgentJackson.mapper().createObjectNode().put("path", "Example.java")),
-                new ToolCall("record", ReviewFindingsLedger.TOOL, AgentJackson.mapper().readTree(recordArgs))),
-                StopReason.TOOL_USE, 100, 20);
+        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(), eq(PostReviewAction.NONE));
     }
 
     private ChatTurn exploration(int round) {

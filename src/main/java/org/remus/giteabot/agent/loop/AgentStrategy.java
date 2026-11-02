@@ -54,6 +54,12 @@ public interface AgentStrategy {
         return null;
     }
 
+    /** Logical turns reserved for terminal submission and one repair, not available for exploration. */
+    default int reservedFinalizationRounds() { return 0; }
+
+    /** Restricts an opted-in protocol to its terminal operations before the reserved turns. */
+    default void beginFinalization() { }
+
     /**
      * Decide what to do given the AI's latest assistant turn (text path).
      *

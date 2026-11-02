@@ -55,28 +55,57 @@ not change the review or clarification outcome. If creation fails, that run
 continues without progress. Activity write attempts are at least 15 seconds
 apart, even after a failed update; terminal updates are attempted once immediately.
 
+### Structured review state
+
+The structured protocol stores bounded schema-1 review drafts on the workflow
+run, bound to its captured head/base/diff revision. Updates use application-owned
+versions and conditional writes; cancelled runs, stale versions and sealed
+snapshots cannot be overwritten. Persistence failures stop the run before an
+update is acknowledged. Snapshot JSON is parsed strictly but does not require
+byte-identical reserialization.
+
+Set **Structured review shadow mode** (`structuredReviewShadow`, default `false`)
+only on a diagnostic bot configuration after deploying compatible readers on
+every instance sharing the database. This canary has no publishing branch:
+
+- `record_findings` applies validated add/remove operations and tracks unresolved
+  `openQuestions`. Every acknowledged version is already persisted.
+- Only `submit_review` can complete the structured run. `COMPLETE` requires a
+  nonblank summary, explicit `complete: true`, and no open questions;
+  `INSUFFICIENT_CONTEXT` preserves the diagnostic draft and fails the run.
+- Native calls and legacy JSON use the same argument shapes. A legacy terminal
+  response is `{"submit_review":{"result":"COMPLETE","summary":"...","complete":true}}`.
+  Assistant prose and trailing classification JSON are never terminal results.
+- Two logical turns are reserved for submission and one repair. Once finalizing,
+  inspection tools are no longer offered or dispatched. These are logical-turn
+  reserves, not a qualified provider-call or token-budget guarantee.
+- A complete snapshot and terminal run state are sealed atomically using the
+  expected version and captured revision. Its preview is rendered from the
+  reloaded snapshot, never from assistant prose.
+- The terminal run status is **SHADOW**, not `SUCCESS`. There are no PR comments,
+  progress comments, formal actions, finding events or review-success events.
+  Clarifications are rejected in this mode until their baseline contract exists.
+
+Do not treat this canary as production qualification. Provider request-preservation,
+exact remote capture, pending-evidence/coverage, transport budgets, execution
+fencing and publication/recovery gates still need their planned qualification.
+There is no flag here that enables authoritative structured publication.
+
 ### Formal review decision
 
-When `enableFormalReviewDecision` is on, the model classifies its findings as
-`BLOCKER`, `MEDIUM`, or `LOW`. With native tool calling it records each finding
-with the `record_findings` tool, and the application counts the recorded
-findings; findings mentioned only in the text do not count. In legacy mode the
-model instead emits a JSON object such as `{"blocker": 0, "medium": 1, "low": 2}`.
-The application then compares each count to the configured thresholds:
+Formal actions are currently withheld (`NONE`) until repository adapters prove
+atomic binding to the complete reviewed revision and the completion/coverage
+gates are qualified. Reviews are posted only as comments labelled with the
+captured head SHA, base SHA and complete diff hash. Providers without a fresh
+revision lookup fail before inference; a changed revision fails rather than
+being recorded as a successful skipped review.
 
-- If **all configured thresholds** are satisfied, the bot submits `APPROVE`.
-- If **any configured threshold** is exceeded, the bot submits `REQUEST_CHANGES`.
-- If **no thresholds** are configured, the bot leaves the review state unchanged
-  (`NONE`) while still posting the review text.
-- An unset threshold is ignored entirely, so you can enforce only the severities
-  that matter to you (for example, only `BLOCKER`).
-- With native tool calling, `APPROVE` additionally requires the model to confirm
-  that its record is complete (`"complete": true`, also when there are no
-  findings). Without that confirmation the bot posts the review without a formal
-  action, so a model that never records findings cannot approve by omission.
-
-If the model fails to emit a clean classification, the bot falls back to posting
-a plain review comment so the findings are never lost.
+Outside shadow mode, the existing classification prompt/thresholds remain available
+for analysis and finding-event compatibility, but the submitted formal action is
+always `NONE`. Shadow mode does not send the classification prompt at all. A model's
+completeness confirmation is necessary for a structured terminal snapshot; it is
+never sufficient to authorize an approval without application-verified coverage
+and adapter/revision gates. Failed publication is not retried as a plain comment.
 
 ## The review prompt
 
@@ -90,9 +119,9 @@ are not part of this prompt, so editing it can't break anything.
 1. Open **System settings → Workflow configurations → Workflows** for the
    relevant configuration.
 2. Tick **Agentic PR Review** and adjust its settings if you like.
-3. To let the bot approve / request changes, tick **Enable formal review
-   decision**, optionally customise the decision prompt, and set at least one
-   severity threshold (for example, **Blocker must be less or equal = 0**).
+3. To test structured completion without publication, enable **Structured review
+   shadow mode**. Otherwise the existing comment workflow remains selected.
+   Formal decision settings cannot currently authorize APPROVE or REQUEST_CHANGES.
 
 It only runs for bots that have it explicitly enabled — it never replaces or
 duplicates the default **PR Review** workflow.

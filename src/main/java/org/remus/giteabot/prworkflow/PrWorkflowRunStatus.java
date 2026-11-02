@@ -28,15 +28,16 @@ public enum PrWorkflowRunStatus {
     RUNNING,
     WAITING_DEPLOY,
     SUCCESS,
+    /** Terminal diagnostic result that can never authorize publication or formal actions. */
+    SHADOW,
     FAILED,
     CANCELLED;
 
     public boolean isTerminal() {
-        return this == SUCCESS || this == FAILED || this == CANCELLED;
+        return this == SUCCESS || this == SHADOW || this == FAILED || this == CANCELLED;
     }
 
     public boolean isActive() {
         return this == RUNNING || this == WAITING_DEPLOY;
     }
 }
-

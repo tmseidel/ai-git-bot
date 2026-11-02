@@ -23,30 +23,19 @@ import static org.mockito.Mockito.verify;
 class AgentReviewServiceTest {
 
     @Test
-    void decisionFromRecordedFindings_countsRecordsAndIgnoresStrayJson() {
+    void completeSnapshotRendersEveryRecordedFindingFromTheSameData() {
         var findings = List.of(
-                new ReviewFindingsLedger.Finding("F1", "blocker", "security", "SQL injection", "evidence", "A.java", 7),
-                new ReviewFindingsLedger.Finding("F2", "low", null, "Typo", null, null, null));
-
-        var result = AgentReviewService.decisionFromRecordedFindings(
-                "Review.\n{\"blocker\": 0, \"medium\": 0, \"low\": 0}", findings, false, thresholds(0, null, null));
-
-        assertThat(result.action()).isEqualTo(PostReviewAction.REQUEST_CHANGES);
-        assertThat(result.reviewText()).isEqualTo("Review.");
-        assertThat(result.classification()).isEqualTo(new AgentReviewService.SeverityClassification(1, 0, 1));
-        assertThat(result.findings()).containsExactly(
-                Map.of("severity", "blocker", "category", "security", "title", "SQL injection", "file", "A.java", "line", 7),
-                Map.of("severity", "low", "title", "Typo"));
+                new ReviewDraft.Finding("F1", "blocker", "security", "SQL injection", "Concrete evidence", "A.java", 7),
+                new ReviewDraft.Finding("F2", "low", null, "Typo", "Misspelled label", null, null));
+        var draft = new ReviewDraft(1, 2, ReviewDraft.Status.COMPLETE, 3, true, "Reviewed change", List.of(), findings, null);
+        assertThat(draft.render()).contains("Reviewed change", "F1 [BLOCKER] SQL injection", "Concrete evidence",
+                "A.java:7", "F2 [LOW] Typo", "Misspelled label");
     }
 
     @Test
-    void decisionFromRecordedFindings_approvesOnlyAConfirmedRecord() {
-        assertThat(AgentReviewService.decisionFromRecordedFindings("Fine.", List.of(), false, thresholds(0, 0, 0))
-                .action()).isEqualTo(PostReviewAction.NONE);
-        assertThat(AgentReviewService.decisionFromRecordedFindings("Fine.", List.of(), true, thresholds(0, 0, 0))
-                .action()).isEqualTo(PostReviewAction.APPROVE);
-        assertThat(AgentReviewService.decisionFromRecordedFindings("Fine.", List.of(), true, thresholds(null, null, null))
-                .action()).isEqualTo(PostReviewAction.NONE);
+    void anUnsealedDraftCannotBecomeReviewMarkdown() {
+        var draft = new ReviewDraft(1, 1, ReviewDraft.Status.DRAFT, 1, true, "", List.of(), List.of(), null);
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException().isThrownBy(draft::render);
     }
 
     @Test
