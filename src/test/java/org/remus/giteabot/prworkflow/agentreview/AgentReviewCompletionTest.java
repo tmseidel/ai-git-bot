@@ -36,11 +36,14 @@ import org.remus.giteabot.prworkflow.WorkflowResultStatus;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -147,6 +150,39 @@ class AgentReviewCompletionTest {
                         && body.contains("Rounds: 2") && body.contains("Inspection tool calls completed: 1")));
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
                 argThat(body -> body.contains("Review complete.")), eq(PostReviewAction.REQUEST_CHANGES));
+    }
+
+    @Test
+    void reviewOfACommitThatWasReplacedDuringTheRunIsNotPublished() {
+        when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
+                .thenReturn(Optional.of(details("a".repeat(40))), Optional.of(details("b".repeat(40))));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("Review complete."));
+
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.STALE_REVISION);
+
+        assertNothingPublished();
+    }
+
+    @Test
+    void reviewOfAnUnchangedHeadIsPublished() {
+        when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
+                .thenReturn(Optional.of(details("a".repeat(40))));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("Review complete."));
+
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(), eq(PostReviewAction.NONE));
+    }
+
+    private static PullRequestDetails details(String headSha) {
+        return new PullRequestDetails("Update example", null, PullRequestState.OPEN,
+                "feature", headSha, "main", "c".repeat(40));
     }
 
     @Test

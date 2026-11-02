@@ -30,6 +30,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -108,9 +109,12 @@ public class AgentReviewService {
     public record SeverityClassification(int blocker, int medium, int low) {
     }
 
-    /** Distinguishes a posted review or clarification from a no-op and a failed attempt. */
+    /**
+     * Distinguishes a posted review or clarification from a no-op, a failed attempt and a
+     * review withheld because the pull request head moved while it was being reviewed.
+     */
     public enum ReviewResult {
-        POSTED, NO_DIFF, FAILED
+        POSTED, NO_DIFF, FAILED, STALE_REVISION
     }
 
     private final AgentReviewContext context;
@@ -191,6 +195,9 @@ public class AgentReviewService {
         log.info("Starting agentic review for PR #{} '{}' in {}/{} (formalDecision={})",
                 prNumber, prTitle, owner, repo, enableFormalDecision);
 
+        // Captured before the diff and checkout: a later push can only make the review stale, never mislabel it.
+        String reviewedHeadSha = currentHeadSha(owner, repo, prNumber);
+
         String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
         if (diff == null || diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
@@ -253,6 +260,15 @@ public class AgentReviewService {
 
             PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
             String reviewBody = formatReview(parsed.reviewText());
+            if (reviewedHeadSha != null) {
+                String currentHeadSha = currentHeadSha(owner, repo, prNumber);
+                if (!reviewedHeadSha.equals(currentHeadSha)) {
+                    log.warn("PR #{} in {}/{} moved from {} to {} during the agentic review — "
+                            + "not publishing a review of the outdated commit", prNumber, owner, repo,
+                            reviewedHeadSha, currentHeadSha);
+                    return ReviewResult.STALE_REVISION;
+                }
+            }
             try {
                 repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
                 if (action != PostReviewAction.NONE) {
@@ -391,6 +407,18 @@ public class AgentReviewService {
                 }
             }
         }
+    }
+
+    /**
+     * Returns the provider's current head commit, or {@code null} when it does not report one.
+     * shortcut: providers without {@link RepositoryApiClient#getPullRequestDetails} (GitLab,
+     * Bitbucket) are not guarded against stale reviews; implement that lookup to cover them.
+     */
+    private String currentHeadSha(String owner, String repo, Long prNumber) {
+        return repositoryClient.getPullRequestDetails(owner, repo, prNumber)
+                .map(PullRequestDetails::headSha)
+                .filter(sha -> !sha.isBlank())
+                .orElse(null);
     }
 
     /**
