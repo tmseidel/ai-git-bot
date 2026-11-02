@@ -200,8 +200,25 @@ public class AgentReviewService {
                                          Long runId,
                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
                                          boolean enableProgressComments) {
-        return reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, severityThresholds,
-                runId, toolCallConsumer, enableProgressComments, false);
+        ReviewResult result = doReviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt,
+                severityThresholds, runId, toolCallConsumer, enableProgressComments, false);
+        if (result == ReviewResult.STALE_REVISION || result == ReviewResult.FAILED) {
+            String owner = payload.getRepository().getOwner().getLogin();
+            String repo = payload.getRepository().getName();
+            Long number = payload.getPullRequest().getNumber();
+            try {
+                if (runService.isActive(runId) && repositoryClient.isPullRequestOpen(owner, repo, number)) {
+                    String reason = result == ReviewResult.STALE_REVISION
+                            ? "The pull request changed during the review, so the outdated review was not published."
+                            : "The requested review could not be completed.";
+                    repositoryClient.postPullRequestComment(owner, repo, number,
+                            "## 🤖 Review stopped\n\n" + reason + " Please request a new review for the current revision.");
+                }
+            } catch (RuntimeException e) {
+                log.warn("Could not post the review outcome for PR #{} in {}/{}", number, owner, repo, e);
+            }
+        }
+        return result;
     }
 
     /** Dormant integration seam; the workflow cannot select it before full protocol qualification. */
@@ -210,16 +227,17 @@ public class AgentReviewService {
         AiRetryContext.install(new AiRetryContext.Notice(
                 "structured-review-shadow", body -> { }));
         try {
-            return reviewPullRequest(payload, maxToolRounds, false, null, null, runId, toolCallConsumer, false, true);
+            return doReviewPullRequest(payload, maxToolRounds, false, null, null, runId, toolCallConsumer, false, true);
         } finally {
             AiRetryContext.clear();
         }
     }
 
-    private ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds, boolean enableFormalDecision,
-                                          String decisionPrompt, SeverityThresholds severityThresholds, Long runId,
-                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
-                                          boolean enableProgressComments, boolean shadow) {
+    private ReviewResult doReviewPullRequest(WebhookPayload payload, int maxToolRounds,
+                                            boolean enableFormalDecision, String decisionPrompt,
+                                            SeverityThresholds severityThresholds, Long runId,
+                                            Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                            boolean enableProgressComments, boolean shadow) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -260,9 +278,9 @@ public class AgentReviewService {
             if (progress != null) {
                 progress.start();
             }
-            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+            WorkspaceResult wsResult = workspaceService.preparePinnedPullRequestWorkspace(
                     repositoryClient, owner, repo, headBranch, prNumber,
-                    PullRequestWorkspaceMode.READ_ONLY);
+                    captured.revision().headSha());
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
@@ -270,9 +288,6 @@ public class AgentReviewService {
             }
             workspaceDir = wsResult.workspacePath();
 
-            if (!workspaceService.pinReviewRevision(workspaceDir, captured.revision().headSha())) {
-                return ReviewResult.STALE_REVISION;
-            }
             runService.captureReviewRevision(runId, captured.revision());
 
             String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
@@ -289,7 +304,7 @@ public class AgentReviewService {
                         runService.saveReviewDraft(runId, captured.revision(), expected, draft);
                     } else {
                         if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
-                                || !workspaceService.isReviewRevision(reviewedWorkspace, captured.revision().headSha())) {
+                                || !workspaceService.isRevision(reviewedWorkspace, captured.revision().headSha())) {
                             throw new IllegalStateException("stale_revision");
                         }
                         runService.sealReviewShadow(runId, captured.revision(), expected, draft);
@@ -331,7 +346,7 @@ public class AgentReviewService {
             PostReviewAction action = PostReviewAction.NONE;
             String reviewBody = formatReview(captured.revision().header() + parsed.reviewText());
             if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
-                    || !workspaceService.isReviewRevision(workspaceDir, captured.revision().headSha())) {
+                    || !workspaceService.isRevision(workspaceDir, captured.revision().headSha())) {
                 return ReviewResult.STALE_REVISION;
             }
             repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);

@@ -69,10 +69,9 @@ class StructuredReviewShadowTest {
         when(repository.getPullRequestDetails("owner", "repo", 1L)).thenReturn(Optional.of(new PullRequestDetails(
                 "Change", null, PullRequestState.OPEN, "feature", "a".repeat(40), "main", "b".repeat(40))));
         when(repository.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
-        when(workspaces.preparePullRequestWorkspace(repository, "owner", "repo", "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
+        when(workspaces.preparePinnedPullRequestWorkspace(repository, "owner", "repo", "feature", 1L, "a".repeat(40)))
                 .thenReturn(WorkspaceResult.success(WORKSPACE));
-        when(workspaces.pinReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
-        when(workspaces.isReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
+        when(workspaces.isRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
         when(runs.isActive(1L)).thenReturn(true);
         doAnswer(call -> { stored.set(call.getArgument(3)); return null; }).when(runs)
                 .saveReviewDraft(eq(1L), any(), anyLong(), any());
