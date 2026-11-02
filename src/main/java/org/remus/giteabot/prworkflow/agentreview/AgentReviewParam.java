@@ -13,7 +13,7 @@ public enum AgentReviewParam implements WorkflowParamName {
     /** Opt-in progress comments for review and clarification runs. */
     ENABLE_PROGRESS_COMMENTS("enableProgressComments"),
 
-    /** Opt-in structured protocol canary: persists diagnostics and never publishes anything. */
+    /** Reserved key: persisted selections are rejected until the full protocol is qualified. */
     STRUCTURED_REVIEW_SHADOW("structuredReviewShadow"),
 
     /** When true, the workflow may post a formal PR review decision (approve/request-changes). */
@@ -42,4 +42,3 @@ public enum AgentReviewParam implements WorkflowParamName {
         return key;
     }
 }
-

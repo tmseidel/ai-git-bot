@@ -31,7 +31,8 @@ class PrWorkflowRunServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new PrWorkflowRunService(runRepository, stepRepository);
+        service = new PrWorkflowRunService(runRepository, stepRepository,
+                org.mockito.Mockito.mock(org.remus.giteabot.audit.PrAuditEventService.class));
         lenient().when(runRepository.save(any(PrWorkflowRun.class))).thenAnswer(inv -> {
             PrWorkflowRun r = inv.getArgument(0);
             if (r.getId() == null) {
@@ -149,4 +150,3 @@ class PrWorkflowRunServiceTest {
         assertTrue(trimmed.endsWith("..."));
     }
 }
-

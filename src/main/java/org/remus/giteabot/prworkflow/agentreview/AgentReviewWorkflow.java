@@ -75,10 +75,6 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         WorkflowParamField.ParamType.BOOLEAN, false,
                         "false",
                         "Creates one progress comment and updates it during review or clarification."),
-                new WorkflowParamField(AgentReviewParam.STRUCTURED_REVIEW_SHADOW,
-                        "Structured review shadow mode",
-                        WorkflowParamField.ParamType.BOOLEAN, false, "false",
-                        "Tests persisted structured completion without posting reviews, progress comments or formal actions."),
                 new WorkflowParamField(AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION,
                         "Enable formal review decision",
                         WorkflowParamField.ParamType.BOOLEAN, false,
@@ -110,13 +106,16 @@ public class AgentReviewWorkflow implements PrWorkflow {
     public WorkflowResult run(PrWorkflowContext context) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
+        Map<String, Object> params = resolveParams(bot);
+        if (boolParam(params, AgentReviewParam.STRUCTURED_REVIEW_SHADOW, false)) {
+            return WorkflowResult.failed("Structured review is disabled until terminal, transport, budget and read-only contracts are qualified");
+        }
 
         String clarification = context.hint(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION);
         if (clarification != null && !clarification.isBlank()) {
-            return doClarification(context, clarification);
+            return doClarification(context, clarification, params);
         }
 
-        Map<String, Object> params = resolveParams(bot);
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
         boolean enableProgressComments = boolParam(params, AgentReviewParam.ENABLE_PROGRESS_COMMENTS, false);
         boolean enableFormalDecision = boolParam(params, AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION, false);
@@ -130,10 +129,9 @@ public class AgentReviewWorkflow implements PrWorkflow {
         context.requireActive("before running agentic review");
 
         AgentReviewService service = serviceFactory.create(bot);
-        AgentReviewService.ReviewResult reviewed = boolParam(params, AgentReviewParam.STRUCTURED_REVIEW_SHADOW, false)
-                ? service.reviewPullRequestShadow(payload, maxToolRounds, context.runId(), context.auditToolCallConsumer())
-                : service.reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
-                        context.runId(), context.auditToolCallConsumer(), enableProgressComments);
+        AgentReviewService.ReviewResult reviewed = service.reviewPullRequest(payload, maxToolRounds,
+                enableFormalDecision, decisionPrompt, thresholds,
+                context.runId(), context.auditToolCallConsumer(), enableProgressComments);
 
         WorkflowResult result = switch (reviewed) {
             case POSTED -> WorkflowResult.success("Agentic review posted");
@@ -148,14 +146,10 @@ public class AgentReviewWorkflow implements PrWorkflow {
         return result;
     }
 
-    private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion) {
+    private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion, Map<String, Object> params) {
         Bot bot = context.bot();
         context.requireActive("before running agentic clarification");
 
-        Map<String, Object> params = resolveParams(bot);
-        if (boolParam(params, AgentReviewParam.STRUCTURED_REVIEW_SHADOW, false)) {
-            return WorkflowResult.failed("Structured clarification is not qualified; shadow mode never publishes answers");
-        }
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
 
         AgentReviewService.ReviewResult answered = serviceFactory.create(bot)
@@ -197,7 +191,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
         if (raw instanceof Boolean b) return b;
         if (raw == null) return fallback;
         String s = raw.toString().trim();
-        return "true".equalsIgnoreCase(s) || "1".equals(s);
+        return "true".equalsIgnoreCase(s) || "1".equals(s) || "on".equalsIgnoreCase(s);
     }
 
     private String strParam(Map<String, Object> params, AgentReviewParam name, String fallback) {

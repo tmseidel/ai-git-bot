@@ -22,6 +22,7 @@ import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
@@ -52,8 +53,8 @@ import java.util.regex.Pattern;
  * repository through {@link ToolCatalog.Role#REVIEW} (read-only) tools and selected MCP,
  * then posts a single review comment. When the operator enables the optional
  * formal review decision, the model classifies its findings by severity and the
- * application computes the formal action (approve / request changes) from
- * configured thresholds.</p>
+     * application retains the classification for analysis. Formal actions remain
+     * withheld until the revision, coverage and adapter contracts are qualified.</p>
  */
 @Slf4j
 public class AgentReviewService {
@@ -178,16 +179,14 @@ public class AgentReviewService {
      * the resulting review as a PR comment. When {@code enableFormalDecision}
      * is {@code true}, the system prompt is extended with the operator-
      * configured criteria and a fixed format instruction; the model's output
-     * is parsed for a severity classification, and the formal review action
-     * (APPROVE / REQUEST_CHANGES / NONE) is computed deterministically from
-     * {@code severityThresholds}. The action is submitted together with the
-     * review body via {@link RepositoryApiClient#postReview}.
+     * is parsed for a severity classification. The review body is submitted via
+     * {@link RepositoryApiClient#postReview} with action {@code NONE} until
+     * revision, coverage and adapter qualification permits formal actions.
      *
      * @param maxToolRounds         operator-tunable cap on the number of
      *                              explore/answer rounds (clamped to a sane range)
      * @param enableFormalDecision  when true, the model returns a severity
-     *                              classification and the action is derived from
-     *                              the configured thresholds
+     *                              classification for analysis, not a formal action
      * @param decisionPrompt        operator-provided criteria for the severity
      *                              classification
      * @param severityThresholds    optional per-severity thresholds used to
@@ -205,10 +204,16 @@ public class AgentReviewService {
                 runId, toolCallConsumer, enableProgressComments, false);
     }
 
-    /** Runs the opt-in structured protocol with no publication, progress comments or formal actions. */
-    public ReviewResult reviewPullRequestShadow(WebhookPayload payload, int maxToolRounds, Long runId,
-                                                Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
-        return reviewPullRequest(payload, maxToolRounds, false, null, null, runId, toolCallConsumer, false, true);
+    /** Dormant integration seam; the workflow cannot select it before full protocol qualification. */
+    ReviewResult reviewPullRequestShadow(WebhookPayload payload, int maxToolRounds, Long runId,
+                                        Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+        AiRetryContext.install(new AiRetryContext.Notice(
+                "structured-review-shadow", body -> { }));
+        try {
+            return reviewPullRequest(payload, maxToolRounds, false, null, null, runId, toolCallConsumer, false, true);
+        } finally {
+            AiRetryContext.clear();
+        }
     }
 
     private ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds, boolean enableFormalDecision,

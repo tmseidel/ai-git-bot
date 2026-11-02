@@ -58,16 +58,15 @@ class AgentReviewWorkflowTest {
         AgentReviewWorkflow wf = workflow();
         assertEquals("agentic-review", wf.key());
         assertEquals(PrWorkflowCategory.REVIEW, wf.category());
-        assertEquals(8, wf.paramsSchema().fields().size());
+        assertEquals(7, wf.paramsSchema().fields().size());
         assertFalse(wf.paramsSchema().isEmpty());
         var progress = wf.paramsSchema().fields().stream()
                 .filter(field -> field.name().equals("enableProgressComments")).findFirst().orElseThrow();
         assertEquals(WorkflowParamField.ParamType.BOOLEAN, progress.type());
         assertEquals("false", progress.defaultValue());
         org.assertj.core.api.Assertions.assertThat(progress.description()).contains("review or clarification");
-        var shadow = wf.paramsSchema().fields().stream()
-                .filter(field -> field.name().equals("structuredReviewShadow")).findFirst().orElseThrow();
-        assertEquals("false", shadow.defaultValue());
+        org.assertj.core.api.Assertions.assertThat(wf.paramsSchema().fields())
+                .noneMatch(field -> field.name().equals("structuredReviewShadow"));
     }
 
     @ParameterizedTest
@@ -168,20 +167,25 @@ class AgentReviewWorkflowTest {
         assertTrue(result.summary().contains("changed during the review"));
     }
 
-    @Test
-    void shadowSelectionCannotFallThroughToThePublishingService() {
+    @ParameterizedTest
+    @CsvSource({"true,false", "true,true", "1,false", "TRUE,true", "on,true"})
+    void unqualifiedShadowSelectionCannotStartAReviewOrClarification(String setting, boolean clarification) {
         var bot = new Bot();
         var cfg = new org.remus.giteabot.prworkflow.config.WorkflowConfiguration();
         cfg.setId(7L);
         bot.setWorkflowConfiguration(cfg);
+        var params = new org.remus.giteabot.prworkflow.config.WorkflowParamsValidator().typed(
+                Map.of("structuredReviewShadow", setting, "enableFormalReviewDecision", "true", "enableProgressComments", "true"),
+                workflow().paramsSchema());
         when(selectionService.resolveParams(7L, "agentic-review"))
-                .thenReturn(Map.of("structuredReviewShadow", true, "enableFormalReviewDecision", true, "enableProgressComments", true));
-        var service = mock(AgentReviewService.class);
-        when(serviceFactory.create(any())).thenReturn(service);
-        when(service.reviewPullRequestShadow(any(), anyInt(), anyLong(), any()))
-                .thenReturn(AgentReviewService.ReviewResult.SHADOW_RECORDED);
-        assertEquals(WorkflowResultStatus.SHADOW, workflow().run(context(bot)).status());
-        verify(service, org.mockito.Mockito.never()).reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(), any(), anyLong(), any(), anyBoolean());
+                .thenReturn(params);
+        var context = new PrWorkflowContext(bot, new WebhookPayload(), 1L,
+                (name, log) -> { }, () -> false, clarification
+                ? Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION, "Why was this changed?") : Map.of(), null);
+        WorkflowResult result = workflow().run(context);
+        assertEquals(WorkflowResultStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("disabled until"));
+        org.mockito.Mockito.verifyNoInteractions(serviceFactory);
     }
 
     @ParameterizedTest

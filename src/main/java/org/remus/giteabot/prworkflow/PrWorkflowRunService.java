@@ -6,11 +6,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
 import org.remus.giteabot.prworkflow.agentreview.ReviewDraft;
+import org.remus.giteabot.audit.ActorType;
+import org.remus.giteabot.audit.AuditEventType;
+import org.remus.giteabot.audit.PrAuditEvent;
+import org.remus.giteabot.audit.PrAuditEventService;
 
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -25,6 +30,7 @@ public class PrWorkflowRunService {
 
     private final PrWorkflowRunRepository runRepository;
     private final PrWorkflowStepRepository stepRepository;
+    private final PrAuditEventService auditService;
 
     /** Captures the immutable revision once, only while the owning run is active. */
     @Transactional
@@ -74,6 +80,17 @@ public class PrWorkflowRunService {
                 revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
             throw new IllegalStateException("Shadow seal lost its active run, version or revision");
         }
+        PrWorkflowRun run = getById(runId);
+        auditService.recordRequired(PrAuditEvent.builder()
+                .eventType(complete ? AuditEventType.PR_WORKFLOW_SHADOW_RECORDED : AuditEventType.PR_WORKFLOW_RUN_COMPLETED)
+                .eventTimestamp(run.getFinishedAt())
+                .botId(run.getBotId()).repoOwner(run.getRepoOwner()).repoName(run.getRepoName()).prNumber(run.getPrNumber())
+                .runId(runId).actorType(ActorType.SYSTEM.name()).actorId("structured-review-seal")
+                .eventPayloadJson(PrAuditEventService.toJson(Map.of(
+                        "workflow_key", run.getWorkflowKey(), "run_status", run.getStatus().name(),
+                        "draft_status", draft.status().name(), "draft_version", draft.version(),
+                        "head_sha", revision.headSha(), "base_sha", revision.baseSha(), "diff_hash", revision.diffHash())))
+                .build());
     }
 
     @Transactional
