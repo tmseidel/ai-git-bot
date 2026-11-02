@@ -10,7 +10,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Objects;
 
-/** Exact source, target and complete provider diff captured for one review run. */
+/** Source, target and provider diff captured for one review run. */
 public record ReviewRevision(String headSha, String baseSha, String diffHash) {
     public ReviewRevision {
         if (headSha == null || !headSha.matches("[0-9a-f]{40}|[0-9a-f]{64}")
@@ -26,6 +26,7 @@ public record ReviewRevision(String headSha, String baseSha, String diffHash) {
         PullRequestDetails before = details(client, owner, repo, number);
         String diff = Objects.requireNonNull(client.getPullRequestDiff(owner, repo, number), "Missing PR diff");
         PullRequestDetails after = details(client, owner, repo, number);
+        // Detect pushes/retargets across the reads; this is not an atomic provider snapshot.
         if (!Objects.equals(before.headSha(), after.headSha())
                 || !Objects.equals(before.baseSha(), after.baseSha())
                 || !Objects.equals(before.headRef(), after.headRef())
@@ -52,6 +53,6 @@ public record ReviewRevision(String headSha, String baseSha, String diffHash) {
 
     String header() {
         return "**Reviewed revision:** head `" + headSha + "`, base `" + baseSha
-                + "`, diff `" + diffHash + "`.\n\nThis comments on that captured revision; it is not an approval of the current PR.\n\n";
+                + "`, diff `" + diffHash + "`.\n\n";
     }
 }
