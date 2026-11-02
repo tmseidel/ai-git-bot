@@ -111,8 +111,9 @@ public final class AgentLoop {
             }
             long started = System.nanoTime();
             ChatTurn turn;
+            String requestMessage = withRequiredContext(currentMessage, strategy.requiredContext());
             try {
-                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt, round, closingReminder);
+                turn = callAiWithRetry(history, requestMessage, tools, systemPrompt, round, closingReminder);
             } finally {
                 AgentMetricsHolder.recordLatency(modeTag(resolvedMode), providerTag,
                         Duration.ofNanos(System.nanoTime() - started));
@@ -136,7 +137,7 @@ public final class AgentLoop {
             // history (content + toolResult) + systemPrompt + currentMessage
             // + native tool descriptors. When the provider reports actual
             // inputTokens, those take precedence in TokenUsageTracker.record().
-            int promptChars = computePromptChars(history, systemPrompt, currentMessage, tools);
+            int promptChars = computePromptChars(history, systemPrompt, requestMessage, tools);
             tokenTracker.record(ctx.session(), turn, promptChars);
             if (tokenTracker.shouldCompactProactively(ctx.session())) {
                 log.info("AgentLoop round {}/{} for issue #{}: context budget exceeded (usage: {}%),"
@@ -167,7 +168,7 @@ public final class AgentLoop {
                         .mapToInt(HistoryCompactor::messageChars)
                         .sum();
                 int systemPromptChars = systemPrompt != null ? systemPrompt.length() : 0;
-                int currentMessageChars = currentMessage != null ? currentMessage.length() : 0;
+                int currentMessageChars = requestMessage != null ? requestMessage.length() : 0;
                 int toolDescChars = computeToolDescChars(tools);
                 long estimatedPromptTokens = TokenUsageTracker.estimateTokens(
                         historyChars + systemPromptChars + currentMessageChars + toolDescChars);
@@ -319,6 +320,14 @@ public final class AgentLoop {
             }
         }
         return resolved;
+    }
+
+    /** Adds the strategy's required context to the request only; history keeps the plain message. */
+    static String withRequiredContext(String message, String requiredContext) {
+        if (requiredContext == null || requiredContext.isBlank()) {
+            return message;
+        }
+        return message == null || message.isEmpty() ? requiredContext : message + "\n\n" + requiredContext;
     }
 
     private static String modeTag(ToolingMode mode) {

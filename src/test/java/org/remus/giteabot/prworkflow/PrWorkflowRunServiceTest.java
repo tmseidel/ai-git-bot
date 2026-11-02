@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
+import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
 
 @ExtendWith(MockitoExtension.class)
 class PrWorkflowRunServiceTest {
@@ -38,6 +39,15 @@ class PrWorkflowRunServiceTest {
             }
             return r;
         });
+        lenient().when(runRepository.finishIfActive(any(), any(), any(), any())).thenAnswer(call -> {
+            var run = runRepository.findById(call.getArgument(0)).orElse(null);
+            if (run == null || run.getStatus() != PrWorkflowRunStatus.RUNNING
+                    && run.getStatus() != PrWorkflowRunStatus.WAITING_DEPLOY) return 0;
+            run.setStatus(call.getArgument(1));
+            run.setFinishedAt(call.getArgument(2));
+            run.setSummary(call.getArgument(3));
+            return 1;
+        });
     }
 
     @Test
@@ -50,6 +60,8 @@ class PrWorkflowRunServiceTest {
         previous.setRepoName("web");
         previous.setPrNumber(7L);
         previous.setWorkflowKey("review");
+        previous.setReviewHeadSha("a".repeat(40));
+        when(runRepository.findById(99L)).thenReturn(Optional.of(previous));
         when(runRepository
                 .findByBotIdAndRepoOwnerAndRepoNameAndPrNumberAndWorkflowKeyAndStatusIn(
                         any(), any(), any(), any(), any(), any()))
@@ -61,6 +73,8 @@ class PrWorkflowRunServiceTest {
         assertEquals(PrWorkflowRunStatus.CANCELLED, previous.getStatus());
         assertNotNull(previous.getFinishedAt());
         assertTrue(previous.getSummary().startsWith("Superseded"));
+        assertEquals("a".repeat(40), previous.getReviewHeadSha());
+        org.mockito.Mockito.verify(runRepository, org.mockito.Mockito.never()).saveAll(any());
     }
 
     @Test
@@ -117,6 +131,16 @@ class PrWorkflowRunServiceTest {
     }
 
     @Test
+    void revisionCaptureIsConditionalAndCannotOverwriteAnExistingOrCancelledRun() {
+        var revision = new ReviewRevision("a".repeat(40), "b".repeat(40), "sha256:" + "c".repeat(64));
+        when(runRepository.captureReviewRevision(1L, revision.headSha(), revision.baseSha(), revision.diffHash()))
+                .thenReturn(1, 0);
+        service.captureReviewRevision(1L, revision);
+        assertThrows(IllegalStateException.class, () -> service.captureReviewRevision(1L, revision));
+        assertThrows(IllegalStateException.class, () -> service.captureReviewRevision(null, revision));
+    }
+
+    @Test
     void truncationHelperHandlesNullAndShortValues() {
         assertNull(PrWorkflowRunService.truncate(null, 10));
         assertEquals("abc", PrWorkflowRunService.truncate("abc", 10));
@@ -125,6 +149,4 @@ class PrWorkflowRunServiceTest {
         assertTrue(trimmed.endsWith("..."));
     }
 }
-
-
 
