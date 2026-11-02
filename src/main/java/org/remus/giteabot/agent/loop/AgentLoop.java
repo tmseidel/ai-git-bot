@@ -112,7 +112,8 @@ public final class AgentLoop {
             long started = System.nanoTime();
             ChatTurn turn;
             try {
-                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt, round, closingReminder);
+                turn = callAiWithRetry(history, withRequiredContext(currentMessage, strategy.requiredContext()),
+                        tools, systemPrompt, round, closingReminder);
             } finally {
                 AgentMetricsHolder.recordLatency(modeTag(resolvedMode), providerTag,
                         Duration.ofNanos(System.nanoTime() - started));
@@ -319,6 +320,14 @@ public final class AgentLoop {
             }
         }
         return resolved;
+    }
+
+    /** Adds the strategy's required context to the request only; history keeps the plain message. */
+    static String withRequiredContext(String message, String requiredContext) {
+        if (requiredContext == null || requiredContext.isBlank()) {
+            return message;
+        }
+        return message == null || message.isEmpty() ? requiredContext : message + "\n\n" + requiredContext;
     }
 
     private static String modeTag(ToolingMode mode) {

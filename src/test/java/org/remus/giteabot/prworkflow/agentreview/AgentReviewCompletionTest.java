@@ -400,6 +400,37 @@ class AgentReviewCompletionTest {
         verifyNoInteractions(aiClient, workspaceService, eventHooks);
     }
 
+    @Test
+    void recordedFindingsAreSentWithLaterRequestsWithoutEnteringHistoryOrToolBudget() {
+        ChatTurn record = new ChatTurn("", List.of(new ToolCall("record-1", ReviewFindingsLedger.TOOL,
+                AgentJackson.mapper().readTree("""
+                        {"add":[{"severity":"blocker","title":"Missing ownership check",
+                                 "file":"Example.java","line":1,"description":"Any user can cancel any order"}]}
+                        """))), StopReason.TOOL_USE, 100, 20);
+        List<String> requestMessages = new ArrayList<>();
+        List<List<AiMessage>> histories = new ArrayList<>();
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    histories.add(List.copyOf(invocation.<List<AiMessage>>getArgument(0)));
+                    requestMessages.add(invocation.getArgument(1));
+                    return switch (requestMessages.size()) {
+                        case 1 -> record;
+                        case 2 -> exploration(1);
+                        default -> ChatTurn.text("Review complete.");
+                    };
+                });
+
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        assertThat(requestMessages.getFirst()).doesNotContain("Recorded review findings");
+        assertThat(requestMessages.subList(1, 3)).allSatisfy(message -> assertThat(message)
+                .contains("F1 [BLOCKER] Missing ownership check — Example.java:1: Any user can cancel any order"));
+        assertThat(histories.getLast()).noneSatisfy(message -> assertThat(String.valueOf(message.getContent())
+                + message.getToolResult()).contains("Recorded review findings"));
+    }
+
     private ChatTurn exploration(int round) {
         return new ChatTurn("Let me check the remaining files...",
                 List.of(new ToolCall("read-diff-" + round, "pr-diff",

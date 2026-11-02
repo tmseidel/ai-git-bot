@@ -46,6 +46,15 @@ public interface AgentStrategy {
     }
 
     /**
+     * Optional context sent with every model call but never stored in history, so
+     * compaction cannot drop it and repeated calls do not accumulate copies. It is
+     * appended to the call's user message. {@code null} adds nothing.
+     */
+    default String requiredContext() {
+        return null;
+    }
+
+    /**
      * Decide what to do given the AI's latest assistant turn (text path).
      *
      * <p>May execute tools, post comments, mutate {@code ctx} (e.g. update

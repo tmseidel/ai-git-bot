@@ -74,6 +74,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private final int maxContextRounds;
     private final int maxToolRounds;
     private int toolRounds;
+    private final ReviewFindingsLedger ledger = new ReviewFindingsLedger();
 
     /** Read-only context-fetch rounds consumed in legacy mode. */
     private int contextRounds = 0;
@@ -132,11 +133,20 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         return ToolingMode.NATIVE;
     }
 
-    /** Read-only review toolbox plus the explicitly selected MCP catalog. */
+    /** Read-only review toolbox, the explicitly selected MCP catalog and the findings record. */
     @Override
     public List<ToolDescriptor> toolDescriptors() {
-        return catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, mcpToolCatalog, allowedBuiltinTools);
+        List<ToolDescriptor> tools = new ArrayList<>(
+                catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, mcpToolCatalog, allowedBuiltinTools));
+        tools.add(ReviewFindingsLedger.descriptor());
+        return tools;
     }
+
+    @Override
+    public String requiredContext() {
+        return ledger.requiredContext();
+    }
+
 
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
@@ -149,17 +159,25 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             return finish(ctx, turn.assistantText());
         }
 
-        if (toolRounds >= maxToolRounds) {
-            return new StepDecision.Finish(onBudgetExhausted(ctx));
-        }
-        toolRounds++;
-
-        // Execute every requested (read-only) tool and feed the results back.
+        // Findings are recorded locally; only repository inspection spends the tool-round budget.
+        Map<String, String> ledgerResults = new HashMap<>();
         List<ImplementationPlan.ToolRequest> requests = new ArrayList<>();
         for (ToolCall call : turn.toolCalls()) {
-            requests.add(toRequest(call));
+            if (ReviewFindingsLedger.TOOL.equals(call.name())) {
+                ledgerResults.put(call.id(), ledger.apply(call.args()));
+            } else {
+                requests.add(toRequest(call));
+            }
         }
-        if (ctx.progressConsumer() != null) {
+        if (!requests.isEmpty()) {
+            if (toolRounds >= maxToolRounds) {
+                return new StepDecision.Finish(onBudgetExhausted(ctx));
+            }
+            toolRounds++;
+        }
+
+        // Execute every requested (read-only) tool and feed the results back.
+        if (ctx.progressConsumer() != null && !requests.isEmpty()) {
             ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(round,
                     "Inspecting repository: "
                             + String.join(", ", requests.stream().map(ImplementationPlan.ToolRequest::getTool).toList()), 0));
@@ -169,7 +187,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
                     round, "Repository inspection completed", results.size()));
         }
-        List<StepDecision.ToolCallResult> packaged = packageResults(requests, results, turn.toolCalls());
+        List<StepDecision.ToolCallResult> packaged = packageResults(requests, results, turn.toolCalls(), ledgerResults);
         return new StepDecision.ContinueWithToolResults(packaged, null);
     }
 
@@ -328,8 +346,9 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     private List<StepDecision.ToolCallResult> packageResults(List<ImplementationPlan.ToolRequest> requests,
                                                              List<ToolResult> results,
-                                                             List<ToolCall> originalCalls) {
-        Map<String, String> byId = new HashMap<>();
+                                                             List<ToolCall> originalCalls,
+                                                             Map<String, String> presetResults) {
+        Map<String, String> byId = new HashMap<>(presetResults);
         for (int i = 0; i < requests.size(); i++) {
             byId.put(requests.get(i).getId(), results.get(i).formatForAi());
         }
