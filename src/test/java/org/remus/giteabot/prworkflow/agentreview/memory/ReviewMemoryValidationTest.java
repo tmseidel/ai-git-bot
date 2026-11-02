@@ -30,8 +30,8 @@ class ReviewMemoryValidationTest {
                 new TextLimit("summary", 4_000, s -> new ReviewMemory.ReviewContent(s, List.of(), List.of())),
                 new TextLimit("open question", 1_000, s -> new ReviewMemory.ReviewContent("", List.of(s), List.of())),
                 new TextLimit("clarification question", 8_000, s -> new ReviewMemory.ClarificationContent(s, "")),
-                new TextLimit("answer", 16_000, s -> new ReviewMemory.ClarificationContent("Why?", s)),
-                new TextLimit("answer draft", 16_000, ReviewMemoryInputs.UpdateClarificationMemoryInput::new),
+                new TextLimit("answer", 15_000, s -> new ReviewMemory.ClarificationContent("Why?", s)),
+                new TextLimit("answer draft", 15_000, ReviewMemoryInputs.UpdateClarificationMemoryInput::new),
                 new TextLimit("title", 256, s -> finding("F1", s, "Evidence", "Fix", null, null)),
                 new TextLimit("description", 2_000, s -> finding("F1", "Title", s, "Fix", null, null)),
                 new TextLimit("recommendation", 2_000, s -> finding("F1", "Title", "Evidence", s, null, null)),
@@ -47,11 +47,14 @@ class ReviewMemoryValidationTest {
 
     @Test
     void serializedLimitCountsMetadataAndJsonEscapingNotOnlyRawText() {
-        var exact = clarification("q".repeat(8_000), "a".repeat(15_538));
+        var maximalFields = clarification("q".repeat(8_000), "a".repeat(15_000));
+        assertThat(codec.encode(maximalFields).json()).hasSize(23_462);
+        var exact = clarification("q".repeat(8_000), "\"".repeat(538) + "a".repeat(14_462));
         assertThat(codec.encode(exact).json()).hasSize(24_000);
         assertThat(codec.decode(codec.encode(exact).utf8())).isEqualTo(exact);
-        assertThatIllegalArgumentException().isThrownBy(() -> codec.validate(clarification("q".repeat(8_000), "a".repeat(15_539))))
-                .withMessageContaining("serialized");
+        assertThatIllegalArgumentException().isThrownBy(() -> codec.validate(
+                        clarification("q".repeat(8_000), "\"".repeat(539) + "a".repeat(14_461))))
+                .withMessageContaining("serialized limit (24001 > 24000 chars)");
         assertThatIllegalArgumentException().isThrownBy(() -> codec.validate(clarification("Why?", "\"".repeat(12_000))))
                 .withMessageContaining("serialized");
     }

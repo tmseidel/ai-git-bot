@@ -60,8 +60,8 @@ class ReviewMemoryCodecTest {
     void canonicalEscapingUsesFixedControlsAndLeavesSlashesHtmlAndUnicodeLiteral() {
         var memory = new ReviewMemory(1, 1, ReviewMemory.Purpose.REVIEW, ReviewMemory.Status.DRAFT,
                 null, REVISION, null, null, null, List.of(),
-                new ReviewMemory.ReviewContent("\"\\\b\t\n\f\r\u001a\u001b<>&/\u2028é e\u0301 😀", List.of(), List.of()), null, null);
-        assertThat(codec.encode(memory).json()).contains("\"summary\":\"\\\"\\\\\\b\\t\\n\\f\\r\\u001A\\u001B<>&/\u2028é e\u0301 😀\"");
+                new ReviewMemory.ReviewContent("\"\\\b\t\n\f\r\u001a\u001b\u007f\u0085<>&/\u2028é e\u0301 😀", List.of(), List.of()), null, null);
+        assertThat(codec.encode(memory).json()).contains("\"summary\":\"\\\"\\\\\\b\\t\\n\\f\\r\\u001A\\u001B\u007f\u0085<>&/\u2028é e\u0301 😀\"");
         assertThat(codec.decode(codec.encode(memory).utf8())).isEqualTo(memory);
     }
 

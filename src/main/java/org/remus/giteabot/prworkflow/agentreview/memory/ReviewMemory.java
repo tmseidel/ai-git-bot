@@ -22,7 +22,8 @@ public record ReviewMemory(int schemaVersion, long memoryVersion, Purpose purpos
     public static final int MAX_SERIALIZED_CHARS = 24_000;
     public static final int MAX_SUMMARY = 4_000;
     public static final int MAX_QUESTION = 8_000;
-    public static final int MAX_ANSWER = 16_000;
+    /** Leaves room for a maximal question plus metadata within {@link #MAX_SERIALIZED_CHARS}. */
+    public static final int MAX_ANSWER = 15_000;
     public static final int MAX_TITLE = 256;
     public static final int MAX_DESCRIPTION = 2_000;
     public static final int MAX_RECOMMENDATION = 2_000;

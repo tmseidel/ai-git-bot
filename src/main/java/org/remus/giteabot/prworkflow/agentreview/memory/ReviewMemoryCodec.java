@@ -123,7 +123,9 @@ public final class ReviewMemoryCodec {
         }
         root.put("insufficientReason", memory.insufficientReason());
         String json = JSON.writeValueAsString(root);
-        MemoryChecks.require(json.length() <= ReviewMemory.MAX_SERIALIZED_CHARS, "Review memory exceeds serialized limit");
+        MemoryChecks.require(json.length() <= ReviewMemory.MAX_SERIALIZED_CHARS, "Review memory exceeds serialized limit ("
+                + json.length() + " > " + ReviewMemory.MAX_SERIALIZED_CHARS + " chars); shorten summary, descriptions,"
+                + " recommendations or answer, or merge related findings");
         return new Encoded(json, json.getBytes(StandardCharsets.UTF_8));
     }
 

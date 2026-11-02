@@ -39,9 +39,9 @@ Clarification replacements never accept a question or review findings.
   has neither sealing time nor completion cause. Both are required on terminal
   snapshots and cannot subsequently be replaced.
 - Unicode is preserved, not normalized; unpaired UTF-16 surrogates are rejected.
-  Quotes/backslashes use `\"`/`\\`; controls use `\b`, `\t`, `\n`, `\f`, `\r` or
-  `\u00XX` with uppercase hex. Slashes, HTML characters and other Unicode remain
-  literal UTF-8. Character limits count UTF-16 code units, including
+  Quotes/backslashes use `\"`/`\\`; JSON control characters U+0000–U+001F use `\b`,
+  `\t`, `\n`, `\f`, `\r` or `\u00XX` with uppercase hex. Everything else, including
+  slashes, HTML characters and U+007F–U+009F, remains literal UTF-8. Character limits count UTF-16 code units, including
   the **serialized** 24,000-character total. Hashes are `sha256:` plus lowercase
   hexadecimal over exactly the returned UTF-8 bytes, never platform-default bytes.
 - Persisted readers require canonical bytes, including canonical numbers and
@@ -54,11 +54,22 @@ Clarification replacements never accept a question or review findings.
 ## Bounds
 
 Fixed limits: 50 findings, 100 inspected paths, 20 open questions, 24,000 serialized
-characters; 4,000 summary, 8,000 clarification question, 16,000 answer/draft,
+characters; 4,000 summary, 8,000 clarification question, 15,000 answer/draft,
 256 finding title, 2,000 each description/recommendation, 1,024 path, 1,000 each
 open question. Additional bounded identifiers, categories and reference tags are
 128 characters; removal reasons 2,000, insufficient reasons 4,000. Input payloads
 are also limited to 24,000 characters. Values are never silently truncated.
+
+Field limits are per-value caps, not a guarantee that every cap can be used at
+once: the serialized total is the binding budget. A maximal clarification
+question and answer fit together without escaping; 50 short findings fit, 50
+maximal ones do not. An oversized value is rejected with its size and the limit
+so the model can shorten or merge content; the previous draft stays unchanged.
+
+Trigger bodies (review or inline comments) can exceed the 8,000-character
+question cap. The integrating caller must shorten them before admission with a
+visible marker and keep the original in its own audit record; the domain does
+not truncate on its behalf.
 
 Paths are lexical repository-relative slash paths, not absolute paths, drive
 paths, backslash paths, empty components, `.`/`..` components or control characters.
