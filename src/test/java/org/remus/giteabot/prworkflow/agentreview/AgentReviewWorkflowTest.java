@@ -22,6 +22,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -148,6 +149,20 @@ class AgentReviewWorkflowTest {
         WorkflowResult result = workflow().run(context(new Bot()));
 
         assertEquals(WorkflowResultStatus.FAILED, result.status());
+    }
+
+    @Test
+    void run_failsWithReason_whenHeadMovedDuringReview() {
+        AgentReviewService service = mock(AgentReviewService.class);
+        when(serviceFactory.create(any())).thenReturn(service);
+        when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
+                any(AgentReviewService.SeverityThresholds.class), anyLong(), any(), anyBoolean()))
+                .thenReturn(AgentReviewService.ReviewResult.STALE_REVISION);
+
+        WorkflowResult result = workflow().run(context(new Bot()));
+
+        assertEquals(WorkflowResultStatus.FAILED, result.status());
+        assertTrue(result.summary().contains("changed during the review"));
     }
 
     @ParameterizedTest

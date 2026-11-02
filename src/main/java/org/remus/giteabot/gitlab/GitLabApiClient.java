@@ -14,7 +14,9 @@ import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
@@ -31,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * GitLab-specific implementation of {@link RepositoryApiClient}.
@@ -147,6 +150,26 @@ public class GitLabApiClient implements RepositoryApiClient {
                     + "project " + sourceId.longValue() + " of merge request !" + pullNumber);
         }
         return resolved;
+    }
+
+    @Override
+    public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        Map<String, Object> mr = gitlabRestClient.get()
+                .uri(MERGE_PATH, encodeProjectPath(owner, repo), pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (mr == null) return Optional.empty();
+        PullRequestState state = switch (String.valueOf(mr.get("state"))) {
+            case "opened" -> PullRequestState.OPEN;
+            case "merged" -> PullRequestState.MERGED;
+            case "closed" -> PullRequestState.CLOSED_WITHOUT_MERGE;
+            default -> null;
+        };
+        Map<?, ?> refs = mr.get("diff_refs") instanceof Map<?, ?> value ? value : Map.of();
+        // start_sha is the target commit of this diff version; base_sha is its merge base.
+        return Optional.of(new PullRequestDetails((String) mr.get("title"), (String) mr.get("description"), state,
+                (String) mr.get(SOURCE_BRANCH), (String) mr.get("sha"),
+                (String) mr.get("target_branch"), (String) refs.get("start_sha")));
     }
 
     @Override

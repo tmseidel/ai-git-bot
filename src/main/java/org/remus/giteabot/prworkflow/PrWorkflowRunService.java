@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -23,6 +24,15 @@ public class PrWorkflowRunService {
 
     private final PrWorkflowRunRepository runRepository;
     private final PrWorkflowStepRepository stepRepository;
+
+    /** Captures the immutable revision once, only while the owning run is active. */
+    @Transactional
+    public void captureReviewRevision(Long runId, ReviewRevision revision) {
+        if (runId == null || revision == null || runRepository.captureReviewRevision(runId,
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Review revision could not be captured for an active run");
+        }
+    }
 
     @Transactional
     public PrWorkflowRun start(Long botId, String repoOwner, String repoName, Long prNumber,
@@ -52,15 +62,14 @@ public class PrWorkflowRunService {
             return;
         }
         Instant now = Instant.now();
+        int cancelled = 0;
         for (PrWorkflowRun run : active) {
-            run.setStatus(PrWorkflowRunStatus.CANCELLED);
-            run.setFinishedAt(now);
             String existing = run.getSummary() == null ? "" : run.getSummary();
-            run.setSummary(truncate(("Superseded by a newer run. " + existing).trim(), MAX_SUMMARY_CHARS));
+            cancelled += runRepository.finishIfActive(run.getId(), PrWorkflowRunStatus.CANCELLED, now,
+                    truncate(("Superseded by a newer run. " + existing).trim(), MAX_SUMMARY_CHARS));
         }
-        runRepository.saveAll(active);
         log.debug("Cancelled {} prior run(s) for bot={} repo={}/{} pr=#{} workflow={}",
-                active.size(), botId, repoOwner, repoName, prNumber, workflowKey);
+                cancelled, botId, repoOwner, repoName, prNumber, workflowKey);
     }
 
     @Transactional
@@ -87,10 +96,8 @@ public class PrWorkflowRunService {
                     runId, run.getStatus());
             return run;
         }
-        run.setStatus(status);
-        run.setSummary(truncate(summary, MAX_SUMMARY_CHARS));
-        run.setFinishedAt(Instant.now());
-        return runRepository.save(run);
+        runRepository.finishIfActive(runId, status, Instant.now(), truncate(summary, MAX_SUMMARY_CHARS));
+        return getById(runId);
     }
 
     @Transactional(readOnly = true)

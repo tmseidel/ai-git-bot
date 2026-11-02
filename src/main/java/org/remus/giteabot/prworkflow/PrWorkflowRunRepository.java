@@ -1,6 +1,8 @@
 package org.remus.giteabot.prworkflow;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
@@ -8,6 +10,22 @@ import java.util.List;
 
 @Repository
 public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Long> {
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update PrWorkflowRun r set r.reviewHeadSha = :head, r.reviewBaseSha = :base, r.reviewDiffHash = :diff
+            where r.id = :id and r.status = org.remus.giteabot.prworkflow.PrWorkflowRunStatus.RUNNING
+            and r.reviewHeadSha is null and r.reviewBaseSha is null and r.reviewDiffHash is null
+            """)
+    int captureReviewRevision(Long id, String head, String base, String diff);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update PrWorkflowRun r set r.status = :status, r.finishedAt = :finishedAt, r.summary = :summary
+            where r.id = :id and r.status in (org.remus.giteabot.prworkflow.PrWorkflowRunStatus.RUNNING,
+            org.remus.giteabot.prworkflow.PrWorkflowRunStatus.WAITING_DEPLOY)
+            """)
+    int finishIfActive(Long id, PrWorkflowRunStatus status, Instant finishedAt, String summary);
 
     List<PrWorkflowRun> findByBotIdAndRepoOwnerAndRepoNameAndPrNumberAndWorkflowKeyAndStatusIn(
             Long botId,
@@ -33,4 +51,3 @@ public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Lo
      */
     List<PrWorkflowRun> findByFollowUpPrNumberIsNotNullAndFinishedAtBefore(Instant cutoff);
 }
-
