@@ -19,6 +19,17 @@ public interface PrWorkflowRunRepository extends JpaRepository<PrWorkflowRun, Lo
             """)
     int captureReviewRevision(Long id, String head, String base, String diff);
 
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update PrWorkflowRun r set r.reviewDraftJson = :json, r.reviewDraftVersion = :next,
+            r.reviewDraftStatus = :draftStatus where r.id = :id
+            and r.status = org.remus.giteabot.prworkflow.PrWorkflowRunStatus.RUNNING
+            and r.reviewDraftVersion = :expected and (r.reviewDraftStatus is null or r.reviewDraftStatus = 'DRAFT')
+            and r.reviewHeadSha = :head and r.reviewBaseSha = :base and r.reviewDiffHash = :diff
+            """)
+    int saveReviewDraft(Long id, long expected, long next, String json, String draftStatus,
+                        String head, String base, String diff);
+
     List<PrWorkflowRun> findByBotIdAndRepoOwnerAndRepoNameAndPrNumberAndWorkflowKeyAndStatusIn(
             Long botId,
             String repoOwner,

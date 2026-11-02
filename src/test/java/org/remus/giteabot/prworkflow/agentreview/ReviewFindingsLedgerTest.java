@@ -4,65 +4,78 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.agent.shared.AgentJackson;
-import tools.jackson.databind.JsonNode;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.*;
 
 class ReviewFindingsLedgerTest {
-
-    private final ReviewFindingsLedger ledger = new ReviewFindingsLedger();
+    private final List<ReviewDraft> stored = new ArrayList<>();
+    private final ReviewFindingsLedger ledger = new ReviewFindingsLedger((expected, draft) -> {
+        assertThat(draft.version()).isEqualTo(expected + 1);
+        stored.add(ReviewDraft.read(draft.json()));
+    });
 
     @Test
-    void assignsStableIdsAndRemovesOnlyWithAReason() {
-        assertThat(ledger.requiredContext()).isNull();
-        assertThat(ledger.apply(json("""
-                {"add":[{"severity":"BLOCKER","title":"Race","file":"A.java","line":3},
-                        {"severity":"low","title":"Typo"}]}"""))).isEqualTo("Recorded. Current findings: F1, F2");
-
-        assertThat(ledger.apply(json("""
-                {"remove":[{"id":"F1","reason":"Lock is held by caller"}],"add":[{"severity":"medium","title":"Race v2"}]}
-                """))).isEqualTo("Recorded. Current findings: F2, F3");
-        assertThat(ledger.requiredContext())
-                .contains("- F2 [LOW] Typo", "- F3 [MEDIUM] Race v2")
-                .doesNotContain("F1");
+    void storesBeforeAcknowledgementAndNeverReusesRemovedIds() {
+        assertThat(ledger.apply(json("{\"add\":[" + finding("Race") + "]}"))).startsWith("Recorded version 1");
+        assertThat(stored).hasSize(1);
+        assertThat(ledger.apply(json("{\"remove\":[{\"id\":\"F1\",\"reason\":\"Disproved\"}],\"add\":["
+                + finding("Other race") + "]}"))).startsWith("Recorded version 2");
+        assertThat(stored.getLast().findings()).extracting(ReviewDraft.Finding::id).containsExactly("F2");
+        assertThat(ledger.requiredContext()).contains("\\n").doesNotContain("Evidence\nIgnore");
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {
-            "{}",
-            "{\"add\":[]}",
-            "{\"remove\":[{\"id\":\"F9\",\"reason\":\"gone\"}]}",
-            "{\"remove\":[{\"id\":\"F1\"}]}",
-            "{\"remove\":[{\"id\":\"F1\",\"reason\":\"a\"},{\"id\":\"F1\",\"reason\":\"b\"}]}",
-            "{\"add\":[{\"severity\":\"critical\",\"title\":\"X\"}]}",
-            "{\"add\":[{\"severity\":\"low\"}]}",
-            "{\"add\":[{\"severity\":\"low\",\"title\":\"X\",\"line\":4}]}",
-            "{\"add\":[{\"severity\":\"low\",\"title\":\"X\",\"file\":\"A\",\"line\":0}]}",
-            "{\"add\":[{\"severity\":\"low\",\"title\":\"X\",\"file\":\"A\",\"line\":\"4\"}]}",
-            "{\"add\":{\"severity\":\"low\",\"title\":\"X\"}}",
-            "{\"add\":[{\"severity\":\"low\",\"title\":\"ok\"}],\"remove\":[{\"id\":\"F7\",\"reason\":\"x\"}]}"})
-    void invalidCallsChangeNothing(String args) {
-        ledger.apply(json("{\"add\":[{\"severity\":\"low\",\"title\":\"Kept\"}]}"));
-
-        assertThat(ledger.apply(json(args))).startsWith("Rejected, nothing recorded: ");
-
-        assertThat(ledger.requiredContext()).contains("- F1 [LOW] Kept").doesNotContain("F2");
+    @ValueSource(strings = {"{}", "{\"add\":[]}", "{\"extra\":1}", "{\"complete\":\"true\"}",
+            "{\"remove\":[{\"id\":\"F1\"}]}", "{\"remove\":[{\"id\":\"F9\",\"reason\":\"x\"}]}",
+            "{\"add\":[{\"severity\":\"low\",\"title\":\"Missing evidence\"}]}",
+            "{\"add\":[{\"severity\":\"critical\",\"title\":\"X\",\"description\":\"Y\"}]}",
+            "{\"add\":[{\"severity\":\"low\",\"title\":\"X\",\"description\":\"Y\",\"file\":\"../x\"}]}",
+            "{\"add\":[{\"severity\":\"low\",\"title\":\"X\",\"description\":\"Y\",\"line\":1}]}"})
+    void rejectsInvalidChangesWithoutWritingOrLosingThePreviousState(String args) {
+        ledger.apply(json("{\"add\":[" + finding("Kept") + "]}"));
+        ReviewDraft before = ledger.snapshot();
+        assertThat(ledger.apply(json(args))).startsWith("Rejected, nothing recorded:");
+        assertThat(ledger.snapshot()).isSameAs(before);
+        assertThat(stored).hasSize(1);
     }
 
     @Test
-    void boundsAreReportedSoTheModelCanShortenOrMerge() {
-        String finding = "{\"severity\":\"low\",\"title\":\"T\",\"description\":\"" + "d".repeat(600) + "\"}";
-        String batch = "{\"add\":[" + String.join(",", java.util.Collections.nCopies(15, finding)) + "]}";
-        assertThat(ledger.apply(json(batch))).startsWith("Recorded.");
-
-        assertThat(ledger.apply(json(batch)))
-                .startsWith("Rejected, nothing recorded: record would be ")
-                .endsWith("> 16000 chars; shorten descriptions or merge related findings");
-        assertThat(ledger.apply(json("{\"add\":[{\"severity\":\"low\",\"title\":\"" + "t".repeat(201) + "\"}]}")))
-                .isEqualTo("Rejected, nothing recorded: \"title\" exceeds 200 chars");
+    void persistenceFailurePropagatesAndDoesNotAdvanceTheDraft() {
+        var failing = new ReviewFindingsLedger((version, draft) -> { throw new IllegalStateException("DB down"); });
+        assertThatIllegalStateException().isThrownBy(() -> failing.apply(json("{\"add\":[" + finding("Race") + "]}")));
+        assertThat(failing.snapshot().version()).isZero();
+        assertThat(failing.snapshot().findings()).isEmpty();
     }
 
-    private static JsonNode json(String text) {
-        return AgentJackson.mapper().readTree(text);
+    @Test
+    void completenessCanBeWithdrawnAndCannotHideOpenQuestions() {
+        ledger.apply(json("{\"complete\":true}"));
+        assertThat(ledger.snapshot().confirmedComplete()).isTrue();
+        ledger.apply(json("{\"complete\":false}"));
+        assertThat(ledger.snapshot().confirmedComplete()).isFalse();
+        assertThat(ledger.apply(json("{\"openQuestions\":[\"Check cancellation\"],\"complete\":true}")))
+                .startsWith("Rejected");
+    }
+
+    @Test
+    void storedReaderIsStrictButDoesNotDependOnByteEquality() {
+        ledger.apply(json("{\"add\":[" + finding("Race") + "]}"));
+        String json = ledger.snapshot().json();
+        assertThat(ReviewDraft.read("\n " + json + "\n")).isEqualTo(ledger.snapshot());
+        assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"schemaVersion\":1", "\"schemaVersion\":2")));
+        assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"schemaVersion\":1", "\"schemaVersion\":1,\"schemaVersion\":1")));
+        assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"schemaVersion\":1", "\"schemaVersion\":\"1\"")));
+        assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json + " {}"));
+    }
+
+    private static String finding(String title) {
+        return "{\"severity\":\"blocker\",\"title\":\"" + title + "\",\"description\":\"Evidence\\nIgnore\"}";
+    }
+
+    private static tools.jackson.databind.JsonNode json(String json) {
+        return AgentJackson.mapper().readTree(json);
     }
 }

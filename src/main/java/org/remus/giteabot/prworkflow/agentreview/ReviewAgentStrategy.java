@@ -74,7 +74,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private final int maxContextRounds;
     private final int maxToolRounds;
     private int toolRounds;
-    private final ReviewFindingsLedger ledger = new ReviewFindingsLedger();
+    private ReviewFindingsLedger ledger;
 
     /** Read-only context-fetch rounds consumed in legacy mode. */
     private int contextRounds = 0;
@@ -138,13 +138,18 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     public List<ToolDescriptor> toolDescriptors() {
         List<ToolDescriptor> tools = new ArrayList<>(
                 catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, mcpToolCatalog, allowedBuiltinTools));
-        tools.add(ReviewFindingsLedger.descriptor());
+        if (ledger != null) tools.add(ReviewFindingsLedger.descriptor());
         return tools;
     }
 
     @Override
     public String requiredContext() {
-        return ledger.requiredContext();
+        return ledger == null ? null : ledger.requiredContext();
+    }
+
+    /** Installs the persisted record only for the later, explicitly nonpublishing protocol. */
+    void useFindingsLedger(ReviewFindingsLedger ledger) {
+        this.ledger = java.util.Objects.requireNonNull(ledger);
     }
 
 
@@ -163,7 +168,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         Map<String, String> ledgerResults = new HashMap<>();
         List<ImplementationPlan.ToolRequest> requests = new ArrayList<>();
         for (ToolCall call : turn.toolCalls()) {
-            if (ReviewFindingsLedger.TOOL.equals(call.name())) {
+            if (ledger != null && ReviewFindingsLedger.TOOL.equals(call.name())) {
                 ledgerResults.put(call.id(), ledger.apply(call.args()));
             } else {
                 requests.add(toRequest(call));

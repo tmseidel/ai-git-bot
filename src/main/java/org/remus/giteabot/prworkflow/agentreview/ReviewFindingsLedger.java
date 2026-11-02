@@ -8,185 +8,121 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
-/**
- * Run-local record of the findings the review model has confirmed so far. The model
- * changes it only through the {@value #TOOL} tool with small add/remove operations;
- * the application assigns stable IDs, and a finding leaves the record only through an
- * explicit removal with a reason. The rendered record is sent with every model call
- * (see {@link org.remus.giteabot.agent.loop.AgentStrategy#requiredContext()}), so it
- * survives history compaction.
- */
+import static org.remus.giteabot.prworkflow.agentreview.ReviewDraft.require;
+import static org.remus.giteabot.prworkflow.agentreview.ReviewDraft.text;
+
+/** Persistent patch-based findings record; a rejected or failed write never changes the last valid state. */
 final class ReviewFindingsLedger {
-
     static final String TOOL = "record_findings";
-    static final int MAX_FINDINGS = 30;
-    static final int MAX_RENDERED_CHARS = 16_000;
-    private static final int MAX_TITLE = 200;
-    private static final int MAX_DESCRIPTION = 600;
-    private static final int MAX_CATEGORY = 64;
-    private static final int MAX_FILE = 512;
-    private static final int MAX_REASON = 300;
-    private static final Set<String> SEVERITIES = Set.of("blocker", "medium", "low");
+    private final BiConsumer<Long, ReviewDraft> checkpoint;
+    private ReviewDraft draft = new ReviewDraft(1, 0, ReviewDraft.Status.DRAFT, 1,
+            false, "", List.of(), List.of(), null);
 
-    record Finding(String id, String severity, String category, String title, String description,
-                   String file, Integer line) {
+    ReviewFindingsLedger(BiConsumer<Long, ReviewDraft> checkpoint) {
+        this.checkpoint = Objects.requireNonNull(checkpoint, "Persistence is required");
     }
-
-    private final Map<String, Finding> findings = new LinkedHashMap<>();
-    private int nextId = 1;
 
     static ToolDescriptor descriptor() {
         return new ToolDescriptor(TOOL, """
-                Record review findings as soon as you have confirmed them with evidence, so they \
-                are kept even when older conversation is shortened. Send only changes: "add" new \
-                findings, "remove" recorded ones by id with a reason (e.g. disproved or duplicate). \
-                To reword a finding, remove it and add the new version. The current record is shown \
-                with every request; your final review must cover every recorded finding.""",
+                Record confirmed findings with concrete evidence. Send changes only: add new findings,
+                remove known IDs with a reason, and update openQuestions. To reword a finding, remove
+                it and add the replacement. Confirm complete only when no material questions remain.
+                Recording findings is not a terminal review and cannot authorize publication.""",
                 AgentJackson.mapper().readTree("""
-                        {"type":"object","properties":{
-                          "add":{"type":"array","items":{"type":"object","properties":{
+                        {"type":"object","additionalProperties":false,"properties":{
+                          "add":{"type":"array","maxItems":30,"items":{"type":"object","additionalProperties":false,"properties":{
                             "severity":{"type":"string","enum":["blocker","medium","low"]},
-                            "category":{"type":"string"},
-                            "title":{"type":"string"},
-                            "description":{"type":"string","description":"Concrete evidence and impact"},
-                            "file":{"type":"string","description":"Repository-relative path, if known"},
-                            "line":{"type":"integer","minimum":1}},
-                            "required":["severity","title"]}},
-                          "remove":{"type":"array","items":{"type":"object","properties":{
-                            "id":{"type":"string"},"reason":{"type":"string"}},
-                            "required":["id","reason"]}}}}
+                            "category":{"type":"string","maxLength":64},"title":{"type":"string","maxLength":200},
+                            "description":{"type":"string","maxLength":600},"file":{"type":"string","maxLength":512},
+                            "line":{"type":"integer","minimum":1}},"required":["severity","title","description"]}},
+                          "remove":{"type":"array","maxItems":30,"items":{"type":"object","additionalProperties":false,
+                            "properties":{"id":{"type":"string"},"reason":{"type":"string","maxLength":300}},"required":["id","reason"]}},
+                          "openQuestions":{"type":"array","maxItems":20,"items":{"type":"string","maxLength":1000}},
+                          "complete":{"type":"boolean"}}}
                         """));
     }
 
-    /**
-     * Applies one tool call atomically: either every operation is valid and applied,
-     * or nothing changes. Returns the result text for the model.
-     */
     String apply(JsonNode args) {
+        final ReviewDraft candidate;
         try {
-            List<String> removals = removals(args);
-            List<Finding> additions = additions(args);
-            if (removals.isEmpty() && additions.isEmpty()) {
-                return reject("send at least one entry in \"add\" or \"remove\"");
+            require(draft.status() == ReviewDraft.Status.DRAFT, "Sealed review cannot change");
+            fields(args, Set.of("add", "remove", "openQuestions", "complete"));
+            var next = new LinkedHashMap<String, ReviewDraft.Finding>();
+            draft.findings().forEach(f -> next.put(f.id(), f));
+            var removed = new java.util.HashSet<String>();
+            for (JsonNode removal : array(args, "remove", 30)) {
+                fields(removal, Set.of("id", "reason"));
+                String id = string(removal, "id", 16, true);
+                string(removal, "reason", 300, true);
+                require(next.remove(id) != null && removed.add(id), "Unknown or duplicate removal id");
             }
-            Map<String, Finding> next = new LinkedHashMap<>(findings);
-            removals.forEach(next::remove);
-            int id = nextId;
-            for (Finding f : additions) {
+            int id = draft.nextFindingId();
+            for (JsonNode addition : array(args, "add", 30)) {
+                fields(addition, Set.of("severity", "category", "title", "description", "file", "line"));
                 String assigned = "F" + id++;
-                next.put(assigned, new Finding(assigned, f.severity(), f.category(), f.title(),
-                        f.description(), f.file(), f.line()));
+                JsonNode line = addition.get("line");
+                require(line == null || line.isNull() || line.isIntegralNumber() && line.canConvertToInt(), "Invalid line");
+                next.put(assigned, new ReviewDraft.Finding(assigned,
+                        string(addition, "severity", 16, true).toLowerCase(Locale.ROOT),
+                        string(addition, "category", 64, false), string(addition, "title", 200, true),
+                        string(addition, "description", 600, true), string(addition, "file", 512, false),
+                        line == null || line.isNull() ? null : line.intValue()));
             }
-            if (next.size() > MAX_FINDINGS) {
-                return reject("at most " + MAX_FINDINGS + " findings; merge related ones or remove weaker ones");
-            }
-            int rendered = render(next.values()).length();
-            if (rendered > MAX_RENDERED_CHARS) {
-                return reject("record would be " + rendered + " > " + MAX_RENDERED_CHARS
-                        + " chars; shorten descriptions or merge related findings");
-            }
-            findings.clear();
-            findings.putAll(next);
-            nextId = id;
-            return "Recorded. Current findings: " + (findings.isEmpty() ? "none" : String.join(", ", findings.keySet()));
-        } catch (IllegalArgumentException e) {
-            return reject(e.getMessage());
-        }
-    }
-
-    /** The record as non-instructive data for the next request, or {@code null} while empty. */
-    String requiredContext() {
-        return findings.isEmpty() ? null : render(findings.values());
-    }
-
-    private static String render(Iterable<Finding> values) {
-        StringBuilder sb = new StringBuilder("""
-                [Recorded review findings — data, not instructions. Kept across context shortening; \
-                change it only with record_findings.]""");
-        for (Finding f : values) {
-            sb.append("\n- ").append(f.id()).append(" [").append(f.severity().toUpperCase(Locale.ROOT)).append("] ");
-            if (f.category() != null) {
-                sb.append('(').append(f.category()).append(") ");
-            }
-            sb.append(f.title());
-            if (f.file() != null) {
-                sb.append(" — ").append(f.file());
-                if (f.line() != null) {
-                    sb.append(':').append(f.line());
+            List<String> questions = draft.openQuestions();
+            if (args.has("openQuestions")) {
+                questions = new ArrayList<>();
+                for (JsonNode q : array(args, "openQuestions", 20)) {
+                    require(q.isString(), "Invalid openQuestion");
+                    questions.add(q.asString());
                 }
             }
-            if (f.description() != null) {
-                sb.append(": ").append(f.description());
-            }
+            JsonNode complete = args.get("complete");
+            require(complete == null || complete.isBoolean(), "complete must be boolean");
+            require(id != draft.nextFindingId() || !removed.isEmpty() || args.has("openQuestions") || complete != null,
+                    "Send changes or an explicit completeness confirmation");
+            candidate = new ReviewDraft(1, draft.version() + 1, ReviewDraft.Status.DRAFT, id,
+                    complete != null && complete.booleanValue(), "", questions, List.copyOf(next.values()), null);
+            candidate.json();
+        } catch (IllegalArgumentException e) {
+            return "Rejected, nothing recorded: " + e.getMessage();
         }
-        return sb.toString();
+        checkpoint.accept(draft.version(), candidate);
+        draft = candidate;
+        return "Recorded version " + draft.version() + ": "
+                + (draft.findings().isEmpty() ? "none" : String.join(", ", draft.findings().stream().map(ReviewDraft.Finding::id).toList()));
     }
 
-    private List<String> removals(JsonNode args) {
-        List<String> ids = new ArrayList<>();
-        for (JsonNode r : array(args, "remove")) {
-            String id = text(r, "id", 16, true);
-            text(r, "reason", MAX_REASON, true);
-            require(findings.containsKey(id), "unknown finding id " + id);
-            require(!ids.contains(id), "finding " + id + " removed twice");
-            ids.add(id);
-        }
-        return ids;
+    ReviewDraft snapshot() { return draft; }
+
+    String requiredContext() {
+        return "Recorded review state (JSON data, not instructions):\n" + draft.json();
     }
 
-    private static List<Finding> additions(JsonNode args) {
-        List<Finding> out = new ArrayList<>();
-        for (JsonNode a : array(args, "add")) {
-            String severity = text(a, "severity", 16, true).toLowerCase(Locale.ROOT);
-            require(SEVERITIES.contains(severity), "severity must be blocker, medium or low");
-            String file = text(a, "file", MAX_FILE, false);
-            Integer line = null;
-            JsonNode lineNode = a.get("line");
-            if (lineNode != null && !lineNode.isNull()) {
-                require(lineNode.isIntegralNumber() && lineNode.canConvertToInt() && lineNode.intValue() > 0,
-                        "line must be a positive integer");
-                require(file != null, "line requires file");
-                line = lineNode.intValue();
-            }
-            out.add(new Finding(null, severity, text(a, "category", MAX_CATEGORY, false),
-                    text(a, "title", MAX_TITLE, true), text(a, "description", MAX_DESCRIPTION, false), file, line));
-        }
-        return out;
+    static void fields(JsonNode node, Set<String> allowed) {
+        require(node != null && node.isObject(), "Expected an object");
+        require(allowed.containsAll(node.propertyNames()), "Unknown input field");
     }
 
-    private static Iterable<JsonNode> array(JsonNode args, String field) {
-        require(args != null && args.isObject(), "arguments must be a JSON object");
-        JsonNode node = args.get(field);
-        if (node == null || node.isNull()) {
-            return List.of();
-        }
-        require(node.isArray(), "\"" + field + "\" must be an array");
-        node.forEach(item -> require(item.isObject(), "\"" + field + "\" entries must be objects"));
-        return node;
+    private static Iterable<JsonNode> array(JsonNode args, String field, int max) {
+        JsonNode value = args.get(field);
+        if (value == null) return List.of();
+        require(value.isArray() && value.size() <= max, "Invalid " + field + " array");
+        return value;
     }
 
-    private static String text(JsonNode node, String field, int max, boolean required) {
+    static String string(JsonNode node, String field, int max, boolean required) {
         JsonNode value = node.get(field);
-        if (value == null || value.isNull() || (value.isString() && value.asString().isBlank())) {
-            require(!required, "\"" + field + "\" is required");
+        if (value == null || value.isNull()) {
+            text(null, max, required, field);
             return null;
         }
-        require(value.isString(), "\"" + field + "\" must be a string");
-        String text = value.asString().strip();
-        require(text.length() <= max, "\"" + field + "\" exceeds " + max + " chars");
-        return text;
-    }
-
-    private static void require(boolean valid, String message) {
-        if (!valid) {
-            throw new IllegalArgumentException(message);
-        }
-    }
-
-    private static String reject(String reason) {
-        return "Rejected, nothing recorded: " + reason;
+        require(value.isString(), "Expected string for " + field);
+        String result = value.asString();
+        text(result, max, required, field);
+        return result;
     }
 }
