@@ -250,7 +250,7 @@ public class AgentReviewService {
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
+                    workspaceDir, captured.revision().headSha(), systemPrompt, userMessage, maxToolRounds, diffSummary,
                     runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {

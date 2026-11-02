@@ -239,6 +239,19 @@ class AgentReviewCompletionTest {
     }
 
     @Test
+    void legacyFileReadsUseTheCapturedCommitNotTheMovingBranch() {
+        when(aiClient.supportsNativeTools()).thenReturn(false);
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("{\"requestFiles\":[\"Example.java\"]}"), ChatTurn.text("Reviewed change"));
+        when(repositoryClient.getFileContent("owner", "repo", "Example.java", "a".repeat(40)))
+                .thenReturn("captured source");
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+        verify(repositoryClient).getFileContent("owner", "repo", "Example.java", "a".repeat(40));
+    }
+
+    @Test
     void failedReviewClosesItsProgressCommentWithoutPublishingAPartialReview() {
         when(repositoryClient.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), contains("Agentic Review Progress")))
                 .thenReturn(CommentId.NumericCommentId.of(42L));
