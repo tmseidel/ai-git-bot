@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.loop.AgentRunContext;
 import org.remus.giteabot.agent.loop.LoopOutcome;
 import org.remus.giteabot.agent.loop.StepDecision;
@@ -68,7 +69,7 @@ class WriterAgentStrategyTest {
     void setUp() {
         AgentSession session = new AgentSession("o", "r", ISSUE_NUMBER, "title");
         session.setId(1L);
-        ctx = new AgentRunContext(session, "o", "r", ISSUE_NUMBER, Path.of("/tmp/ws"), "main");
+        ctx = new AgentRunContext(session, "o", "r", ISSUE_NUMBER, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         ctx.setToolingMode(ToolingMode.NATIVE);
         strategy = new WriterAgentStrategy("sys", new WriterPromptBuilder(), new WriterResponseParser(),
                 sessionService, repositoryClient, branchSwitcher, toolRouter, mcpToolCatalog,

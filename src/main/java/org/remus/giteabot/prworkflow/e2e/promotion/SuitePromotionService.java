@@ -6,6 +6,7 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
@@ -144,11 +145,10 @@ public class SuitePromotionService {
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());
         }
-        Path workspace = ws.workspacePath();
-        try {
+        try (Workspace workspace = ws.workspace()) {
             final List<String> writtenPaths;
             try {
-                writtenPaths = writeCases(workspace, targetDir, suite.getCases());
+                writtenPaths = writeCases(workspace.path(), targetDir, suite.getCases());
             } catch (IOException e) {
                 return Outcome.failure("Failed to write E2E test cases: " + e.getMessage());
             }
@@ -156,7 +156,7 @@ public class SuitePromotionService {
                 return Outcome.failure("Failed to write E2E test cases: no files were written.");
             }
 
-            boolean pushed = workspaceService.commitAndPush(workspace, workBranch,
+            boolean pushed = workspace.commitAndPush(workBranch,
                     commitMessage(mode, prNumber),
                     mode != SuiteLifecycleMode.COMMIT_TO_PR);
             if (!pushed) {
@@ -189,8 +189,6 @@ public class SuitePromotionService {
             log.info("M7 promotion: opened follow-up PR #{} on {}/{} (mode={}, branch={})",
                     followUpPr, repoOwner, repoName, mode, workBranch);
             return Outcome.promoted(followUpPr, workBranch, writtenPaths);
-        } finally {
-            workspaceService.cleanupWorkspace(workspace);
         }
     }
 

@@ -1,6 +1,7 @@
 package org.remus.giteabot.prworkflow;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.tools.AgentToolRouter;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
@@ -46,7 +47,7 @@ class WorkflowToolSurfaceTest {
     private WorkflowToolSurface surface(Set<String> botTools, AgentToolRouter router) {
         return new WorkflowToolSurface(OWN, catalog, McpToolCatalog.empty(),
                 WorkflowToolSurface.callableTools(OWN, botTools), router,
-                "acme", "repo", 42L, Path.of("/tmp/ws"));
+                "acme", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")));
     }
 
     private AgentToolRouter router(Set<String> whitelist) {

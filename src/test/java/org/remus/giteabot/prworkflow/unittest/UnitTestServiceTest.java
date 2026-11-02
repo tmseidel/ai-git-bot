@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
@@ -40,6 +41,7 @@ class UnitTestServiceTest {
     @Mock private AiClient aiClient;
     @Mock private SystemPrompt systemPrompt;
     @Mock private WorkspaceService workspaceService;
+    private final Workspace managedWorkspace = org.mockito.Mockito.mock(Workspace.class);
     @Mock private FrameworkDetector frameworkDetector;
     @Mock private UnitTestAuthorAgent authorAgent;
     @Mock private UnitTestRunner runner;
@@ -98,7 +100,8 @@ class UnitTestServiceTest {
         when(workspaceService.preparePullRequestWorkspace(
                 repositoryClient, "acme", "repo", "feature/test", 42L,
                 PullRequestWorkspaceMode.PUSH_BACK))
-                .thenReturn(WorkspaceResult.success(workspace));
+                .thenReturn(WorkspaceResult.success(managedWorkspace));
+        when(managedWorkspace.path()).thenReturn(workspace);
         when(suiteRepository.save(any(UnitTestSuite.class))).thenAnswer(invocation -> {
             UnitTestSuite suite = invocation.getArgument(0);
             suite.setId(10L);
@@ -106,10 +109,10 @@ class UnitTestServiceTest {
         });
         when(authorAgent.write(any(), any(), any(), anyString(), any(), eq(1)))
                 .thenReturn(new UnitTestAuthorAgent.Result(1, "written", false));
-        when(workspaceService.hasUncommittedChanges(workspace)).thenReturn(true);
-        when(workspaceService.listChangedFiles(workspace))
+        when(managedWorkspace.hasUncommittedChanges()).thenReturn(true);
+        when(managedWorkspace.listChangedFiles())
                 .thenReturn(List.of("src/test/java/GeneratedTest.java"));
-        when(workspaceService.commitAndPush(eq(workspace), eq("feature/test"), anyString(), eq(false))).thenReturn(false);
+        when(managedWorkspace.commitAndPush(eq("feature/test"), anyString(), eq(false))).thenReturn(false);
         when(runner.run(any())).thenReturn(UnitTestOutcome.passed(
                 "all tests passed", 1, CoverageResult.unknown(), null));
         when(suiteRepository.findByIdWithCases(10L)).thenReturn(Optional.empty());

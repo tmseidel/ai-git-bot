@@ -1,9 +1,8 @@
 package org.remus.giteabot.prworkflow.unittest.runner;
 
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.prworkflow.unittest.UnitTestFramework;
 import org.remus.giteabot.prworkflow.unittest.UnitTestSuite;
-
-import java.nio.file.Path;
 
 /**
  * Everything a {@link UnitTestRunner} needs to execute one generated unit-test
@@ -19,7 +18,7 @@ import java.nio.file.Path;
  */
 public record UnitTestRunRequest(
         UnitTestSuite suite,
-        Path workspace,
+        Workspace workspace,
         UnitTestFramework framework,
         int maxRetries,
         org.remus.giteabot.prworkflow.unittest.coverage.CoverageResult baseline) {

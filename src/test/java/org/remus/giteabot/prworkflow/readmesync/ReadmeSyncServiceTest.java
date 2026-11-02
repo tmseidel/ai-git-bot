@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
@@ -43,6 +44,7 @@ class ReadmeSyncServiceTest {
 
     private RepositoryApiClient repoClient;
     private WorkspaceService workspaceService;
+    private final Workspace managedWorkspace = org.mockito.Mockito.mock(Workspace.class);
     private ReadmeSyncAgent agent;
     private ReadmeSyncService service;
 
@@ -95,8 +97,7 @@ class ReadmeSyncServiceTest {
         verify(workspaceService, never()).preparePullRequestWorkspace(
                 any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK));
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
         // And it must never substitute the default branch.
         verify(repoClient, never()).getDefaultBranch(anyString(), anyString());
     }
@@ -157,8 +158,7 @@ class ReadmeSyncServiceTest {
 
         assertThat(result.status()).isEqualTo(ReadmeSyncService.Result.Status.FAILED);
         verify(workspaceService, never()).prepareWorkspace(any(), anyString(), anyString(), anyString(), anyLong());
-        verify(workspaceService, never()).commitAndPush(
-                any(), anyString(), anyString(), anyBoolean());
+        verify(managedWorkspace, never()).commitAndPush(anyString(), anyString(), anyBoolean());
     }
 
     @Test
@@ -171,7 +171,8 @@ class ReadmeSyncServiceTest {
         payload.getPullRequest().setHead(head);
         when(workspaceService.prepareWorkspace(
                 repoClient, "acme", "my-repo", "feature/docs", 42L))
-                .thenReturn(WorkspaceResult.success(workspace));
+                .thenReturn(WorkspaceResult.success(managedWorkspace));
+        when(managedWorkspace.path()).thenReturn(workspace);
         when(agent.write(any(), any(), any(), anyString(), any(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenAnswer(invocation -> {
                     ReadmeSyncToolContext toolContext = invocation.getArgument(2);
@@ -179,8 +180,8 @@ class ReadmeSyncServiceTest {
                     toolContext.recordUpdated("README.md");
                     return new ReadmeSyncAgent.Result(1, "updated", false);
                 });
-        when(workspaceService.listChangedFiles(workspace)).thenReturn(List.of("README.md"));
-        when(workspaceService.commitAndPush(eq(workspace), anyString(), anyString(), eq(true), any(Runnable.class))).thenReturn(true);
+        when(managedWorkspace.listChangedFiles()).thenReturn(List.of("README.md"));
+        when(managedWorkspace.commitAndPush(anyString(), anyString(), eq(true), any(Runnable.class))).thenReturn(true);
         when(repoClient.createPullRequest(eq("acme"), eq("my-repo"), anyString(), anyString(),
                 anyString(), eq("feature/docs"))).thenReturn(null);
 

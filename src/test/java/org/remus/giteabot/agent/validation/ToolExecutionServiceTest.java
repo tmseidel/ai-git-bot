@@ -23,13 +23,12 @@ class ToolExecutionServiceTest {
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
-                new org.remus.giteabot.agent.tools.ToolCatalog(config),
-                new WorkspaceService(null, 60));
+                new org.remus.giteabot.agent.tools.ToolCatalog(config));
     }
 
     @Test
     void executeContextTool_branchSwitcher_invalidBranchName_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "branch-switcher", List.of("../main"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "branch-switcher", List.of("../main"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("Invalid branch name");
@@ -37,7 +36,7 @@ class ToolExecutionServiceTest {
 
     @Test
     void executeContextTool_branchSwitcher_missingArgs_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "branch-switcher", List.of());
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "branch-switcher", List.of());
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("requires a branch name argument");
@@ -45,7 +44,7 @@ class ToolExecutionServiceTest {
 
     @Test
     void executeContextTool_branchSwitcher_blankBranch_returnsFailure() {
-        ToolResult result = service.executeContextTool(tempDir, "branch-switcher", List.of("   "));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "branch-switcher", List.of("   "));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("requires a non-empty branch name");
@@ -61,7 +60,7 @@ class ToolExecutionServiceTest {
                 line 3
                 """);
 
-        ToolResult result = service.executeContextTool(tempDir, "cat", List.of("src/Main.java", "2", "3"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "cat", List.of("src/Main.java", "2", "3"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.output()).contains("2 | line 2");
@@ -80,7 +79,7 @@ class ToolExecutionServiceTest {
                 """);
 
         // {"path": …, "endLine": 3} arrives with the startLine slot blank rather than shifted into it.
-        ToolResult result = service.executeContextTool(tempDir, "cat", List.of("src/Main.java", "", "3"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "cat", List.of("src/Main.java", "", "3"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.output()).contains("1 | line 1").contains("3 | line 3");
@@ -96,7 +95,7 @@ class ToolExecutionServiceTest {
                 }
                 """);
 
-        ToolResult result = service.executeContextTool(tempDir, "rg", List.of("ConfigService", "src"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("ConfigService", "src"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.output()).contains("src/Config.java:2:     private ConfigService service;");
@@ -113,7 +112,7 @@ class ToolExecutionServiceTest {
                 }
                 """);
 
-        ToolResult result = service.executeContextTool(tempDir, "rg",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
                 List.of("handleBotCommand\\|handleInlineComment", "src", "-n"));
 
         assertThat(result.success()).isTrue();
@@ -131,7 +130,7 @@ class ToolExecutionServiceTest {
                 }
                 """);
 
-        ToolResult result = service.executeContextTool(tempDir, "rg",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
                 List.of("clarifying", "src", "-in"));
 
         assertThat(result.success()).isTrue();
@@ -144,7 +143,7 @@ class ToolExecutionServiceTest {
         Files.writeString(tempDir.resolve("src/BotWebhookService.java"), "class BotWebhookService { String author = \"tom\"; }");
         Files.writeString(tempDir.resolve("src/notes.txt"), "author mention in text file");
 
-        ToolResult result = service.executeContextTool(tempDir, "rg",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
                 List.of("author", "src", "--include=*.java", "-l"));
 
         assertThat(result.success()).isTrue();
@@ -157,7 +156,7 @@ class ToolExecutionServiceTest {
         Files.writeString(tempDir.resolve("src/app.yml"), "name: app");
         Files.writeString(tempDir.resolve("src/Config.java"), "class Config {}");
 
-        ToolResult result = service.executeContextTool(tempDir, "find", List.of("*.yml", "src"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "find", List.of("*.yml", "src"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.output()).contains("src/app.yml");
@@ -169,7 +168,7 @@ class ToolExecutionServiceTest {
         Files.writeString(tempDir.resolve("src/main/java/org/example/BotWebhookService.java"), "class BotWebhookService {}");
         Files.writeString(tempDir.resolve("src/main/java/org/example/BotWebhookService.txt"), "text");
 
-        ToolResult result = service.executeContextTool(tempDir, "find",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "find",
                 List.of("src/main/java", "-name", "BotWebhookService.java"));
 
         assertThat(result.success()).isTrue();
@@ -182,7 +181,7 @@ class ToolExecutionServiceTest {
         Files.writeString(tempDir.resolve("src/main/java/org/example/BotWebhookService.java"), "class BotWebhookService {}");
         Files.writeString(tempDir.resolve("src/main/java/org/example/BotWebhookService.kt"), "class BotWebhookService");
 
-        ToolResult result = service.executeContextTool(tempDir, "find",
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "find",
                 List.of("src/main/java/org/example", "--include=*.java", "-name", "BotWebhookService.*"));
 
         assertThat(result.success()).isTrue();
@@ -194,9 +193,9 @@ class ToolExecutionServiceTest {
         Files.createDirectories(tempDir.resolve(".git"));
         Files.writeString(tempDir.resolve(".git/config"), "token=should-not-be-visible");
 
-        ToolResult catResult = service.executeContextTool(tempDir, "cat", List.of(".git/config"));
-        ToolResult caseVariantResult = service.executeContextTool(tempDir, "cat", List.of(".GIT/config"));
-        ToolResult searchResult = service.executeContextTool(tempDir, "rg",
+        ToolResult catResult = service.executeContextTool(Workspace.unmanaged(tempDir), "cat", List.of(".git/config"));
+        ToolResult caseVariantResult = service.executeContextTool(Workspace.unmanaged(tempDir), "cat", List.of(".GIT/config"));
+        ToolResult searchResult = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
                 List.of("should-not-be-visible", "."));
 
         assertThat(catResult.success()).isFalse();
@@ -216,7 +215,7 @@ class ToolExecutionServiceTest {
         Files.writeString(outside.resolve("secret.txt"), "should-not-be-visible");
         Files.createSymbolicLink(workspace.resolve("linked"), outside);
 
-        ToolResult result = service.executeContextTool(workspace, "cat", List.of("linked/secret.txt"));
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(workspace), "cat", List.of("linked/secret.txt"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("symlinked directory");
@@ -231,9 +230,9 @@ class ToolExecutionServiceTest {
         Files.writeString(outside.resolve("secret.txt"), "host-only-secret");
         Files.createSymbolicLink(workspace.resolve("linked-secret.txt"), outside.resolve("secret.txt"));
 
-        ToolResult searchResult = service.executeContextTool(workspace, "rg", List.of("host-only-secret", "."));
-        ToolResult findResult = service.executeContextTool(workspace, "find", List.of("*", "."));
-        ToolResult treeResult = service.executeContextTool(workspace, "tree", List.of(".", "1"));
+        ToolResult searchResult = service.executeContextTool(Workspace.unmanaged(workspace), "rg", List.of("host-only-secret", "."));
+        ToolResult findResult = service.executeContextTool(Workspace.unmanaged(workspace), "find", List.of("*", "."));
+        ToolResult treeResult = service.executeContextTool(Workspace.unmanaged(workspace), "tree", List.of(".", "1"));
 
         assertThat(searchResult.success()).isTrue();
         assertThat(searchResult.output()).startsWith("No matches found");
@@ -245,7 +244,7 @@ class ToolExecutionServiceTest {
 
     @Test
     void executeFileTool_writeFile_createsFileWithContent() throws IOException {
-        ToolResult result = service.executeFileTool(tempDir, "write-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "write-file",
                 List.of("src/main/Foo.java", "public class Foo {}"));
 
         assertThat(result.success()).isTrue();
@@ -258,7 +257,7 @@ class ToolExecutionServiceTest {
         Path target = tempDir.resolve("Existing.java");
         Files.writeString(target, "old content");
 
-        ToolResult result = service.executeFileTool(tempDir, "write-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "write-file",
                 List.of("Existing.java", "new content"));
 
         assertThat(result.success()).isTrue();
@@ -270,7 +269,7 @@ class ToolExecutionServiceTest {
         Path target = tempDir.resolve("Existing.java");
         Files.writeString(target, "same content");
 
-        ToolResult result = service.executeFileTool(tempDir, "write-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "write-file",
                 List.of("Existing.java", "same content"));
 
         assertThat(result.success()).isFalse();
@@ -282,7 +281,7 @@ class ToolExecutionServiceTest {
         Path target = tempDir.resolve("Service.java");
         Files.writeString(target, "class Service {\n    private int x = 1;\n}\n");
 
-        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
                 List.of("Service.java", "private int x = 1;", "private int x = 42;"));
 
         assertThat(result.success()).isTrue();
@@ -294,7 +293,7 @@ class ToolExecutionServiceTest {
         Path target = tempDir.resolve("Service.java");
         Files.writeString(target, "class Service {}");
 
-        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
                 List.of("Service.java", "does not exist", "replacement"));
 
         assertThat(result.success()).isFalse();
@@ -306,7 +305,7 @@ class ToolExecutionServiceTest {
         Path target = tempDir.resolve("Service.java");
         Files.writeString(target, "class Service { int x = 1; }");
 
-        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
                 List.of("Service.java", "int x = 1;", "int x = 1;"));
 
         assertThat(result.success()).isFalse();
@@ -320,7 +319,7 @@ class ToolExecutionServiceTest {
         Files.writeString(target, "class Service {\r\n    private int x = 1;\r\n}\r\n");
 
         // LLM submits the search/replacement with LF (typical model output).
-        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
                 List.of("Service.java", "private int x = 1;\n", "private int x = 42;\n"));
 
         assertThat(result.success()).isTrue();
@@ -337,7 +336,7 @@ class ToolExecutionServiceTest {
         Files.writeString(target, "class Service {\n    private int x = 1;   \n}\n");
 
         // Search spans two lines so trailing whitespace on the first line breaks exact match.
-        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
                 List.of("Service.java",
                         "    private int x = 1;\n}",
                         "    private int x = 42;\n}"));
@@ -353,7 +352,7 @@ class ToolExecutionServiceTest {
         Files.writeString(target, "class   Service { int    x = 1; }\n");
 
         // LLM normalized interior whitespace to a single space.
-        ToolResult result = service.executeFileTool(tempDir, "patch-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
                 List.of("Service.java", "class Service { int x = 1; }", "class Service { int x = 42; }"));
 
         assertThat(result.success()).isTrue();
@@ -364,7 +363,7 @@ class ToolExecutionServiceTest {
 
     @Test
     void executeFileTool_mkdir_createsDirectory() {
-        ToolResult result = service.executeFileTool(tempDir, "mkdir",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "mkdir",
                 List.of("new/nested/dir"));
 
         assertThat(result.success()).isTrue();
@@ -375,7 +374,7 @@ class ToolExecutionServiceTest {
     void executeFileTool_mkdir_existingDirectory_returnsFailure() throws IOException {
         Files.createDirectories(tempDir.resolve("existing"));
 
-        ToolResult result = service.executeFileTool(tempDir, "mkdir", List.of("existing"));
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "mkdir", List.of("existing"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("already exists");
@@ -386,7 +385,7 @@ class ToolExecutionServiceTest {
         Path target = tempDir.resolve("ToDelete.java");
         Files.writeString(target, "delete me");
 
-        ToolResult result = service.executeFileTool(tempDir, "delete-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "delete-file",
                 List.of("ToDelete.java"));
 
         assertThat(result.success()).isTrue();
@@ -395,7 +394,7 @@ class ToolExecutionServiceTest {
 
     @Test
     void executeFileTool_deleteFile_nonexistent_returnsFailure() {
-        ToolResult result = service.executeFileTool(tempDir, "delete-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "delete-file",
                 List.of("DoesNotExist.java"));
 
         assertThat(result.success()).isFalse();
@@ -404,7 +403,7 @@ class ToolExecutionServiceTest {
 
     @Test
     void executeFileTool_pathTraversal_returnsError() {
-        ToolResult result = service.executeFileTool(tempDir, "write-file",
+        ToolResult result = service.executeFileTool(Workspace.unmanaged(tempDir), "write-file",
                 List.of("../../etc/passwd", "evil content"));
 
         assertThat(result.success()).isFalse();

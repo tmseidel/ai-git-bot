@@ -45,7 +45,7 @@ class ToolExecutionServiceExecuteScriptTest {
     }
 
     private static ToolExecutionService newService(AgentConfigProperties config) {
-        return new ToolExecutionService(config, new ToolCatalog(config), new WorkspaceService(null, 60));
+        return new ToolExecutionService(config, new ToolCatalog(config));
     }
 
     private void git(String... arguments) throws IOException {
@@ -90,7 +90,7 @@ class ToolExecutionServiceExecuteScriptTest {
         writeCommittedScript("scripts/validate.sh",
                 "#!/bin/sh\ntest -f marker.txt && echo 'cwd-ok; validated docs'\nexit 0\n", true);
 
-        ToolResult result = service.executeTool(workspace, "execute", List.of("scripts/validate.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isTrue();
         assertThat(result.exitCode()).isZero();
@@ -102,7 +102,7 @@ class ToolExecutionServiceExecuteScriptTest {
         writeCommittedScript("scripts/validate.sh",
                 "#!/bin/sh\necho 'lint error: README.md:12' 1>&2\nexit 3\n", true);
 
-        ToolResult result = service.executeTool(workspace, "execute", List.of("scripts/validate.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.exitCode()).isEqualTo(3);
@@ -113,7 +113,7 @@ class ToolExecutionServiceExecuteScriptTest {
     void execute_extraArgumentsAreForwardedToTheScript() throws IOException {
         writeCommittedScript("scripts/validate.sh", "#!/bin/sh\necho \"args:$@\"\n", true);
 
-        ToolResult result = service.executeTool(workspace, "execute",
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute",
                 List.of("scripts/validate.sh", "--strict", "docs/"));
 
         assertThat(result.success()).isTrue();
@@ -124,7 +124,7 @@ class ToolExecutionServiceExecuteScriptTest {
     void execute_blankArgumentsAreForwardedVerbatim() throws IOException {
         writeCommittedScript("scripts/validate.sh", "#!/bin/sh\necho \"argc=$#\"\n", true);
 
-        ToolResult result = service.executeTool(workspace, "execute",
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute",
                 List.of("scripts/validate.sh", "", "--strict"));
 
         assertThat(result.success()).isTrue();
@@ -133,7 +133,7 @@ class ToolExecutionServiceExecuteScriptTest {
 
     @Test
     void execute_missingScript_reportsClearError() {
-        ToolResult result = service.executeTool(workspace, "execute", List.of("scripts/does-not-exist.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/does-not-exist.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error())
@@ -145,7 +145,7 @@ class ToolExecutionServiceExecuteScriptTest {
     void execute_scriptWithoutExecutableBit_reportsClearError() throws IOException {
         writeCommittedScript("scripts/validate.sh", "#!/bin/sh\nexit 0\n", false);
 
-        ToolResult result = service.executeTool(workspace, "execute", List.of("scripts/validate.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("not executable").contains("chmod +x");
@@ -158,7 +158,7 @@ class ToolExecutionServiceExecuteScriptTest {
         // The agent rewrites the script it is being validated by — the bypass this guards against.
         writeScript("scripts/validate.sh", "#!/bin/sh\nexit 0\n", true);
 
-        ToolResult result = service.executeTool(workspace, "execute", List.of("scripts/validate.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error())
@@ -170,7 +170,7 @@ class ToolExecutionServiceExecuteScriptTest {
     void execute_scriptNeverCommitted_isRefused() throws IOException {
         writeScript("scripts/validate.sh", "#!/bin/sh\nexit 0\n", true);
 
-        ToolResult result = service.executeTool(workspace, "execute", List.of("scripts/validate.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("must be the committed version");
@@ -183,7 +183,7 @@ class ToolExecutionServiceExecuteScriptTest {
         Files.writeString(script, "#!/bin/sh\nexit 0\n");
         assertThat(script.toFile().setExecutable(true)).isTrue();
 
-        ToolResult result = service.executeTool(plainDirectory, "execute", List.of("scripts/validate.sh"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(plainDirectory), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("could not be verified against the repository");
@@ -191,7 +191,7 @@ class ToolExecutionServiceExecuteScriptTest {
 
     @Test
     void execute_pathTraversalOutOfTheRepository_isRejected() {
-        ToolResult result = service.executeTool(workspace, "execute", List.of("../../etc/passwd"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("../../etc/passwd"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("escapes");
@@ -199,7 +199,7 @@ class ToolExecutionServiceExecuteScriptTest {
 
     @Test
     void execute_absolutePath_isRejected() {
-        ToolResult result = service.executeTool(workspace, "execute", List.of("/etc/passwd"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("/etc/passwd"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("must be relative");
@@ -207,7 +207,7 @@ class ToolExecutionServiceExecuteScriptTest {
 
     @Test
     void execute_gitInternalsPath_isRejected() {
-        ToolResult result = service.executeTool(workspace, "execute", List.of(".git/hooks/pre-commit"));
+        ToolResult result = service.executeTool(Workspace.unmanaged(workspace), "execute", List.of(".git/hooks/pre-commit"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains(".git internals");
@@ -215,9 +215,9 @@ class ToolExecutionServiceExecuteScriptTest {
 
     @Test
     void execute_missingPathArgument_reportsClearError() {
-        assertThat(service.executeTool(workspace, "execute", List.of()).error())
+        assertThat(service.executeTool(Workspace.unmanaged(workspace), "execute", List.of()).error())
                 .contains("requires the repository-relative path");
-        assertThat(service.executeTool(workspace, "execute", List.of("   ")).error())
+        assertThat(service.executeTool(Workspace.unmanaged(workspace), "execute", List.of("   ")).error())
                 .contains("requires the repository-relative path");
     }
 
@@ -227,7 +227,7 @@ class ToolExecutionServiceExecuteScriptTest {
         config.getValidation().setAvailableTools(List.of("mvn"));
 
         ToolResult result = newService(config)
-                .executeTool(workspace, "execute", List.of("scripts/validate.sh"));
+                .executeTool(Workspace.unmanaged(workspace), "execute", List.of("scripts/validate.sh"));
 
         assertThat(result.success()).isFalse();
         assertThat(result.output()).contains("is not available");

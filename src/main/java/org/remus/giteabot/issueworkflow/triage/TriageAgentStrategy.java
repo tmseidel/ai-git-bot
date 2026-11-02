@@ -200,7 +200,7 @@ public final class TriageAgentStrategy implements AgentStrategy {
             log.debug("Triage agent (legacy) gathering context for issue #{} (round {}/{})",
                     ctx.issueNumber(), contextRounds, maxContextRounds);
             BranchSwitcher.Result branchSwitch = branchSwitcher.apply(
-                    ctx.workspaceDir(), ctx.baseBranch(), contextRequests, ctx.issueNumber());
+                    ctx.workspace(), ctx.baseBranch(), contextRequests, ctx.issueNumber());
             if (branchSwitch.selectedBranch() != null
                     && !branchSwitch.selectedBranch().equals(ctx.baseBranch())) {
                 ctx.setBaseBranch(branchSwitch.selectedBranch());
@@ -268,7 +268,7 @@ public final class TriageAgentStrategy implements AgentStrategy {
         for (ImplementationPlan.ToolRequest request : requests) {
             results.add(toolRouter.execute(AgentToolRouter.Mode.WRITER,
                     new ToolCallContext(ctx.owner(), ctx.repo(), ctx.issueNumber(),
-                            ctx.workspaceDir(), request)));
+                            ctx.workspace(), request)));
         }
         return results;
     }

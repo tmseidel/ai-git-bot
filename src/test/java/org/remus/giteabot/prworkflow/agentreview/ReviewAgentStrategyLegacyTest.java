@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentBudget;
 import org.remus.giteabot.agent.loop.AgentLoop;
@@ -80,7 +81,7 @@ class ReviewAgentStrategyLegacyTest {
     }
 
     private AgentRunContext ctx() {
-        return new AgentRunContext(null, "octo", "repo", 1L, Path.of("/tmp/ws"), "main");
+        return new AgentRunContext(null, "octo", "repo", 1L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
     }
 
     @Test
@@ -117,7 +118,7 @@ class ReviewAgentStrategyLegacyTest {
                 new ToolCatalog(new AgentConfigProperties()), null, null, parser,
                 new BranchSwitcher(toolExecutionService), fetcher, 5);
         AgentSession session = new AgentSession("octo", "repo", 1L, "Review example");
-        AgentRunContext context = new AgentRunContext(session, "octo", "repo", 1L, Path.of("/tmp/ws"), "main");
+        AgentRunContext context = new AgentRunContext(session, "octo", "repo", 1L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         AgentLoop loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                 new AgentBudget(3, 2, 2, 32, 8_000, 120_000, 200_000, 0.7));
 
@@ -139,7 +140,7 @@ class ReviewAgentStrategyLegacyTest {
                         new ChatTurn("The change correctly handles missing values.", List.of(), StopReason.END_TURN, 120, 20));
         AgentSession session = new AgentSession("octo", "repo", 1L, "Review example");
         AgentRunContext context = new AgentRunContext(session, "octo", "repo", 1L,
-                Path.of("/tmp/ws"), "main");
+                Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         AgentLoop loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                 new AgentBudget(3, 2, 2, 4000, 8_000, 120_000, 200_000, 0.7));
 

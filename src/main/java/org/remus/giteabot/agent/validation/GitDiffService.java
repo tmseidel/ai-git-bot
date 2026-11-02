@@ -2,7 +2,6 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.RepositoryApiClient;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -52,35 +51,9 @@ public class GitDiffService {
      */
     public String diffCommits(RepositoryApiClient repositoryClient, String owner, String repo,
                               String baseSha, String headSha) {
-        WorkspaceSetup setup = null;
-        final String repositoryRemote;
-        final RepositoryCredentials credentials;
-        final boolean usesAuthorizationHeader;
-        try {
-            repositoryRemote = repositoryClient.getRepositoryRemote(owner, repo);
-            credentials = repositoryClient.getCredentials();
-            usesAuthorizationHeader = repositoryClient.usesGitAuthorizationHeader();
-            if (repositoryRemote == null || repositoryRemote.isBlank() || credentials == null) {
-                throw new IllegalStateException("Repository client returned incomplete checkout configuration");
-            }
-        } catch (RuntimeException e) {
-            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            log.error("Failed to resolve repository checkout for {}/{}: {}", owner, repo, message, e);
-            return null;
-        }
-
-        try {
-            setup = workspaceService.createWorkspaceSetup();
-            setup.setAuthentication(repositoryRemote, credentials, usesAuthorizationHeader);
-            Path workspaceDir = setup.workspaceDir();
-
-            CommandResult init = workspaceService.runCommand(setup.workspaceRoot().toFile(),
-                    new String[]{"git", "init", "-q", workspaceDir.getFileName().toString()}, 15);
-            if (!init.success()) {
-                return failed(owner, repo, "git init", init);
-            }
-            CommandResult fetch = workspaceService.runRemoteCommand(setup, workspaceDir.toFile(), 120,
-                    "fetch", "--depth=1", "--no-tags", "--end-of-options", repositoryRemote, baseSha, headSha);
+        try (Workspace workspace = workspaceService.createEmptyWorkspace(repositoryClient, owner, repo)) {
+            CommandResult fetch = workspace.gitRemote(120, "fetch", "--depth=1", "--no-tags",
+                    "--end-of-options", workspace.repositoryRemote(), baseSha, headSha);
             if (!fetch.success()) {
                 return failed(owner, repo, "git fetch", fetch);
             }
@@ -88,11 +61,10 @@ public class GitDiffService {
             // also capped far below a large diff. The file itself is uncapped until read();
             // that is bounded in practice by the fetched snapshot already on disk next to
             // it, and binary files take a single line.
-            Path diffFile = setup.workspaceRoot().resolve("changes.diff");
-            CommandResult diff = workspaceService.runCommand(workspaceDir.toFile(),
-                    new String[]{"git", "-c", "core.quotePath=false", "diff", "--no-color",
-                            "--no-ext-diff", "--no-textconv", "--find-renames",
-                            "--output=" + diffFile.toAbsolutePath(), "--end-of-options", baseSha, headSha}, 60);
+            Path diffFile = workspace.root().resolve("changes.diff");
+            CommandResult diff = workspace.git(60, "-c", "core.quotePath=false", "diff", "--no-color",
+                    "--no-ext-diff", "--no-textconv", "--find-renames",
+                    "--output=" + diffFile.toAbsolutePath(), "--end-of-options", baseSha, headSha);
             if (!diff.success()) {
                 return failed(owner, repo, "git diff", diff);
             }
@@ -100,10 +72,6 @@ public class GitDiffService {
         } catch (IOException | RuntimeException e) {
             log.error("Failed to diff {}..{} in {}/{}: {}", baseSha, headSha, owner, repo, e.getMessage(), e);
             return null;
-        } finally {
-            if (setup != null) {
-                workspaceService.cleanupWorkspace(setup);
-            }
         }
     }
 

@@ -76,7 +76,7 @@ public class UnitTestRunner {
         String combinedOutput = combine(result);
         persistCaseStatuses(cases, status, combinedOutput, durationMs);
 
-        CoverageResult coverage = coverageParser.parse(request.workspace(), framework, combinedOutput);
+        CoverageResult coverage = coverageParser.parse(request.workspace().path(), framework, combinedOutput);
 
         String summary = green
                 ? attempted + "/" + attempted + " passed"
