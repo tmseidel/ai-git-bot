@@ -68,6 +68,8 @@ class ReviewFindingsLedgerTest {
         assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"schemaVersion\":1", "\"schemaVersion\":2")));
         assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"schemaVersion\":1", "\"schemaVersion\":1,\"schemaVersion\":1")));
         assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"schemaVersion\":1", "\"schemaVersion\":\"1\"")));
+        assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"version\":1", "\"version\":1.5")));
+        assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json.replace("\"status\":\"DRAFT\"", "\"status\":0")));
         assertThatIllegalArgumentException().isThrownBy(() -> ReviewDraft.read(json + " {}"));
     }
 

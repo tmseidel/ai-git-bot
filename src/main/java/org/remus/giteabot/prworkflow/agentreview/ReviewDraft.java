@@ -26,6 +26,7 @@ public record ReviewDraft(int schemaVersion, long version, Status status, int ne
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, DeserializationFeature.FAIL_ON_TRAILING_TOKENS,
                     DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
             .enable(EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+            .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS).build();
 
     /** A confirmed finding with an application-assigned identity and concrete evidence. */
