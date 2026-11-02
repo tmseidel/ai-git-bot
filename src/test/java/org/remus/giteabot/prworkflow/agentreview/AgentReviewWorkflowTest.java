@@ -152,7 +152,7 @@ class AgentReviewWorkflowTest {
     }
 
     @Test
-    void run_skipsWithReason_whenHeadMovedDuringReview() {
+    void run_failsWithReason_whenHeadMovedDuringReview() {
         AgentReviewService service = mock(AgentReviewService.class);
         when(serviceFactory.create(any())).thenReturn(service);
         when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), anyString(),
@@ -161,7 +161,7 @@ class AgentReviewWorkflowTest {
 
         WorkflowResult result = workflow().run(context(new Bot()));
 
-        assertEquals(WorkflowResultStatus.SKIPPED, result.status());
+        assertEquals(WorkflowResultStatus.FAILED, result.status());
         assertTrue(result.summary().contains("changed during the review"));
     }
 

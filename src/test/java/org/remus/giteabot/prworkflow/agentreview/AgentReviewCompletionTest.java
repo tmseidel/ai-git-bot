@@ -32,6 +32,7 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
+import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 import org.remus.giteabot.prworkflow.WorkflowResultStatus;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
@@ -82,6 +83,7 @@ class AgentReviewCompletionTest {
     @Mock private RepositoryApiClient repositoryClient;
     @Mock private WorkspaceService workspaceService;
     @Mock private EventHookPublisher eventHooks;
+    @Mock private PrWorkflowRunService runService;
 
     private AgentReviewService service;
     private WebhookPayload payload;
@@ -111,9 +113,13 @@ class AgentReviewCompletionTest {
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, workspaceService), catalog, workspaceService,
-                config, null, new Bot(), eventHooks, null);
+                config, null, new Bot(), eventHooks, null, runService);
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
-        when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
+        lenient().when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
+        lenient().when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
+                .thenReturn(Optional.of(details("a".repeat(40))));
+        lenient().when(workspaceService.pinReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
+        lenient().when(workspaceService.isReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(true);
         lenient().when(workspaceService.preparePullRequestWorkspace(repositoryClient, "owner", "repo",
                         "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
                 .thenReturn(WorkspaceResult.success(WORKSPACE));
@@ -149,13 +155,14 @@ class AgentReviewCompletionTest {
                 argThat(body -> body.contains("- Latest activity: Completed")
                         && body.contains("Rounds: 2") && body.contains("Inspection tool calls completed: 1")));
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
-                argThat(body -> body.contains("Review complete.")), eq(PostReviewAction.REQUEST_CHANGES));
+                argThat(body -> body.contains("Review complete.")), eq(PostReviewAction.NONE));
     }
 
     @Test
     void reviewOfACommitThatWasReplacedDuringTheRunIsNotPublished() {
         when(repositoryClient.getPullRequestDetails("owner", "repo", 1L))
-                .thenReturn(Optional.of(details("a".repeat(40))), Optional.of(details("b".repeat(40))));
+                .thenReturn(Optional.of(details("a".repeat(40))), Optional.of(details("a".repeat(40))),
+                        Optional.of(details("b".repeat(40))));
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
                 .thenReturn(ChatTurn.text("Review complete."));
 
@@ -178,6 +185,52 @@ class AgentReviewCompletionTest {
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(), eq(PostReviewAction.NONE));
+        verify(runService).captureReviewRevision(eq(1L), any(ReviewRevision.class));
+        verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
+                argThat(body -> body.contains("head `" + "a".repeat(40))
+                        && body.contains("base `" + "c".repeat(40)) && body.contains("diff `sha256:")
+                        && body.contains("not an approval")), eq(PostReviewAction.NONE));
+    }
+
+    @Test
+    void aChangedBaseOrDiffCannotPublishEvenWhenTheHeadIsUnchanged() {
+        when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF, DIFF + "changed");
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("Review complete."));
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.STALE_REVISION);
+        assertNothingPublished();
+    }
+
+    @Test
+    void unsupportedRevisionCaptureFailsBeforeInferenceOrCheckout() {
+        when(repositoryClient.getPullRequestDetails("owner", "repo", 1L)).thenReturn(Optional.empty());
+        assertThat(service.reviewPullRequest(payload, 1, true, null,
+                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.FAILED);
+        verifyNoInteractions(aiClient, workspaceService, runService, eventHooks);
+    }
+
+    @Test
+    void checkoutMustMatchTheCapturedCommit() {
+        when(workspaceService.pinReviewRevision(WORKSPACE, "a".repeat(40))).thenReturn(false);
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.STALE_REVISION);
+        verifyNoInteractions(aiClient, runService, eventHooks);
+        assertNothingPublished();
+    }
+
+    @Test
+    void capturePersistenceFailureCannotContinueOrPublish() {
+        doThrow(new IllegalStateException("DB unavailable")).when(runService)
+                .captureReviewRevision(eq(1L), any());
+        assertThat(service.reviewPullRequest(payload, 1, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                .isEqualTo(AgentReviewService.ReviewResult.FAILED);
+        verifyNoInteractions(aiClient);
+        assertNothingPublished();
     }
 
     private static PullRequestDetails details(String headSha) {

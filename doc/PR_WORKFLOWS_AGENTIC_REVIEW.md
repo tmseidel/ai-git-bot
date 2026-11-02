@@ -57,6 +57,13 @@ apart, even after a failed update; terminal updates are attempted once immediate
 
 ### Formal review decision
 
+Formal actions are currently withheld (`NONE`) until repository adapters prove
+atomic binding to the complete reviewed revision and the completion/coverage
+gates are qualified. Reviews are posted only as comments labelled with the
+captured head SHA, base SHA and complete diff hash. Providers without a fresh
+revision lookup fail before inference; a changed revision fails rather than
+being recorded as a successful skipped review.
+
 When `enableFormalReviewDecision` is on, the model classifies its findings as
 `BLOCKER`, `MEDIUM`, or `LOW` and emits a JSON object such as
 `{"blocker": 0, "medium": 1, "low": 2}`. The application then compares each

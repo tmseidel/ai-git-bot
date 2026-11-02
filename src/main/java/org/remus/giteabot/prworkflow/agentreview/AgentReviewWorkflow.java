@@ -133,7 +133,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
             case POSTED -> WorkflowResult.success("Agentic review posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to review");
             case FAILED -> WorkflowResult.failed("Agentic review failed; no complete review was produced");
-            case STALE_REVISION -> WorkflowResult.skipped(
+            case STALE_REVISION -> WorkflowResult.failed(
                     "Pull request changed during the review; no review posted for the outdated commit");
         };
         context.appendStep("agentic-review", result.summary());

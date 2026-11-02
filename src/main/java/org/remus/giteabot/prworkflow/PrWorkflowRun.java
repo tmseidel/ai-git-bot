@@ -67,6 +67,15 @@ public class PrWorkflowRun {
     @Column(length = 2048)
     private String summary;
 
+    @Column(name = "review_head_sha", length = 64)
+    private String reviewHeadSha;
+
+    @Column(name = "review_base_sha", length = 64)
+    private String reviewBaseSha;
+
+    @Column(name = "review_diff_hash", length = 71)
+    private String reviewDiffHash;
+
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
@@ -127,4 +136,3 @@ public class PrWorkflowRun {
         }
     }
 }
-

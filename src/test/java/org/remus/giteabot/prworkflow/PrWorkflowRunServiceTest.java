@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
+import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
 
 @ExtendWith(MockitoExtension.class)
 class PrWorkflowRunServiceTest {
@@ -117,6 +118,16 @@ class PrWorkflowRunServiceTest {
     }
 
     @Test
+    void revisionCaptureIsConditionalAndCannotOverwriteAnExistingOrCancelledRun() {
+        var revision = new ReviewRevision("a".repeat(40), "b".repeat(40), "sha256:" + "c".repeat(64));
+        when(runRepository.captureReviewRevision(1L, revision.headSha(), revision.baseSha(), revision.diffHash()))
+                .thenReturn(1, 0);
+        service.captureReviewRevision(1L, revision);
+        assertThrows(IllegalStateException.class, () -> service.captureReviewRevision(1L, revision));
+        assertThrows(IllegalStateException.class, () -> service.captureReviewRevision(null, revision));
+    }
+
+    @Test
     void truncationHelperHandlesNullAndShortValues() {
         assertNull(PrWorkflowRunService.truncate(null, 10));
         assertEquals("abc", PrWorkflowRunService.truncate("abc", 10));
@@ -125,6 +136,5 @@ class PrWorkflowRunServiceTest {
         assertTrue(trimmed.endsWith("..."));
     }
 }
-
 
 

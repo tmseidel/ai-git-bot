@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -23,6 +24,15 @@ public class PrWorkflowRunService {
 
     private final PrWorkflowRunRepository runRepository;
     private final PrWorkflowStepRepository stepRepository;
+
+    /** Captures the immutable revision once, only while the owning run is active. */
+    @Transactional
+    public void captureReviewRevision(Long runId, ReviewRevision revision) {
+        if (runId == null || revision == null || runRepository.captureReviewRevision(runId,
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Review revision could not be captured for an active run");
+        }
+    }
 
     @Transactional
     public PrWorkflowRun start(Long botId, String repoOwner, String repoName, Long prNumber,

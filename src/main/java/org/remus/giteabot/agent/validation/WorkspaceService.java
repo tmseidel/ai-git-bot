@@ -283,6 +283,23 @@ public class WorkspaceService {
                 + ": " + fallback.error() + ")");
     }
 
+    /** Pins a read-only review workspace to its captured commit, never a moving branch tip. */
+    public boolean pinReviewRevision(Path workspaceDir, String headSha) {
+        if (headSha == null || !headSha.matches("[0-9a-f]{40}|[0-9a-f]{64}")) {
+            throw new IllegalArgumentException("Invalid review commit");
+        }
+        return runCommand(workspaceDir.toFile(),
+                new String[]{"git", "checkout", "--detach", headSha}, cloneTimeoutSeconds).success()
+                && isReviewRevision(workspaceDir, headSha);
+    }
+
+    /** Verifies the local commit again before publishing a revision-labelled review. */
+    public boolean isReviewRevision(Path workspaceDir, String headSha) {
+        CommandResult result = runCommand(workspaceDir.toFile(),
+                new String[]{"git", "rev-parse", "--verify", "HEAD"}, 15);
+        return result.success() && headSha != null && headSha.equals(result.output().strip());
+    }
+
     /**
      * Returns whether an authoritative PR head belongs to another repository.
      * Providers without authoritative head resolution retain their existing

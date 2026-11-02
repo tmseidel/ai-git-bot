@@ -30,7 +30,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
-import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -124,6 +124,7 @@ public class AgentReviewService {
     private final ToolCatalog toolCatalog;
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
+    private final PrWorkflowRunService runService;
 
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
@@ -141,7 +142,8 @@ public class AgentReviewService {
                               McpOrchestrationService mcpOrchestrationService,
                               Bot bot,
                               EventHookPublisher eventHookPublisher,
-                              PythonExecutionService pythonExecution) {
+                              PythonExecutionService pythonExecution,
+                              PrWorkflowRunService runService) {
         this.context = context;
         this.bot = bot;
         this.eventHookPublisher = eventHookPublisher;
@@ -149,6 +151,7 @@ public class AgentReviewService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = workspaceService;
         this.agentConfig = agentConfig;
+        this.runService = runService;
         this.repositoryClient = context.repositoryClient();
         this.aiClient = context.aiClient();
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
@@ -195,11 +198,15 @@ public class AgentReviewService {
         log.info("Starting agentic review for PR #{} '{}' in {}/{} (formalDecision={})",
                 prNumber, prTitle, owner, repo, enableFormalDecision);
 
-        // Captured before the diff and checkout: a later push can only make the review stale, never mislabel it.
-        String reviewedHeadSha = currentHeadSha(owner, repo, prNumber);
-
-        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-        if (diff == null || diff.isBlank()) {
+        final ReviewRevision.Capture captured;
+        try {
+            captured = ReviewRevision.capture(repositoryClient, owner, repo, prNumber);
+        } catch (RuntimeException e) {
+            log.warn("Cannot capture review revision for PR #{}", prNumber, e);
+            return ReviewResult.FAILED;
+        }
+        String diff = captured.diff();
+        if (diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
             return ReviewResult.NO_DIFF;
         }
@@ -207,7 +214,7 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo, prNumber);
+        String headBranch = captured.headRef();
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
@@ -228,12 +235,14 @@ public class AgentReviewService {
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
-                repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
-                                + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
+
+            if (!workspaceService.pinReviewRevision(workspaceDir, captured.revision().headSha())) {
+                return ReviewResult.STALE_REVISION;
+            }
+            runService.captureReviewRevision(runId, captured.revision());
 
             String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
             String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
@@ -258,33 +267,14 @@ public class AgentReviewService {
             ParseResult parsed = enableFormalDecision
                     ? parseFormalReviewResult(review, severityThresholds) : ParseResult.noDecision(review);
 
-            PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
-            String reviewBody = formatReview(parsed.reviewText());
-            if (reviewedHeadSha != null) {
-                String currentHeadSha = currentHeadSha(owner, repo, prNumber);
-                if (!reviewedHeadSha.equals(currentHeadSha)) {
-                    log.warn("PR #{} in {}/{} moved from {} to {} during the agentic review — "
-                            + "not publishing a review of the outdated commit", prNumber, owner, repo,
-                            reviewedHeadSha, currentHeadSha);
-                    return ReviewResult.STALE_REVISION;
-                }
+            // No adapter yet proves atomic binding of a formal action to the complete revision.
+            PostReviewAction action = PostReviewAction.NONE;
+            String reviewBody = formatReview(captured.revision().header() + parsed.reviewText());
+            if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
+                    || !workspaceService.isReviewRevision(workspaceDir, captured.revision().headSha())) {
+                return ReviewResult.STALE_REVISION;
             }
-            try {
-                repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
-                if (action != PostReviewAction.NONE) {
-                    log.info("Agentic review posted formal decision {} for PR #{} in {}/{}",
-                            action, prNumber, owner, repo);
-                }
-            } catch (Exception e) {
-                if (action == PostReviewAction.NONE) {
-                    throw e;
-                }
-                // Fall back to a plain comment so the findings survive a failed formal submission.
-                log.warn("Failed to post formal review {} for PR #{} in {}/{}: {} — "
-                        + "falling back to a plain review comment",
-                        action, prNumber, owner, repo, e.getMessage());
-                repositoryClient.postReviewComment(owner, repo, prNumber, reviewBody);
-            }
+            repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
 
             publishFindingEvents(eventHookPublisher, bot, parsed, owner, repo, prNumber);
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
@@ -293,10 +283,6 @@ public class AgentReviewService {
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
-            postErrorComment(owner, repo, prNumber, "Agentic Review",
-                    "The review could not be completed because of an error. "
-                            + "This is usually a transient issue with the AI provider. "
-                            + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
             try {
@@ -407,18 +393,6 @@ public class AgentReviewService {
                 }
             }
         }
-    }
-
-    /**
-     * Returns the provider's current head commit, or {@code null} when it does not report one.
-     * shortcut: providers without {@link RepositoryApiClient#getPullRequestDetails} (GitLab,
-     * Bitbucket) are not guarded against stale reviews; implement that lookup to cover them.
-     */
-    private String currentHeadSha(String owner, String repo, Long prNumber) {
-        return repositoryClient.getPullRequestDetails(owner, repo, prNumber)
-                .map(PullRequestDetails::headSha)
-                .filter(sha -> !sha.isBlank())
-                .orElse(null);
     }
 
     /**
