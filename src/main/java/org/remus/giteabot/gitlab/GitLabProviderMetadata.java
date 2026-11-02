@@ -1,35 +1,39 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.gitlab;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.gitea.GiteaApiClient;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryProviderMetadata;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Metadata and factory for Gitea repository integration.
- * Handles URL transformations and creates properly configured Gitea API clients.
+ * Metadata and factory for GitLab repository integration.
+ * Handles URL transformations and creates properly configured GitLab API clients.
+ * <p>
+ * GitLab uses the {@code PRIVATE-TOKEN} header for authentication and
+ * URL-encoded project paths ({@code owner%2Frepo}) in its REST API v4.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class GiteaProviderMetadata implements RepositoryProviderMetadata {
+public class GitLabProviderMetadata implements RepositoryProviderMetadata {
 
-    private static final String DEFAULT_WEB_URL = "https://gitea.example.com";
+    private static final String DEFAULT_WEB_URL = "https://gitlab.com";
 
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public RepositoryType getProviderType() {
-        return RepositoryType.GITEA;
+        return RepositoryType.GITLAB;
     }
 
     public String resolveApiUrl(GitIntegration integration) {
-        // Gitea's API is at the same base URL, just with /api/v1 paths
-        // The RestClient uses the base URL and adds /api/v1 in each request
+        // GitLab's API is at the same base URL; the client adds /api/v4 paths
         return integration.getUrl();
     }
 
@@ -39,29 +43,28 @@ public class GiteaProviderMetadata implements RepositoryProviderMetadata {
             return DEFAULT_WEB_URL;
         }
 
-        // Remove /api/v1 suffix if present
-        if (url.contains("/api/v1")) {
-            return url.replaceAll("/api/v1/?$", "");
+        // Remove /api/v4 suffix if present
+        if (url.contains("/api/v4")) {
+            return url.replaceAll("/api/v4/?$", "");
         }
 
         return url;
     }
 
     public String buildAuthorizationHeader(String token) {
-        // Gitea uses "token <token>" format
-        return "token " + token;
+        // GitLab uses "PRIVATE-TOKEN: <token>" header format
+        return token;
     }
 
     @Override
     public RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
-        String authHeader = buildAuthorizationHeader(decryptedToken);
 
-        log.debug("Building Gitea RestClient: apiUrl={}", apiUrl);
+        log.debug("Building GitLab RestClient: apiUrl={}", apiUrl);
 
         return restClientBuilder.getObject()
                 .baseUrl(apiUrl)
-                .defaultHeader("Authorization", authHeader)
+                .defaultHeader("PRIVATE-TOKEN", decryptedToken)
                 .defaultHeader("Accept", "application/json")
                 .build();
     }
@@ -75,8 +78,6 @@ public class GiteaProviderMetadata implements RepositoryProviderMetadata {
 
     @Override
     public RepositoryApiClient createClient(RestClient restClient, RepositoryCredentials credentials) {
-        return new GiteaApiClient(restClient, credentials);
+        return new GitLabApiClient(restClient, credentials);
     }
 }
-
-

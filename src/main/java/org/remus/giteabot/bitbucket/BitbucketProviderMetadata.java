@@ -1,10 +1,12 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.bitbucket;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.bitbucket.BitbucketApiClient;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryProviderMetadata;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;

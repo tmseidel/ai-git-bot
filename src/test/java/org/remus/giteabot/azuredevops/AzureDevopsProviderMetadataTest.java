@@ -1,8 +1,8 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.azuredevops;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.azuredevops.AzureDevopsApiClient;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 
 import static org.junit.jupiter.api.Assertions.*;
