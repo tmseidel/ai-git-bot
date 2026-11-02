@@ -174,7 +174,7 @@ public class PrWorkflowOrchestrator {
                     .durationMs(Duration.between(startInstant, Instant.now()).toMillis())
                     .build());
 
-            if (workflow.category() == PrWorkflowCategory.REVIEW) {
+            if (workflow.category() == PrWorkflowCategory.REVIEW && result.status() != WorkflowResultStatus.SKIPPED) {
                 auditService.record(PrAuditEvent.builder()
                         .eventType(effective == PrWorkflowRunStatus.SUCCESS ? AuditEventType.REVIEW_COMPLETED: AuditEventType.REVIEW_FAILED)
                         .eventTimestamp(Instant.now())

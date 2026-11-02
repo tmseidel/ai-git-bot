@@ -161,6 +161,25 @@ class PrWorkflowOrchestratorTest {
         PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 2), "test-wf");
 
         assertEquals(PrWorkflowRunStatus.SUCCESS, result.getStatus());
+        verify(auditService, org.mockito.Mockito.never()).record(org.mockito.ArgumentMatchers.argThat(event ->
+                event.getEventType() == org.remus.giteabot.audit.AuditEventType.REVIEW_COMPLETED
+                        || event.getEventType() == org.remus.giteabot.audit.AuditEventType.FINDING_POSTED));
+    }
+
+    @Test
+    void staleRevisionFailureDoesNotEmitReviewOrFindingSuccess() {
+        when(runService.start(anyLong(), any(), any(), anyLong(), any())).thenReturn(runWithId(2L));
+        when(runService.complete(anyLong(), any(), any()))
+                .thenReturn(runWithIdAndStatus(2L, PrWorkflowRunStatus.FAILED));
+        Bot bot = new Bot();
+        bot.setId(1L);
+        var result = newOrchestrator(workflowWithResult(WorkflowResult.failed("stale_revision")))
+                .run(bot, payloadFor("o", "r", 2), "test-wf");
+        assertEquals(PrWorkflowRunStatus.FAILED, result.getStatus());
+        verify(runService).complete(2L, PrWorkflowRunStatus.FAILED, "stale_revision");
+        verify(auditService, org.mockito.Mockito.never()).record(org.mockito.ArgumentMatchers.argThat(event ->
+                event.getEventType() == org.remus.giteabot.audit.AuditEventType.REVIEW_COMPLETED
+                        || event.getEventType() == org.remus.giteabot.audit.AuditEventType.FINDING_POSTED));
     }
 
     @Test

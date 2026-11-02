@@ -19,6 +19,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Component;
+import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 
 @Component
 @RequiredArgsConstructor
@@ -36,6 +37,7 @@ public class AgentReviewServiceFactory {
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
     private final EventHookPublisher eventHookPublisher;
+    private final PrWorkflowRunService runService;
 
     public AgentReviewService create(Bot bot) {
         if (bot.getSystemPrompt() == null) {
@@ -61,6 +63,6 @@ public class AgentReviewServiceFactory {
 
         return new AgentReviewService(context, agentSessionService, toolExecutionService,
                 toolCatalog, workspaceService, agentConfig, mcpOrchestrationService,
-                bot, eventHookPublisher, pythonExecution);
+                bot, eventHookPublisher, pythonExecution, runService);
     }
 }
