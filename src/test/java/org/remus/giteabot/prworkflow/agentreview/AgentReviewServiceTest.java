@@ -23,6 +23,22 @@ import static org.mockito.Mockito.verify;
 class AgentReviewServiceTest {
 
     @Test
+    void completeSnapshotRendersEveryRecordedFindingFromTheSameData() {
+        var findings = List.of(
+                new ReviewDraft.Finding("F1", "blocker", "security", "SQL injection", "Concrete evidence", "A.java", 7),
+                new ReviewDraft.Finding("F2", "low", null, "Typo", "Misspelled label", null, null));
+        var draft = new ReviewDraft(1, 2, ReviewDraft.Status.COMPLETE, 3, true, "Reviewed change", List.of(), findings, null);
+        assertThat(draft.render()).contains("Reviewed change", "F1 [BLOCKER] SQL injection", "Concrete evidence",
+                "A.java:7", "F2 [LOW] Typo", "Misspelled label");
+    }
+
+    @Test
+    void anUnsealedDraftCannotBecomeReviewMarkdown() {
+        var draft = new ReviewDraft(1, 1, ReviewDraft.Status.DRAFT, 1, true, "", List.of(), List.of(), null);
+        org.assertj.core.api.Assertions.assertThatIllegalArgumentException().isThrownBy(draft::render);
+    }
+
+    @Test
     void parseFormalReviewResult_nullAndEmptyYieldsNone() {
         assertThat(AgentReviewService.parseFormalReviewResult(null, thresholds(0, null, null)).action()).isNull();
         assertThat(AgentReviewService.parseFormalReviewResult("", thresholds(0, null, null)).action()).isNull();

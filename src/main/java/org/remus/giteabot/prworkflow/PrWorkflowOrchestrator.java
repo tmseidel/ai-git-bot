@@ -174,7 +174,8 @@ public class PrWorkflowOrchestrator {
                     .durationMs(Duration.between(startInstant, Instant.now()).toMillis())
                     .build());
 
-            if (workflow.category() == PrWorkflowCategory.REVIEW) {
+            if (workflow.category() == PrWorkflowCategory.REVIEW && result.status() != WorkflowResultStatus.SKIPPED
+                    && effective != PrWorkflowRunStatus.SHADOW) {
                 auditService.record(PrAuditEvent.builder()
                         .eventType(effective == PrWorkflowRunStatus.SUCCESS ? AuditEventType.REVIEW_COMPLETED: AuditEventType.REVIEW_FAILED)
                         .eventTimestamp(Instant.now())
@@ -206,7 +207,10 @@ public class PrWorkflowOrchestrator {
             if (completed.getSummary() != null && !completed.getSummary().isBlank()) {
                 completedData.put("summary", completed.getSummary());
             }
-            publishRunEvent(effective == PrWorkflowRunStatus.SUCCESS ? EventHookEventType.PR_WORKFLOW_COMPLETED : EventHookEventType.PR_WORKFLOW_FAILED, bot, owner, repoName, prNumber, completedData);
+            if (effective != PrWorkflowRunStatus.SHADOW) {
+                publishRunEvent(effective == PrWorkflowRunStatus.SUCCESS ? EventHookEventType.PR_WORKFLOW_COMPLETED : EventHookEventType.PR_WORKFLOW_FAILED,
+                        bot, owner, repoName, prNumber, completedData);
+            }
             log.info("[Workflow '{}'] Finished run id={} status={}", workflow.key(), completed.getId(), effective);
             return completed;
         } catch (WorkflowCancelledException cancelled) {
@@ -275,6 +279,7 @@ public class PrWorkflowOrchestrator {
     private PrWorkflowRunStatus mapTerminalStatus(WorkflowResultStatus status) {
         return switch (status) {
             case SUCCESS, SKIPPED -> PrWorkflowRunStatus.SUCCESS;
+            case SHADOW -> PrWorkflowRunStatus.SHADOW;
             case FAILED -> PrWorkflowRunStatus.FAILED;
             case WAITING_DEPLOY -> PrWorkflowRunStatus.WAITING_DEPLOY;
         };

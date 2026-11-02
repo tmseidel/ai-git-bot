@@ -10,6 +10,8 @@ public enum AuditEventType {
     PR_WORKFLOW_RUN_STARTED,
     PR_WORKFLOW_STEP_APPENDED,
     PR_WORKFLOW_RUN_COMPLETED,
+    /** Local-only structured review seal, never a publication event. */
+    PR_WORKFLOW_SHADOW_RECORDED,
 
 
     /** Agent tool-call tracing — implemented. */

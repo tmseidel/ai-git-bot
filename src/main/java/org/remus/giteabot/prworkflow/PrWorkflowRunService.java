@@ -4,11 +4,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.remus.giteabot.prworkflow.agentreview.ReviewRevision;
+import org.remus.giteabot.prworkflow.agentreview.ReviewDraft;
+import org.remus.giteabot.audit.ActorType;
+import org.remus.giteabot.audit.AuditEventType;
+import org.remus.giteabot.audit.PrAuditEvent;
+import org.remus.giteabot.audit.PrAuditEventService;
 
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -23,6 +30,68 @@ public class PrWorkflowRunService {
 
     private final PrWorkflowRunRepository runRepository;
     private final PrWorkflowStepRepository stepRepository;
+    private final PrAuditEventService auditService;
+
+    /** Captures the immutable revision once, only while the owning run is active. */
+    @Transactional
+    public void captureReviewRevision(Long runId, ReviewRevision revision) {
+        if (runId == null || revision == null || runRepository.captureReviewRevision(runId,
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Review revision could not be captured for an active run");
+        }
+    }
+
+    /** Atomically writes a validated snapshot, rejecting stale versions, revisions, cancelled or sealed runs. */
+    @Transactional
+    public void saveReviewDraft(Long runId, ReviewRevision revision, long expected, ReviewDraft draft) {
+        if (runId == null || revision == null || draft == null || draft.status() != ReviewDraft.Status.DRAFT
+                || expected < 0 || draft.version() != expected + 1
+                || runRepository.saveReviewDraft(runId, expected, draft.version(), draft.json(), draft.status().name(),
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Review draft write lost its active run, version or revision");
+        }
+    }
+
+    /** Reloads the supported snapshot and verifies its application-owned metadata before use. */
+    @Transactional(readOnly = true)
+    public ReviewDraft loadReviewDraft(Long runId, ReviewRevision revision) {
+        PrWorkflowRun run = getById(runId);
+        ReviewDraft draft = ReviewDraft.read(run.getReviewDraftJson());
+        if (!revision.headSha().equals(run.getReviewHeadSha()) || !revision.baseSha().equals(run.getReviewBaseSha())
+                || !revision.diffHash().equals(run.getReviewDiffHash()) || draft.version() != run.getReviewDraftVersion()
+                || !draft.status().name().equals(run.getReviewDraftStatus())) {
+            throw new IllegalStateException("Stored review draft binding does not match");
+        }
+        return draft;
+    }
+
+    /** Atomically seals a diagnostic review and terminates its run without a publishable state. */
+    @Transactional
+    public void sealReviewShadow(Long runId, ReviewRevision revision, long expected, ReviewDraft draft) {
+        if (runId == null || revision == null || draft == null || expected < 0 || draft.version() != expected + 1
+                || draft.status() == ReviewDraft.Status.DRAFT) {
+            throw new IllegalArgumentException("Invalid shadow seal");
+        }
+        boolean complete = draft.status() == ReviewDraft.Status.COMPLETE;
+        if (complete) draft.render();
+        if (runRepository.sealReviewShadow(runId, expected, draft.version(), draft.json(), draft.status().name(),
+                complete ? PrWorkflowRunStatus.SHADOW : PrWorkflowRunStatus.FAILED,
+                complete ? "Structured review sealed in shadow mode; not published" : "insufficient_context",
+                revision.headSha(), revision.baseSha(), revision.diffHash()) != 1) {
+            throw new IllegalStateException("Shadow seal lost its active run, version or revision");
+        }
+        PrWorkflowRun run = getById(runId);
+        auditService.recordRequired(PrAuditEvent.builder()
+                .eventType(complete ? AuditEventType.PR_WORKFLOW_SHADOW_RECORDED : AuditEventType.PR_WORKFLOW_RUN_COMPLETED)
+                .eventTimestamp(run.getFinishedAt())
+                .botId(run.getBotId()).repoOwner(run.getRepoOwner()).repoName(run.getRepoName()).prNumber(run.getPrNumber())
+                .runId(runId).actorType(ActorType.SYSTEM.name()).actorId("structured-review-seal")
+                .eventPayloadJson(PrAuditEventService.toJson(Map.of(
+                        "workflow_key", run.getWorkflowKey(), "run_status", run.getStatus().name(),
+                        "draft_status", draft.status().name(), "draft_version", draft.version(),
+                        "head_sha", revision.headSha(), "base_sha", revision.baseSha(), "diff_hash", revision.diffHash())))
+                .build());
+    }
 
     @Transactional
     public PrWorkflowRun start(Long botId, String repoOwner, String repoName, Long prNumber,
@@ -52,15 +121,14 @@ public class PrWorkflowRunService {
             return;
         }
         Instant now = Instant.now();
+        int cancelled = 0;
         for (PrWorkflowRun run : active) {
-            run.setStatus(PrWorkflowRunStatus.CANCELLED);
-            run.setFinishedAt(now);
             String existing = run.getSummary() == null ? "" : run.getSummary();
-            run.setSummary(truncate(("Superseded by a newer run. " + existing).trim(), MAX_SUMMARY_CHARS));
+            cancelled += runRepository.finishIfActive(run.getId(), PrWorkflowRunStatus.CANCELLED, now,
+                    truncate(("Superseded by a newer run. " + existing).trim(), MAX_SUMMARY_CHARS));
         }
-        runRepository.saveAll(active);
         log.debug("Cancelled {} prior run(s) for bot={} repo={}/{} pr=#{} workflow={}",
-                active.size(), botId, repoOwner, repoName, prNumber, workflowKey);
+                cancelled, botId, repoOwner, repoName, prNumber, workflowKey);
     }
 
     @Transactional
@@ -87,10 +155,8 @@ public class PrWorkflowRunService {
                     runId, run.getStatus());
             return run;
         }
-        run.setStatus(status);
-        run.setSummary(truncate(summary, MAX_SUMMARY_CHARS));
-        run.setFinishedAt(Instant.now());
-        return runRepository.save(run);
+        runRepository.finishIfActive(runId, status, Instant.now(), truncate(summary, MAX_SUMMARY_CHARS));
+        return getById(runId);
     }
 
     @Transactional(readOnly = true)

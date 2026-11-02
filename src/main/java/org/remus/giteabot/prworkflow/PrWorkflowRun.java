@@ -17,6 +17,8 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -66,6 +68,25 @@ public class PrWorkflowRun {
 
     @Column(length = 2048)
     private String summary;
+
+    @Column(name = "review_head_sha", length = 64)
+    private String reviewHeadSha;
+
+    @Column(name = "review_base_sha", length = 64)
+    private String reviewBaseSha;
+
+    @Column(name = "review_diff_hash", length = 71)
+    private String reviewDiffHash;
+
+    @JdbcTypeCode(SqlTypes.LONG32VARCHAR)
+    @Column(name = "review_draft_json")
+    private String reviewDraftJson;
+
+    @Column(name = "review_draft_version", nullable = false)
+    private long reviewDraftVersion;
+
+    @Column(name = "review_draft_status", length = 24)
+    private String reviewDraftStatus;
 
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
@@ -127,4 +148,3 @@ public class PrWorkflowRun {
         }
     }
 }
-

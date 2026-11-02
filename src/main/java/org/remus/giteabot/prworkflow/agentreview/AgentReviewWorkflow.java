@@ -106,13 +106,16 @@ public class AgentReviewWorkflow implements PrWorkflow {
     public WorkflowResult run(PrWorkflowContext context) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
+        Map<String, Object> params = resolveParams(bot);
+        if (boolParam(params, AgentReviewParam.STRUCTURED_REVIEW_SHADOW, false)) {
+            return WorkflowResult.failed("Structured review is disabled until terminal, transport, budget and read-only contracts are qualified");
+        }
 
         String clarification = context.hint(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION);
         if (clarification != null && !clarification.isBlank()) {
-            return doClarification(context, clarification);
+            return doClarification(context, clarification, params);
         }
 
-        Map<String, Object> params = resolveParams(bot);
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
         boolean enableProgressComments = boolParam(params, AgentReviewParam.ENABLE_PROGRESS_COMMENTS, false);
         boolean enableFormalDecision = boolParam(params, AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION, false);
@@ -125,24 +128,28 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         context.requireActive("before running agentic review");
 
-        AgentReviewService.ReviewResult reviewed = serviceFactory.create(bot)
-                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
-                        context.runId(), context.auditToolCallConsumer(), enableProgressComments);
+        AgentReviewService service = serviceFactory.create(bot);
+        AgentReviewService.ReviewResult reviewed = service.reviewPullRequest(payload, maxToolRounds,
+                enableFormalDecision, decisionPrompt, thresholds,
+                context.runId(), context.auditToolCallConsumer(), enableProgressComments);
 
         WorkflowResult result = switch (reviewed) {
             case POSTED -> WorkflowResult.success("Agentic review posted");
+            case SHADOW_RECORDED -> new WorkflowResult(org.remus.giteabot.prworkflow.WorkflowResultStatus.SHADOW,
+                    "Structured review sealed in shadow mode; not published");
             case NO_DIFF -> WorkflowResult.skipped("No diff to review");
             case FAILED -> WorkflowResult.failed("Agentic review failed; no complete review was produced");
+            case STALE_REVISION -> WorkflowResult.failed(
+                    "Pull request changed during the review; no review posted for the outdated commit");
         };
         context.appendStep("agentic-review", result.summary());
         return result;
     }
 
-    private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion) {
+    private WorkflowResult doClarification(PrWorkflowContext context, String userQuestion, Map<String, Object> params) {
         Bot bot = context.bot();
         context.requireActive("before running agentic clarification");
 
-        Map<String, Object> params = resolveParams(bot);
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
 
         AgentReviewService.ReviewResult answered = serviceFactory.create(bot)
@@ -152,7 +159,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
         WorkflowResult result = switch (answered) {
             case POSTED -> WorkflowResult.success("Clarification posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to answer clarification");
-            case FAILED -> WorkflowResult.failed("No clarification produced");
+            case FAILED, STALE_REVISION, SHADOW_RECORDED -> WorkflowResult.failed("No clarification produced");
         };
         context.appendStep("agentic-clarification", result.summary());
         return result;
@@ -184,7 +191,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
         if (raw instanceof Boolean b) return b;
         if (raw == null) return fallback;
         String s = raw.toString().trim();
-        return "true".equalsIgnoreCase(s) || "1".equals(s);
+        return "true".equalsIgnoreCase(s) || "1".equals(s) || "on".equalsIgnoreCase(s);
     }
 
     private String strParam(Map<String, Object> params, AgentReviewParam name, String fallback) {

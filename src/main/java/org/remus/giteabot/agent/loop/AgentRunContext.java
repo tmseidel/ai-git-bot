@@ -28,6 +28,8 @@ public final class AgentRunContext {
     private Consumer<ToolCallRecord> auditToolCallConsumer;
     @Setter
     private Consumer<ProgressUpdate> progressConsumer;
+    @Setter
+    private Runnable activeCheck = () -> { };
 
     public AgentRunContext(AgentSession session, String owner, String repo,
                            Long issueNumber, Path workspaceDir, String baseBranch) {
@@ -49,6 +51,9 @@ public final class AgentRunContext {
     public DiffSummary diffSummary() { return diffSummary; }
     public Consumer<ToolCallRecord> auditToolCallConsumer() { return auditToolCallConsumer; }
     public Consumer<ProgressUpdate> progressConsumer() { return progressConsumer; }
+
+    /** Caller-owned cancellation check, including before a retried provider call. */
+    public void requireActive() { activeCheck.run(); }
 
     /** Reports the current round and activity, with inspection tool calls just completed. */
     public record ProgressUpdate(int round, String activity, int completedToolCalls) {}

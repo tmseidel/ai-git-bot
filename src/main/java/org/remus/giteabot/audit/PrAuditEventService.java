@@ -43,16 +43,21 @@ public class PrAuditEventService {
     @Transactional
     public void record(PrAuditEvent event) {
         try {
-            String previousHash = resolvePreviousHash(event);
-            String payloadJson = event.getEventPayloadJson();
-            String eventTypeName = event.getEventType() != null ? event.getEventType().name() : "UNKNOWN";
-            event.setPreviousHash(previousHash);
-            event.setHash(computeHash(eventTypeName, event.getEventTimestamp(), payloadJson, previousHash));
-            auditRepository.save(event);
-            log.debug("Audit event persisted: type={} runId={} id={}", event.getEventType(), event.getRunId(), event.getId());
+            recordRequired(event);
         } catch (Exception e) {
             log.error("Failed to persist audit event type={} runId={}: {}", event.getEventType(), event.getRunId(), e.getMessage(), e);
         }
+    }
+
+    /** Joins the caller's transaction; failure must roll back the state change being audited. */
+    @Transactional
+    public void recordRequired(PrAuditEvent event) {
+        String previousHash = resolvePreviousHash(event);
+        String eventTypeName = event.getEventType() != null ? event.getEventType().name() : "UNKNOWN";
+        event.setPreviousHash(previousHash);
+        event.setHash(computeHash(eventTypeName, event.getEventTimestamp(), event.getEventPayloadJson(), previousHash));
+        auditRepository.save(event);
+        log.debug("Audit event persisted: type={} runId={} id={}", event.getEventType(), event.getRunId(), event.getId());
     }
 
     /** Convenience: emit a tool-call event. Arguments truncated to 2 KB, result to 1 KB. */

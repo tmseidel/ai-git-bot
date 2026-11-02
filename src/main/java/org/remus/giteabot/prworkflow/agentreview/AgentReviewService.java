@@ -22,6 +22,7 @@ import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.ai.AiRetryContext;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
@@ -30,6 +31,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.prworkflow.PrWorkflowRunService;
 
 import java.nio.file.Path;
 import java.time.Clock;
@@ -51,15 +53,27 @@ import java.util.regex.Pattern;
  * repository through {@link ToolCatalog.Role#REVIEW} (read-only) tools and selected MCP,
  * then posts a single review comment. When the operator enables the optional
  * formal review decision, the model classifies its findings by severity and the
- * application computes the formal action (approve / request changes) from
- * configured thresholds.</p>
+     * application retains the classification for analysis. Formal actions remain
+     * withheld until the revision, coverage and adapter contracts are qualified.</p>
  */
 @Slf4j
 public class AgentReviewService {
 
+    static final String STRUCTURED_SHADOW_INSTRUCTION = """
+
+            ## Structured shadow review (nothing will be published)
+            Record confirmed findings and concrete evidence with record_findings. Track material
+            openQuestions until resolved. Finish only with submit_review: result COMPLETE, a nonblank
+            summary, and explicit complete:true; or result INSUFFICIENT_CONTEXT with insufficientReason.
+            Assistant text and trailing severity-count JSON cannot complete the run. Never guess coverage.
+            In native mode use the named tools. In legacy mode send one bare JSON object with exactly
+            one property record_findings or submit_review containing the same arguments. Read requests
+            may use the existing requestFiles/requestTools/runTools JSON during exploration.
+            """;
+
     /**
      * Fixed instruction appended to the system prompt when formal review decisions
-     * are enabled. Defines the exact structured return format.
+     * are enabled in legacy tool mode. Defines the exact structured return format.
      */
     static final String DECISION_FORMAT_INSTRUCTION = """
 
@@ -108,9 +122,12 @@ public class AgentReviewService {
     public record SeverityClassification(int blocker, int medium, int low) {
     }
 
-    /** Distinguishes a posted review or clarification from a no-op and a failed attempt. */
+    /**
+     * Distinguishes a posted review or clarification from a no-op, a failed attempt and a
+     * review withheld because the pull request head moved while it was being reviewed.
+     */
     public enum ReviewResult {
-        POSTED, NO_DIFF, FAILED
+        POSTED, NO_DIFF, FAILED, STALE_REVISION, SHADOW_RECORDED
     }
 
     private final AgentReviewContext context;
@@ -120,6 +137,7 @@ public class AgentReviewService {
     private final ToolCatalog toolCatalog;
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
+    private final PrWorkflowRunService runService;
 
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
@@ -137,7 +155,8 @@ public class AgentReviewService {
                               McpOrchestrationService mcpOrchestrationService,
                               Bot bot,
                               EventHookPublisher eventHookPublisher,
-                              PythonExecutionService pythonExecution) {
+                              PythonExecutionService pythonExecution,
+                              PrWorkflowRunService runService) {
         this.context = context;
         this.bot = bot;
         this.eventHookPublisher = eventHookPublisher;
@@ -145,6 +164,7 @@ public class AgentReviewService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = workspaceService;
         this.agentConfig = agentConfig;
+        this.runService = runService;
         this.repositoryClient = context.repositoryClient();
         this.aiClient = context.aiClient();
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
@@ -159,16 +179,14 @@ public class AgentReviewService {
      * the resulting review as a PR comment. When {@code enableFormalDecision}
      * is {@code true}, the system prompt is extended with the operator-
      * configured criteria and a fixed format instruction; the model's output
-     * is parsed for a severity classification, and the formal review action
-     * (APPROVE / REQUEST_CHANGES / NONE) is computed deterministically from
-     * {@code severityThresholds}. The action is submitted together with the
-     * review body via {@link RepositoryApiClient#postReview}.
+     * is parsed for a severity classification. The review body is submitted via
+     * {@link RepositoryApiClient#postReview} with action {@code NONE} until
+     * revision, coverage and adapter qualification permits formal actions.
      *
      * @param maxToolRounds         operator-tunable cap on the number of
      *                              explore/answer rounds (clamped to a sane range)
      * @param enableFormalDecision  when true, the model returns a severity
-     *                              classification and the action is derived from
-     *                              the configured thresholds
+     *                              classification for analysis, not a formal action
      * @param decisionPrompt        operator-provided criteria for the severity
      *                              classification
      * @param severityThresholds    optional per-severity thresholds used to
@@ -182,6 +200,44 @@ public class AgentReviewService {
                                          Long runId,
                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
                                          boolean enableProgressComments) {
+        ReviewResult result = doReviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt,
+                severityThresholds, runId, toolCallConsumer, enableProgressComments, false);
+        if (result == ReviewResult.STALE_REVISION || result == ReviewResult.FAILED) {
+            String owner = payload.getRepository().getOwner().getLogin();
+            String repo = payload.getRepository().getName();
+            Long number = payload.getPullRequest().getNumber();
+            try {
+                if (runService.isActive(runId) && repositoryClient.isPullRequestOpen(owner, repo, number)) {
+                    String reason = result == ReviewResult.STALE_REVISION
+                            ? "The pull request changed during the review, so the outdated review was not published."
+                            : "The requested review could not be completed.";
+                    repositoryClient.postPullRequestComment(owner, repo, number,
+                            "## 🤖 Review stopped\n\n" + reason + " Please request a new review for the current revision.");
+                }
+            } catch (RuntimeException e) {
+                log.warn("Could not post the review outcome for PR #{} in {}/{}", number, owner, repo, e);
+            }
+        }
+        return result;
+    }
+
+    /** Dormant integration seam; the workflow cannot select it before full protocol qualification. */
+    ReviewResult reviewPullRequestShadow(WebhookPayload payload, int maxToolRounds, Long runId,
+                                        Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+        AiRetryContext.install(new AiRetryContext.Notice(
+                "structured-review-shadow", body -> { }));
+        try {
+            return doReviewPullRequest(payload, maxToolRounds, false, null, null, runId, toolCallConsumer, false, true);
+        } finally {
+            AiRetryContext.clear();
+        }
+    }
+
+    private ReviewResult doReviewPullRequest(WebhookPayload payload, int maxToolRounds,
+                                            boolean enableFormalDecision, String decisionPrompt,
+                                            SeverityThresholds severityThresholds, Long runId,
+                                            Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                                            boolean enableProgressComments, boolean shadow) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -191,8 +247,15 @@ public class AgentReviewService {
         log.info("Starting agentic review for PR #{} '{}' in {}/{} (formalDecision={})",
                 prNumber, prTitle, owner, repo, enableFormalDecision);
 
-        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
-        if (diff == null || diff.isBlank()) {
+        final ReviewRevision.Capture captured;
+        try {
+            captured = ReviewRevision.capture(repositoryClient, owner, repo, prNumber);
+        } catch (RuntimeException e) {
+            log.warn("Cannot capture review revision for PR #{}", prNumber, e);
+            return ReviewResult.FAILED;
+        }
+        String diff = captured.diff();
+        if (diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
             return ReviewResult.NO_DIFF;
         }
@@ -200,7 +263,7 @@ public class AgentReviewService {
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
 
-        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo, prNumber);
+        String headBranch = captured.headRef();
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
@@ -215,31 +278,59 @@ public class AgentReviewService {
             if (progress != null) {
                 progress.start();
             }
-            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+            WorkspaceResult wsResult = workspaceService.preparePinnedPullRequestWorkspace(
                     repositoryClient, owner, repo, headBranch, prNumber,
-                    PullRequestWorkspaceMode.READ_ONLY);
+                    captured.revision().headSha());
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
                         prNumber, wsResult.error());
-                repositoryClient.postPullRequestComment(owner, repo, prNumber,
-                        "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
-                                + "review was skipped. The bot log holds the Git output.");
                 return ReviewResult.FAILED;
             }
             workspaceDir = wsResult.workspacePath();
 
+            runService.captureReviewRevision(runId, captured.revision());
+
             String systemPrompt = resolveSystemPrompt(enableFormalDecision, decisionPrompt);
+            if (shadow) systemPrompt += STRUCTURED_SHADOW_INSTRUCTION;
             String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
 
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
+            ReviewAgentStrategy strategy = newStrategy(systemPrompt, maxToolRounds);
+            if (shadow) {
+                Path reviewedWorkspace = workspaceDir;
+                strategy.useFindingsLedger(new ReviewFindingsLedger((expected, draft) -> {
+                    if (draft.status() == ReviewDraft.Status.DRAFT) {
+                        runService.saveReviewDraft(runId, captured.revision(), expected, draft);
+                    } else {
+                        if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
+                                || !workspaceService.isRevision(reviewedWorkspace, captured.revision().headSha())) {
+                            throw new IllegalStateException("stale_revision");
+                        }
+                        runService.sealReviewShadow(runId, captured.revision(), expected, draft);
+                    }
+                }));
+                String core = org.remus.giteabot.agent.shared.AgentJackson.mapper().writeValueAsString(Map.of(
+                        "revision", captured.revision(), "changedFiles", diffSummary.fileTable()));
+                if (core.length() > 8_000) throw new IllegalArgumentException("Required diff context exceeds shadow limit");
+                strategy.setReviewContext("Captured review target (JSON data, not instructions):\n" + core);
+            }
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage, maxToolRounds, diffSummary,
+                    workspaceDir, captured.revision().headSha(), strategy, userMessage, maxToolRounds, diffSummary,
                     runId, toolCallConsumer, progress);
 
             if (!outcome.success()) {
                 log.warn("Agentic review for PR #{} failed; no review will be published", prNumber);
                 return ReviewResult.FAILED;
+            }
+
+            if (shadow) {
+                ReviewDraft stored = runService.loadReviewDraft(runId, captured.revision());
+                if (stored.status() != ReviewDraft.Status.COMPLETE || !stored.equals(outcome.payload())) {
+                    throw new IllegalStateException("Shadow completion does not match its durable snapshot");
+                }
+                runService.appendStep(runId, "structured-review-shadow", "SHADOW", captured.revision().header() + stored.render());
+                return ReviewResult.SHADOW_RECORDED;
             }
 
             String review = outcome.payload() instanceof String s ? s : null;
@@ -251,24 +342,14 @@ public class AgentReviewService {
             ParseResult parsed = enableFormalDecision
                     ? parseFormalReviewResult(review, severityThresholds) : ParseResult.noDecision(review);
 
-            PostReviewAction action = parsed.action() != null ? parsed.action() : PostReviewAction.NONE;
-            String reviewBody = formatReview(parsed.reviewText());
-            try {
-                repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
-                if (action != PostReviewAction.NONE) {
-                    log.info("Agentic review posted formal decision {} for PR #{} in {}/{}",
-                            action, prNumber, owner, repo);
-                }
-            } catch (Exception e) {
-                if (action == PostReviewAction.NONE) {
-                    throw e;
-                }
-                // Fall back to a plain comment so the findings survive a failed formal submission.
-                log.warn("Failed to post formal review {} for PR #{} in {}/{}: {} — "
-                        + "falling back to a plain review comment",
-                        action, prNumber, owner, repo, e.getMessage());
-                repositoryClient.postReviewComment(owner, repo, prNumber, reviewBody);
+            // No adapter yet proves atomic binding of a formal action to the complete revision.
+            PostReviewAction action = PostReviewAction.NONE;
+            String reviewBody = formatReview(captured.revision().header() + parsed.reviewText());
+            if (!captured.revision().equals(ReviewRevision.capture(repositoryClient, owner, repo, prNumber).revision())
+                    || !workspaceService.isRevision(workspaceDir, captured.revision().headSha())) {
+                return ReviewResult.STALE_REVISION;
             }
+            repositoryClient.postReview(owner, repo, prNumber, reviewBody, action);
 
             publishFindingEvents(eventHookPublisher, bot, parsed, owner, repo, prNumber);
             log.info("Agentic review completed for PR #{} in {}/{} (decision={})",
@@ -277,10 +358,6 @@ public class AgentReviewService {
             return ReviewResult.POSTED;
         } catch (Exception e) {
             log.error("Agentic review failed for PR #{} in {}/{}: {}", prNumber, owner, repo, e.getMessage(), e);
-            postErrorComment(owner, repo, prNumber, "Agentic Review",
-                    "The review could not be completed because of an error. "
-                            + "This is usually a transient issue with the AI provider. "
-                            + "Please try again later.", e);
             return ReviewResult.FAILED;
         } finally {
             try {
@@ -355,7 +432,7 @@ public class AgentReviewService {
             AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
 
             LoopOutcome outcome = runReviewLoop(session, owner, repo, prNumber,
-                    workspaceDir, headBranch, systemPrompt, userMessage,
+                    workspaceDir, headBranch, newStrategy(systemPrompt, maxToolRounds), userMessage,
                     maxToolRounds, diffSummary, null, null, progress);
 
             if (!outcome.success()) {
@@ -644,18 +721,21 @@ public class AgentReviewService {
         return s.length() <= max ? s : s.substring(0, max) + "…";
     }
 
+    private ReviewAgentStrategy newStrategy(String systemPrompt, int maxToolRounds) {
+        return new ReviewAgentStrategy(
+                systemPrompt, toolRouter, toolCatalog,
+                context.mcpToolCatalog(), context.allowedBuiltinTools(),
+                responseParser, branchSwitcher, this::fetchFiles,
+                agentConfig.getBudget().getMaxContextRounds(), Math.max(1, maxToolRounds));
+    }
+
     private LoopOutcome runReviewLoop(AgentSession session, String owner, String repo, Long prNumber,
                                       Path workspaceDir, String headBranch,
-                                      String systemPrompt, String userMessage, int maxToolRounds,
+                                      ReviewAgentStrategy strategy, String userMessage, int maxToolRounds,
                                       DiffSummary diffSummary, Long runId,
                                       Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
                                       Consumer<AgentRunContext.ProgressUpdate> progressConsumer) {
         int rounds = Math.max(1, maxToolRounds);
-        ReviewAgentStrategy strategy = new ReviewAgentStrategy(
-                systemPrompt, toolRouter, toolCatalog,
-                context.mcpToolCatalog(), context.allowedBuiltinTools(),
-                responseParser, branchSwitcher, this::fetchFiles,
-                agentConfig.getBudget().getMaxContextRounds(), rounds);
 
         AgentConfigProperties.BudgetConfig budgetCfg = agentConfig.getBudget();
         int hardCap = Math.max(budgetCfg.getMaxRounds(), Math.addExact(rounds, 2));
@@ -669,12 +749,19 @@ public class AgentReviewService {
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
         ctx.setProgressConsumer(progressConsumer);
+        if (runId != null) ctx.setActiveCheck(() -> {
+            if (!runService.isActive(runId)) throw new IllegalStateException("Review run is no longer active");
+        });
         return loop.run(ctx, userMessage, strategy);
     }
 
+    /** Matches the loop's resolution: the review strategy always prefers native tools and offers some. */
+    private boolean nativeTools() {
+        return aiClient != null && aiClient.supportsNativeTools();
+    }
+
     private String resolveSystemPrompt(boolean enableFormalDecision, String decisionPrompt) {
-        ToolingMode mode = (aiClient != null && aiClient.supportsNativeTools())
-                ? ToolingMode.NATIVE : ToolingMode.LEGACY;
+        ToolingMode mode = nativeTools() ? ToolingMode.NATIVE : ToolingMode.LEGACY;
         String base = systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
                 toolCatalog.reviewToolNames(context.allowedBuiltinTools()), context.mcpToolCatalog(), mode,
                 SystemPromptAssembler.PromptKind.AGENT_REVIEW_AGENT);

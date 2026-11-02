@@ -74,6 +74,10 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private final int maxContextRounds;
     private final int maxToolRounds;
     private int toolRounds;
+    private ReviewFindingsLedger ledger;
+    private boolean finalizing;
+    private boolean repairUsed;
+    private String reviewContext = "";
 
     /** Read-only context-fetch rounds consumed in legacy mode. */
     private int contextRounds = 0;
@@ -115,6 +119,11 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     @Override
     public String roundBudgetReminder(int remainingRounds, ToolingMode mode) {
+        if (ledger != null) {
+            return remainingRounds <= 3 || finalizing
+                    ? "Conclude with submit_review only. Do not request further inspection. Assistant text cannot finish a shadow review."
+                    : null;
+        }
         int explorationRounds = mode == ToolingMode.NATIVE
                 ? maxToolRounds - toolRounds : maxContextRounds - contextRounds;
         return Math.min(remainingRounds, explorationRounds) <= CLOSING_REMINDER_OFFSET + 1 ? """
@@ -132,11 +141,34 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         return ToolingMode.NATIVE;
     }
 
-    /** Read-only review toolbox plus the explicitly selected MCP catalog. */
+    /** Read-only review toolbox, the explicitly selected MCP catalog and the findings record. */
     @Override
     public List<ToolDescriptor> toolDescriptors() {
-        return catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, mcpToolCatalog, allowedBuiltinTools);
+        if (ledger != null && finalizing) return List.of(ReviewFindingsLedger.submitDescriptor());
+        List<ToolDescriptor> tools = new ArrayList<>(
+                catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, mcpToolCatalog, allowedBuiltinTools));
+        if (ledger != null) {
+            tools.add(ReviewFindingsLedger.descriptor());
+            tools.add(ReviewFindingsLedger.submitDescriptor());
+        }
+        return tools;
     }
+
+    @Override
+    public String requiredContext() {
+        return ledger == null ? null : reviewContext + "\n" + ledger.requiredContext();
+    }
+
+    /** Installs the persisted record only for the later, explicitly nonpublishing protocol. */
+    void useFindingsLedger(ReviewFindingsLedger ledger) {
+        this.ledger = java.util.Objects.requireNonNull(ledger);
+    }
+
+    void setReviewContext(String reviewContext) { this.reviewContext = reviewContext; }
+
+    @Override public int reservedFinalizationRounds() { return ledger == null ? 0 : 2; }
+    @Override public void beginFinalization() { finalizing = ledger != null; }
+
 
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
@@ -144,22 +176,42 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         if (turn.stopReason() != expected) {
             return incompleteTurn(ctx, turn.stopReason());
         }
+        if (ledger != null && turn.toolCalls().stream().anyMatch(call -> ReviewFindingsLedger.SUBMIT.equals(call.name()))) {
+            beginFinalization();
+            if (turn.toolCalls().size() != 1) return repairToolTurn(ctx, turn, "submit_review must be the only tool call");
+            StepDecision result = submit(ctx, turn.toolCalls().getFirst().args());
+            return result instanceof StepDecision.Continue next ? toolReply(turn, next.nextUserMessage()) : result;
+        }
+        if (ledger != null && finalizing && turn.hasToolCalls()) return repairToolTurn(ctx, turn, "Only submit_review is allowed now");
         // Only a completed, non-empty text turn may become the final review.
         if (!turn.hasToolCalls()) {
             return finish(ctx, turn.assistantText());
         }
 
-        if (toolRounds >= maxToolRounds) {
-            return new StepDecision.Finish(onBudgetExhausted(ctx));
-        }
-        toolRounds++;
-
-        // Execute every requested (read-only) tool and feed the results back.
+        // Findings are recorded locally; only repository inspection spends the tool-round budget.
+        Map<String, String> ledgerResults = new HashMap<>();
         List<ImplementationPlan.ToolRequest> requests = new ArrayList<>();
         for (ToolCall call : turn.toolCalls()) {
-            requests.add(toRequest(call));
+            ctx.requireActive();
+            if (ledger != null && ReviewFindingsLedger.TOOL.equals(call.name())) {
+                ledgerResults.put(call.id(), ledger.apply(call.args()));
+            } else {
+                requests.add(toRequest(call));
+            }
         }
-        if (ctx.progressConsumer() != null) {
+        if (!requests.isEmpty()) {
+            if (toolRounds >= maxToolRounds) {
+                if (ledger != null) {
+                    beginFinalization();
+                    return toolReply(turn, "Exploration budget reached; submit_review using the recorded findings");
+                }
+                return new StepDecision.Finish(onBudgetExhausted(ctx));
+            }
+            toolRounds++;
+        }
+
+        // Execute every requested (read-only) tool and feed the results back.
+        if (ctx.progressConsumer() != null && !requests.isEmpty()) {
             ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(round,
                     "Inspecting repository: "
                             + String.join(", ", requests.stream().map(ImplementationPlan.ToolRequest::getTool).toList()), 0));
@@ -169,7 +221,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
                     round, "Repository inspection completed", results.size()));
         }
-        List<StepDecision.ToolCallResult> packaged = packageResults(requests, results, turn.toolCalls());
+        List<StepDecision.ToolCallResult> packaged = packageResults(requests, results, turn.toolCalls(), ledgerResults);
         return new StepDecision.ContinueWithToolResults(packaged, null);
     }
 
@@ -192,6 +244,25 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     @Override
     public StepDecision step(AgentRunContext ctx, String aiResponse, int round) {
+        if (ledger != null) {
+            try {
+                var node = ReviewDraft.readInput(aiResponse);
+                if (node.has(ReviewFindingsLedger.SUBMIT)) {
+                    beginFinalization();
+                    ReviewFindingsLedger.fields(node, Set.of(ReviewFindingsLedger.SUBMIT));
+                    return submit(ctx, node.get(ReviewFindingsLedger.SUBMIT));
+                }
+                if (finalizing) return repair(ctx, "Only submit_review is allowed now");
+                if (node.has(ReviewFindingsLedger.TOOL)) {
+                    ReviewFindingsLedger.fields(node, Set.of(ReviewFindingsLedger.TOOL));
+                    ctx.requireActive();
+                    return new StepDecision.Continue(ledger.apply(node.get(ReviewFindingsLedger.TOOL)));
+                }
+                ReviewFindingsLedger.fields(node, Set.of("requestFiles", "requestTools", "runTools"));
+            } catch (IllegalArgumentException e) {
+                return repair(ctx, e.getMessage());
+            }
+        }
         ImplementationPlan plan = responseParser.parseAiResponse(aiResponse);
 
         // Collect legacy tool requests (requestTools/runTools) and explicit file requests.
@@ -229,11 +300,16 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             }
             return new StepDecision.Continue(
                     "Here is the requested repository context:\n" + context
-                            + "\n\nContinue your review. When you have gathered enough context, reply with "
-                            + "the final review as plain Markdown (no JSON, no further tool requests).");
+                            + (ledger != null ? "\n\nRecord findings, then finish with submit_review."
+                            : "\n\nContinue your review. When you have gathered enough context, reply with "
+                            + "the final review as plain Markdown (no JSON, no further tool requests)."));
         }
 
         if (wantsContext) {
+            if (ledger != null) {
+                beginFinalization();
+                return new StepDecision.Continue("Exploration budget reached; submit_review using the recorded findings");
+            }
             log.warn("Agentic review (legacy) hit the context-round cap ({}) for PR #{} before completion",
                     maxContextRounds, ctx.issueNumber());
             return new StepDecision.Finish(onBudgetExhausted(ctx));
@@ -251,11 +327,44 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     // ---------------------------------------------------------------------
 
     private StepDecision finish(AgentRunContext ctx, String review) {
+        if (ledger != null) return repair(ctx, "Assistant text is diagnostic; finish with submit_review");
         if (review == null || review.isBlank()) {
             return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(),
                     "⚠️ *The review feedback was empty or could not be generated by the agent.*"));
         }
         return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), review));
+    }
+
+    private StepDecision submit(AgentRunContext ctx, tools.jackson.databind.JsonNode args) {
+        ctx.requireActive();
+        beginFinalization();
+        final ReviewDraft sealed;
+        try {
+            sealed = ledger.submit(args);
+        } catch (IllegalArgumentException e) {
+            return repair(ctx, e.getMessage());
+        }
+        return new StepDecision.Finish(sealed.status() == ReviewDraft.Status.COMPLETE
+                ? LoopOutcome.success(ctx.baseBranch(), sealed)
+                : LoopOutcome.fail(ctx.baseBranch(), "insufficient_context"));
+    }
+
+    private StepDecision repair(AgentRunContext ctx, String message) {
+        beginFinalization();
+        if (repairUsed) return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(), "Structured review failed after one repair"));
+        repairUsed = true;
+        return new StepDecision.Continue("Invalid structured review: " + message + ". Use submit_review for a terminal result.");
+    }
+
+    private StepDecision repairToolTurn(AgentRunContext ctx, ChatTurn turn, String message) {
+        StepDecision result = repair(ctx, message);
+        return result instanceof StepDecision.Continue next ? toolReply(turn, next.nextUserMessage()) : result;
+    }
+
+    private StepDecision toolReply(ChatTurn turn, String message) {
+        return new StepDecision.ContinueWithToolResults(turn.toolCalls().stream()
+                .map(call -> new StepDecision.ToolCallResult(call.id(), "Rejected: " + message)).toList(),
+                "Repair the structured submission using submit_review only.");
     }
 
     /**
@@ -319,6 +428,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private List<ToolResult> executeAll(AgentRunContext ctx, List<ImplementationPlan.ToolRequest> requests) {
         List<ToolResult> results = new ArrayList<>(requests.size());
         for (ImplementationPlan.ToolRequest req : requests) {
+            ctx.requireActive();
             results.add(toolRouter.execute(AgentToolRouter.Mode.REVIEW,
                     new ToolCallContext(ctx.owner(), ctx.repo(), ctx.issueNumber(),
                             ctx.workspaceDir(), req, ctx.diffSummary())));
@@ -328,8 +438,9 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     private List<StepDecision.ToolCallResult> packageResults(List<ImplementationPlan.ToolRequest> requests,
                                                              List<ToolResult> results,
-                                                             List<ToolCall> originalCalls) {
-        Map<String, String> byId = new HashMap<>();
+                                                             List<ToolCall> originalCalls,
+                                                             Map<String, String> presetResults) {
+        Map<String, String> byId = new HashMap<>(presetResults);
         for (int i = 0; i < requests.size(); i++) {
             byId.put(requests.get(i).getId(), results.get(i).formatForAi());
         }
