@@ -65,7 +65,10 @@ public class AiUsageLog {
     @Column(name = "agent_round")
     private Integer round;
 
-    /** Raw request body sent to the AI provider (JSON), for audit/debug. */
+    /**
+     * Raw request body sent to the AI provider (JSON), for audit/debug. The column is
+     * {@code TEXT} (V45); {@code length} is only mapping metadata and does not limit it.
+     */
     @Column(name = "raw_request", length = 65535)
     private String rawRequest;
 

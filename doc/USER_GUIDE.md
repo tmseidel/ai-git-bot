@@ -62,7 +62,7 @@ A paginated table (20 entries per page) of every AI interaction with the columns
 
 Click the **Raw** button in the **Details** column to open a modal showing the raw JSON request sent to the AI provider and the raw JSON response received back. This is useful for debugging provider-specific behavior, token accounting discrepancies, or unexpected completions.
 
-Raw payload capture is **disabled by default** because the payloads can be large and may contain sensitive prompt content. When disabled, the **Details** column is hidden from the AI usage table entirely. To enable it, set the configuration property `ai-usage.raw-payloads-enabled=true` (for example, in `application.properties`, `application.yml`, or via the `AI_USAGE_RAW_PAYLOADS_ENABLED` environment variable when running under Docker). You can also cap the stored payload size with `ai-usage.max-raw-payload-length` (default: 65535, which matches the `ai_usage_log.raw_request` / `raw_response` column size). The modal shows **—** when a payload is not available.
+Raw payload capture is **disabled by default** because the payloads can be large and may contain sensitive prompt content. When disabled, the **Details** column is hidden from the AI usage table entirely. To enable it, set the configuration property `ai-usage.raw-payloads-enabled=true` (for example, in `application.properties`, `application.yml`, or via the `AI_USAGE_RAW_PAYLOADS_ENABLED` environment variable when running under Docker). You can also cap the stored payload size with `ai-usage.max-raw-payload-length` (default: 65535). Set it to `0` to store payloads in full; the Usage page then embeds the full payloads of every shown row, so it can get large. The modal shows **—** when a payload is not available.
 
 ### Errors
 

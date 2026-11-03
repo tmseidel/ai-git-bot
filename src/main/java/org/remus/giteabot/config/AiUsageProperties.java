@@ -21,18 +21,17 @@ public class AiUsageProperties {
 
     /**
      * Maximum length of a raw request/response payload stored in the audit log.
-     * Longer payloads are truncated to this length. The database columns
-     * {@code ai_usage_log.raw_request} and {@code ai_usage_log.raw_response}
-     * are sized for 65535 characters; higher values are capped to that limit.
+     * Longer payloads are truncated to this length. {@code 0} or a negative value
+     * stores payloads in full. The columns {@code ai_usage_log.raw_request} and
+     * {@code ai_usage_log.raw_response} are {@code TEXT}, so any length fits.
      */
     private int maxRawPayloadLength = 65535;
 
     /**
-     * Returns the effective maximum raw payload length, capped at the database
-     * column size so truncation can never produce a value too large for the
-     * schema.
+     * Returns the effective maximum raw payload length: {@link Integer#MAX_VALUE}
+     * (no truncation) when {@link #maxRawPayloadLength} is {@code 0} or negative.
      */
     public int getEffectiveMaxRawPayloadLength() {
-        return Math.min(maxRawPayloadLength, 65535);
+        return maxRawPayloadLength <= 0 ? Integer.MAX_VALUE : maxRawPayloadLength;
     }
 }
