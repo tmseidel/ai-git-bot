@@ -1,9 +1,10 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.bitbucket;
 
 import lombok.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.client.RestClient;

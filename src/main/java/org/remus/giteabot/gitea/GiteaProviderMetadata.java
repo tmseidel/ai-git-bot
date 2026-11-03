@@ -1,53 +1,38 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.gitea;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.github.GitHubApiClient;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryProviderMetadata;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 /**
- * Metadata and factory for GitHub repository integration.
- * Handles URL transformations between github.com and api.github.com,
- * and creates properly configured GitHub API clients.
+ * Metadata and factory for Gitea repository integration.
+ * Handles URL transformations and creates properly configured Gitea API clients.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class GitHubProviderMetadata implements RepositoryProviderMetadata {
+public class GiteaProviderMetadata implements RepositoryProviderMetadata {
 
-    private static final String DEFAULT_WEB_URL = "https://github.com";
-    private static final String DEFAULT_API_URL = "https://api.github.com";
+    private static final String DEFAULT_WEB_URL = "https://gitea.example.com";
 
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
     public RepositoryType getProviderType() {
-        return RepositoryType.GITHUB;
+        return RepositoryType.GITEA;
     }
 
     public String resolveApiUrl(GitIntegration integration) {
-        String url = integration.getUrl();
-        if (url == null || url.isBlank()) {
-            return DEFAULT_API_URL;
-        }
-
-        // Already an API URL
-        if (url.contains("api.github.com") || url.contains("/api/v3")) {
-            return url;
-        }
-
-        // Public GitHub: github.com -> api.github.com
-        if (url.contains("github.com")) {
-            return url.replace("github.com", "api.github.com");
-        }
-
-        // GitHub Enterprise: add /api/v3 suffix
-        String baseUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
-        return baseUrl + "/api/v3";
+        // Gitea's API is at the same base URL, just with /api/v1 paths
+        // The RestClient uses the base URL and adds /api/v1 in each request
+        return integration.getUrl();
     }
 
     public String resolveCloneUrl(GitIntegration integration) {
@@ -56,21 +41,17 @@ public class GitHubProviderMetadata implements RepositoryProviderMetadata {
             return DEFAULT_WEB_URL;
         }
 
-        // Convert API URL back to web URL
-        if (url.contains("api.github.com")) {
-            return url.replace("api.github.com", "github.com");
-        }
-
-        // GitHub Enterprise: remove /api/v3 suffix
-        if (url.contains("/api/v3")) {
-            return url.replaceAll("/api/v3/?$", "");
+        // Remove /api/v1 suffix if present
+        if (url.contains("/api/v1")) {
+            return url.replaceAll("/api/v1/?$", "");
         }
 
         return url;
     }
 
     public String buildAuthorizationHeader(String token) {
-        return "Bearer " + token;
+        // Gitea uses "token <token>" format
+        return "token " + token;
     }
 
     @Override
@@ -78,7 +59,7 @@ public class GitHubProviderMetadata implements RepositoryProviderMetadata {
         String apiUrl = resolveApiUrl(integration);
         String authHeader = buildAuthorizationHeader(decryptedToken);
 
-        log.debug("Building GitHub RestClient: apiUrl={}", apiUrl);
+        log.debug("Building Gitea RestClient: apiUrl={}", apiUrl);
 
         return restClientBuilder.getObject()
                 .baseUrl(apiUrl)
@@ -96,7 +77,7 @@ public class GitHubProviderMetadata implements RepositoryProviderMetadata {
 
     @Override
     public RepositoryApiClient createClient(RestClient restClient, RepositoryCredentials credentials) {
-        return new GitHubApiClient(restClient, credentials);
+        return new GiteaApiClient(restClient, credentials);
     }
 }
 
