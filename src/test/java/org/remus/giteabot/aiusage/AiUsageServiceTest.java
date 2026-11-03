@@ -177,9 +177,9 @@ class AiUsageServiceTest {
 
     @Test
     void findUsage_fallsBackToTimestampForUnknownSortColumn() {
-        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        Page<AiUsageRow> page = new PageImpl<>(List.of());
         ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+        when(usageRepository.findRowsByTimestampBetween(any(), any(), captor.capture()))
                 .thenReturn(page);
 
         service.findUsage(null, null, 0, AiUsageService.PAGE_SIZE, "evil'); DROP TABLE", false);
@@ -192,9 +192,9 @@ class AiUsageServiceTest {
 
     @Test
     void findUsage_usesRequestedPageSize() {
-        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        Page<AiUsageRow> page = new PageImpl<>(List.of());
         ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+        when(usageRepository.findRowsByTimestampBetween(any(), any(), captor.capture()))
                 .thenReturn(page);
 
         service.findUsage(null, null, 0, 100, "timestamp", false);
@@ -231,9 +231,9 @@ class AiUsageServiceTest {
 
     @Test
     void findUsage_clampsOversizedPageSizeToMax() {
-        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        Page<AiUsageRow> page = new PageImpl<>(List.of());
         ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+        when(usageRepository.findRowsByTimestampBetween(any(), any(), captor.capture()))
                 .thenReturn(page);
 
         service.findUsage(null, null, 0, 1_000_000, "timestamp", false);
@@ -255,13 +255,30 @@ class AiUsageServiceTest {
 
     @Test
     void findUsage_keepsPageSizeAtMaxBoundary() {
-        Page<AiUsageLog> page = new PageImpl<>(List.of());
+        Page<AiUsageRow> page = new PageImpl<>(List.of());
         ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        when(usageRepository.findByTimestampBetween(any(), any(), captor.capture()))
+        when(usageRepository.findRowsByTimestampBetween(any(), any(), captor.capture()))
                 .thenReturn(page);
 
         service.findUsage(null, null, 0, AiUsageService.MAX_PAGE_SIZE, "timestamp", false);
 
         assertEquals(AiUsageService.MAX_PAGE_SIZE, captor.getValue().getPageSize());
+    }
+
+    @Test
+    void findRawPayload_readsTheEntryWhenCaptureIsEnabled() {
+        when(usageProperties.isRawPayloadsEnabled()).thenReturn(true);
+        AiUsageRawPayload payload = new AiUsageRawPayload("req", "res");
+        when(usageRepository.findRawPayloadById(5L)).thenReturn(java.util.Optional.of(payload));
+
+        assertEquals(java.util.Optional.of(payload), service.findRawPayload(5L));
+    }
+
+    @Test
+    void findRawPayload_isEmptyWhenCaptureIsDisabled() {
+        when(usageProperties.isRawPayloadsEnabled()).thenReturn(false);
+
+        assertTrue(service.findRawPayload(5L).isEmpty());
+        org.mockito.Mockito.verifyNoInteractions(usageRepository);
     }
 }

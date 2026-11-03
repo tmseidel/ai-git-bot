@@ -184,7 +184,7 @@ These variables control the optional raw request/response payload capture on the
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AI_USAGE_RAW_PAYLOADS_ENABLED` | `false` | Set to `true` to store raw AI request/response JSON in the audit log and show the **Details** column on the Usage page. |
-| `AI_USAGE_MAX_RAW_PAYLOAD_LENGTH` | `65535` | Maximum characters stored per raw payload. Longer payloads are truncated to this length. `0` stores payloads in full; note that the Usage page embeds every payload of the shown rows, so full payloads make it heavy. |
+| `AI_USAGE_MAX_RAW_PAYLOAD_LENGTH` | `65535` | Maximum characters stored per raw payload. Longer payloads are truncated to this length. `0` stores payloads in full. Agent runs send the whole conversation with every request, so full payloads grow the database quickly. |
 
 ### Anthropic Extended Thinking (Optional)
 

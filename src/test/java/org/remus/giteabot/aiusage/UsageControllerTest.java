@@ -21,12 +21,15 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.never;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
@@ -65,49 +68,59 @@ class UsageControllerTest {
     @MockitoBean
     private AdminUserRepository adminUserRepository;
 
+    private static AiUsageRow row(long id, Integer round) {
+        return new AiUsageRow(id, Instant.parse("2026-06-01T10:15:30Z"), "my-openai", "owner/repo#42", round,
+                120, 35, 0, 0);
+    }
+
     @Test
-    void usage_rendersRawPayloadModalForEntriesWithPayloads() throws Exception {
+    void usage_rendersDetailsButtonThatLoadsThePayloadOnDemand() throws Exception {
         when(usageProperties.isRawPayloadsEnabled()).thenReturn(true);
-
-        AiUsageLog usage = new AiUsageLog();
-        usage.setId(7L);
-        usage.setTimestamp(Instant.parse("2026-06-01T10:15:30Z"));
-        usage.setAiIntegrationName("my-openai");
-        usage.setSessionId("owner/repo#42");
-        usage.setInputTokens(120);
-        usage.setOutputTokens(35);
-        usage.setRawRequest("{\"model\":\"gpt-4o\"}");
-        usage.setRawResponse("{\"choices\":[]}");
-
         when(aiUsageService.findUsage(any(), any(), anyInt(), anyInt(), anyString(), anyBoolean()))
-                .thenReturn(new PageImpl<>(List.of(usage), PageRequest.of(0, 20), 1));
+                .thenReturn(new PageImpl<>(List.of(row(7, null)), PageRequest.of(0, 20), 1));
         when(aiUsageService.findErrors(any(), any(), anyInt(), anyInt(), anyString(), anyBoolean()))
                 .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
         mockMvc.perform(get("/usage").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("data-bs-target=\"#rawPayloadModal-7\"")))
-                .andExpect(content().string(containsString("id=\"rawPayloadModal-7\"")))
-                .andExpect(content().string(containsString("{&quot;model&quot;:&quot;gpt-4o&quot;}")))
-                .andExpect(content().string(containsString("{&quot;choices&quot;:[]}")));
+                .andExpect(content().string(containsString("data-bs-target=\"#rawPayloadModal\"")))
+                .andExpect(content().string(containsString("data-raw-url=\"/usage/7/raw\"")))
+                .andExpect(content().string(containsString("id=\"rawPayloadModal\"")));
+        // the page only carries rows: the service is never asked for payloads while rendering
+        verify(aiUsageService, never()).findRawPayload(anyLong());
+    }
+
+    @Test
+    void rawPayload_returnsTheEntryPayloadsAsJson() throws Exception {
+        when(aiUsageService.findRawPayload(7L))
+                .thenReturn(Optional.of(new AiUsageRawPayload("{\"model\":\"gpt-4o\"}", null)));
+
+        mockMvc.perform(get("/usage/7/raw").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.rawRequest").value("{\"model\":\"gpt-4o\"}"))
+                .andExpect(jsonPath("$.rawResponse").doesNotExist());
+    }
+
+    @Test
+    void rawPayload_isNotFoundForMissingEntriesOrDisabledCapture() throws Exception {
+        when(aiUsageService.findRawPayload(anyLong())).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/usage/8/raw").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void rawPayload_requiresAuthentication() throws Exception {
+        mockMvc.perform(get("/usage/7/raw"))
+                .andExpect(status().is3xxRedirection());
+        verify(aiUsageService, never()).findRawPayload(anyLong());
     }
 
     @Test
     void usage_hidesDetailsColumnWhenRawPayloadsDisabled() throws Exception {
         when(usageProperties.isRawPayloadsEnabled()).thenReturn(false);
-
-        AiUsageLog usage = new AiUsageLog();
-        usage.setId(7L);
-        usage.setTimestamp(Instant.parse("2026-06-01T10:15:30Z"));
-        usage.setAiIntegrationName("my-openai");
-        usage.setSessionId("owner/repo#42");
-        usage.setInputTokens(120);
-        usage.setOutputTokens(35);
-        usage.setRawRequest("{\"model\":\"gpt-4o\"}");
-        usage.setRawResponse("{\"choices\":[]}");
-
         when(aiUsageService.findUsage(any(), any(), anyInt(), anyInt(), anyString(), anyBoolean()))
-                .thenReturn(new PageImpl<>(List.of(usage), PageRequest.of(0, 20), 1));
+                .thenReturn(new PageImpl<>(List.of(row(7, null)), PageRequest.of(0, 20), 1));
         when(aiUsageService.findErrors(any(), any(), anyInt(), anyInt(), anyString(), anyBoolean()))
                 .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
 
@@ -116,18 +129,12 @@ class UsageControllerTest {
                 .andExpect(content().string(containsString("AI usage")))
                 .andExpect(content().string(containsString("my-openai")))
                 .andExpect(content().string(org.hamcrest.Matchers.not(containsString("Raw LLM payloads"))))
-                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("data-bs-target=\"#rawPayloadModal-7\""))));
+                .andExpect(content().string(org.hamcrest.Matchers.not(containsString("data-raw-url="))));
     }
 
     @Test
     void usage_rendersUsageAndErrorSections() throws Exception {
-        AiUsageLog usage = new AiUsageLog();
-        usage.setId(1L);
-        usage.setTimestamp(Instant.parse("2026-06-01T10:15:30Z"));
-        usage.setAiIntegrationName("my-openai");
-        usage.setSessionId("owner/repo#42");
-        usage.setInputTokens(120);
-        usage.setOutputTokens(35);
+        AiUsageRow usage = row(1, null);
 
         AiErrorLog error = new AiErrorLog();
         error.setId(2L);
@@ -178,14 +185,7 @@ class UsageControllerTest {
 
     @Test
     void usage_rendersAgentLoopRoundColumn() throws Exception {
-        AiUsageLog entry = new AiUsageLog();
-        entry.setId(3L);
-        entry.setTimestamp(Instant.parse("2026-06-01T10:15:30Z"));
-        entry.setAiIntegrationName("my-openai");
-        entry.setSessionId("owner/repo#42");
-        entry.setRound(4);
-        entry.setInputTokens(120);
-        entry.setOutputTokens(35);
+        AiUsageRow entry = row(3, 4);
 
         when(aiUsageService.findUsage(any(), any(), anyInt(), anyInt(), anyString(), anyBoolean()))
                 .thenReturn(new PageImpl<>(List.of(entry), PageRequest.of(0, 20), 1));

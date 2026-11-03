@@ -16,6 +16,7 @@ import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -111,12 +112,25 @@ public class AiUsageService {
         usageRepository.deleteAllInBatch();
     }
 
+    /** A page of Usage table rows; the raw payloads are not loaded (see {@link #findRawPayload}). */
     @Transactional(readOnly = true)
-    public Page<AiUsageLog> findUsage(Instant from, Instant to, int page, int pageSize,
+    public Page<AiUsageRow> findUsage(Instant from, Instant to, int page, int pageSize,
                                       String sortColumn, boolean ascending) {
         String column = USAGE_SORT_COLUMNS.contains(sortColumn) ? sortColumn : "timestamp";
-        return usageRepository.findByTimestampBetween(effectiveFrom(from), effectiveTo(to),
+        return usageRepository.findRowsByTimestampBetween(effectiveFrom(from), effectiveTo(to),
                 PageRequest.of(page, effectivePageSize(pageSize), sortOf(column, ascending)));
+    }
+
+    /**
+     * The raw payloads of one usage entry, or empty when the entry does not exist or raw payload
+     * capture is disabled (stored payloads are then not shown, as the page hides the Details column).
+     */
+    @Transactional(readOnly = true)
+    public Optional<AiUsageRawPayload> findRawPayload(long id) {
+        if (usageProperties == null || !usageProperties.isRawPayloadsEnabled()) {
+            return Optional.empty();
+        }
+        return usageRepository.findRawPayloadById(id);
     }
 
     @Transactional(readOnly = true)
