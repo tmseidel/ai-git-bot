@@ -19,6 +19,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Stream;
@@ -608,6 +609,9 @@ public class ToolExecutionService {
 
         SearchRequest searchRequest = parseSearchRequest(arguments);
         String patternText = searchRequest.patternText();
+        if (patternText == null && !searchRequest.listFiles()) {
+            return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
+        }
         String relativePath = searchRequest.relativePath();
         Path basePath;
         try {
@@ -618,6 +622,9 @@ public class ToolExecutionService {
 
         if (!Files.exists(basePath)) {
             return new ToolResult(false, 1, "", "Path not found: " + relativePath);
+        }
+        if (searchRequest.listFiles()) {
+            return listSearchFiles(workspaceDir, basePath, searchRequest);
         }
 
         Pattern compiledPattern;
@@ -695,6 +702,31 @@ public class ToolExecutionService {
         return matches;
     }
 
+    /** {@code rg --files [path]}: lists the files a search would visit, filtered by {@code -g} globs. */
+    private ToolResult listSearchFiles(Path workspaceDir, Path basePath, SearchRequest searchRequest) {
+        List<String> files;
+        try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
+            files = stream
+                    .filter(this::isVisibleWorkspacePath)
+                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .map(path -> workspaceDir.relativize(path).toString())
+                    .filter(path -> matchesAnyGlob(path, searchRequest.includeGlobs(), searchRequest.caseInsensitive()))
+                    .sorted()
+                    .limit(MAX_SEARCH_MATCHES + 1L)
+                    .toList();
+        } catch (IOException e) {
+            return new ToolResult(false, -1, "", "Listing files failed: " + e.getMessage());
+        }
+        if (files.isEmpty()) {
+            return outputResult(true, 0, "No files found.", false);
+        }
+        String output = String.join("\n", files.subList(0, Math.min(files.size(), MAX_SEARCH_MATCHES)));
+        if (files.size() > MAX_SEARCH_MATCHES) {
+            output += "\n... (more than " + MAX_SEARCH_MATCHES + " files; narrow it with a path or -g <glob>)";
+        }
+        return outputResult(true, 0, output, false);
+    }
+
     private boolean shouldRetryWithUnescapedAlternation(String tool, String patternText, SearchRequest searchRequest) {
         if (searchRequest.fixedString()) {
             return false;
@@ -705,40 +737,106 @@ public class ToolExecutionService {
         return patternText.contains("\\|");
     }
 
+    /** Short ripgrep flags that take a value; the value is skipped rather than read as pattern or path. */
+    private static final Set<Character> SEARCH_VALUE_FLAGS = Set.of('A', 'B', 'C', 'm', 't', 'T', 'M', 'j', 'f');
+    private static final Set<String> SEARCH_VALUE_OPTIONS = Set.of("--max-count", "--context", "--after-context",
+            "--before-context", "--type", "--type-not", "--max-columns", "--threads", "--file");
+    /** A flag is {@code -x...} with letters/digits only, so patterns such as {@code ->} stay positional. */
+    private static final Pattern SEARCH_SHORT_FLAGS = Pattern.compile("-[A-Za-z0-9]+");
+
+    /**
+     * Ripgrep-style arguments: flags may come before, between or after the positionals, as models
+     * write {@code rg -i pattern path}. The first positional is the pattern, the second the path;
+     * {@code -e}/{@code --regexp} names the pattern explicitly and {@code --} ends the flags.
+     */
     private SearchRequest parseSearchRequest(List<String> arguments) {
-        String patternText = arguments.getFirst();
-        String relativePath = ".";
+        String patternText = null;
+        String relativePath = null;
         Set<Character> flags = new LinkedHashSet<>();
         List<String> includeGlobs = new ArrayList<>();
+        boolean flagsEnded = false;
+        boolean listFiles = false;
 
-        for (int i = 1; i < arguments.size(); i++) {
+        for (int i = 0; i < arguments.size(); i++) {
             String argument = arguments.get(i);
             if (argument == null || argument.isBlank()) {
                 continue;
             }
-            if (argument.startsWith("--include=")) {
-                includeGlobs.add(argument.substring("--include=".length()));
-                continue;
-            }
-            if (argument.startsWith("--glob=")) {
-                includeGlobs.add(argument.substring("--glob=".length()));
-                continue;
-            }
-            if ("--glob".equals(argument) || "-g".equals(argument)) {
-                if (i + 1 < arguments.size()) {
-                    includeGlobs.add(arguments.get(++i));
+            if (!flagsEnded) {
+                if ("--".equals(argument)) {
+                    flagsEnded = true;
+                    continue;
                 }
-                continue;
-            }
-            if (argument.startsWith("-") && argument.length() > 1) {
-                for (int j = 1; j < argument.length(); j++) {
-                    flags.add(argument.charAt(j));
+                if (argument.startsWith("--include=")) {
+                    includeGlobs.add(argument.substring("--include=".length()));
+                    continue;
                 }
-                continue;
+                if (argument.startsWith("--glob=")) {
+                    includeGlobs.add(argument.substring("--glob=".length()));
+                    continue;
+                }
+                if ("--glob".equals(argument) || "-g".equals(argument)) {
+                    if (i + 1 < arguments.size()) {
+                        includeGlobs.add(arguments.get(++i));
+                    }
+                    continue;
+                }
+                if ("-e".equals(argument) || "--regexp".equals(argument)) {
+                    if (i + 1 < arguments.size()) {
+                        // a positional taken for the pattern before -e was the path
+                        if (patternText != null && relativePath == null) {
+                            relativePath = patternText;
+                        }
+                        patternText = arguments.get(++i);
+                    }
+                    continue;
+                }
+                if (argument.startsWith("--regexp=")) {
+                    patternText = argument.substring("--regexp=".length());
+                    continue;
+                }
+                switch (argument) {
+                    case "--files" -> listFiles = true;
+                    case "--ignore-case" -> flags.add('i');
+                    case "--fixed-strings" -> flags.add('F');
+                    case "--files-with-matches" -> flags.add('l');
+                    default -> { }
+                }
+                if (SEARCH_VALUE_OPTIONS.contains(argument)) {
+                    i++;
+                    continue;
+                }
+                if (argument.startsWith("--")) {
+                    continue;
+                }
+                if (SEARCH_SHORT_FLAGS.matcher(argument).matches()) {
+                    for (int j = 1; j < argument.length(); j++) {
+                        char flag = argument.charAt(j);
+                        if (SEARCH_VALUE_FLAGS.contains(flag)) {
+                            // "-C 3" takes the next argument; "-C3" carries its value inline
+                            if (j == argument.length() - 1) {
+                                i++;
+                            }
+                            break;
+                        }
+                        flags.add(flag);
+                    }
+                    continue;
+                }
             }
-            if (".".equals(relativePath)) {
+            if (patternText == null) {
+                patternText = argument;
+            } else if (relativePath == null) {
                 relativePath = argument;
             }
+        }
+        if (listFiles && patternText != null && relativePath == null) {
+            // "rg --files src" takes no pattern: its positional is the path
+            relativePath = patternText;
+            patternText = null;
+        }
+        if (relativePath == null) {
+            relativePath = ".";
         }
 
         int regexFlags = flags.contains('i') ? Pattern.CASE_INSENSITIVE : 0;
@@ -746,12 +844,12 @@ public class ToolExecutionService {
         boolean filesOnly = flags.contains('l');
         boolean caseInsensitive = flags.contains('i');
         return new SearchRequest(patternText, relativePath, regexFlags, fixedString, filesOnly,
-                caseInsensitive, includeGlobs);
+                caseInsensitive, includeGlobs, listFiles);
     }
 
     private record SearchRequest(String patternText, String relativePath, int regexFlags,
                                  boolean fixedString, boolean filesOnly,
-                                 boolean caseInsensitive, List<String> includeGlobs) {
+                                 boolean caseInsensitive, List<String> includeGlobs, boolean listFiles) {
     }
 
     private ToolResult executeFindTool(Path workspaceDir, List<String> arguments) {
@@ -915,23 +1013,40 @@ public class ToolExecutionService {
         }
     }
 
+    private static final Pattern GIT_LOG_COUNT_FLAG = Pattern.compile("-(\\d+)|(?:-n|--max-count=)(\\d+)");
+
+    /**
+     * Arguments are {@code [path] [limit]} in any order. Models often add git flags: a count
+     * ({@code -20}, {@code -n 20}, {@code --max-count=20}) sets the limit, any other flag is ignored
+     * instead of being taken for a path, which used to filter the log down to nothing.
+     */
     private ToolResult executeGitLogTool(Path workspaceDir, List<String> arguments) {
         String relativePath = null;
         int limit = DEFAULT_GIT_LOG_LIMIT;
-        if (arguments != null && !arguments.isEmpty()) {
-            if (arguments.size() == 1 && isInteger(arguments.getFirst())) {
-                limit = Integer.parseInt(arguments.getFirst());
-            } else {
-                relativePath = arguments.getFirst();
-                if (arguments.size() > 1 && isInteger(arguments.get(1))) {
-                    limit = Integer.parseInt(arguments.get(1));
-                }
+        List<String> args = arguments == null ? List.of() : arguments;
+        for (int i = 0; i < args.size(); i++) {
+            String argument = args.get(i);
+            if (argument == null || argument.isBlank()) {
+                continue;
+            }
+            Matcher count = GIT_LOG_COUNT_FLAG.matcher(argument);
+            if (count.matches()) {
+                limit = Integer.parseInt(count.group(1) != null ? count.group(1) : count.group(2));
+            } else if (("-n".equals(argument) || "--max-count".equals(argument))
+                    && i + 1 < args.size() && isInteger(args.get(i + 1))) {
+                limit = Integer.parseInt(args.get(++i));
+            } else if (argument.startsWith("-")) {
+                log.debug("git-log ignores unsupported flag {}", argument);
+            } else if (isInteger(argument)) {
+                limit = Integer.parseInt(argument);
+            } else if (relativePath == null) {
+                relativePath = argument;
             }
         }
 
         List<String> command = new ArrayList<>(List.of(
                 "git", "log", "--date=short", "--pretty=format:%h %ad %an %s", "-n", String.valueOf(limit)));
-        if (relativePath != null && !relativePath.isBlank()) {
+        if (relativePath != null) {
             try {
                 resolveWorkspacePath(workspaceDir, relativePath);
             } catch (IOException e) {
@@ -940,7 +1055,13 @@ public class ToolExecutionService {
             command.add("--");
             command.add(relativePath);
         }
-        return executeCommand(workspaceDir, command.toArray(String[]::new));
+        ToolResult result = executeCommand(workspaceDir, command.toArray(String[]::new));
+        if (result.success() && (result.output() == null || result.output().isBlank())) {
+            return outputResult(true, 0, relativePath == null
+                    ? "No commits found."
+                    : "No commits found for path: " + relativePath, false);
+        }
+        return result;
     }
 
     private ToolResult executeGitBlameTool(Path workspaceDir, List<String> arguments) {

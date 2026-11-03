@@ -151,6 +151,103 @@ class ToolExecutionServiceTest {
     }
 
     @Test
+    void executeContextTool_rg_acceptsFlagsBeforeThePattern() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/OrderExporter.java"), "class OrderExporter {}\n");
+        Files.writeString(tempDir.resolve("src/Discount.java"), "class Discount {}\n");
+
+        ToolResult flagFirst = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-i", "orderexporter"));
+        ToolResult alternation = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-i", "exporter|discount", "src"));
+        ToolResult withContext = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-C", "2", "-n", "Discount", "src"));
+
+        assertThat(flagFirst.success()).isTrue();
+        assertThat(flagFirst.output()).contains("src/OrderExporter.java:1:");
+        assertThat(alternation.output()).contains("src/OrderExporter.java:1:").contains("src/Discount.java:1:");
+        assertThat(withContext.output()).contains("src/Discount.java:1:").doesNotContain("OrderExporter");
+    }
+
+    @Test
+    void executeContextTool_rg_filesListsFilesWithPathAndGlob() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.createDirectories(tempDir.resolve(".git"));
+        Files.writeString(tempDir.resolve("src/A.java"), "class A {}\n");
+        Files.writeString(tempDir.resolve("src/notes.md"), "notes\n");
+        Files.writeString(tempDir.resolve(".reviewignore"), "*.lock\n");
+        Files.writeString(tempDir.resolve(".git/HEAD"), "ref: refs/heads/main\n");
+
+        ToolResult all = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files"));
+        ToolResult inSrc = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files", "src"));
+        ToolResult javaOnly = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files", "-g", "*.java"));
+        ToolResult none = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files", "-g", "*.kt"));
+
+        assertThat(all.success()).isTrue();
+        assertThat(all.output()).contains(".reviewignore").contains("src/A.java").contains("src/notes.md")
+                .doesNotContain(".git/HEAD");
+        assertThat(inSrc.output()).contains("src/A.java").contains("src/notes.md").doesNotContain(".reviewignore");
+        assertThat(javaOnly.output()).isEqualTo("src/A.java");
+        assertThat(none.output()).isEqualTo("No files found.");
+    }
+
+    @Test
+    void executeContextTool_rg_explicitPatternAndDashPatterns() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Notes.md"), "a -> b\n-flag text\n");
+
+        ToolResult arrow = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("->", "src"));
+        ToolResult explicit = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("src", "-e", "-flag"));
+        ToolResult flagsOnly = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-i", "-n"));
+
+        assertThat(arrow.output()).contains("src/Notes.md:1:");
+        assertThat(explicit.output()).contains("src/Notes.md:2:");
+        assertThat(flagsOnly.success()).isFalse();
+        assertThat(flagsOnly.error()).contains("requires at least a pattern");
+    }
+
+    @Test
+    void executeContextTool_gitLog_ignoresFlagsAndReadsCounts() throws Exception {
+        initRepoWithCommits("first", "second", "third");
+
+        ToolResult flags = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("--oneline", "-2"));
+        ToolResult maxCount = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("-n", "1"));
+        ToolResult pathAndLimit = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("file.txt", "5"));
+
+        assertThat(flags.success()).isTrue();
+        assertThat(flags.output()).contains("third").contains("second").doesNotContain("first");
+        assertThat(maxCount.output()).contains("third").doesNotContain("second");
+        assertThat(pathAndLimit.output()).contains("first").contains("third");
+    }
+
+    @Test
+    void executeContextTool_gitLog_reportsNoCommitsInsteadOfEmptyOutput() throws Exception {
+        initRepoWithCommits("only");
+        Files.writeString(tempDir.resolve("untracked.txt"), "x");
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("untracked.txt"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).isEqualTo("No commits found for path: untracked.txt");
+    }
+
+    private void initRepoWithCommits(String... messages) throws Exception {
+        git("init", "-q");
+        for (String message : messages) {
+            Files.writeString(tempDir.resolve("file.txt"), message);
+            git("add", "file.txt");
+            git("-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", message);
+        }
+    }
+
+    private void git(String... args) throws Exception {
+        List<String> command = new java.util.ArrayList<>(List.of("git"));
+        command.addAll(List.of(args));
+        Process process = new ProcessBuilder(command).directory(tempDir.toFile()).redirectErrorStream(true).start();
+        String output = new String(process.getInputStream().readAllBytes());
+        assertThat(process.waitFor()).as(output).isZero();
+    }
+
+    @Test
     void executeContextTool_find_matchesGlobPattern() throws IOException {
         Files.createDirectories(tempDir.resolve("src"));
         Files.writeString(tempDir.resolve("src/app.yml"), "name: app");
