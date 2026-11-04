@@ -8,8 +8,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * CRUD + clone for reusable bot built-in tool configurations. Analogous to
@@ -25,6 +28,22 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class BotToolConfigurationService {
 
+    /**
+     * Tools that are never added to the Default configuration automatically — the build ships
+     * them, but a bot only gets one from a configuration an operator attaches to it.
+     *
+     * <p>{@code execute-code} runs a model-written Python program as this service user inside
+     * this container, or as one of the sandbox identities where the deployment names a pool.
+     * The Default row cannot be edited ({@link BotToolSelectionService#saveSelection} rejects
+     * it) and {@link #addMissingTools} restores whatever the row lacks on every boot, so a tool
+     * that lands in it is permanent and reaches every bot that never configured tools of its
+     * own. A code-execution tool must therefore be a decision an operator takes per bot.</p>
+     *
+     * <p>{@code DefaultToolSetInitializerTest} pins that every agent-control tool is listed
+     * here: a new one does not silently become part of the Default set.</p>
+     */
+    static final Set<String> OPT_IN_TOOLS = Set.of("execute-code");
+
     private final BotToolConfigurationRepository configurationRepository;
     private final BotToolSelectionRepository selectionRepository;
     private final BotRepository botRepository;
@@ -37,6 +56,45 @@ public class BotToolConfigurationService {
     @Transactional(readOnly = true)
     public Optional<BotToolConfiguration> findById(Long id) {
         return configurationRepository.findById(id);
+    }
+
+    /**
+     * Adds every catalog tool the configuration does not yet select.
+     *
+     * <p>Used at startup for the default configuration: the Flyway seed can only list the
+     * tools that existed when it was written, and the default configuration cannot be
+     * edited through the UI, so without this step a bot that never customised its tool
+     * set would silently lose every tool added after the seed.</p>
+     *
+     * <p>{@link #OPT_IN_TOOLS} is never added, whoever asks: a tool that runs model-written
+     * code must reach a bot through a configuration an operator attached to it, not through
+     * this row, which cannot be edited again afterwards.</p>
+     *
+     * @return the number of tools added; {@code 0} when the configuration is complete
+     */
+    @Transactional
+    public int addMissingTools(Long configurationId, List<BuiltinToolRegistry.BuiltinTool> catalog) {
+        BotToolConfiguration configuration = configurationRepository.findById(configurationId)
+                .orElseThrow(() -> new IllegalArgumentException("Tool configuration not found"));
+        Set<String> present = configuration.getSelectedTools().stream()
+                .map(BotToolSelection::getToolName)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        int added = 0;
+        for (BuiltinToolRegistry.BuiltinTool tool : catalog) {
+            if (present.contains(tool.name()) || OPT_IN_TOOLS.contains(tool.name())) {
+                continue;
+            }
+            BotToolSelection selection = new BotToolSelection();
+            selection.setConfiguration(configuration);
+            selection.setToolName(tool.name());
+            selection.setToolKind(tool.kind().name());
+            configuration.getSelectedTools().add(selection);
+            added++;
+        }
+        if (added > 0) {
+            configurationRepository.save(configuration);
+        }
+        return added;
     }
 
     @Transactional(readOnly = true)

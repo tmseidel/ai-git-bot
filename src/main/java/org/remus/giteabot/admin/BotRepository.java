@@ -42,4 +42,6 @@ public interface BotRepository extends JpaRepository<Bot, Long> {
     @Modifying
     @Query("update Bot b set b.lastErrorMessage = :message, b.lastErrorAt = :at where b.id = :id")
     int recordError(Long id, String message, Instant at);
+
+    Optional<Bot> findByName(String name);
 }

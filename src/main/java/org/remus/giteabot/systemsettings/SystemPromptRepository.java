@@ -14,4 +14,5 @@ public interface SystemPromptRepository extends JpaRepository<SystemPrompt, Long
 
     boolean existsByNameAndIdNot(String name, Long id);
 
+    Optional<SystemPrompt> findByName(String name);
 }

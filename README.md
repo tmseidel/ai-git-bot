@@ -438,6 +438,57 @@ Then:
 6. Configure the webhook
 7. You're done
 
+### Preconfigured start (from a configuration document)
+
+Instead of clicking through the admin UI, an instance can boot from a configuration
+document. The generator on **[gitbot.eu/trial](https://gitbot.eu/trial)** builds that
+document in your browser from the AI provider, Git platform and workflows you pick, and
+hands you a `docker-compose.yml` that carries it as `APP_CONFIG_JSON` — together with the
+exact webhook URL and secret to paste into your repository. Nothing you type there leaves
+the browser.
+
+The document is a projection of the entity model: one array per configuration table
+(`adminUsers`, `aiIntegrations`, `gitIntegrations`, `workflowConfigurations`, `bots`, and
+the optional `systemPrompts`, `botToolConfigurations`, `mcpConfigurations`,
+`deploymentTargets`, `eventHookEndpoints`), using the entities' own field names. There is
+no separate schema to learn or keep in sync.
+
+- It is applied **only into an empty database** — no admin user exists yet. On a
+  throw-away instance (in-memory H2) that is every start; on a persistent instance it is
+  the first start of an empty volume and never again, so a restart can never overwrite
+  what you changed in the UI.
+- A row the document declares **overrides** the seeded row of the same name — field by
+  field: values it omits keep their stored value, and a declared `selectedTools` /
+  `selectedWorkflows` list replaces the existing selection. Because the import only runs
+  on an empty database, the rows it can meet are the Flyway seeds (`Default` prompt,
+  default tool configuration, seeded workflow configurations); user data is never touched.
+  The `defaultEntry` flag itself is never taken from a document.
+- The default tool configuration is extended at startup with every built-in tool the
+  running build ships — `execute-code` excepted — because the seed can only list the tools
+  that existed when it was written and the default row cannot be edited in the UI. Code
+  execution stays out of it for the same reason it is opt-in everywhere: the row is
+  permanent once written, so a bot gets `execute-code` only from a tool configuration that
+  selects it.
+- The document must declare at least one administrator with a password. Without one it is
+  refused as a whole: nothing is imported and the instance stays unconfigured for `/setup`.
+  Exported documents carry no password, so add one before using an export as a document.
+- Credentials are plaintext in the document and encrypted at rest on import
+  (`APP_ENCRYPTION_KEY`).
+- `GET /config/export` returns the current instance in the same shape — use it to turn a
+  UI-configured instance into a document. The admin UI offers the same download under
+  **System settings → General application settings**, so it does not depend on the banner.
+- [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) is
+  a complete example: every editable property of every entity set, with notes on the values
+  that need explaining.
+
+Set `APP_CONFIG_JSON` (inline) or `APP_CONFIG_FILE` (path) to use it; leave both unset and
+the instance behaves exactly as before — you create the administrator account, the AI and
+Git integrations and the bot in the admin UI. With a document, the admin UI shows a banner
+that states which situation applies: rebuilt from the document on every start, initialised
+once into an empty database, document present but ignored because the database already
+holds data, or document present but not importable (the log names the cause, and `/setup`
+finishes the job).
+
 ### Production deployment
 
 For a configured production or long-term deployment, we recommend the Docker Compose approach, which gives you full control over configuration:
