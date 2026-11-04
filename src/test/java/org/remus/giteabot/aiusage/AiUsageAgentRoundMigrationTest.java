@@ -25,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AiUsageAgentRoundMigrationTest {
 
     private static final String URL = "jdbc:h2:mem:ai-usage-agent-round;DB_CLOSE_DELAY=-1";
-    private static final String LOCATIONS = "filesystem:src/main/resources/db/migration/h2";
+    private static final String LOCATIONS = "classpath:db/migration/h2";
 
     @Test
     void aiUsageLogCarriesTheAgentRoundColumn() throws Exception {

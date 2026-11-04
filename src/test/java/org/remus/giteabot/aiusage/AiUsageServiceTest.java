@@ -14,6 +14,7 @@ import org.springframework.data.domain.Sort;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -269,9 +271,9 @@ class AiUsageServiceTest {
     void findRawPayload_readsTheEntryWhenCaptureIsEnabled() {
         when(usageProperties.isRawPayloadsEnabled()).thenReturn(true);
         AiUsageRawPayload payload = new AiUsageRawPayload("req", "res");
-        when(usageRepository.findRawPayloadById(5L)).thenReturn(java.util.Optional.of(payload));
+        when(usageRepository.findRawPayloadById(5L)).thenReturn(Optional.of(payload));
 
-        assertEquals(java.util.Optional.of(payload), service.findRawPayload(5L));
+        assertEquals(Optional.of(payload), service.findRawPayload(5L));
     }
 
     @Test
@@ -279,6 +281,6 @@ class AiUsageServiceTest {
         when(usageProperties.isRawPayloadsEnabled()).thenReturn(false);
 
         assertTrue(service.findRawPayload(5L).isEmpty());
-        org.mockito.Mockito.verifyNoInteractions(usageRepository);
+        verifyNoInteractions(usageRepository);
     }
 }

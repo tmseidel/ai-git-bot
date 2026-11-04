@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class AiUsageRawPayloadColumnTest {
 
     private static final String URL = "jdbc:h2:mem:ai-usage-raw-payload;DB_CLOSE_DELAY=-1";
-    private static final String LOCATIONS = "filesystem:src/main/resources/db/migration/h2";
+    private static final String LOCATIONS = "classpath:db/migration/h2";
 
     @Test
     void migratedColumnsHoldPayloadsFarBeyond65535Characters() throws Exception {

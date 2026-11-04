@@ -445,7 +445,12 @@
                             });
                     });
                     rawModal.addEventListener('hidden.bs.modal', function () {
-                        // drop the text so a large payload does not stay in the DOM
+                        // cancel a request that is still running, or its late response would refill the
+                        // hidden modal; then drop the text so a large payload does not stay in the DOM
+                        if (pending) {
+                            pending.abort();
+                            pending = null;
+                        }
                         fields.forEach(function (field) { field.textContent = ''; });
                     });
                 }

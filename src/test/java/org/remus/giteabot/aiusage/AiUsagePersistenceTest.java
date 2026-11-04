@@ -12,11 +12,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * The Usage page queries against the Flyway schema: the row query leaves the raw payloads out,
  * sorting still works on the projection, and a full payload ({@code max-raw-payload-length=0})
- * far beyond 65535 characters is stored through Hibernate and read back by id.
+ * far beyond 65535 characters is stored through Hibernate and read back by id. Runs with
+ * {@code ddl-auto=validate} as production does, so the entity mapping must match the migrations.
  */
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:ai-usage-persistence;DB_CLOSE_DELAY=-1",
-        "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=none",
+        "spring.flyway.enabled=true", "spring.jpa.hibernate.ddl-auto=validate",
         "spring.jpa.defer-datasource-initialization=false", "spring.sql.init.mode=never",
         "ai-usage.raw-payloads-enabled=true", "ai-usage.max-raw-payload-length=0"
 })
@@ -40,12 +41,12 @@ class AiUsagePersistenceTest {
         Page<AiUsageRow> rows = service.findUsage(null, null, 0, 20, "inputTokens", false);
 
         assertThat(rows.getTotalElements()).isEqualTo(2);
-        assertThat(rows.getContent()).extracting(AiUsageRow::getAiIntegrationName).containsExactly("big", "small");
+        assertThat(rows.getContent()).extracting(AiUsageRow::aiIntegrationName).containsExactly("big", "small");
         AiUsageRow bigRow = rows.getContent().getFirst();
-        assertThat(bigRow.getRound()).isEqualTo(3);
-        assertThat(bigRow.getSessionId()).isEqualTo("s#2");
+        assertThat(bigRow.round()).isEqualTo(3);
+        assertThat(bigRow.sessionId()).isEqualTo("s#2");
 
-        AiUsageRawPayload payload = service.findRawPayload(bigRow.getId()).orElseThrow();
+        AiUsageRawPayload payload = service.findRawPayload(bigRow.id()).orElseThrow();
         assertThat(payload.rawRequest()).isEqualTo(big);
         assertThat(payload.rawResponse()).isNull();
         assertThat(service.findRawPayload(-1L)).isEmpty();

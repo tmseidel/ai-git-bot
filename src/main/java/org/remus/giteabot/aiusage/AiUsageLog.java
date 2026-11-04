@@ -66,13 +66,13 @@ public class AiUsageLog {
     private Integer round;
 
     /**
-     * Raw request body sent to the AI provider (JSON), for audit/debug. The column is
-     * {@code TEXT} (V45); {@code length} is only mapping metadata and does not limit it.
+     * Raw request body sent to the AI provider (JSON), for audit/debug. Unbounded {@code TEXT}
+     * column (V45). Not {@code @Lob}: on PostgreSQL that maps a String to {@code oid}.
      */
-    @Column(name = "raw_request", length = 65535)
+    @Column(name = "raw_request", columnDefinition = "TEXT")
     private String rawRequest;
 
     /** Raw response body received from the AI provider (JSON), for audit/debug. */
-    @Column(name = "raw_response", length = 65535)
+    @Column(name = "raw_response", columnDefinition = "TEXT")
     private String rawResponse;
 }
