@@ -41,4 +41,15 @@ class ConfigModeTest {
 
         assertEquals(ConfigMode.State.APPLIED_EPHEMERAL, mode.state());
     }
+
+    @Test
+    void aFailedImportIsNotBlamedOnTheDatabase() {
+        ConfigMode mode = new ConfigMode("jdbc:h2:mem:giteabot");
+        mode.markDocumentPresent();
+        mode.markFailed();
+
+        assertEquals(ConfigMode.State.IMPORT_FAILED, mode.state(),
+                "an empty instance whose document did not import must say so, not claim the "
+                        + "database already had data");
+    }
 }

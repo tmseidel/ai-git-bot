@@ -25,7 +25,7 @@ public class ConfigBannerAdvice {
         this.configMode = configMode;
     }
 
-    /** Name of {@link ConfigMode.State}; the layout renders one of three messages from it. */
+    /** Name of {@link ConfigMode.State}; the layout renders one of four messages from it. */
     @ModelAttribute("configState")
     public String configState() {
         return configMode.state().name();

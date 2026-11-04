@@ -19,7 +19,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * The runner must never take the application down: a broken document leaves an
- * unconfigured instance whose operator can finish at {@code /setup}.
+ * unconfigured instance whose operator can finish at {@code /setup}. It must also say
+ * <em>why</em> it did not apply the document — a failed import is not a database that was
+ * already full.
  */
 @ExtendWith(OutputCaptureExtension.class)
 class ConfigImportRunnerTest {
@@ -37,7 +39,7 @@ class ConfigImportRunnerTest {
     void doesNothingWithoutADocument() {
         when(source.read()).thenReturn(Optional.empty());
 
-        runner().run(null);
+        runner().afterSingletonsInstantiated();
 
         verify(service, never()).importDocument(any());
         assertEquals(ConfigMode.State.NOT_CONFIGURED, mode.state());
@@ -49,7 +51,7 @@ class ConfigImportRunnerTest {
         when(adminService.isSetupRequired()).thenReturn(true);
         when(service.importDocument(any())).thenReturn(3);
 
-        runner().run(null);
+        runner().afterSingletonsInstantiated();
 
         assertEquals(ConfigMode.State.APPLIED_EPHEMERAL, mode.state());
         assertEquals(3, mode.getImportedRows());
@@ -60,21 +62,23 @@ class ConfigImportRunnerTest {
         when(source.read()).thenReturn(Optional.of(document()));
         when(adminService.isSetupRequired()).thenReturn(false);
 
-        runner().run(null);
+        runner().afterSingletonsInstantiated();
 
         verify(service, never()).importDocument(any());
         assertEquals(ConfigMode.State.IGNORED_DATABASE_NOT_EMPTY, mode.state());
     }
 
     @Test
-    void malformedJsonStartsUnconfigured(CapturedOutput output) {
+    void malformedJsonStartsUnconfiguredAndSaysWhy(CapturedOutput output) {
         when(source.read()).thenReturn(Optional.of("{ not json"));
         when(adminService.isSetupRequired()).thenReturn(true);
 
-        assertDoesNotThrow(() -> runner().run(null));
+        assertDoesNotThrow(() -> runner().afterSingletonsInstantiated());
 
         verify(service, never()).importDocument(any());
         assertTrue(output.getOut().contains("not valid JSON"), output.getOut());
+        assertEquals(ConfigMode.State.IMPORT_FAILED, mode.state(),
+                "a document that could not be parsed is not a database that already had data");
     }
 
     @Test
@@ -84,11 +88,11 @@ class ConfigImportRunnerTest {
         when(service.importDocument(any()))
                 .thenThrow(new IllegalArgumentException("bots[0]: aiIntegration missing"));
 
-        assertDoesNotThrow(() -> runner().run(null));
+        assertDoesNotThrow(() -> runner().afterSingletonsInstantiated());
 
         assertTrue(output.getOut().contains("Config import failed"), output.getOut());
         assertTrue(output.getOut().contains("aiIntegration missing"), output.getOut());
-        assertEquals(ConfigMode.State.IGNORED_DATABASE_NOT_EMPTY, mode.state());
+        assertEquals(ConfigMode.State.IMPORT_FAILED, mode.state());
     }
 
     private static String document() {

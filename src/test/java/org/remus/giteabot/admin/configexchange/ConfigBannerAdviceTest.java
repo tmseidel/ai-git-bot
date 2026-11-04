@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * The layout renders exactly one of the three banner messages from this attribute, so the
+ * The layout renders exactly one of the four banner messages from this attribute, so the
  * attribute must be the derived state and nothing else.
  */
 class ConfigBannerAdviceTest {

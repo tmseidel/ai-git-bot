@@ -99,6 +99,7 @@ public class ConfigExchangeRegistry {
                 adminUserRepository::findByUsername,
                 null,
                 null,
+                null,
                 null));
 
         declared.add(new ConfigTable<>("systemPrompts", SystemPrompt.class,
@@ -107,6 +108,7 @@ public class ConfigExchangeRegistry {
                 systemPromptRepository::findByName,
                 systemPromptService::save,
                 null,
+                null,
                 null));
 
         declared.add(new ConfigTable<>("botToolConfigurations", BotToolConfiguration.class,
@@ -114,6 +116,7 @@ public class ConfigExchangeRegistry {
                 botToolConfigurationService::findAll,
                 botToolConfigurationRepository::findByName,
                 botToolConfigurationService::save,
+                null,
                 null,
                 null));
 
@@ -124,6 +127,10 @@ public class ConfigExchangeRegistry {
                 mcpConfigurationService::save,
                 (configuration, node) -> put(node, "jsonContent",
                         mcpConfigurationService.getDecryptedJsonContent(configuration)),
+                // The service always encrypts on save, so a row the document overrides has to
+                // hold plaintext again — also the field the document does not declare.
+                configuration -> configuration.setJsonContent(
+                        mcpConfigurationService.getDecryptedJsonContent(configuration)),
                 null));
 
         declared.add(new ConfigTable<>("deploymentTargets", DeploymentTarget.class,
@@ -131,6 +138,7 @@ public class ConfigExchangeRegistry {
                 deploymentTargetService::findAll,
                 deploymentTargetRepository::findByName,
                 deploymentTargetService::save,
+                null,
                 null,
                 null));
 
@@ -140,6 +148,8 @@ public class ConfigExchangeRegistry {
                 aiIntegrationRepository::findByName,
                 aiIntegrationService::save,
                 (integration, node) -> put(node, "apiKey",
+                        aiIntegrationService.decryptApiKey(integration)),
+                integration -> integration.setApiKey(
                         aiIntegrationService.decryptApiKey(integration)),
                 null));
 
@@ -154,6 +164,9 @@ public class ConfigExchangeRegistry {
                     // next instance ciphertext it cannot decrypt with its own APP_ENCRYPTION_KEY.
                     put(node, "sshPrivateKey", gitIntegrationService.decryptSshPrivateKey(integration));
                 },
+                // No decrypt step: GitIntegrationService keeps the stored ciphertext on a blank
+                // field, so it never re-encrypts what it did not receive as plaintext.
+                null,
                 null));
 
         declared.add(new ConfigTable<>("workflowConfigurations", WorkflowConfiguration.class,
@@ -170,6 +183,7 @@ public class ConfigExchangeRegistry {
                 workflowConfigurationRepository::findByName,
                 workflowConfigurationService::save,
                 null,
+                null,
                 configuration -> validateWorkflowKeys(configuration, prWorkflowRegistry,
                         issueWorkflowRegistry)));
 
@@ -180,14 +194,18 @@ public class ConfigExchangeRegistry {
                 botService::save,
                 (bot, node) -> put(node, "webhookSigningSecret",
                         botService.getDecryptedWebhookSigningSecret(bot)),
+                bot -> bot.setWebhookSigningSecret(
+                        botService.getDecryptedWebhookSigningSecret(bot)),
                 null));
 
-        // Outgoing webhooks: name is not unique, so an import always creates a row.
-        // botId is an internal reference and is dropped like any other id.
+        // Outgoing webhooks: the column does not make the name unique, so the first row of that
+        // name is the one a re-import merges into — an existing endpoint is updated instead of
+        // created again. The bot scope is a reference (EventHookEndpointScope): a dropped botId
+        // would not just detach the endpoint, it would make it global.
         declared.add(new ConfigTable<>("eventHookEndpoints", EventHookEndpoint.class,
                 EventHookEndpoint::getName,
                 eventHookEndpointService::findAll,
-                null,
+                eventHookEndpointRepository::findFirstByNameOrderByIdAsc,
                 endpoint -> eventHookEndpointService.save(endpoint,
                         endpoint.getSecret(), endpoint.getAuthorizationHeader(),
                         endpoint.getCustomHeaders()),
@@ -196,6 +214,15 @@ public class ConfigExchangeRegistry {
                     put(node, "authorizationHeader",
                             eventHookEndpointService.decryptAuthorizationHeader(endpoint));
                     put(node, "customHeaders",
+                            eventHookEndpointService.decryptCustomHeaders(endpoint));
+                },
+                // The service encrypts whatever it is handed, so the stored ciphertext has to
+                // be plaintext before it is merged over and saved again.
+                endpoint -> {
+                    endpoint.setSecret(eventHookEndpointService.decryptSecret(endpoint));
+                    endpoint.setAuthorizationHeader(
+                            eventHookEndpointService.decryptAuthorizationHeader(endpoint));
+                    endpoint.setCustomHeaders(
                             eventHookEndpointService.decryptCustomHeaders(endpoint));
                 },
                 null));

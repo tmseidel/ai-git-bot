@@ -121,12 +121,14 @@ With a document, these rules apply:
   `selectedWorkflows` list replaces the existing selection. The import only runs on an
   empty database, so the only rows it can meet are Flyway seeds — operator-created data is
   never modified. The `defaultEntry` flag is never taken from a document.
-- The default tool configuration is extended at startup with every built-in tool the
-  running build ships, `execute-code` included (see `DefaultToolSetInitializer`). That tool
-  runs model-written code as the container user, so a bot that must not have it needs a tool
-  configuration of its own; the migrations keep it out of the seed on purpose. An instance
-  upgraded from an older image gains the tool on the next start — narrow the default before
-  upgrading if that is not wanted.
+- The default tool configuration is extended at startup with every built-in tool the running
+  build ships, **except** `execute-code` (see `DefaultToolSetInitializer`, and
+  `BotToolConfigurationService.OPT_IN_TOOLS` for the list). Neither the migrations nor the
+  startup extension put it in the Default row: that row cannot be edited afterwards, so a
+  code-execution tool in it would be permanent and opt-out for every bot that never attached a
+  tool configuration of its own. A bot gets it only from a configuration that selects it.
+  Instances upgraded from an older image gain the other new tools on the next start;
+  `execute-code` is never among them.
 - `adminUsers` entries carry a plaintext `password` (hashed on import). An entry without a
   password is skipped with a warning — exported documents never contain one.
 - Credentials are plaintext in the document and encrypted on import
@@ -135,16 +137,25 @@ With a document, these rules apply:
 - `workflowConfigurations[*].selectedWorkflows[*].workflowKey` is validated against the
   registered workflows of that kind; an unknown key fails the import instead of silently
   disabling a workflow.
-- `eventHookEndpoints[*].botId` is an internal reference and is dropped on import; a
-  restored endpoint is not bound to a bot.
+- `eventHookEndpoints[*].bot` scopes an endpoint to one bot and is written as a reference,
+  `{"name": "demo-bot"}`; a name the document does not declare fails the import. Leaving it
+  out means the endpoint receives every bot's events (`repoOwner` / `repoName` narrow it
+  further). The internal id never appears in the document, and an exported endpoint carries its
+  bot by name so a re-import keeps the scope instead of widening it.
 - `GET /config/export` (authenticated, admin UI session) returns the running instance in
   the same shape. The same download is a button in the admin UI under **System settings →
   General application settings**, so it is always reachable — not only through the banner.
+  The response carries every decrypted credential, so it is sent with `Cache-Control:
+  no-store` and every fetch is logged with the account that asked for it.
 
 A failure is logged at ERROR and never aborts the container: the instance starts
-unconfigured and `/setup` remains available. The admin UI shows a banner stating whether
-the document is applied on every start (in-memory database), was applied once
-(persistent), or is present but ignored because the database already has data.
+unconfigured and `/setup` remains available. The import runs before the servlet container
+binds its port, so `/setup` cannot be reached while a document is being applied — on a public
+trial instance that would otherwise let a visitor create a competing administrator account.
+The admin UI shows a banner stating whether the document is applied on every start (in-memory
+database), was applied once (persistent), is present but ignored because the database already
+has data, or was present and could not be imported (the log names the cause; `/setup` finishes
+the job).
 
 ### Secret References (Optional)
 

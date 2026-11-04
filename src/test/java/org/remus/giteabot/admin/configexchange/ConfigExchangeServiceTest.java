@@ -11,6 +11,8 @@ import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GitIntegrationRepository;
+import org.remus.giteabot.eventhook.EventHookEndpoint;
+import org.remus.giteabot.eventhook.EventHookEndpointRepository;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationKind;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationRepository;
@@ -64,9 +66,11 @@ class ConfigExchangeServiceTest {
     @Autowired private BotToolConfigurationRepository botToolConfigurationRepository;
     @Autowired private BotToolSelectionRepository botToolSelectionRepository;
     @Autowired private EncryptionService encryptionService;
+    @Autowired private EventHookEndpointRepository eventHookEndpointRepository;
 
     @BeforeEach
     void resetConfigTables() {
+        eventHookEndpointRepository.deleteAll();
         botRepository.deleteAll();
         workflowConfigurationRepository.deleteAll();
         aiIntegrationRepository.deleteAll();
@@ -238,6 +242,74 @@ class ConfigExchangeServiceTest {
         assertTrue(saved.getToolConfiguration().isDefaultEntry());
         assertEquals(List.of("injected-tool"), toolNames(saved.getToolConfiguration().getId()),
                 "declared selectedTools replace the seeded tool set");
+    }
+
+    @Test
+    void anExportedEndpointKeepsItsBotScope() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        root.putArray("eventHookEndpoints").addObject()
+                .put("name", "Ops hook")
+                .put("url", "https://ops.example/hook")
+                .put("eventTypes", "PR_WORKFLOW_COMPLETED")
+                .putObject("bot").put("name", "trial");
+
+        configExchangeService.importDocument(root);
+
+        Long botId = botRepository.findByName("trial").orElseThrow().getId();
+        assertEquals(botId, onlyEndpoint().getBotId(),
+                "a declared bot reference binds the endpoint to that bot");
+
+        JsonNode exported = configExchangeService.export();
+        JsonNode endpoint = exported.path("eventHookEndpoints").get(0);
+        assertEquals("trial", endpoint.path("bot").path("name").asString(),
+                "the bot travels as a reference, not as its internal id");
+        assertTrue(endpoint.path("botId").isMissingNode(),
+                "internal ids never reach the document");
+
+        assertEquals(0, configExchangeService.importDocument(exported),
+                "re-importing the export creates no second endpoint");
+        assertEquals(1, eventHookEndpointRepository.count());
+        assertEquals(botId, onlyEndpoint().getBotId(),
+                "the scope survives the round trip instead of becoming global — a null botId "
+                        + "means the endpoint receives every bot's events");
+    }
+
+    @Test
+    void anUnscopedEndpointStaysGlobal() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        root.putArray("eventHookEndpoints").addObject()
+                .put("name", "Ops hook")
+                .put("url", "https://ops.example/hook")
+                .put("eventTypes", "PR_WORKFLOW_COMPLETED");
+
+        configExchangeService.importDocument(root);
+
+        assertNull(onlyEndpoint().getBotId());
+        JsonNode endpoint = configExchangeService.export().path("eventHookEndpoints").get(0);
+        assertTrue(endpoint.path("bot").isMissingNode(), "no scope is exported");
+    }
+
+    @Test
+    void rejectsAnEndpointScopedToAnUndeclaredBot() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        root.putArray("eventHookEndpoints").addObject()
+                .put("name", "Ops hook")
+                .put("url", "https://ops.example/hook")
+                .put("eventTypes", "PR_WORKFLOW_COMPLETED")
+                .putObject("bot").put("name", "ghost");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> configExchangeService.importDocument(root));
+
+        assertTrue(error.getMessage().startsWith("eventHookEndpoints[0]:"),
+                () -> "message should name the entry, was: " + error.getMessage());
+        assertTrue(error.getMessage().contains("ghost"), error.getMessage());
+    }
+
+    private EventHookEndpoint onlyEndpoint() {
+        List<EventHookEndpoint> endpoints = eventHookEndpointRepository.findAll();
+        assertEquals(1, endpoints.size());
+        return endpoints.getFirst();
     }
 
     private List<String> toolNames(Long configurationId) {

@@ -11,7 +11,7 @@ import java.util.List;
 
 /**
  * Extends the default tool configuration with every built-in tool the running build
- * actually ships.
+ * actually ships — except the opt-in ones ({@link BotToolConfigurationService#OPT_IN_TOOLS}).
  *
  * <p>The Flyway seed can only list the tools that existed when it was written, and the
  * default configuration cannot be edited through the UI
@@ -20,16 +20,21 @@ import java.util.List;
  * freshly imported instance (see {@code admin/configexchange}) would start with a stale
  * tool set.</p>
  *
- * <p>Everything the build ships is included, {@code execute-code} too: the default set answers
- * "what may a bot do at all", and the default row cannot be edited afterwards, so a tool left
- * out here can never be given back to it later. An operator who does not want a bot running
- * model-written programs attaches a tool configuration of their own instead — the selection
- * travels with the bot, not with this seed. {@code ExecuteCodeOptInConfigurationTest} keeps
- * pinning the migrations, which must not seed it: a migrated row would be permanent in
- * databases whose operator never sees this class run.</p>
+ * <p>Code execution stays out of it. The row this class writes cannot be edited afterwards,
+ * so a tool added here is permanent and reaches every bot that never attached a
+ * configuration of its own: {@code execute-code} would become opt-out for exactly the
+ * deployments that never made a decision about it, on the next boot, without an operator
+ * having asked. It runs a model-written program as this service user (or as a sandbox
+ * identity where the deployment names a pool), so an operator attaches a tool configuration
+ * that selects it when a bot should have it. {@code ExecuteCodeOptInConfigurationTest} keeps
+ * pinning the migrations for the same reason, and {@code DefaultToolSetInitializerTest} pins
+ * this class.</p>
  *
- * <p>Additive only: nothing is ever removed, so an operator who deliberately disabled a
- * tool keeps that decision.</p>
+ * <p>Additive only, and only over the tools it does manage: nothing is ever removed. That
+ * promise is about an operator's <em>own</em> configuration — in the Default row nobody can
+ * disable anything, so a tool that landed there could never be taken back. Which is why the
+ * opt-in tools are excluded by name rather than added and left for an operator to
+ * remove.</p>
  */
 @Slf4j
 @Component
@@ -41,6 +46,8 @@ public class DefaultToolSetInitializer implements ApplicationRunner {
 
     @Override
     public void run(@NonNull ApplicationArguments args) {
+        // The catalog as it is: addMissingTools owns the opt-in policy (OPT_IN_TOOLS) and
+        // skips those tools whatever it is handed.
         List<BuiltinToolRegistry.BuiltinTool> selectable = builtinToolRegistry.builtinTools();
         botToolConfigurationService.findDefault().ifPresent(configuration -> {
             int added = botToolConfigurationService.addMissingTools(configuration.getId(), selectable);

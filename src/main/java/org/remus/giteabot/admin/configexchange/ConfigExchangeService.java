@@ -5,8 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AdminService;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.systemsettings.McpConfiguration;
-import org.remus.giteabot.systemsettings.McpConfigurationService;
+import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.systemsettings.SystemPromptService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,14 +26,15 @@ import java.util.Map;
  *
  * <p>The document is a projection of the entity model: one array per importable table,
  * entities serialized with their own field names, {@code @ManyToOne} references
- * reduced to {@code {"name": …}}. That is why there is no DTO and no schema version —
- * a new entity field flows through both directions without a code change, and an
+ * reduced to {@code {"name": …}}. That is why there is no DTO and no schema version — a
+ * new entity field flows through both directions without a code change, and an
  * unknown key is simply ignored on import.</p>
  *
  * <p>Import semantics (see {@code doc/DEPLOYMENT.md}): validate, strip identity,
- * resolve references, skip rows whose unique name already exists, then save through
- * the owning service. Rows that already exist can only be Flyway seeds, so the seeds
- * keep their special role and an import never duplicates them.</p>
+ * resolve references, then save through the owning service. A row whose name already
+ * exists is overridden field by field instead of created again — either a Flyway seed or a
+ * row an earlier import created, which is what makes importing the same document twice
+ * create nothing.</p>
  */
 @Slf4j
 @Service
@@ -45,8 +45,8 @@ public class ConfigExchangeService {
 
     private final ConfigExchangeRegistry registry;
     private final AdminService adminService;
-    private final McpConfigurationService mcpConfigurationService;
     private final SystemPromptService systemPromptService;
+    private final BotRepository botRepository;
 
     /**
      * Applies every section of the document in registry order.
@@ -97,6 +97,7 @@ public class ConfigExchangeService {
         T entity = MAPPER.treeToValue(node, table.type());
         EntityIdentity.strip(entity);
         AssociationResolver.resolve(entity, lookups);
+        EventHookEndpointScope.apply(entity, node, lookups);
         applyDefaults(table.type(), entity);
         AssociationResolver.linkChildren(entity);
         if (table.validate() != null) {
@@ -121,16 +122,19 @@ public class ConfigExchangeService {
         }
 
         T target = existing.get();
-        if (target instanceof McpConfiguration mcpConfiguration) {
-            // The service always encrypts on save, so the stored ciphertext has to be
-            // turned back into plaintext before it is handed to it again.
-            mcpConfiguration.setJsonContent(mcpConfigurationService.getDecryptedJsonContent(mcpConfiguration));
+        if (table.decryptStoredCredentials() != null) {
+            // The service encrypts whatever it is handed, so a credential the document does not
+            // declare has to be plaintext again before the row is saved a second time.
+            table.decryptStoredCredentials().accept(target);
         }
         if (EntityIdentity.isDefaultEntry(target)) {
             log.warn("Config import: overriding the seeded default {} '{}' from the document",
                     table.jsonKey(), name);
         }
         EntityMerge.apply(entity, target, node);
+        // The bot scope is an internal id, which the merge leaves alone: set what the document
+        // declares on the row itself.
+        EventHookEndpointScope.apply(target, node, lookups);
         table.save().accept(target);
         log.info("Config import: {} '{}' overridden by the document", table.jsonKey(), name);
         return false;
@@ -200,12 +204,18 @@ public class ConfigExchangeService {
         for (T entity : table.readAll().get()) {
             ObjectNode node = MAPPER.valueToTree(entity);
             flattenAssociations(node, entity);
+            EventHookEndpointScope.export(entity, node, this::botName);
             if (table.exportSecrets() != null) {
                 table.exportSecrets().accept(entity, node);
             }
             ConfigExchangeJson.clean(node);
             items.add(node);
         }
+    }
+
+    /** Bot id → name, for the reference a document carries instead of an internal id. */
+    private Optional<String> botName(Long botId) {
+        return botRepository.findById(botId).map(Bot::getName);
     }
 
     /**

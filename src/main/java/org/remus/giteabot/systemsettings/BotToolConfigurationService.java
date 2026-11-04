@@ -28,6 +28,22 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class BotToolConfigurationService {
 
+    /**
+     * Tools that are never added to the Default configuration automatically — the build ships
+     * them, but a bot only gets one from a configuration an operator attaches to it.
+     *
+     * <p>{@code execute-code} runs a model-written Python program as this service user inside
+     * this container, or as one of the sandbox identities where the deployment names a pool.
+     * The Default row cannot be edited ({@link BotToolSelectionService#saveSelection} rejects
+     * it) and {@link #addMissingTools} restores whatever the row lacks on every boot, so a tool
+     * that lands in it is permanent and reaches every bot that never configured tools of its
+     * own. A code-execution tool must therefore be a decision an operator takes per bot.</p>
+     *
+     * <p>{@code DefaultToolSetInitializerTest} pins that every agent-control tool is listed
+     * here: a new one does not silently become part of the Default set.</p>
+     */
+    static final Set<String> OPT_IN_TOOLS = Set.of("execute-code");
+
     private final BotToolConfigurationRepository configurationRepository;
     private final BotToolSelectionRepository selectionRepository;
     private final BotRepository botRepository;
@@ -50,6 +66,10 @@ public class BotToolConfigurationService {
      * edited through the UI, so without this step a bot that never customised its tool
      * set would silently lose every tool added after the seed.</p>
      *
+     * <p>{@link #OPT_IN_TOOLS} is never added, whoever asks: a tool that runs model-written
+     * code must reach a bot through a configuration an operator attached to it, not through
+     * this row, which cannot be edited again afterwards.</p>
+     *
      * @return the number of tools added; {@code 0} when the configuration is complete
      */
     @Transactional
@@ -61,7 +81,7 @@ public class BotToolConfigurationService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         int added = 0;
         for (BuiltinToolRegistry.BuiltinTool tool : catalog) {
-            if (present.contains(tool.name())) {
+            if (present.contains(tool.name()) || OPT_IN_TOOLS.contains(tool.name())) {
                 continue;
             }
             BotToolSelection selection = new BotToolSelection();

@@ -372,6 +372,7 @@ services:
               "authorizationHeader": "Bearer replace-me",
               "customHeaders": "{\"X-Source\": \"ai-git-bot\"}",
               "eventTypes": "PR_WORKFLOW_STARTED,PR_WORKFLOW_COMPLETED,PR_WORKFLOW_FAILED,AGENT_REVIEW_FINDING_DETECTED,ISSUE_ASSIGNMENT_STARTED,ISSUE_ASSIGNMENT_COMPLETED,ISSUE_ASSIGNMENT_FAILED",
+              "bot": { "name": "demo-bot" },
               "repoOwner": "acme",
               "repoName": "widgets",
               "skipTlsVerify": false,

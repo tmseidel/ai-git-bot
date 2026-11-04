@@ -28,6 +28,12 @@ import java.util.function.Supplier;
  *                     plaintext password must be hashed, not stored)
  * @param exportSecrets patches decrypted credentials into the exported node;
  *                     {@code null} when the row has no credentials
+ * @param decryptStoredCredentials turns a stored row's ciphertext back into plaintext
+ *                     before a document is merged over it and saved again — these services
+ *                     encrypt any non-blank credential they are handed, so one the document
+ *                     does not declare would otherwise be encrypted twice; {@code null} when
+ *                     the row has no encrypted fields or its service keeps the stored value
+ *                     on a blank field (the Git integrations)
  * @param validate     import-side guard, or {@code null}
  */
 public record ConfigTable<T>(
@@ -38,5 +44,6 @@ public record ConfigTable<T>(
         Function<String, Optional<T>> findByName,
         Consumer<T> save,
         BiConsumer<T, ObjectNode> exportSecrets,
+        Consumer<T> decryptStoredCredentials,
         Consumer<T> validate) {
 }

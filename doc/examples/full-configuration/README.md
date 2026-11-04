@@ -30,15 +30,16 @@ value.
 | `gitIntegrations` | `Gitea (HTTP)`, `Gitea (SSH)` | `name`, `providerType`, `url`, `username`, `token`, `transport`, `postReviewAction`, `sshCleanupVerified`, `sshPrivateKey`, `sshKnownHosts` |
 | `workflowConfigurations` | `PR workflows`, `Issue workflows` | `name`, `kind`, `selectedWorkflows[].workflowKey`, `.params[].name/.value` |
 | `bots` | `demo-bot` | `name`, `webhookSecret`, `webhookSigningSecret`, `userWhitelist`, `enabled`, `branchFilter`, `runOnPrCreation`, `runOnPrUpdate`, `runOnIssueCreation`, plus the seven references (`aiIntegration`, `gitIntegration`, `systemPrompt`, `toolConfiguration`, `mcpConfiguration`, `workflowConfiguration`, `issueWorkflowConfiguration`, `deploymentTarget`) |
-| `eventHookEndpoints` | `Ops webhook` | `name`, `url`, `secret`, `authorizationHeader`, `customHeaders`, `eventTypes`, `repoOwner`, `repoName`, `skipTlsVerify`, `enabled` |
+| `eventHookEndpoints` | `Ops webhook` | `name`, `url`, `secret`, `authorizationHeader`, `customHeaders`, `eventTypes`, `bot` (reference, optional — omit for every bot), `repoOwner`, `repoName`, `skipTlsVerify`, `enabled` |
 
 Values that need explaining:
 
 - **System prompts are all-or-nothing per row.** All ten role prompts are `NOT NULL`, so a
   custom prompt must set all ten; a document that sets only one fails with
   `Review-Agent System-Prompt is required`.
-- **`selectedTools` is a full replacement.** The default configuration already contains every
-  built-in tool (including `execute-code`), so a tool configuration exists to take tools away.
+- **`selectedTools` is a full replacement.** The default configuration contains every built-in
+  tool except `execute-code`, which is opt-in: a tool configuration exists to take tools away,
+  or to give one bot code execution.
 - **`gitIntegrations`.** HTTP needs a `token`; SSH is Gitea-only and needs a `token` for the API
   as well as `sshPrivateKey` + `sshKnownHosts`. Both secrets are stored encrypted. When you
   switch an integration away from SSH, its key and known-hosts are dropped.
