@@ -126,7 +126,8 @@ public class ToolCatalog {
                 .withHint("**Switch branches**: `branch-switcher` goes first, before any other repository tool."),
             entry("rg", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
                     "Run ripgrep across the workspace. Args: [\"pattern\"] or [\"pattern\", \"path\"]; the pattern is a Java regex. "
-                            + "Flags -i, -F, -l and -g <glob> may go anywhere; [\"--files\", \"path\"] lists files.",
+                            + "Flags -i, -F, -l and -g <glob> may go anywhere; use -e <pattern> or -- for a pattern starting with -; "
+                            + "[\"--files\", \"path\"] lists files.",
                     varargsSchema())
                 .withHint("**Search the codebase**: `rg` finds symbol usages."),
             entry("find", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER,  Role.REVIEW),
@@ -144,7 +145,8 @@ public class ToolCatalog {
                             required("path")))
                 .withHint("**Read specific lines once you know the structure**: `cat` with `startLine`/`endLine`. It is for precision reads, not for a first look at a file."),
             entry("git-log", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
-                    "Inspect change history. Args: [\"path/file\"], [\"path/file\", \"limit\"] or [\"limit\"].",
+                    "Inspect change history. Args: [\"path/file\"], [\"path/file\", \"limit\"] or [\"limit\"]; "
+                            + "filters --author, --since, --until, --grep, -S <text> and --no-merges.",
                     varargsSchema()),
             entry("git-blame", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
                     "Inspect line history. Args: [\"path/file\", \"startLine\", \"endLine\"].",

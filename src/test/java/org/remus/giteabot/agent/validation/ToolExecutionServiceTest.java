@@ -8,6 +8,7 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -230,6 +231,96 @@ class ToolExecutionServiceTest {
         assertThat(result.output()).isEqualTo("No commits found for path: untracked.txt");
     }
 
+    @Test
+    void executeContextTool_rg_repeatedRegexpPatternsAreOred() throws IOException {
+        Files.createDirectories(tempDir.resolve("sub"));
+        Files.writeString(tempDir.resolve("A.txt"), "foo here\nbar there\nbaz\n");
+        Files.writeString(tempDir.resolve("sub/B.txt"), "foo\n");
+        Files.writeString(tempDir.resolve("Lit.txt"), "a.b\naxb\nc+d\ncd\n");
+
+        ToolResult both = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-e", "foo", "-e", "bar", "A.txt"));
+        ToolResult pathFirst = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("sub", "-e", "foo"));
+        ToolResult longForm = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("sub", "--regexp=foo"));
+        ToolResult fixed = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-F", "-e", "a.b", "-e", "c+d", "Lit.txt"));
+
+        assertThat(both.output()).contains("A.txt:1: foo here").contains("A.txt:2: bar there").doesNotContain("baz");
+        assertThat(pathFirst.output()).contains("B.txt:1: foo").doesNotContain("A.txt");
+        assertThat(longForm.output()).contains("B.txt:1: foo").doesNotContain("A.txt");
+        assertThat(fixed.output()).contains("Lit.txt:1: a.b").contains("Lit.txt:3: c+d")
+                .doesNotContain("Lit.txt:2:").doesNotContain("Lit.txt:4:");
+    }
+
+    @Test
+    void executeContextTool_rg_valueFlagsDoNotBecomePatternOrPath() throws IOException {
+        Files.writeString(tempDir.resolve("Hello.java"), "Hello\n");
+        Files.writeString(tempDir.resolve("Hello.txt"), "hello\n");
+
+        ToolResult combinedGlob = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-ig", "*.java", "hello"));
+        ToolResult grepInclude = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("--include", "*.txt", "hello"));
+        ToolResult inlineContext = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-C3", "Hello"));
+        ToolResult maxDepth = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("--max-depth", "2", "Hello"));
+        ToolResult shortDepth = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-d", "1", "Hello"));
+
+        assertThat(combinedGlob.output()).contains("Hello.java:1: Hello").doesNotContain("Hello.txt");
+        assertThat(grepInclude.output()).contains("Hello.txt:1: hello").doesNotContain("Hello.java");
+        assertThat(inlineContext.output()).contains("Hello.java:1: Hello");
+        assertThat(maxDepth.output()).contains("Hello.java:1: Hello");
+        assertThat(shortDepth.output()).contains("Hello.java:1: Hello");
+    }
+
+    @Test
+    void executeContextTool_gitLog_passesAllowedFiltersAsOptionValues() throws Exception {
+        git("init", "-q");
+        commitAs("alice", "add feature", "alpha");
+        commitAs("bob", "fix bug", "beta");
+
+        ToolResult author = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("--author", "alice"));
+        ToolResult grep = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("--grep=fix"));
+        ToolResult pickaxe = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("-S", "beta"));
+        ToolResult noMatch = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("--author", "nobody"));
+        // a value is always passed as --name=value, so it cannot turn into an option of its own
+        ToolResult injected = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log",
+                List.of("--author", "--output=evil.txt"));
+        ToolResult unsupported = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log",
+                List.of("--stat", "--format", "%H"));
+
+        assertThat(author.output()).contains("add feature").doesNotContain("fix bug");
+        assertThat(grep.output()).contains("fix bug").doesNotContain("add feature");
+        assertThat(pickaxe.output()).contains("fix bug").doesNotContain("add feature");
+        assertThat(noMatch.output()).isEqualTo("No commits found (filters: --author=nobody)");
+        assertThat(injected.output()).startsWith("No commits found (filters: --author=--output=evil.txt)");
+        assertThat(tempDir.resolve("evil.txt")).doesNotExist();
+        assertThat(unsupported.output()).contains("fix bug").contains("add feature")
+                .endsWith("Ignored unsupported options: --stat, --format %H");
+    }
+
+    @Test
+    void executeContextTool_gitLog_clampsCountsAndNeedsAPathForFollow() throws Exception {
+        git("init", "-q");
+        commitAs("alice", "add feature", "alpha");
+        commitAs("bob", "fix bug", "beta");
+
+        ToolResult huge = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("-99999999999"));
+        ToolResult zero = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("0"));
+        ToolResult follow = service.executeContextTool(Workspace.unmanaged(tempDir), "git-log", List.of("--follow"));
+
+        assertThat(huge.success()).isTrue();
+        assertThat(huge.output()).contains("add feature").contains("fix bug");
+        assertThat(zero.output()).contains("fix bug").doesNotContain("add feature");
+        assertThat(follow.output()).endsWith("Ignored unsupported options: --follow (needs a path)");
+    }
+
+    private void commitAs(String author, String message, String content) throws Exception {
+        Files.writeString(tempDir.resolve("file.txt"), content);
+        git("add", "file.txt");
+        git("-c", "user.name=" + author, "-c", "user.email=" + author + "@example.com", "commit", "-q", "-m", message);
+    }
+
     private void initRepoWithCommits(String... messages) throws Exception {
         git("init", "-q");
         for (String message : messages) {
@@ -240,7 +331,7 @@ class ToolExecutionServiceTest {
     }
 
     private void git(String... args) throws Exception {
-        List<String> command = new java.util.ArrayList<>(List.of("git"));
+        List<String> command = new ArrayList<>(List.of("git"));
         command.addAll(List.of(args));
         Process process = new ProcessBuilder(command).directory(tempDir.toFile()).redirectErrorStream(true).start();
         String output = new String(process.getInputStream().readAllBytes());

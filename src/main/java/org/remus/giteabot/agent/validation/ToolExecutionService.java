@@ -17,11 +17,13 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -702,7 +704,10 @@ public class ToolExecutionService {
         return matches;
     }
 
-    /** {@code rg --files [path]}: lists the files a search would visit, filtered by {@code -g} globs. */
+    /**
+     * {@code rg --files [path]}: lists the files under the path, filtered by {@code -g} globs. Binary and
+     * oversized files are listed too; only the search skips them.
+     */
     private ToolResult listSearchFiles(Path workspaceDir, Path basePath, SearchRequest searchRequest) {
         List<String> files;
         try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
@@ -737,21 +742,26 @@ public class ToolExecutionService {
         return patternText.contains("\\|");
     }
 
-    /** Short ripgrep flags that take a value; the value is skipped rather than read as pattern or path. */
-    private static final Set<Character> SEARCH_VALUE_FLAGS = Set.of('A', 'B', 'C', 'm', 't', 'T', 'M', 'j', 'f');
+    /**
+     * Short ripgrep/grep flags that take a value; the value is skipped rather than read as pattern or path.
+     * {@code g} and {@code e} take a value too but are handled, see {@link #parseSearchRequest}.
+     */
+    private static final Set<Character> SEARCH_VALUE_FLAGS = Set.of('A', 'B', 'C', 'm', 't', 'T', 'M', 'j', 'f', 'd');
     private static final Set<String> SEARCH_VALUE_OPTIONS = Set.of("--max-count", "--context", "--after-context",
-            "--before-context", "--type", "--type-not", "--max-columns", "--threads", "--file");
+            "--before-context", "--type", "--type-not", "--max-columns", "--threads", "--file", "--max-depth",
+            "--maxdepth", "--max-filesize", "--exclude", "--exclude-dir", "--iglob");
     /** A flag is {@code -x...} with letters/digits only, so patterns such as {@code ->} stay positional. */
     private static final Pattern SEARCH_SHORT_FLAGS = Pattern.compile("-[A-Za-z0-9]+");
 
     /**
      * Ripgrep-style arguments: flags may come before, between or after the positionals, as models
-     * write {@code rg -i pattern path}. The first positional is the pattern, the second the path;
-     * {@code -e}/{@code --regexp} names the pattern explicitly and {@code --} ends the flags.
+     * write {@code rg -i pattern path}. Without {@code -e} the first positional is the pattern and the
+     * second the path; with {@code -e}/{@code --regexp} (repeatable, the patterns are OR-ed as in ripgrep)
+     * the first positional is the path. {@code --} ends the flags, so a pattern may start with {@code -}.
      */
     private SearchRequest parseSearchRequest(List<String> arguments) {
-        String patternText = null;
-        String relativePath = null;
+        List<String> positionals = new ArrayList<>();
+        List<String> explicitPatterns = new ArrayList<>();
         Set<Character> flags = new LinkedHashSet<>();
         List<String> includeGlobs = new ArrayList<>();
         boolean flagsEnded = false;
@@ -767,15 +777,11 @@ public class ToolExecutionService {
                     flagsEnded = true;
                     continue;
                 }
-                if (argument.startsWith("--include=")) {
-                    includeGlobs.add(argument.substring("--include=".length()));
+                if (argument.startsWith("--include=") || argument.startsWith("--glob=")) {
+                    includeGlobs.add(argument.substring(argument.indexOf('=') + 1));
                     continue;
                 }
-                if (argument.startsWith("--glob=")) {
-                    includeGlobs.add(argument.substring("--glob=".length()));
-                    continue;
-                }
-                if ("--glob".equals(argument) || "-g".equals(argument)) {
+                if ("--glob".equals(argument) || "--include".equals(argument) || "-g".equals(argument)) {
                     if (i + 1 < arguments.size()) {
                         includeGlobs.add(arguments.get(++i));
                     }
@@ -783,16 +789,12 @@ public class ToolExecutionService {
                 }
                 if ("-e".equals(argument) || "--regexp".equals(argument)) {
                     if (i + 1 < arguments.size()) {
-                        // a positional taken for the pattern before -e was the path
-                        if (patternText != null && relativePath == null) {
-                            relativePath = patternText;
-                        }
-                        patternText = arguments.get(++i);
+                        explicitPatterns.add(arguments.get(++i));
                     }
                     continue;
                 }
                 if (argument.startsWith("--regexp=")) {
-                    patternText = argument.substring("--regexp=".length());
+                    explicitPatterns.add(argument.substring("--regexp=".length()));
                     continue;
                 }
                 switch (argument) {
@@ -812,10 +814,14 @@ public class ToolExecutionService {
                 if (SEARCH_SHORT_FLAGS.matcher(argument).matches()) {
                     for (int j = 1; j < argument.length(); j++) {
                         char flag = argument.charAt(j);
-                        if (SEARCH_VALUE_FLAGS.contains(flag)) {
-                            // "-C 3" takes the next argument; "-C3" carries its value inline
-                            if (j == argument.length() - 1) {
-                                i++;
+                        if (flag == 'g' || flag == 'e' || SEARCH_VALUE_FLAGS.contains(flag)) {
+                            // "-ig *.java" / "-C 3" take the next argument; "-C3" carries its value inline
+                            String value = j < argument.length() - 1 ? argument.substring(j + 1)
+                                    : i + 1 < arguments.size() ? arguments.get(++i) : null;
+                            if (value != null && flag == 'g') {
+                                includeGlobs.add(value);
+                            } else if (value != null && flag == 'e') {
+                                explicitPatterns.add(value);
                             }
                             break;
                         }
@@ -824,27 +830,44 @@ public class ToolExecutionService {
                     continue;
                 }
             }
-            if (patternText == null) {
-                patternText = argument;
-            } else if (relativePath == null) {
-                relativePath = argument;
-            }
+            positionals.add(argument);
         }
-        if (listFiles && patternText != null && relativePath == null) {
+
+        boolean fixedString = flags.contains('F');
+        String patternText;
+        String relativePath;
+        if (!explicitPatterns.isEmpty()) {
+            relativePath = positionals.isEmpty() ? null : positionals.getFirst();
+            patternText = joinAlternatives(explicitPatterns, fixedString);
+            // several -F patterns are quoted into one regex, which must not be quoted again
+            fixedString = fixedString && explicitPatterns.size() == 1;
+        } else if (listFiles) {
             // "rg --files src" takes no pattern: its positional is the path
-            relativePath = patternText;
             patternText = null;
+            relativePath = positionals.isEmpty() ? null : positionals.getFirst();
+        } else {
+            patternText = positionals.isEmpty() ? null : positionals.getFirst();
+            relativePath = positionals.size() > 1 ? positionals.get(1) : null;
         }
         if (relativePath == null) {
             relativePath = ".";
         }
 
         int regexFlags = flags.contains('i') ? Pattern.CASE_INSENSITIVE : 0;
-        boolean fixedString = flags.contains('F');
         boolean filesOnly = flags.contains('l');
         boolean caseInsensitive = flags.contains('i');
         return new SearchRequest(patternText, relativePath, regexFlags, fixedString, filesOnly,
                 caseInsensitive, includeGlobs, listFiles);
+    }
+
+    /** Ripgrep ORs repeated {@code -e} patterns; with {@code -F} each one is matched literally. */
+    private static String joinAlternatives(List<String> patterns, boolean fixedString) {
+        if (patterns.size() == 1) {
+            return patterns.getFirst();
+        }
+        return patterns.stream()
+                .map(p -> fixedString ? Pattern.quote(p) : "(?:" + p + ")")
+                .collect(Collectors.joining("|"));
     }
 
     private record SearchRequest(String patternText, String relativePath, int regexFlags,
@@ -1014,54 +1037,118 @@ public class ToolExecutionService {
     }
 
     private static final Pattern GIT_LOG_COUNT_FLAG = Pattern.compile("-(\\d+)|(?:-n|--max-count=)(\\d+)");
+    private static final Pattern DIGITS = Pattern.compile("\\d+");
+    static final int MAX_GIT_LOG_LIMIT = 200;
+    /** Filters passed to git, always as {@code --name=value} so a value can never become an option itself. */
+    private static final Map<String, String> GIT_LOG_VALUE_FILTERS = Map.of(
+            "--author", "--author", "--committer", "--committer", "--grep", "--grep",
+            "--since", "--since", "--after", "--since", "--until", "--until", "--before", "--until");
+    private static final Set<String> GIT_LOG_SWITCHES = Set.of(
+            "-i", "--regexp-ignore-case", "--all-match", "--no-merges", "--merges");
+    /** Unsupported options that take a value: the value is ignored with them instead of becoming the path. */
+    private static final Set<String> GIT_LOG_IGNORED_VALUE_OPTIONS = Set.of(
+            "--format", "--pretty", "--date", "--output", "--skip", "-L", "--decorate");
 
     /**
-     * Arguments are {@code [path] [limit]} in any order. Models often add git flags: a count
-     * ({@code -20}, {@code -n 20}, {@code --max-count=20}) sets the limit, any other flag is ignored
-     * instead of being taken for a path, which used to filter the log down to nothing.
+     * Arguments are {@code [path] [limit]} in any order, plus an allow-list of filters: {@code --author},
+     * {@code --committer}, {@code --since}/{@code --after}, {@code --until}/{@code --before},
+     * {@code --grep} (with {@code -i}, {@code --all-match}), {@code -S}/{@code -G} pickaxe, {@code --no-merges},
+     * {@code --merges} and {@code --follow} (with a path). A count ({@code -20}, {@code -n 20},
+     * {@code --max-count=20}) sets the limit, clamped to 1..{@value #MAX_GIT_LOG_LIMIT}. Every other option is
+     * ignored and named in the result, so the model knows its filter had no effect.
      */
     private ToolResult executeGitLogTool(Path workspaceDir, List<String> arguments) {
         String relativePath = null;
         int limit = DEFAULT_GIT_LOG_LIMIT;
+        List<String> filters = new ArrayList<>();
+        List<String> ignored = new ArrayList<>();
+        boolean follow = false;
         List<String> args = arguments == null ? List.of() : arguments;
         for (int i = 0; i < args.size(); i++) {
             String argument = args.get(i);
             if (argument == null || argument.isBlank()) {
                 continue;
             }
+            String name = argument.contains("=") ? argument.substring(0, argument.indexOf('=')) : argument;
             Matcher count = GIT_LOG_COUNT_FLAG.matcher(argument);
             if (count.matches()) {
-                limit = Integer.parseInt(count.group(1) != null ? count.group(1) : count.group(2));
+                limit = clampGitLogLimit(count.group(1) != null ? count.group(1) : count.group(2));
             } else if (("-n".equals(argument) || "--max-count".equals(argument))
-                    && i + 1 < args.size() && isInteger(args.get(i + 1))) {
-                limit = Integer.parseInt(args.get(++i));
+                    && i + 1 < args.size() && isDigits(args.get(i + 1))) {
+                limit = clampGitLogLimit(args.get(++i));
+            } else if (GIT_LOG_VALUE_FILTERS.containsKey(name)) {
+                String value = argument.contains("=") ? argument.substring(argument.indexOf('=') + 1)
+                        : i + 1 < args.size() ? args.get(++i) : null;
+                if (value != null && !value.isBlank()) {
+                    filters.add(GIT_LOG_VALUE_FILTERS.get(name) + "=" + value);
+                }
+            } else if (argument.startsWith("-S") || argument.startsWith("-G")) {
+                // pickaxe: "-S text" or "-Stext"; git takes the value glued to the flag
+                String value = argument.length() > 2 ? argument.substring(2)
+                        : i + 1 < args.size() ? args.get(++i) : null;
+                if (value != null && !value.isEmpty()) {
+                    filters.add(argument.substring(0, 2) + value);
+                }
+            } else if (GIT_LOG_SWITCHES.contains(argument)) {
+                filters.add(argument);
+            } else if ("--follow".equals(argument)) {
+                follow = true;
             } else if (argument.startsWith("-")) {
-                log.debug("git-log ignores unsupported flag {}", argument);
-            } else if (isInteger(argument)) {
-                limit = Integer.parseInt(argument);
+                String skippedValue = GIT_LOG_IGNORED_VALUE_OPTIONS.contains(argument) && i + 1 < args.size()
+                        ? " " + args.get(++i) : "";
+                ignored.add(argument + skippedValue);
+            } else if (isDigits(argument)) {
+                limit = clampGitLogLimit(argument);
             } else if (relativePath == null) {
                 relativePath = argument;
+            } else {
+                ignored.add(argument);
             }
         }
 
         List<String> command = new ArrayList<>(List.of(
                 "git", "log", "--date=short", "--pretty=format:%h %ad %an %s", "-n", String.valueOf(limit)));
+        command.addAll(filters);
         if (relativePath != null) {
             try {
                 resolveWorkspacePath(workspaceDir, relativePath);
             } catch (IOException e) {
                 return new ToolResult(false, -1, "", e.getMessage());
             }
+            if (follow) {
+                command.add("--follow");
+            }
             command.add("--");
             command.add(relativePath);
+        } else if (follow) {
+            ignored.add("--follow (needs a path)");
         }
         ToolResult result = executeCommand(workspaceDir, command.toArray(String[]::new));
-        if (result.success() && (result.output() == null || result.output().isBlank())) {
-            return outputResult(true, 0, relativePath == null
-                    ? "No commits found."
-                    : "No commits found for path: " + relativePath, false);
+        if (!result.success()) {
+            return result;
         }
-        return result;
+        String output = result.output();
+        if (output == null || output.isBlank()) {
+            output = (relativePath == null ? "No commits found" : "No commits found for path: " + relativePath)
+                    + (filters.isEmpty() ? "" : " (filters: " + String.join(" ", filters) + ")")
+                    + (relativePath == null && filters.isEmpty() ? "." : "");
+        }
+        if (!ignored.isEmpty()) {
+            output = output.stripTrailing() + "\nIgnored unsupported options: " + String.join(", ", ignored);
+        }
+        return outputResult(true, 0, output, result.outputTruncated());
+    }
+
+    /** A count from the model; anything outside 1..{@value #MAX_GIT_LOG_LIMIT}, also absurdly long digit runs, is clamped. */
+    private static int clampGitLogLimit(String digits) {
+        if (digits.length() > 4) {
+            return MAX_GIT_LOG_LIMIT;
+        }
+        return Math.clamp(Integer.parseInt(digits), 1, MAX_GIT_LOG_LIMIT);
+    }
+
+    private static boolean isDigits(String value) {
+        return value != null && DIGITS.matcher(value).matches();
     }
 
     private ToolResult executeGitBlameTool(Path workspaceDir, List<String> arguments) {
