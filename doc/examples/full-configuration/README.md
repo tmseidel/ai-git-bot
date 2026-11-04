@@ -37,6 +37,11 @@ Values that need explaining:
 - **System prompts are all-or-nothing per row.** All ten role prompts are `NOT NULL`, so a
   custom prompt must set all ten; a document that sets only one fails with
   `Review-Agent System-Prompt is required`.
+- **`adminUsers` needs one usable administrator.** At least one entry must carry both
+  `username` and `password`; a document without one is refused and imports nothing, because the
+  import (which only runs while no admin user exists) would otherwise re-apply on every start
+  and leave `/setup` claimable. Exported documents never carry a password — add one before
+  re-importing.
 - **`selectedTools` is a full replacement.** The default configuration contains every built-in
   tool except `execute-code`, which is opt-in: a tool configuration exists to take tools away,
   or to give one bot code execution.

@@ -129,8 +129,14 @@ With a document, these rules apply:
   tool configuration of its own. A bot gets it only from a configuration that selects it.
   Instances upgraded from an older image gain the other new tools on the next start;
   `execute-code` is never among them.
-- `adminUsers` entries carry a plaintext `password` (hashed on import). An entry without a
-  password is skipped with a warning — exported documents never contain one.
+- At least one `adminUsers` entry needs both a `username` and a plaintext `password` (hashed
+  on import). A document without such an entry is refused before the first row is written:
+  nothing is imported and the instance starts unconfigured, ready for `/setup`. The alternative
+  would be worse — the importer only runs while no admin user exists, so a document that creates
+  none would be applied again on every start, merged over its own previous import, and `/setup`
+  would stay claimable on a persistent instance. Exported documents carry no password by
+  design, so an export needs one added before it can serve as a document. Any further
+  passwordless entry is skipped with a warning.
 - Credentials are plaintext in the document and encrypted on import
   (`APP_ENCRYPTION_KEY`); the document itself is a secret file. Remove the variable after
   the first start.

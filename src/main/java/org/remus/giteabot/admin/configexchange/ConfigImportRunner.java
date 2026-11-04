@@ -17,6 +17,13 @@ import tools.jackson.databind.ObjectMapper;
  * is the first boot of an empty volume and never again. A restart therefore cannot
  * overwrite data an operator created through the UI.</p>
  *
+ * <p>That gate also means the document itself has to close it, which is why
+ * {@link ConfigExchangeService#importDocument} refuses a document that declares no
+ * administrator with a password ({@code requireAdministrator}): a document without one would
+ * be applied, and then applied again on the next start — merged over its own rows — while
+ * {@code /setup} stayed claimable. Exported documents carry no password, so an export has to
+ * have one added before it can serve as a document.</p>
+ *
  * <p>Runs as a {@link SmartInitializingSingleton}: every singleton — the Flyway migration
  * initializer, the repositories, the services — exists by then, and the web server has not
  * been started yet (that happens in {@code finishRefresh}, after singleton instantiation).

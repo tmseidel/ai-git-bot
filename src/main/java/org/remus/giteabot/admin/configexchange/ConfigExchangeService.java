@@ -35,6 +35,12 @@ import java.util.Map;
  * exists is overridden field by field instead of created again — either a Flyway seed or a
  * row an earlier import created, which is what makes importing the same document twice
  * create nothing.</p>
+ *
+ * <p>A document that cannot produce an administrator is refused before the first row is
+ * written ({@link #requireAdministrator}). The import runs while no admin user exists, so an
+ * applied document without one would leave that gate open: the next start would import the
+ * document again, over the rows the previous import created, and {@code /setup} — a
+ * permit-all page — would stay claimable on a persistent instance until somebody used it.</p>
  */
 @Slf4j
 @Service
@@ -52,11 +58,13 @@ public class ConfigExchangeService {
      * Applies every section of the document in registry order.
      *
      * @return the number of rows created, for the boot log
-     * @throws IllegalArgumentException on the first invalid entry, naming section and
-     *         index; nothing after it is applied
+     * @throws IllegalArgumentException when the document declares no administrator with a
+     *         password (nothing at all is applied), or on the first invalid entry, naming
+     *         section and index
      */
     @Transactional
     public int importDocument(JsonNode root) {
+        requireAdministrator(root);
         int created = 0;
         Map<Class<?>, Function<String, Optional<Object>>> lookups = registry.lookups();
         Set<String> declared = new HashSet<>();
@@ -68,6 +76,35 @@ public class ConfigExchangeService {
             created += importSection(table, section, lookups, declared);
         }
         return created;
+    }
+
+    /**
+     * Refuses a document that declares no administrator with a password.
+     *
+     * <p>This gate is the difference between "applied" and "applied again on every start": the
+     * importer runs only while no admin user exists, so an applied document that creates none
+     * leaves {@link AdminService#isSetupRequired()} true — a persistent instance would merge the
+     * document over its own previous import on every restart, and its {@code /setup} page would
+     * stay available to whoever reaches it first. An exported document never carries a password
+     * (hashes do not leave the instance), so an export must have one added before it is used as
+     * a document.</p>
+     *
+     * <p>Runs before the first row is written, so a refused document imports nothing at all.</p>
+     *
+     * @throws IllegalArgumentException naming {@code adminUsers}, never a section index
+     */
+    private static void requireAdministrator(JsonNode root) {
+        for (JsonNode entry : root.path("adminUsers")) {
+            String username = entry.path("username").asString(null);
+            String password = entry.path("password").asString(null);
+            if (username != null && !username.isBlank()
+                    && password != null && !password.isBlank()) {
+                return;
+            }
+        }
+        throw new IllegalArgumentException("adminUsers: the document declares no administrator "
+                + "with a password, so the instance cannot be set up from it (an exported "
+                + "document never carries one) — nothing was imported");
     }
 
     private <T> int importSection(ConfigTable<T> table, JsonNode section,
@@ -163,9 +200,10 @@ public class ConfigExchangeService {
      * password arrives in plaintext and must be hashed, so the generic save path is
      * bypassed for {@link org.remus.giteabot.admin.AdminUser}.
      *
-     * <p>A missing password is not an error: an <em>exported</em> document only carries
-     * the username, because hashes never leave the instance. Such an entry is skipped
-     * with a warning and the instance asks for the account at {@code /setup}.</p>
+     * <p>{@link #requireAdministrator} has already refused a document without any usable
+     * administrator, so a passwordless entry that reaches this method is an extra one — an
+     * exported document carries only usernames, because hashes never leave the instance. It is
+     * skipped with a warning rather than failing the whole import.</p>
      */
     private int importAdminUser(JsonNode node) {
         String username = node.path("username").asString(null);

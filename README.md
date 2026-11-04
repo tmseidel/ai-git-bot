@@ -469,6 +469,9 @@ no separate schema to learn or keep in sync.
   execution stays out of it for the same reason it is opt-in everywhere: the row is
   permanent once written, so a bot gets `execute-code` only from a tool configuration that
   selects it.
+- The document must declare at least one administrator with a password. Without one it is
+  refused as a whole: nothing is imported and the instance stays unconfigured for `/setup`.
+  Exported documents carry no password, so add one before using an export as a document.
 - Credentials are plaintext in the document and encrypted at rest on import
   (`APP_ENCRYPTION_KEY`).
 - `GET /config/export` returns the current instance in the same shape — use it to turn a

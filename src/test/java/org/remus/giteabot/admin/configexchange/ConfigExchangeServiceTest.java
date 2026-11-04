@@ -182,8 +182,46 @@ class ConfigExchangeServiceTest {
         assertTrue(exported.path("workflowConfigurations").toString().contains("\"Trial issues\""),
                 "the ISSUE-kind configuration belongs in the export too");
 
-        // Re-importing the export into the instance it came from adds nothing.
+        // An export carries no password, so it cannot set an instance up: refused as a whole
+        // before a single row is written, instead of being applied and then re-applied on
+        // every start while /setup stays claimable.
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> configExchangeService.importDocument(exported));
+        assertTrue(refused.getMessage().startsWith("adminUsers:"), refused.getMessage());
+
+        // With a password added it is a document again, and re-importing it into the instance
+        // it came from adds nothing.
+        ((ObjectNode) exported.path("adminUsers").get(0)).put("password", "another-password");
         assertEquals(0, configExchangeService.importDocument(exported));
+    }
+
+    @Test
+    void refusesADocumentWithoutAnAdministratorPasswordAndImportsNothing() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        ((ObjectNode) root.path("adminUsers").get(0)).remove("password");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> configExchangeService.importDocument(root));
+
+        assertTrue(error.getMessage().startsWith("adminUsers:"),
+                () -> "message should name the section, was: " + error.getMessage());
+        assertTrue(error.getMessage().contains("password"), error.getMessage());
+        assertEquals(0, botRepository.count(), "a refused document imports nothing at all");
+        assertEquals(0, aiIntegrationRepository.count());
+        assertTrue(adminService.isSetupRequired(),
+                "and it leaves the instance unconfigured, which is what /setup is for");
+    }
+
+    @Test
+    void refusesADocumentWithoutAnyAdminSection() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        root.remove("adminUsers");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> configExchangeService.importDocument(root));
+
+        assertTrue(error.getMessage().startsWith("adminUsers:"), error.getMessage());
+        assertEquals(0, botRepository.count());
     }
 
     @Test
@@ -266,6 +304,8 @@ class ConfigExchangeServiceTest {
         assertTrue(endpoint.path("botId").isMissingNode(),
                 "internal ids never reach the document");
 
+        // An export carries no admin password, so it is a document again only once one is added.
+        ((ObjectNode) exported.path("adminUsers").get(0)).put("password", "another-password");
         assertEquals(0, configExchangeService.importDocument(exported),
                 "re-importing the export creates no second endpoint");
         assertEquals(1, eventHookEndpointRepository.count());
