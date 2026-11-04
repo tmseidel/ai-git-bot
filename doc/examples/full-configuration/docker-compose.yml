@@ -138,7 +138,7 @@ services:
           "aiIntegrations": [
             {
               "name": "DeepSeek",
-              "providerType": "openai",
+              "providerType": "OPENAI",
               "apiUrl": "https://api.deepseek.com",
               "apiKey": "sk-replace-me",
               "apiVersion": "",
@@ -153,7 +153,7 @@ services:
             },
             {
               "name": "OpenRouter (EU, no data collection)",
-              "providerType": "openai",
+              "providerType": "OPENROUTER",
               "apiUrl": "https://eu.openrouter.ai/api",
               "apiKey": "sk-or-replace-me",
               "apiVersion": "",
@@ -169,12 +169,12 @@ services:
               "openRouterZdr": true
             },
             {
-              "name": "Azure OpenAI",
-              "providerType": "openai",
-              "apiUrl": "https://my-resource.openai.azure.com",
+              "name": "Anthropic (direct)",
+              "providerType": "ANTHROPIC",
+              "apiUrl": "https://api.anthropic.com",
               "apiKey": "replace-me",
-              "apiVersion": "2024-10-21",
-              "model": "gpt-4o-2024-11-20",
+              "apiVersion": "2023-06-01",
+              "model": "claude-sonnet-5",
               "maxTokens": 16384,
               "useLegacyToolCalling": true,
               "promptCachingEnabled": false,
@@ -185,7 +185,7 @@ services:
             },
             {
               "name": "Ollama (local)",
-              "providerType": "ollama",
+              "providerType": "OLLAMA",
               "apiUrl": "http://host.docker.internal:11434",
               "apiVersion": "",
               "model": "qwen3:32b",

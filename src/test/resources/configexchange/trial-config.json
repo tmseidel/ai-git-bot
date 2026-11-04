@@ -3,7 +3,7 @@
     { "username": "trial-admin", "password": "trial-password" }
   ],
   "aiIntegrations": [
-    { "name": "Trial AI", "providerType": "openai",
+    { "name": "Trial AI", "providerType": "OPENAI",
       "apiUrl": "https://api.deepseek.com", "apiKey": "sk-trial-key",
       "model": "deepseek-chat", "maxTokens": 4096, "contextWindowTokens": 131072 }
   ],

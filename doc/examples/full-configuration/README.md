@@ -26,7 +26,7 @@ value.
 | `botToolConfigurations` | `Read-only set` | `name`, `selectedTools[].toolName`, `.toolKind` |
 | `mcpConfigurations` | `Docs index` | `name`, `jsonContent`, `selectedTools[].qualifiedName/.serverName/.toolName/.title/.description` |
 | `deploymentTargets` | `Preview (static)`, `Staging (webhook)` | `name`, `strategyType`, `configJson`, `previewUrlTemplate`, `timeoutSeconds` |
-| `aiIntegrations` | `DeepSeek`, `OpenRouter (EU, no data collection)`, `Azure OpenAI`, `Ollama (local)` | `name`, `providerType`, `apiUrl`, `apiKey`, `apiVersion`, `model`, `maxTokens`, `useLegacyToolCalling`, `promptCachingEnabled`, `contextWindowTokens`, `parallelWorkerLimit`, `modelFlavor`, `openRouterRegion`, `openRouterDataCollection`, `openRouterZdr` |
+| `aiIntegrations` | `DeepSeek`, `OpenRouter (EU, no data collection)`, `Anthropic (direct)`, `Ollama (local)` | `name`, `providerType`, `apiUrl`, `apiKey`, `apiVersion`, `model`, `maxTokens`, `useLegacyToolCalling`, `promptCachingEnabled`, `contextWindowTokens`, `parallelWorkerLimit`, `modelFlavor`, `openRouterRegion`, `openRouterDataCollection`, `openRouterZdr` |
 | `gitIntegrations` | `Gitea (HTTP)`, `Gitea (SSH)` | `name`, `providerType`, `url`, `username`, `token`, `transport`, `postReviewAction`, `sshCleanupVerified`, `sshPrivateKey`, `sshKnownHosts` |
 | `workflowConfigurations` | `PR workflows`, `Issue workflows` | `name`, `kind`, `selectedWorkflows[].workflowKey`, `.params[].name/.value` |
 | `bots` | `demo-bot` | `name`, `webhookSecret`, `webhookSigningSecret`, `userWhitelist`, `enabled`, `branchFilter`, `runOnPrCreation`, `runOnPrUpdate`, `runOnIssueCreation`, plus the seven references (`aiIntegration`, `gitIntegration`, `systemPrompt`, `toolConfiguration`, `mcpConfiguration`, `workflowConfiguration`, `issueWorkflowConfiguration`, `deploymentTarget`) |
@@ -48,10 +48,14 @@ Values that need explaining:
 - **`gitIntegrations`.** HTTP needs a `token`; SSH is Gitea-only and needs a `token` for the API
   as well as `sshPrivateKey` + `sshKnownHosts`. Both secrets are stored encrypted. When you
   switch an integration away from SSH, its key and known-hosts are dropped.
-- **`aiIntegrations`.** `providerType` is one of `openai`, `anthropic`, `google`, `ollama`,
-  `llamacpp`; OpenRouter is `openai` with an `openrouter.ai` URL plus the three `openRouter*`
-  fields. `apiVersion` is only read for Azure OpenAI. `modelFlavor` is `standard` or
-  `no_reasoning` for the OpenAI-compatible providers. `apiKey` is omitted for `ollama`.
+- **`aiIntegrations`.** `providerType` is the enum constant, upper case: `OPENAI`, `ANTHROPIC`,
+  `GOOGLE`, `OLLAMA`, `LLAMACPP`, `OPENROUTER` — the same value the `provider_type` column holds
+  and the admin UI's provider select posts, so a lower-case `openai` fails the import. The
+  `openRouter*` fields (`region`: `GLOBAL` | `EU` | `US`, `dataCollection`: `DENY` | `ALLOW`,
+  `zdr`) are read by the `OPENROUTER` provider only; the same applies to `apiVersion`, which
+  is the Anthropic `anthropic-version` header (`2023-06-01` when unset). `modelFlavor` is
+  `standard` or `no_reasoning` for the OpenAI-compatible providers; `apiKey` is omitted for
+  `OLLAMA` / `LLAMACPP`.
 - **`workflowConfigurations[].params`** — keys per workflow: `review` takes
   `maxDiffCharsPerChunk`, `maxDiffChunks`, `retryTruncatedChunkChars`, `excludedFilePatterns`;
   `e2e-test` takes `framework`, `maxRetries`, `maxTestCases`, `suiteLifecycle`,

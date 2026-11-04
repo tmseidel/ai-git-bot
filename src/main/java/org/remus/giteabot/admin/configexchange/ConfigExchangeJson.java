@@ -95,10 +95,17 @@ public final class ConfigExchangeJson {
         }
     }
 
-    /** Cuts the {@code WorkflowSelection → WorkflowConfiguration} back-reference. */
+    /** Cuts the {@code WorkflowSelection → WorkflowConfiguration} back-reference and the derived map. */
     abstract static class WorkflowSelectionMixin {
         @JsonIgnore
         abstract WorkflowConfiguration getConfiguration();
+
+        /**
+         * Computed from {@code params}; exporting it too would ship the same fact twice and put a
+         * key in the document that an operator can edit without any effect.
+         */
+        @JsonIgnore
+        abstract Map<String, String> getParamsMap();
     }
 
     /** Cuts the {@code WorkflowSelectionParam → WorkflowSelection} back-reference. */
