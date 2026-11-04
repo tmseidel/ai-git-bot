@@ -7,11 +7,14 @@ import org.remus.giteabot.config.AiUsageProperties;
 import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.io.IOException;
@@ -52,7 +55,7 @@ public class UsageController {
 
         // Page parameters are 1-based (the UI counts from page 1); Spring Data
         // PageRequest is 0-based, so subtract 1 (and never go below 0).
-        Page<AiUsageLog> usage = aiUsageService.findUsage(fromInstant, toInstant,
+        Page<AiUsageRow> usage = aiUsageService.findUsage(fromInstant, toInstant,
                 Math.max(0, usagePage - 1), usageSize, usageSort, "asc".equalsIgnoreCase(usageDir));
         Page<AiErrorLog> errors = aiUsageService.findErrors(fromInstant, toInstant,
                 Math.max(0, errorPage - 1), errorSize, errorSort, "asc".equalsIgnoreCase(errorDir));
@@ -71,6 +74,16 @@ public class UsageController {
         model.addAttribute("rawPayloadsEnabled",
                 usageProperties != null && usageProperties.isRawPayloadsEnabled());
         return "usage/list";
+    }
+
+    /**
+     * The raw payloads of one usage entry, loaded by the Details modal when it opens so the page
+     * itself never carries them. 404 when the entry is missing or raw payload capture is disabled.
+     */
+    @GetMapping(value = "/usage/{id}/raw", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public ResponseEntity<AiUsageRawPayload> rawPayload(@PathVariable long id) {
+        return ResponseEntity.of(aiUsageService.findRawPayload(id));
     }
 
     /**
