@@ -11,7 +11,6 @@ import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -27,7 +26,6 @@ import org.springframework.web.client.RestClient;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Bitbucket Cloud implementation of {@link RepositoryApiClient}.
@@ -39,23 +37,18 @@ import java.util.Optional;
 public class BitbucketApiClient implements RepositoryApiClient {
 
     private final RestClient restClient;
-    private final RepositoryCredentials credentials;
+    private final String cloneUrl;
     private volatile BitbucketAccount authenticatedAccount;
 
     /**
-     * Creates a BitbucketApiClient with the given RestClient and credentials.
+     * Creates a BitbucketApiClient with the given RestClient and clone URL.
      *
      * @param restClient  pre-configured RestClient pointing at the Bitbucket API base URL
-     * @param credentials the repository credentials (base URL, clone URL, username, token)
+     * @param cloneUrl    the credential-free HTTP clone base URL
      */
-    public BitbucketApiClient(RestClient restClient, RepositoryCredentials credentials) {
+    public BitbucketApiClient(RestClient restClient, String cloneUrl) {
         this.restClient = restClient;
-        this.credentials = credentials;
-    }
-
-    @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
+        this.cloneUrl = cloneUrl;
     }
 
     /**
@@ -79,15 +72,6 @@ public class BitbucketApiClient implements RepositoryApiClient {
         return account;
     }
 
-    /**
-     * Bitbucket mentions are picked via the {@code @} autocomplete, which searches by
-     * display name, so that name (or the nickname) is what users should type.
-     */
-    @Override
-    public Optional<String> getBotMentionName() {
-        return Optional.ofNullable(getAuthenticatedAccount().name());
-    }
-
     // ---- Pull request operations ----
 
     @Override
@@ -101,7 +85,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
 
     @Override
     public String getPullRequestDiff(String owner, String repo, Long pullNumber) {
-        log.info("Fetching diff for PR #{} in {}/{} from baseUrl={}", pullNumber, owner, repo, credentials.baseUrl());
+        log.info("Fetching diff for PR #{} in {}/{}", pullNumber, owner, repo);
         try {
             // Bitbucket Cloud's diff endpoint returns a 302 redirect to the actual diff
             // content; the auto-configured HttpComponents client follows redirects by default.
@@ -217,7 +201,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     private String buildDownloadUrl(String workspace, String repo, String fileName) {
-        String base = credentials.cloneUrl();
+        String base = cloneUrl;
         if (base == null || base.isBlank()) {
             base = "https://bitbucket.org";
         }

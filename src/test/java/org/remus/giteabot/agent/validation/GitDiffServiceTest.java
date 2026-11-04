@@ -3,8 +3,8 @@ package org.remus.giteabot.agent.validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.remus.giteabot.repository.RepositoryApiClient;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.model.HttpCredentials;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -25,7 +25,7 @@ class GitDiffServiceTest {
     private Path origin;
     private Path workspaces;
     private GitDiffService service;
-    private RepositoryApiClient client;
+    private RepositoryPlatform platform;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -38,10 +38,9 @@ class GitDiffServiceTest {
 
         workspaces = tempDir.resolve("workspaces");
         service = new GitDiffService(new WorkspaceService(workspaces.toString(), 60));
-        client = mock(RepositoryApiClient.class);
-        when(client.getRepositoryRemote("owner", "repo")).thenReturn(origin.toUri().toString());
-        when(client.getCredentials()).thenReturn(
-                RepositoryCredentials.of("https://git.example.com", "https://git.example.com", "token"));
+        platform = mock(RepositoryPlatform.class);
+        when(platform.getRepositoryRemote("owner", "repo")).thenReturn(origin.toUri().toString());
+        when(platform.getCredentials()).thenReturn(new HttpCredentials(null, "token"));
     }
 
     @Test
@@ -53,7 +52,7 @@ class GitDiffServiceTest {
         git("mv", "b.txt", "c.txt");
         String head = commit();
 
-        String diff = service.diffCommits(client, "owner", "repo", base, head);
+        String diff = service.diffCommits(platform, "owner", "repo", base, head);
 
         assertThat(diff)
                 .contains("diff --git a/a.txt b/a.txt", "-two", "+changed")
@@ -94,7 +93,7 @@ class GitDiffServiceTest {
         write("README.md", "base\n");
         String head = commit();
 
-        assertThat(service.diffCommits(client, "owner", "repo", "0".repeat(40), head)).isNull();
+        assertThat(service.diffCommits(platform, "owner", "repo", "0".repeat(40), head)).isNull();
         assertNoWorkspaceLeft();
     }
 
@@ -105,16 +104,16 @@ class GitDiffServiceTest {
         Path marker = tempDir.resolve("injected");
         String injected = "--upload-pack=touch '" + marker.toAbsolutePath().toString().replace('\\', '/') + "'";
 
-        assertThat(service.diffCommits(client, "owner", "repo", injected, head)).isNull();
+        assertThat(service.diffCommits(platform, "owner", "repo", injected, head)).isNull();
         assertThat(marker).doesNotExist();
         assertNoWorkspaceLeft();
     }
 
     @Test
     void diffCommits_returnsNullWithoutAllocatingAWorkspaceWhenProviderResolutionFails() {
-        when(client.getRepositoryRemote("owner", "repo")).thenThrow(new IllegalStateException("provider down"));
+        when(platform.getRepositoryRemote("owner", "repo")).thenThrow(new IllegalStateException("provider down"));
 
-        assertThat(service.diffCommits(client, "owner", "repo", "a".repeat(40), "b".repeat(40))).isNull();
+        assertThat(service.diffCommits(platform, "owner", "repo", "a".repeat(40), "b".repeat(40))).isNull();
         assertThat(workspaces).doesNotExist();
     }
 
@@ -132,7 +131,7 @@ class GitDiffServiceTest {
             }
         };
 
-        assertThat(new GitDiffService(failingInit).diffCommits(client, "owner", "repo", "a".repeat(40), "b".repeat(40)))
+        assertThat(new GitDiffService(failingInit).diffCommits(platform, "owner", "repo", "a".repeat(40), "b".repeat(40)))
                 .isNull();
         assertNoWorkspaceLeft();
     }

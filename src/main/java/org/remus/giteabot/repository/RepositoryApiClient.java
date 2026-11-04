@@ -1,7 +1,6 @@
 package org.remus.giteabot.repository;
 
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
@@ -10,139 +9,33 @@ import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
-import java.net.URI;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Provider-agnostic interface for repository operations (pull requests, reviews,
- * comments, branches, files).  Implementations exist for Gitea
+ * Provider-agnostic interface for the REST API of a repository provider (pull requests,
+ * reviews, comments, branches, files). Implementations exist for Gitea
  * ({@link org.remus.giteabot.gitea.GiteaApiClient}), GitHub
  * ({@link org.remus.giteabot.github.GitHubApiClient}), GitLab
- * ({@link org.remus.giteabot.gitlab.GitLabApiClient}), and Bitbucket Cloud
- * ({@link org.remus.giteabot.bitbucket.BitbucketApiClient}).
+ * ({@link org.remus.giteabot.gitlab.GitLabApiClient}), Bitbucket Cloud
+ * ({@link org.remus.giteabot.bitbucket.BitbucketApiClient}) and Azure DevOps
+ * ({@link org.remus.giteabot.azuredevops.AzureDevopsApiClient}).
  * <p>
- * Each bot receives its own {@code RepositoryApiClient} instance, pre-configured
- * with the bot's credentials from the {@link org.remus.giteabot.admin.GitIntegration}
- * entity stored in the database.
+ * A client only talks to the API; it holds no Git credentials. Everything else about reaching
+ * an integration — URLs, Git remotes, transport and credentials, provider naming conventions —
+ * belongs to its {@link RepositoryPlatform}, whose {@linkplain RepositoryPlatform#getClient()
+ * client} this is. Both are built per {@link org.remus.giteabot.admin.GitIntegration} by
+ * {@link org.remus.giteabot.admin.RepositoryPlatformFactory}.
  */
 public interface RepositoryApiClient {
 
-    /**
-     * Returns the credentials used by this client: API base URL, credential-free
-     * HTTP clone base URL, username, and token, plus the selected Git transport
-     * and its SSH material (private key, {@code known_hosts}) when SSH is active.
-     */
-    RepositoryCredentials getCredentials();
-
-    /** Returns the API base URL of the repository provider (e.g. {@code https://api.github.com}). */
-    default String getBaseUrl() {
-        return getCredentials().baseUrl();
-    }
-
-    /**
-     * Returns the credential-free HTTP clone base URL (e.g. {@code https://github.com}).
-     * This is the HTTP-transport base only; the actual Git remote for clone, fetch,
-     * and push operations is resolved per repository by {@link #getRepositoryRemote},
-     * which providers may override to select SSH.
-     */
-    default String getCloneUrl() {
-        return getCredentials().cloneUrl();
-    }
-
-    /**
-     * Validates an HTTP clone base URL and returns it normalized: lower-case scheme, no
-     * trailing slash.
-     * <p>
-     * The remote this feeds is handed to {@code git} as a command-line argument and is
-     * echoed back in git's own error output, so it must never carry a secret. A base URL
-     * with userinfo would both leak the credential there and corrupt the credential-store
-     * host {@code WorkspaceService} derives from the remote. Query and fragment are
-     * rejected for the same reason: neither is meaningful in a Git remote, and both would
-     * survive into the concatenated URL.
-     * <p>
-     * Exposed as a static helper rather than being inlined into
-     * {@link #getRepositoryRemote} so that providers overriding that method to build a
-     * provider-specific path — Azure DevOps addresses repositories as
-     * {@code /{org}/{project}/_git/{name}} — keep the same guarantee instead of
-     * reimplementing (and quietly dropping) it.
-     *
-     * @throws IllegalStateException when the URL is missing, unparseable, not HTTP(S), or
-     *                               carries userinfo, a query or a fragment
-     */
-    static String validatedCloneBaseUrl(String cloneBaseUrl) {
-        if (cloneBaseUrl == null || cloneBaseUrl.isBlank()) {
-            throw new IllegalStateException("Repository remote cannot be resolved");
-        }
-        String normalized;
-        try {
-            URI base = URI.create(cloneBaseUrl);
-            if (!("http".equalsIgnoreCase(base.getScheme()) || "https".equalsIgnoreCase(base.getScheme()))
-                    || base.getHost() == null || base.getUserInfo() != null
-                    || base.getRawQuery() != null || base.getRawFragment() != null) {
-                throw new IllegalStateException("HTTP clone base URL must be credential-free");
-            }
-            normalized = base.getScheme().toLowerCase(Locale.ROOT)
-                    + cloneBaseUrl.substring(base.getScheme().length());
-        } catch (IllegalArgumentException e) {
-            throw new IllegalStateException("HTTP clone base URL is invalid", e);
-        }
-        while (normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        return normalized;
-    }
-
-    /**
-     * Resolves the complete, credential-free Git remote for one repository.
-     * Providers may override this to select a repository-specific transport; an override
-     * that still builds an HTTP remote must run its base URL through
-     * {@link #validatedCloneBaseUrl}.
-     */
-    default String getRepositoryRemote(String owner, String repo) {
-        if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
-            throw new IllegalStateException("Repository remote cannot be resolved");
-        }
-        return validatedCloneBaseUrl(getCloneUrl()) + "/" + owner + "/" + repo + ".git";
-    }
-
-    /**
-     * Returns whether HTTP Git operations must authenticate with a pre-emptive
-     * {@code Authorization: Basic} header instead of a credential helper.
-     * Needed for providers (e.g. Azure DevOps) whose remotes reject the
-     * credential-store challenge/response flow.
-     */
-    default boolean usesGitAuthorizationHeader() {
-        return false;
-    }
-
-    /** Returns the authentication token used by this client. */
-    default String getToken() {
-        return getCredentials().token();
-    }
-
-    /**
-     * Returns the name users type after {@code @} to address the bot, for providers that
-     * derive the bot's identity from the integration credentials rather than from the
-     * bot's configured username (e.g. Bitbucket). Empty means "use the bot username".
-     */
-    default Optional<String> getBotMentionName() {
-        return Optional.empty();
-    }
-
-    /**
-     * Formats a pull/merge request reference for use in comments.
-     * GitLab uses {@code !N} for merge requests, while Gitea, GitHub, and Bitbucket use {@code #N}.
-     * Override in provider-specific clients as needed.
-     */
-    default String formatPullRequestReference(Long prNumber) {
-        return "#" + prNumber;
-    }
-
     // ---- Pull request operations ----
 
+    /**
+     * Returns the unified diff of a pull request, or {@code null} when it could not be
+     * determined.
+     */
     String getPullRequestDiff(String owner, String repo, Long pullNumber);
 
     void postReviewComment(String owner, String repo, Long pullNumber, String body);

@@ -5,7 +5,7 @@ import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.config.DeploymentTarget;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -24,11 +24,11 @@ import static org.mockito.Mockito.when;
 class CiActionTriggerStrategyTest {
 
     private final BotRepository botRepository = mock(BotRepository.class);
-    private final RepositoryApiClientFactory clientFactory = mock(RepositoryApiClientFactory.class);
+    private final RepositoryPlatformFactory repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
     private final RepositoryApiClient apiClient = mock(RepositoryApiClient.class);
 
     private final CiActionTriggerStrategy strategy =
-            new CiActionTriggerStrategy(botRepository, clientFactory);
+            new CiActionTriggerStrategy(botRepository, repositoryPlatformFactory);
 
     private DeploymentRequest request(String configJson) {
         DeploymentTarget target = new DeploymentTarget();
@@ -59,7 +59,7 @@ class CiActionTriggerStrategyTest {
         integration.setUpdatedAt(Instant.now());
         bot.setGitIntegration(integration);
         when(botRepository.findByIdWithIntegrations(7L)).thenReturn(Optional.of(bot));
-        when(clientFactory.getApiClient(any())).thenReturn(apiClient);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(apiClient);
     }
 
     @Test

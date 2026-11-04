@@ -3,11 +3,11 @@ package org.remus.giteabot.prworkflow.readmesync;
 import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
 public class ReadmeSyncServiceFactory {
 
     private final AiClientFactory aiClientFactory;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final WorkspaceService workspaceService;
     private final ReadmeSyncAgent agent;
     private final WorkflowToolSurfaceFactory surfaceFactory;
@@ -30,8 +30,8 @@ public class ReadmeSyncServiceFactory {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
-        return new ReadmeSyncService(repoClient, aiClient, bot.getSystemPrompt(),
+        RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
+        return new ReadmeSyncService(platform, aiClient, bot.getSystemPrompt(),
                 workspaceService, agent, surfaceFactory);
     }
 }

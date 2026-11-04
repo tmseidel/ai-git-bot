@@ -3,7 +3,7 @@ package org.remus.giteabot.azuredevops;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -72,7 +72,7 @@ public class AzureDevopsWebhookHandler {
     private static final int MAX_TRACKED_PULL_REQUESTS = 5000;
 
     private final BotWebhookService botWebhookService;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /**
      * What the previous event said about one pull request: the source-branch commit it
@@ -113,9 +113,9 @@ public class AzureDevopsWebhookHandler {
             });
 
     public AzureDevopsWebhookHandler(BotWebhookService botWebhookService,
-                                     RepositoryApiClientFactory repositoryApiClientFactory) {
+                                     RepositoryPlatformFactory repositoryPlatformFactory) {
         this.botWebhookService = botWebhookService;
-        this.repositoryApiClientFactory = repositoryApiClientFactory;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
     }
 
     /**
@@ -401,7 +401,7 @@ public class AzureDevopsWebhookHandler {
             return;
         }
         try {
-            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             if (!(client instanceof AzureDevopsApiClient azureClient)) {
                 return;
             }
@@ -763,7 +763,7 @@ public class AzureDevopsWebhookHandler {
      * not the organization.
      * <p>
      * Whether the resolved organization is then repeated in outbound request paths is
-     * decided separately, by {@code AzureDevopsApiClient#scopesOrganization} — for the
+     * decided separately, by {@link AzureDevopsAddress#isOrganizationScopedBy} — for the
      * legacy form, and for a Server instance configured with its collection, the base URL
      * already carries it.
      *

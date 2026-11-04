@@ -15,7 +15,6 @@ import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -35,22 +34,14 @@ import java.util.Optional;
 public class GitHubApiClient implements RepositoryApiClient {
 
     private final RestClient restClient;
-    private final RepositoryCredentials credentials;
 
     /**
-     * Creates a GitHubApiClient with the given RestClient and credentials.
+     * Creates a GitHubApiClient with the given RestClient.
      *
      * @param restClient  pre-configured RestClient pointing at the GitHub API base URL
-     * @param credentials the repository credentials (base URL, clone URL, token)
      */
-    public GitHubApiClient(RestClient restClient, RepositoryCredentials credentials) {
+    public GitHubApiClient(RestClient restClient) {
         this.restClient = restClient;
-        this.credentials = credentials;
-    }
-
-    @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
     }
 
     @Override
@@ -105,9 +96,7 @@ public class GitHubApiClient implements RepositoryApiClient {
 
     @Override
     public String getPullRequestDiff(String owner, String repo, Long pullNumber) {
-        log.info("Fetching diff for PR #{} in {}/{} from baseUrl={}", pullNumber, owner, repo, credentials.baseUrl());
-        log.debug("Token present: {}, tokenLength: {}", credentials.token() != null && !credentials.token().isBlank(),
-                credentials.token() != null ? credentials.token().length() : 0);
+        log.info("Fetching diff for PR #{} in {}/{}", pullNumber, owner, repo);
         return restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{pull_number}", owner, repo, pullNumber)
                 .header("Accept", "application/vnd.github.v3.diff")

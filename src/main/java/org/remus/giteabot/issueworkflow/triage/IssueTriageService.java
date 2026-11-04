@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentBudget;
@@ -30,6 +30,7 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Service;
@@ -113,7 +114,7 @@ public class IssueTriageService {
             """;
 
     private final AiClientFactory aiClientFactory;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final AgentSessionService sessionService;
     private final ToolExecutionService toolExecutionService;
     private final ToolCatalog toolCatalog;
@@ -150,14 +151,15 @@ public class IssueTriageService {
         Set<String> allowed = allowedAssignees(params);
         String configuredPrompt = configuredPrompt(params);
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
+        RepositoryApiClient repoClient = platform.getClient();
 
         String issueRef = BranchRefs.normalize(issue.getRef());
         String baseBranch = issueRef != null && !issueRef.isBlank()
                 ? issueRef : repoClient.getDefaultBranch(owner, repo);
 
         WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                repoClient, owner, repo, baseBranch, null);
+                platform, owner, repo, baseBranch, null);
         if (!wsResult.success()) {
             postErrorComment(repoClient, owner, repo, issue.getNumber(),
                     "Issue triage failed: could not prepare the read-only repository context ("

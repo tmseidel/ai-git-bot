@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
@@ -57,7 +57,7 @@ public class AgentReviewSlashCommandHandler {
      * {@link org.remus.giteabot.repository.RepositoryProviderRegistry}
      * based on {@code bot.getGitIntegration().getProviderType()}.
      */
-    private final RepositoryApiClientFactory repositoryClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /**
      * @return {@code true} when the comment was recognized as an agentic-review
@@ -106,7 +106,7 @@ public class AgentReviewSlashCommandHandler {
 
         // Hydrate PR details when the webhook only carries an issue block
         // (GitHub issue_comment events lack the pull_request object).
-        PrPayloadHydrator.hydrate(payload, () -> repositoryClientFactory.getApiClient(bot.getGitIntegration()));
+        PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
 
         try {
             var hints = Map.of(
@@ -144,7 +144,7 @@ public class AgentReviewSlashCommandHandler {
         String repo = payload.getRepository().getName();
         CommentId commentId = payload.getComment().getId();
         try {
-            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             client.addReaction(owner, repo, commentId, "eyes");
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",
@@ -168,7 +168,7 @@ public class AgentReviewSlashCommandHandler {
                 + "```\n" + abbreviate(reason, 1500) + "\n```\n\n"
                 + "_Please check the bot logs for the full stack trace._";
         try {
-            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             client.postPullRequestComment(owner, repo, prNumber, body);
         } catch (RuntimeException postError) {
             log.warn("[Bot '{}'] Failed to post internal-error comment on PR #{}: {}",

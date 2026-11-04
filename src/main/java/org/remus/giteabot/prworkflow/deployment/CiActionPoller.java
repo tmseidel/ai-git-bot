@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GitIntegrationService;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
 import org.remus.giteabot.prworkflow.PrWorkflowRunStatus;
@@ -51,7 +51,7 @@ public class CiActionPoller {
     private final DeploymentTargetService deploymentTargetService;
     private final DeploymentCallbackNotifier callbackNotifier;
     private final GitIntegrationService gitIntegrationService;
-    private final RepositoryApiClientFactory clientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /** Run id → epoch-millis of last status call. */
     private final Map<Long, Long> lastPolledAt = new ConcurrentHashMap<>();
@@ -94,7 +94,7 @@ public class CiActionPoller {
                     "Git integration id=" + handle.integrationId() + " no longer exists");
             return;
         }
-        RepositoryApiClient client = clientFactory.getApiClient(integration);
+        RepositoryApiClient client = repositoryPlatformFactory.getApiClient(integration);
         WorkflowRunStatus status;
         try {
             status = client.getWorkflowRun(handle.owner(), handle.repo(), handle.runId());

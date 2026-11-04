@@ -5,7 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.repository.RepositoryType;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.HttpCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.client.RestClient;
 
@@ -111,16 +111,16 @@ class BitbucketProviderMetadataTest {
     }
 
     @Test
-    void createCredentials_usesStaticGitUsernameInsteadOfEmail() {
+    void createHttpCredentials_usesStaticGitUsernameInsteadOfEmail() {
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://bitbucket.org");
         integration.setProviderType(RepositoryType.BITBUCKET);
         integration.setUsername("bot@example.com");
 
-        RepositoryCredentials credentials = metadata.createCredentials(integration, "api-token");
+        HttpCredentials credentials = metadata.createHttpCredentials(integration, "api-token");
 
         assertThat(credentials.username()).isEqualTo("x-bitbucket-api-token-auth");
-        assertThat(credentials.token()).isEqualTo("api-token");
+        assertThat(credentials.password()).isEqualTo("api-token");
     }
 
     @Test

@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.SshCredentials;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -64,7 +66,7 @@ class WorkspaceTest {
     @Test
     void gitRemote_rejectsAClosedWorkspace() throws IOException {
         Workspace workspace = workspaceService.createWorkspace();
-        workspace.setAuthentication("/tmp/remote", RepositoryCredentials.of("", "/tmp/remote", ""), false);
+        workspace.setAuthentication("/tmp/remote", new HttpCredentials(null, ""), false);
         workspace.close();
 
         CommandResult result = workspace.gitRemote(15, "fetch", "origin");
@@ -96,23 +98,22 @@ class WorkspaceTest {
     @Test
     void gitCommand_sshUsesIntegrationKeyAndPinnedHostKeys() throws IOException {
         Workspace workspace = workspaceService.createWorkspace();
-        RepositoryCredentials credentials = RepositoryCredentials
-                .of("https://gitea.example.com", "git@gitea.example.com:owner/repo.git", "token")
-                .withSsh("private key", "gitea.example.com ssh-ed25519 host-key");
-        workspace.createAuthenticationFiles(credentials.cloneUrl(), credentials);
+        RepositoryCredentials credentials =
+                new SshCredentials("private key", "gitea.example.com ssh-ed25519 host-key");
+        workspace.createAuthenticationFiles("git@gitea.example.com:owner/repo.git", credentials);
 
         Path privateKey = workspace.sshPrivateKeyFile();
         Path knownHosts = workspace.sshKnownHostsFile();
         assertThat(Files.readString(privateKey)).isEqualTo("private key\n");
         assertThat(Files.readString(knownHosts)).isEqualTo("gitea.example.com ssh-ed25519 host-key\n");
-        assertThat(Workspace.withGitConfig(workspace.gitConfigArgs(), "clone", credentials.cloneUrl()))
+        assertThat(Workspace.withGitConfig(workspace.gitConfigArgs(), "clone", "git@gitea.example.com:owner/repo.git"))
                 .containsExactly(
                         "git", "-c",
                         "core.sshCommand=ssh -F /dev/null -i '" + privateKey.toAbsolutePath() + "'"
                                 + " -o UserKnownHostsFile='" + knownHosts.toAbsolutePath() + "'"
                                 + " -o GlobalKnownHostsFile=/dev/null -o IdentitiesOnly=yes"
                                 + " -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes",
-                        "clone", credentials.cloneUrl());
+                        "clone", "git@gitea.example.com:owner/repo.git");
 
         workspace.clearAuthenticationFiles();
         assertThat(workspace.sshPrivateKeyFile()).isNull();
@@ -145,8 +146,7 @@ class WorkspaceTest {
     @Test
     void authenticationFile_preservesConfiguredUsernameWithUppercaseScheme() throws IOException {
         Workspace workspace = workspaceService.createWorkspace();
-        RepositoryCredentials credentials = RepositoryCredentials.of(
-                "https://api.bitbucket.org", "HTTPS://bitbucket.org", "alice", "api-token");
+        RepositoryCredentials credentials = new HttpCredentials("alice", "api-token");
 
         workspace.createAuthenticationFiles("HTTPS://bitbucket.org/owner/repo.git", credentials);
 
@@ -160,7 +160,7 @@ class WorkspaceTest {
         Workspace workspace = workspaceService.createWorkspace();
         String remote = "https://dev.azure.com/org/project/_git/repo";
         RepositoryCredentials credentials =
-                RepositoryCredentials.of("https://dev.azure.com", "https://dev.azure.com", "pat");
+                new HttpCredentials(null, "pat");
         workspace.setAuthentication(remote, credentials, true);
 
         try {
@@ -183,7 +183,7 @@ class WorkspaceTest {
     void authorizationHeader_notUsedByDefault() throws IOException {
         Workspace workspace = workspaceService.createWorkspace();
         workspace.setAuthentication("https://git.example.com/owner/repo.git",
-                RepositoryCredentials.of("https://git.example.com", "https://git.example.com", "token"), false);
+                new HttpCredentials(null, "token"), false);
 
         try {
             assertThat(workspace.authorizationHeaderEnvironment()).isEmpty();
@@ -354,7 +354,7 @@ class WorkspaceTest {
         runGit(directory, "remote", "add", "origin", remote.toAbsolutePath().toString());
         runGit(directory, "push", "-u", "origin", branch);
         workspace.setAuthentication(remote.toString(),
-                RepositoryCredentials.of("", remote.toString(), ""), false);
+                new HttpCredentials(null, ""), false);
         return workspace;
     }
 

@@ -5,7 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
@@ -59,7 +59,7 @@ import java.util.Set;
 public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
 
     private final AiClientFactory aiClientFactory;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final TestPlannerAgent plannerAgent;
     private final TestAuthorAgent authorAgent;
     private final TestRunnerAgent runnerAgent;
@@ -96,7 +96,7 @@ public class PlaywrightTestSuiteRunner implements TestSuiteRunner {
         RepositoryApiClient apiClient;
         try {
             aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-            apiClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+            apiClient = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
         } catch (RuntimeException e) {
             log.warn("PlaywrightTestSuiteRunner: client factory threw {}: {}",
                     e.getClass().getSimpleName(), e.getMessage(), e);

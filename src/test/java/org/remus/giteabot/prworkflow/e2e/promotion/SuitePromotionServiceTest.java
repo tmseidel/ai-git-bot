@@ -7,7 +7,7 @@ import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -16,6 +16,8 @@ import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.TestPlatforms;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -45,6 +47,7 @@ class SuitePromotionServiceTest {
 
     private WorkspaceService workspaceService;
     private RepositoryApiClient repoClient;
+    private RepositoryPlatform platform;
     private SuitePromotionService service;
 
     private Path workspace;
@@ -56,16 +59,18 @@ class SuitePromotionServiceTest {
         workspaceService = mock(WorkspaceService.class);
         managedWorkspace = mock(Workspace.class);
         when(managedWorkspace.path()).thenReturn(workspace);
-        RepositoryApiClientFactory repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
+        RepositoryPlatformFactory repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
         PrWorkflowRunRepository runRepository = mock(PrWorkflowRunRepository.class);
         repoClient = mock(RepositoryApiClient.class);
+        platform = TestPlatforms.of(repoClient);
 
-        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repoClient);
+        lenient().when(repositoryPlatformFactory.getPlatform(any())).thenReturn(platform);
         when(repoClient.getDefaultBranch(anyString(), anyString())).thenReturn("main");
-        when(workspaceService.prepareWorkspace(any(RepositoryApiClient.class),
+        when(workspaceService.prepareWorkspace(any(RepositoryPlatform.class),
                 anyString(), anyString(), anyString(), any()))
                 .thenReturn(WorkspaceResult.success(managedWorkspace));
-        when(workspaceService.preparePullRequestWorkspace(any(RepositoryApiClient.class),
+        when(workspaceService.preparePullRequestWorkspace(any(RepositoryPlatform.class),
                 anyString(), anyString(), anyString(), any(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.success(managedWorkspace));
@@ -73,7 +78,7 @@ class SuitePromotionServiceTest {
                 .thenReturn(true);
         lenient().when(runRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service = new SuitePromotionService(workspaceService, repositoryApiClientFactory, runRepository);
+        service = new SuitePromotionService(workspaceService, repositoryPlatformFactory, runRepository);
     }
 
     @Test
@@ -109,7 +114,7 @@ class SuitePromotionServiceTest {
         // File actually written.
         assertThat(workspace.resolve("tests/e2e/pr-7/login.spec.ts")).exists();
         verify(workspaceService).prepareWorkspace(
-                repoClient, "acme", "web", "feature/login", 7L);
+                platform, "acme", "web", "feature/login", 7L);
         verify(managedWorkspace).commitAndPush(eq(expectedBranch),
                 anyString(), eq(true));
     }
@@ -130,7 +135,7 @@ class SuitePromotionServiceTest {
         assertThat(workspace.resolve("tests/e2e/checkout.spec.ts")).exists();
         assertThat(run.getFollowUpPrNumber()).isEqualTo(5050L);
         verify(workspaceService).prepareWorkspace(
-                eq(repoClient), eq("acme"), eq("web"), eq("main"), isNull());
+                eq(platform), eq("acme"), eq("web"), eq("main"), isNull());
     }
 
     @Test
@@ -173,7 +178,7 @@ class SuitePromotionServiceTest {
         assertThat(out.branch()).isEqualTo("feature/x");
         assertThat(workspace.resolve("tests/e2e/pr-3/smoke.spec.ts")).exists();
         verify(workspaceService).preparePullRequestWorkspace(
-                repoClient, "acme", "web", "feature/x", 3L,
+                platform, "acme", "web", "feature/x", 3L,
                 PullRequestWorkspaceMode.PUSH_BACK);
         verify(managedWorkspace).commitAndPush(eq("feature/x"),
                 anyString(), eq(false));

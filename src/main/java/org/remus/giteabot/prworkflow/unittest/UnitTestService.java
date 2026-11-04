@@ -1,6 +1,5 @@
 package org.remus.giteabot.prworkflow.unittest;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
@@ -20,6 +19,7 @@ import org.remus.giteabot.prworkflow.unittest.runner.UnitTestRunRequest;
 import org.remus.giteabot.prworkflow.unittest.runner.UnitTestRunner;
 import org.remus.giteabot.prworkflow.unittest.tools.UnitTestToolContext;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.nio.file.Path;
@@ -40,13 +40,13 @@ import java.util.Set;
  * post a single Markdown summary comment.</p>
  */
 @Slf4j
-@RequiredArgsConstructor
 public class UnitTestService {
 
     static final int MAX_DIFF_CHARS_FOR_CONTEXT = 60_000;
     static final int MAX_FILE_CONTEXT_CHARS = 80_000;
     static final int MAX_CHANGED_FILES_IN_CONTEXT = 25;
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SystemPrompt systemPrompt;
@@ -58,6 +58,27 @@ public class UnitTestService {
     private final UnitTestSuiteRepository suiteRepository;
     /** Builds the run's tool surface (own tools + the bot's selected read-only catalogue tools). */
     private final WorkflowToolSurfaceFactory surfaceFactory;
+
+    public UnitTestService(RepositoryPlatform repositoryPlatform,
+                           AiClient aiClient,
+                           SystemPrompt systemPrompt,
+                           WorkspaceService workspaceService,
+                           FrameworkDetector frameworkDetector,
+                           UnitTestAuthorAgent authorAgent,
+                           UnitTestRunner runner,
+                           UnitTestSuiteRepository suiteRepository,
+                           WorkflowToolSurfaceFactory surfaceFactory) {
+        this.repositoryPlatform = repositoryPlatform;
+        this.repositoryClient = repositoryPlatform.getClient();
+        this.aiClient = aiClient;
+        this.systemPrompt = systemPrompt;
+        this.workspaceService = workspaceService;
+        this.frameworkDetector = frameworkDetector;
+        this.authorAgent = authorAgent;
+        this.runner = runner;
+        this.suiteRepository = suiteRepository;
+        this.surfaceFactory = surfaceFactory;
+    }
 
     /** Inputs resolved from the workflow params by {@link UnitTestWorkflow}. */
     public record Request(PrWorkflowContext context,
@@ -108,10 +129,10 @@ public class UnitTestService {
             context.requireActive("before preparing unit-test workspace");
             WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
                     ? workspaceService.preparePullRequestWorkspace(
-                            repositoryClient, owner, repo, headBranch, prNumber,
+                            repositoryPlatform, owner, repo, headBranch, prNumber,
                             PullRequestWorkspaceMode.PUSH_BACK)
                     : workspaceService.prepareWorkspace(
-                            repositoryClient, owner, repo, headBranch, prNumber);
+                            repositoryPlatform, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber,
                         UnitTestSummaryRenderer.renderFailed(prNumber,

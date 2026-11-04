@@ -2,18 +2,21 @@ package org.remus.giteabot.azuredevops;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.validation.GitDiffService;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryProviderMetadata;
 import org.remus.giteabot.repository.RepositoryType;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.HttpCredentials;
+import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.function.Supplier;
 
 /**
  * Metadata and factory for Azure DevOps repository integration.
@@ -28,7 +31,7 @@ import java.util.Base64;
  * The first and third carry no organization (collection), so one integration serves any
  * number of them, each resolved per event from the webhook payload. The legacy host and the
  * Server URL with a collection pin the organization (or collection) into the URL itself and
- * therefore need one integration each — {@code AzureDevopsApiClient#scopesOrganization}
+ * therefore need one integration each — {@link AzureDevopsAddress#isOrganizationScopedBy}
  * detects this and omits the organization from request paths so it is not addressed twice.
  * <p>
  * {@code https://dev.azure.com/{organization}} is not a valid shape: the organization is
@@ -74,8 +77,7 @@ public class AzureDevopsProviderMetadata implements RepositoryProviderMetadata {
         return "Basic " + encoded;
     }
 
-    @Override
-    public RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
+    private RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
         log.debug("Building Azure DevOps RestClient: apiUrl={}", apiUrl);
         return restClientBuilder.getObject()
@@ -86,15 +88,19 @@ public class AzureDevopsProviderMetadata implements RepositoryProviderMetadata {
     }
 
     @Override
-    public RepositoryCredentials createCredentials(GitIntegration integration,
-                                                   String decryptedToken) {
-        String url = resolveApiUrl(integration);
-        return RepositoryCredentials.of(url, url, integration.getUsername(), decryptedToken);
+    public HttpCredentials createHttpCredentials(GitIntegration integration, String decryptedToken) {
+        return new HttpCredentials(integration.getUsername(), decryptedToken);
     }
 
     @Override
-    public RepositoryApiClient createClient(RestClient restClient,
-                                            RepositoryCredentials credentials) {
-        return new AzureDevopsApiClient(restClient, credentials, gitDiffService);
+    public RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
+                                             HttpCredentials httpCredentials,
+                                             @Nullable Supplier<SshCredentials> sshCredentials) {
+        RestClient restClient = buildRestClient(integration, decryptedToken);
+        String url = resolveApiUrl(integration);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(restClient, url, gitDiffService);
+        AzureDevopsPlatform platform = new AzureDevopsPlatform(url, url, httpCredentials, sshCredentials, client);
+        client.bindPlatform(platform);
+        return platform;
     }
 }

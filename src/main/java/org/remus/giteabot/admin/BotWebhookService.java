@@ -20,7 +20,7 @@ import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
 import org.remus.giteabot.repository.Reactions;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.review.CodeReviewService;
 import org.remus.giteabot.util.BotMention;
 import org.remus.giteabot.util.BranchFilter;
@@ -36,7 +36,7 @@ import java.util.Set;
  * <p>
  * This is the bridge between the admin data model and the code-review / agent
  * services.  Each bot gets its own {@link AiClient} (via {@link AiClientFactory})
- * and its own {@link RepositoryApiClient} (via {@link RepositoryApiClientFactory}).
+ * and its own {@link RepositoryPlatform} (via {@link RepositoryPlatformFactory}).
  * <p>
  * PR events are delegated to the {@link PrWorkflowOrchestrator}, issue events
  * (assignments and comments, including follow-ups on agent-created PRs) to the
@@ -47,7 +47,7 @@ import java.util.Set;
 @Service
 public class BotWebhookService {
 
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final AgentSessionService agentSessionService;
     private final BotService botService;
     private final PrWorkflowOrchestrator prWorkflowOrchestrator;
@@ -60,7 +60,7 @@ public class BotWebhookService {
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
-    public BotWebhookService(RepositoryApiClientFactory repositoryApiClientFactory,
+    public BotWebhookService(RepositoryPlatformFactory repositoryPlatformFactory,
                              AgentSessionService agentSessionService,
                              BotService botService,
                              PrWorkflowOrchestrator prWorkflowOrchestrator,
@@ -72,7 +72,7 @@ public class BotWebhookService {
                              I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
-        this.repositoryApiClientFactory = repositoryApiClientFactory;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
         this.agentSessionService = agentSessionService;
         this.botService = botService;
         this.prWorkflowOrchestrator = prWorkflowOrchestrator;
@@ -131,7 +131,7 @@ public class BotWebhookService {
             if (IssueWorkflowOrchestrator.enabledWorkflowKeys(bot, workflowSelectionService).isEmpty()) {
                 return;
             }
-            repositoryApiClientFactory.getApiClient(bot.getGitIntegration())
+            repositoryPlatformFactory.getApiClient(bot.getGitIntegration())
                     .addIssueReaction(owner, repo, issueNumber, Reactions.EYES);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to issue #{}: {}: {}",
@@ -161,7 +161,7 @@ public class BotWebhookService {
             if (PrWorkflowOrchestrator.enabledWorkflowKeys(bot, workflowSelectionService).isEmpty()) {
                 return;
             }
-            repositoryApiClientFactory.getApiClient(bot.getGitIntegration())
+            repositoryPlatformFactory.getApiClient(bot.getGitIntegration())
                     .addPullRequestReaction(owner, repo, pullNumber, Reactions.EYES);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to PR #{}: {}: {}",
@@ -645,9 +645,9 @@ public class BotWebhookService {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         try {
-            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
-            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, client));
-            client.postPullRequestComment(owner, repo, prNumber, body);
+            RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
+            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, platform));
+            platform.getClient().postPullRequestComment(owner, repo, prNumber, body);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to post unrecognised-command reply on PR #{}: {}",
                     bot.getName(), prNumber, e.getMessage());
@@ -659,9 +659,9 @@ public class BotWebhookService {
      * otherwise the bot username. Falls back to "bot" when the provider lookup fails, since
      * the bot username may not identify the bot on that provider (e.g. Bitbucket).
      */
-    private String resolveMentionName(Bot bot, RepositoryApiClient client) {
+    private String resolveMentionName(Bot bot, RepositoryPlatform platform) {
         try {
-            var providerName = client.getBotMentionName();
+            var providerName = platform.getBotMentionName();
             if (providerName.isPresent()) {
                 return providerName.get();
             }

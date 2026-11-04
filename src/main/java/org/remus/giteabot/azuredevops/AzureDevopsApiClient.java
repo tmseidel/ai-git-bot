@@ -19,14 +19,12 @@ import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.web.client.RestClient;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -67,8 +65,16 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     private static final Pattern COMMIT_SHA = Pattern.compile("[0-9a-fA-F]{40}");
 
     private final RestClient restClient;
-    private final RepositoryCredentials credentials;
+    private final String baseUrl;
     private final GitDiffService gitDiffService;
+
+    /**
+     * The platform this client belongs to, whose remotes and credentials {@link GitDiffService}
+     * fetches the diffed commits through. Bound by {@link AzureDevopsProviderMetadata} before it
+     * hands the platform out: the platform is built around this client, so it cannot be passed in
+     * here.
+     */
+    private AzureDevopsPlatform platform;
 
     /**
      * Cached identity GUID of the authenticated bot, resolved lazily for voting, keyed by
@@ -95,22 +101,15 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      */
     private static final String NO_IDENTITY = "";
 
-    public AzureDevopsApiClient(RestClient restClient, RepositoryCredentials credentials,
-                                GitDiffService gitDiffService) {
+    public AzureDevopsApiClient(RestClient restClient, String baseUrl, GitDiffService gitDiffService) {
         this.restClient = restClient;
-        this.credentials = credentials;
+        this.baseUrl = baseUrl;
         this.gitDiffService = gitDiffService;
     }
 
-    @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
-    }
-
-    /** Azure DevOps Git remotes only accept the PAT as a pre-emptive Basic header. */
-    @Override
-    public boolean usesGitAuthorizationHeader() {
-        return true;
+    /** Binds this client to the platform it belongs to, see {@link #platform}. */
+    void bindPlatform(AzureDevopsPlatform platform) {
+        this.platform = platform;
     }
 
     // ---- Request scoping ----
@@ -119,74 +118,15 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      * A URI path prefix plus the template variables it consumes, in order.
      * <p>
      * Needed because whether the organization appears in the path at all depends on how
-     * the instance is addressed — see {@link #scopesOrganization}.
+     * the instance is addressed — see {@link AzureDevopsAddress#isOrganizationScopedBy}.
      */
     private record Scope(String path, Object[] vars) { }
-
-    /**
-     * Whether {@code url} already scopes {@code organization}, meaning the organization
-     * must <em>not</em> be repeated as a path segment.
-     * <p>
-     * Azure DevOps is addressed three different ways, and only the first needs the
-     * organization in the request path:
-     * <pre>
-     * https://dev.azure.com              + org "contoso" -&gt; /contoso/{project}/_apis/...
-     * https://contoso.visualstudio.com   + org "contoso" -&gt; /{project}/_apis/...
-     * https://tfs.example.com/tfs/DefaultCollection
-     *                    + collection "DefaultCollection" -&gt; /{project}/_apis/...
-     * </pre>
-     * Repeating it in the second and third forms puts the organization where the server
-     * expects a collection, which 404s every request.
-     * <p>
-     * The decision is derived from the configured URL rather than from a host allow-list,
-     * so an Azure DevOps Server instance configured without its collection
-     * ({@code https://tfs.example.com/tfs}) still gets the collection as a path segment.
-     * Two shapes count as already-scoped:
-     * <ul>
-     *   <li>the organization as the leading label of a {@code *.visualstudio.com} host.
-     *       The suffix is required: Azure DevOps Server never encodes its collection in
-     *       the hostname, so without it a host like {@code tfs.example.com} serving a
-     *       collection named {@code tfs} would wrongly look already-scoped.</li>
-     *   <li>the organization as the URL path's last segment — an Azure DevOps Server
-     *       collection, and also the {@code https://dev.azure.com/contoso} misconfiguration
-     *       the setup guide warns against, which this makes harmless.</li>
-     * </ul>
-     */
-    private static boolean scopesOrganization(String url, String organization) {
-        if (url == null || url.isBlank() || organization == null || organization.isBlank()) {
-            return false;
-        }
-        URI uri;
-        try {
-            uri = URI.create(url);
-        } catch (IllegalArgumentException e) {
-            return false;
-        }
-        String host = uri.getHost();
-        if (host != null && host.toLowerCase(Locale.ROOT).endsWith(".visualstudio.com")) {
-            int firstDot = host.indexOf('.');
-            if (firstDot > 0 && host.substring(0, firstDot).equalsIgnoreCase(organization)) {
-                return true;
-            }
-        }
-        String path = uri.getPath();
-        if (path == null || path.isBlank()) {
-            return false;
-        }
-        String[] segments = path.split("/");
-        for (int i = segments.length - 1; i >= 0; i--) {
-            if (!segments[i].isBlank()) {
-                return segments[i].equalsIgnoreCase(organization);
-            }
-        }
-        return false;
-    }
 
     /** The path prefix addressing one repository via the Git REST API. */
     private Scope repositoryScope(AzureDevopsAddress addr) {
         // org, project and name stay separate template variables: a combined
         // "Project/Repository" value is encoded to %2F and 404s.
-        if (scopesOrganization(credentials.baseUrl(), addr.organization())) {
+        if (addr.isOrganizationScopedBy(baseUrl)) {
             return new Scope("/{project}/_apis/git/repositories/{name}",
                     new Object[]{addr.project(), addr.name()});
         }
@@ -196,7 +136,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
 
     /** The path prefix addressing the organization itself, for organization-level APIs. */
     private Scope organizationScope(AzureDevopsAddress addr) {
-        if (scopesOrganization(credentials.baseUrl(), addr.organization())) {
+        if (addr.isOrganizationScopedBy(baseUrl)) {
             return new Scope("/_apis", new Object[0]);
         }
         return new Scope("/{org}/_apis", new Object[]{addr.organization()});
@@ -210,40 +150,26 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         return all;
     }
 
-    /**
-     * Azure DevOps clone URLs are {@code {base}/{org}/{project}/_git/{name}} rather than
-     * the {@code {base}/{owner}/{repo}.git} the interface default builds, so the path is
-     * assembled here — including the same organization-scoping rule the REST paths use,
-     * since a legacy or Azure DevOps Server clone URL carries the organization in its
-     * host or collection prefix already.
-     * <p>
-     * The base URL still goes through
-     * {@link RepositoryApiClient#validatedCloneBaseUrl}, which is what keeps a
-     * credential-bearing URL out of the remote handed to {@code git}.
-     */
-    @Override
-    public String getRepositoryRemote(String owner, String repo) {
-        AzureDevopsAddress addr = AzureDevopsAddress.parse(owner, repo);
-        String base = RepositoryApiClient.validatedCloneBaseUrl(getCloneUrl());
-        String organizationSegment = scopesOrganization(base, addr.organization())
-                ? "" : "/" + addr.organization();
-        return base + organizationSegment + "/" + addr.project() + "/_git/" + addr.name();
-    }
-
     // ---- Pull request operations ----
 
     /**
      * Diffs the pull request with {@code git} via {@link GitDiffService}: Azure DevOps
-     * exposes no endpoint returning patch text.
+     * exposes no endpoint returning patch text. The commits are fetched through the
+     * {@linkplain #bindPlatform bound platform}'s remote and credentials.
      * <p>
      * The old side is the latest iteration's merge base ({@code commonRefCommit}), not
      * {@code lastMergeTargetCommit}: that is the target branch <em>tip</em>, and diffing
      * against it mixes the inverse of unrelated target-branch commits into the patch.
      * The tip ({@code targetRefCommit}) is only a fallback when that iteration carries no
      * merge base.
+     *
+     * @throws IllegalStateException when the client is not bound to a platform
      */
     @Override
     public String getPullRequestDiff(String owner, String repo, Long pullNumber) {
+        if (platform == null) {
+            throw new IllegalStateException("AzureDevopsApiClient is not bound to a platform");
+        }
         AzureDevopsAddress addr = AzureDevopsAddress.parse(owner, repo);
         DiffRange diffRange;
         try {
@@ -257,7 +183,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
             return null;
         }
 
-        return gitDiffService.diffCommits(this, owner, repo, diffRange.baseSha, diffRange.headSha);
+        return gitDiffService.diffCommits(platform, owner, repo, diffRange.baseSha(), diffRange.headSha());
     }
 
     /**

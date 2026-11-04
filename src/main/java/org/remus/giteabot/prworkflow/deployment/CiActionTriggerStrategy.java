@@ -8,7 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryType;
@@ -79,7 +79,7 @@ public class CiActionTriggerStrategy implements DeploymentStrategy {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final BotRepository botRepository;
-    private final RepositoryApiClientFactory clientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     @Override
     public DeploymentStrategyType typeKey() {
@@ -122,7 +122,7 @@ public class CiActionTriggerStrategy implements DeploymentStrategy {
         if (integration == null) {
             return DeploymentResult.rejected("Bot '" + bot.getName() + "' has no Git integration configured");
         }
-        RepositoryApiClient client = clientFactory.getApiClient(integration);
+        RepositoryApiClient client = repositoryPlatformFactory.getApiClient(integration);
 
         String refTemplate = textOr(config, CONFIG_REF_TEMPLATE, DEFAULT_REF_TEMPLATE);
         String gitRef = applyPlaceholders(refTemplate, request);
