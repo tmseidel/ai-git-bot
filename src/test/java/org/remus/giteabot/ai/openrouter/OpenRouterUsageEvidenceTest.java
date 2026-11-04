@@ -234,7 +234,7 @@ class OpenRouterUsageEvidenceTest {
                     .andExpect(jsonPath("$.provider.allow_fallbacks").value(false))
                     .andExpect(jsonPath("$.provider.data_collection").value("deny"))
                     .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
-            client = new OpenRouterClient(http.build(), "author/model", 32, true);
+            client = new OpenRouterClient(http.build(), "author/model", 32, true, "AI Git Bot");
             client.setAuditRecorder(recorder);
         }
     }

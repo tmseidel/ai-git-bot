@@ -147,7 +147,7 @@ class TextTurnMetadataTest {
                           {"role":"user","content":"Continue"}]}
                         """),
                 new Provider("OpenRouter", "/v1/chat/completions",
-                        (http, nativeTools) -> new OpenRouterClient(http, "test-model", 32, nativeTools),
+                        (http, nativeTools) -> new OpenRouterClient(http, "test-model", 32, nativeTools, "AI Git Bot"),
                         "length", "stop", """
                         {"choices":[{"finish_reason":"%s","message":{"content":"Review text"}}],
                          "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
