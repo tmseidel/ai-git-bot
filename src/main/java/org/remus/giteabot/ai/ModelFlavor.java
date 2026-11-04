@@ -14,8 +14,7 @@ import org.springframework.web.client.RestClient;
  * provider's {@link AiProviderMetadata#createClient(RestClient, AiIntegration)}
  * from the persisted flavor id.
  *
- * <p>{@code providerType} (the {@code ai_integrations.provider_type} value,
- * e.g. {@code "openai"}) namespaces the {@code id}. A bare id like
+ * <p>{@code providerType} (e.g. {@link AiProviderType#OPENAI}) namespaces the {@code id}. A bare id like
  * {@code "standard"} is only meaningful within one provider and would collide
  * across providers; pairing it with the provider type makes every flavor
  * globally unique, so a flat collection of flavors across providers can never
@@ -25,5 +24,5 @@ import org.springframework.web.client.RestClient;
  * behaviour"; every provider that exposes flavors must include it so the
  * persisted column always has a valid value.
  */
-public record ModelFlavor(String providerType, String id, String label, String description) {
+public record ModelFlavor(AiProviderType providerType, String id, String label, String description) {
 }

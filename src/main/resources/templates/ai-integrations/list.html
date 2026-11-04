@@ -37,7 +37,7 @@
                             <tr th:each="integration : ${integrations}">
                                 <td th:text="${integration.name}"></td>
                                 <td>
-                                    <span class="badge bg-secondary" th:text="${integration.providerType}"></span>
+                                    <span class="badge bg-secondary" th:text="${integration.providerType?.displayName}"></span>
                                 </td>
                                 <td th:text="${integration.apiUrl}"></td>
                                 <td th:text="${integration.model}"></td>

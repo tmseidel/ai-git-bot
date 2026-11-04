@@ -3,7 +3,7 @@ package org.remus.giteabot.ai.openrouter;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
-import org.remus.giteabot.ai.ModelFlavor;
+import org.remus.giteabot.ai.AiProviderType;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
@@ -35,16 +35,10 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
                 .build(settings.withRedirects(HttpRedirects.DONT_FOLLOW)));
     }
 
-    @Override public String getProviderType() { return "openrouter"; }
+    @Override public AiProviderType getProviderType() { return AiProviderType.OPENROUTER; }
     @Override public String getDefaultApiUrl() { return OpenRouterRegion.GLOBAL.getApiRoot(); }
     @Override public List<String> getSuggestedModels() { return SUGGESTED_MODELS; }
     @Override public boolean requiresApiKey() { return true; }
-
-    @Override
-    public List<ModelFlavor> getFlavors() {
-        return List.of(new ModelFlavor("openrouter", "standard", "Provider default",
-                "Use the selected model's default reasoning behavior."));
-    }
 
     @Override
     public boolean requiresRetainedKeyValidation(AiIntegration previous, AiIntegration updated) {

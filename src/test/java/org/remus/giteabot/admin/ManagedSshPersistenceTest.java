@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -586,7 +587,7 @@ class ManagedSshPersistenceTest {
         return transaction().execute(status -> {
             AiIntegration ai = new AiIntegration();
             ai.setName("race-ai-" + UUID.randomUUID());
-            ai.setProviderType("OPENAI");
+            ai.setProviderType(AiProviderType.OPENAI);
             ai.setApiUrl("http://localhost");
             ai.setModel("test");
             Bot result = new Bot();
