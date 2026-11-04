@@ -11,6 +11,7 @@ import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GitIntegrationRepository;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.eventhook.EventHookEndpoint;
 import org.remus.giteabot.eventhook.EventHookEndpointRepository;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
@@ -93,7 +94,7 @@ class ConfigExchangeServiceTest {
         assertTrue(adminService.findByUsername("trial-admin").isPresent());
 
         AiIntegration ai = aiIntegrationRepository.findByName("Trial AI").orElseThrow();
-        assertEquals("openai", ai.getProviderType());
+        assertEquals(AiProviderType.OPENAI, ai.getProviderType());
         assertEquals("deepseek-chat", ai.getModel());
         assertEquals("sk-trial-key", encryptionService.decrypt(ai.getApiKey()),
                 "the plaintext key from the document must be encrypted on import");

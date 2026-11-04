@@ -36,6 +36,9 @@ class ConfigExchangeJsonTest {
         JsonNode selection = node.path("workflowConfiguration").path("selectedWorkflows").get(0);
         assertFalse(selection.has("configuration"), "back-reference must not be serialized");
         assertEquals("review", selection.path("workflowKey").asString());
+        assertFalse(selection.has("paramsMap"), "the derived params map is not state");
+        assertEquals("maxDiffChunks", selection.path("params").get(0).path("name").asString(),
+                "the persisted params are the state that has to be exported");
         JsonNode tool = node.path("toolConfiguration").path("selectedTools").get(0);
         assertFalse(tool.has("configuration"), "back-reference must not be serialized");
         assertFalse(node.path("gitIntegration").has("managedSshKeyTracking"));
