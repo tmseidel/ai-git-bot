@@ -41,6 +41,9 @@ import java.util.Set;
 @Slf4j
 public class AgentToolRouter {
 
+    static final String NEW_FILE_HEADER =
+            "(new file: this diff is the complete file content; no need to cat it)\n";
+
     public enum Mode { CODING, WRITER, REVIEW }
 
     private final ToolExecutionService toolExecutionService;
@@ -371,13 +374,17 @@ public class AgentToolRouter {
             return new ToolResult(false, -1, "", "No PR diff available in this context");
         }
 
-        String hunk = ctx.diffSummary().fileDiff(filePath);
+        String hunk = ctx.diffSummary().numberedFileDiff(filePath);
         if (hunk == null || hunk.isBlank()) {
             List<String> changedFiles = ctx.diffSummary().changedFiles();
             String fileList = String.join(", ", changedFiles);
             return new ToolResult(true, 0,
                     "No diff hunks found for: " + filePath
                             + "\nChanged files: " + fileList, "");
+        }
+        if (ctx.diffSummary().isNewFile(filePath)) {
+            // a new file's diff is its whole content; stop agents from re-reading it with cat
+            hunk = NEW_FILE_HEADER + hunk;
         }
         return new ToolResult(true, 0, hunk, "");
     }

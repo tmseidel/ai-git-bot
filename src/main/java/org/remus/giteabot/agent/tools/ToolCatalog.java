@@ -179,8 +179,9 @@ public class ToolCatalog {
             entry("pr-diff", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
                     "Return the diff hunks for a specific changed file in the current pull request. "
                             + "Use this after inspecting the changed-file summary to see what exactly "
-                            + "was added, removed, or modified in a file. "
-                            + "Args: [\"path/to/file\"].",
+                            + "was added, removed, or modified in a file. Added and context lines "
+                            + "carry their line number in the new file (\"37 | +code\"); removed "
+                            + "lines have none. Args: [\"path/to/file\"].",
                     objectSchema(
                             prop("path", "string", "Repository-relative path of the changed file."),
                             required("path"))),
