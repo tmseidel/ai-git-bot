@@ -1,0 +1,413 @@
+# Reference instance: a docker-compose.yml in which every editable property of
+# every configuration entity is set.
+#
+#   docker compose up -d          # http://localhost:8080, log in as "admin"
+#
+# The document below is the entity model itself: one array per configuration
+# table, field names as the entities name them, @ManyToOne references as
+# {"name": ...}. Import runs only while no admin user exists, so this file is
+# applied on an empty database and never on top of an operator's data.
+#
+# Throw-away mode is configured here (in-memory H2): every start re-applies the
+# document and discards UI changes. For a persistent instance see the commented
+# Postgres block at the end of this file.
+#
+# NOT settable from a document: defaultEntry (the seed rows keep it), ids,
+# timestamps and the statistics/last-error fields.
+services:
+  giteabot:
+    image: tmseidel/ai-git-bot:latest
+    container_name: giteabot-reference
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # 32 random bytes, base64. The value below is a placeholder, not random:
+      #   openssl rand -base64 32
+      APP_ENCRYPTION_KEY: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
+      APP_PUBLIC_URL: "http://localhost:8080"
+      DATABASE_URL: "jdbc:h2:mem:giteabot;DB_CLOSE_DELAY=-1"
+      DATABASE_DRIVER: "org.h2.Driver"
+      # Credentials are plaintext here and encrypted on import: treat this file
+      # as a secret, and drop the variable once the instance is set up.
+      APP_CONFIG_JSON: |
+        {
+          "adminUsers": [
+            {
+              "username": "admin",
+              "password": "change-this-password"
+            }
+          ],
+          "systemPrompts": [
+            {
+              "name": "House style",
+              "reviewSystemPrompt": "You review pull requests. Cite file:line for every finding.",
+              "reviewAgentSystemPrompt": "You are a review agent with tools; gather context, then report findings.",
+              "issueAgentSystemPrompt": "You implement an issue in the checked-out repository.",
+              "writerAgentSystemPrompt": "You write documentation for the changed code.",
+              "e2ePlannerSystemPrompt": "You plan end-to-end test cases for the change.",
+              "e2eAuthorSystemPrompt": "You write the end-to-end test code.",
+              "e2eRunnerSystemPrompt": "You run the end-to-end tests and repair them until they pass.",
+              "unitTestAuthorSystemPrompt": "You write focused unit tests.",
+              "readmeSyncSystemPrompt": "You keep the documentation in sync with the code.",
+              "i18nCoverageSystemPrompt": "You translate the message bundles."
+            }
+          ],
+          "botToolConfigurations": [
+            {
+              "name": "Read-only set",
+              "selectedTools": [
+                {
+                  "toolName": "rg",
+                  "toolKind": "CONTEXT"
+                },
+                {
+                  "toolName": "cat",
+                  "toolKind": "CONTEXT"
+                },
+                {
+                  "toolName": "find",
+                  "toolKind": "CONTEXT"
+                },
+                {
+                  "toolName": "git-log",
+                  "toolKind": "CONTEXT"
+                },
+                {
+                  "toolName": "git-blame",
+                  "toolKind": "CONTEXT"
+                },
+                {
+                  "toolName": "pr-diff",
+                  "toolKind": "CONTEXT"
+                },
+                {
+                  "toolName": "write-file",
+                  "toolKind": "FILE"
+                },
+                {
+                  "toolName": "patch-file",
+                  "toolKind": "FILE"
+                },
+                {
+                  "toolName": "mkdir",
+                  "toolKind": "FILE"
+                },
+                {
+                  "toolName": "delete-file",
+                  "toolKind": "FILE"
+                },
+                {
+                  "toolName": "mvn",
+                  "toolKind": "VALIDATION"
+                }
+              ]
+            }
+          ],
+          "mcpConfigurations": [
+            {
+              "name": "Docs index",
+              "jsonContent": "{\"mcpServers\": {\"docs\": {\"type\": \"http\", \"url\": \"https://mcp.example.com/mcp\", \"headers\": {\"Authorization\": \"Bearer replace-me\"}}}}",
+              "selectedTools": [
+                {
+                  "qualifiedName": "docs.search",
+                  "serverName": "docs",
+                  "toolName": "search",
+                  "title": "Search the handbook",
+                  "description": "Full-text search over the internal handbook."
+                }
+              ]
+            }
+          ],
+          "deploymentTargets": [
+            {
+              "name": "Preview (static)",
+              "strategyType": "STATIC",
+              "configJson": "{\"healthcheckPath\": \"/healthz\", \"expectedStatus\": 200, \"intervalSeconds\": 15, \"extraHeaders\": {\"X-Preview\": \"ai-git-bot\"}}",
+              "previewUrlTemplate": "https://pr-{prNumber}.preview.example.com",
+              "timeoutSeconds": 600
+            },
+            {
+              "name": "Staging (webhook)",
+              "strategyType": "WEBHOOK",
+              "configJson": "{\"webhookUrl\": \"https://deploy.example.com/hooks/preview\", \"sharedSecret\": \"replace-me-shared-secret\", \"headers\": {\"X-Environment\": \"staging\"}}",
+              "previewUrlTemplate": "https://staging-{sha}.example.com",
+              "timeoutSeconds": 900
+            }
+          ],
+          "aiIntegrations": [
+            {
+              "name": "DeepSeek",
+              "providerType": "OPENAI",
+              "apiUrl": "https://api.deepseek.com",
+              "apiKey": "sk-replace-me",
+              "apiVersion": "",
+              "model": "deepseek-chat",
+              "maxTokens": 8192,
+              "useLegacyToolCalling": false,
+              "promptCachingEnabled": false,
+              "contextWindowTokens": 131072,
+              "parallelWorkerLimit": 4,
+              "modelFlavor": "standard",
+              "openRouterZdr": false
+            },
+            {
+              "name": "OpenRouter (EU, no data collection)",
+              "providerType": "OPENROUTER",
+              "apiUrl": "https://eu.openrouter.ai/api",
+              "apiKey": "sk-or-replace-me",
+              "apiVersion": "",
+              "model": "deepseek/deepseek-chat",
+              "maxTokens": 8192,
+              "useLegacyToolCalling": false,
+              "promptCachingEnabled": true,
+              "contextWindowTokens": 131072,
+              "parallelWorkerLimit": 8,
+              "modelFlavor": "no_reasoning",
+              "openRouterRegion": "EU",
+              "openRouterDataCollection": "DENY",
+              "openRouterZdr": true
+            },
+            {
+              "name": "Anthropic (direct)",
+              "providerType": "ANTHROPIC",
+              "apiUrl": "https://api.anthropic.com",
+              "apiKey": "replace-me",
+              "apiVersion": "2023-06-01",
+              "model": "claude-sonnet-5",
+              "maxTokens": 16384,
+              "useLegacyToolCalling": true,
+              "promptCachingEnabled": false,
+              "contextWindowTokens": 128000,
+              "parallelWorkerLimit": 2,
+              "modelFlavor": "standard",
+              "openRouterZdr": false
+            },
+            {
+              "name": "Ollama (local)",
+              "providerType": "OLLAMA",
+              "apiUrl": "http://host.docker.internal:11434",
+              "apiVersion": "",
+              "model": "qwen3:32b",
+              "maxTokens": 8192,
+              "useLegacyToolCalling": false,
+              "promptCachingEnabled": false,
+              "contextWindowTokens": 32768,
+              "parallelWorkerLimit": 1,
+              "modelFlavor": "standard",
+              "openRouterZdr": false
+            }
+          ],
+          "gitIntegrations": [
+            {
+              "name": "Gitea (HTTP)",
+              "providerType": "GITEA",
+              "url": "https://gitea.example.com",
+              "username": "ai-bot",
+              "token": "replace-me-with-a-scoped-token",
+              "transport": "HTTP",
+              "postReviewAction": "APPROVE",
+              "sshCleanupVerified": false
+            },
+            {
+              "name": "Gitea (SSH)",
+              "providerType": "GITEA",
+              "url": "https://gitea.example.com",
+              "username": "ai-bot",
+              "token": "replace-me-with-a-scoped-token",
+              "transport": "SSH",
+              "postReviewAction": "NONE",
+              "sshCleanupVerified": false,
+              "sshPrivateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nreplace-me-with-a-real-key\n-----END OPENSSH PRIVATE KEY-----",
+              "sshKnownHosts": "gitea.example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHYG4+MwR8smX3wSawFCi47+S0z81NztKQDX7nMPSwCC"
+            }
+          ],
+          "workflowConfigurations": [
+            {
+              "name": "PR workflows",
+              "kind": "PR",
+              "selectedWorkflows": [
+                {
+                  "workflowKey": "agentic-review"
+                },
+                {
+                  "workflowKey": "e2e-test",
+                  "params": [
+                    {
+                      "name": "framework",
+                      "value": "playwright"
+                    },
+                    {
+                      "name": "maxRetries",
+                      "value": "2"
+                    },
+                    {
+                      "name": "maxTestCases",
+                      "value": "20"
+                    },
+                    {
+                      "name": "suiteLifecycle",
+                      "value": "offer-as-pr"
+                    },
+                    {
+                      "name": "promotionThresholdPercent",
+                      "value": "90"
+                    }
+                  ]
+                },
+                {
+                  "workflowKey": "i18n-coverage"
+                },
+                {
+                  "workflowKey": "readme-sync",
+                  "params": [
+                    {
+                      "name": "includedFilePatterns",
+                      "value": "README*.md,docs/**/*.md"
+                    },
+                    {
+                      "name": "maxToolRounds",
+                      "value": "12"
+                    },
+                    {
+                      "name": "suiteLifecycle",
+                      "value": "ephemeral"
+                    }
+                  ]
+                },
+                {
+                  "workflowKey": "review",
+                  "params": [
+                    {
+                      "name": "maxDiffCharsPerChunk",
+                      "value": "60000"
+                    },
+                    {
+                      "name": "maxDiffChunks",
+                      "value": "25"
+                    },
+                    {
+                      "name": "retryTruncatedChunkChars",
+                      "value": "20000"
+                    },
+                    {
+                      "name": "excludedFilePatterns",
+                      "value": "*.lock,dist/**"
+                    }
+                  ]
+                },
+                {
+                  "workflowKey": "unit-test-author"
+                }
+              ]
+            },
+            {
+              "name": "Issue workflows",
+              "kind": "ISSUE",
+              "selectedWorkflows": [
+                {
+                  "workflowKey": "issue-coding"
+                },
+                {
+                  "workflowKey": "issue-triage",
+                  "params": [
+                    {
+                      "name": "assignees",
+                      "value": "alice,bob,none"
+                    },
+                    {
+                      "name": "systemPrompt",
+                      "value": "Route the issue to the owning team."
+                    }
+                  ]
+                },
+                {
+                  "workflowKey": "issue-writer"
+                }
+              ]
+            }
+          ],
+          "bots": [
+            {
+              "name": "demo-bot",
+              "webhookSecret": "3f2b8c1e-9a4d-4f7b-8c2e-5d1a6b0f9e34",
+              "webhookSigningSecret": "0123456789abcdef0123456789abcdef",
+              "userWhitelist": "alice, bob",
+              "enabled": true,
+              "branchFilter": "main|release/*",
+              "runOnPrCreation": true,
+              "runOnPrUpdate": true,
+              "runOnIssueCreation": true,
+              "aiIntegration": {
+                "name": "DeepSeek"
+              },
+              "gitIntegration": {
+                "name": "Gitea (HTTP)"
+              },
+              "systemPrompt": {
+                "name": "House style"
+              },
+              "toolConfiguration": {
+                "name": "Read-only set"
+              },
+              "mcpConfiguration": {
+                "name": "Docs index"
+              },
+              "workflowConfiguration": {
+                "name": "PR workflows"
+              },
+              "issueWorkflowConfiguration": {
+                "name": "Issue workflows"
+              },
+              "deploymentTarget": {
+                "name": "Preview (static)"
+              }
+            }
+          ],
+          "eventHookEndpoints": [
+            {
+              "name": "Ops webhook",
+              "url": "https://hooks.example.com/ai-bot",
+              "secret": "replace-me-hook-secret",
+              "authorizationHeader": "Bearer replace-me",
+              "customHeaders": "{\"X-Source\": \"ai-git-bot\"}",
+              "eventTypes": "PR_WORKFLOW_STARTED,PR_WORKFLOW_COMPLETED,PR_WORKFLOW_FAILED,AGENT_REVIEW_FINDING_DETECTED,ISSUE_ASSIGNMENT_STARTED,ISSUE_ASSIGNMENT_COMPLETED,ISSUE_ASSIGNMENT_FAILED",
+              "bot": { "name": "demo-bot" },
+              "repoOwner": "acme",
+              "repoName": "widgets",
+              "skipTlsVerify": false,
+              "enabled": true
+            }
+          ]
+        }
+
+# Persistent alternative: replace the two DATABASE_* lines above and add
+#
+#   depends_on:
+#     db:
+#       condition: service_healthy
+#
+# to the service, then uncomment:
+#
+#   db:
+#     image: postgres:17-alpine
+#     restart: unless-stopped
+#     environment:
+#       POSTGRES_DB: giteabot
+#       POSTGRES_USER: giteabot
+#       POSTGRES_PASSWORD: "change-this-db-password"
+#     volumes:
+#       - giteabot-db:/var/lib/postgresql/data
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U giteabot -d giteabot"]
+#       interval: 5s
+#       timeout: 3s
+#       retries: 20
+#
+#   DATABASE_URL: "jdbc:postgresql://db:5432/giteabot"
+#   DATABASE_DRIVER: "org.postgresql.Driver"
+#   DATABASE_USERNAME: "giteabot"
+#   DATABASE_PASSWORD: "change-this-db-password"
+#
+# volumes:
+#   giteabot-db:

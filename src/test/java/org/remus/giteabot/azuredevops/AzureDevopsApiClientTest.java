@@ -1,9 +1,11 @@
 package org.remus.giteabot.azuredevops;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.azuredevops.model.ThreadCommentId;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
@@ -12,8 +14,10 @@ import org.remus.giteabot.repository.model.ReviewComment;
 import org.remus.giteabot.review.enrichment.CommitMessagesEnricher;
 import org.remus.giteabot.review.enrichment.EnrichmentContext;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
@@ -23,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.ExpectedCount.manyTimes;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class AzureDevopsApiClientTest {
@@ -230,8 +235,8 @@ class AzureDevopsApiClientTest {
                                 + "/pullRequests/42/threads?api-version=6.0"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.comments[0].content").value("hello"))
-                .andExpect(jsonPath("$.comments[0].commentType").value(1))
-                .andExpect(jsonPath("$.status").value(4))
+                .andExpect(jsonPath("$.comments[0].commentType").value("text"))
+                .andExpect(jsonPath("$.status").value("closed"))
                 .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
 
         new AzureDevopsApiClient(builder.build(), creds(), null)
@@ -241,16 +246,61 @@ class AzureDevopsApiClientTest {
     }
 
     @Test
-    void postIssueComment_postsClosedThread() {
-        // Bot replies are informational and must not block the comment-resolution policy.
+    void postPullRequestComment_returnsThreadAndCommentId() {
+        // Comment ids are only unique within a thread, so the id must carry both.
         RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(method(HttpMethod.POST))
-                .andExpect(jsonPath("$.status").value(4))
-                .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess("{\"id\":5,\"comments\":[{\"id\":1,\"content\":\"hello\"}]}",
+                        MediaType.APPLICATION_JSON));
+
+        CommentId id = new AzureDevopsApiClient(builder.build(), creds(), null)
+                .postPullRequestComment("contoso", "MyProject/my-service", 42L, "hello");
+
+        assertEquals(ThreadCommentId.of(5L, 1L), id);
+        server.verify();
+    }
+
+    @Test
+    void postPullRequestComment_threadWithoutComments_returnsNoId() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(method(HttpMethod.POST))
+                .andRespond(withSuccess("{\"id\":5,\"comments\":[]}", MediaType.APPLICATION_JSON));
+
+        assertNull(new AzureDevopsApiClient(builder.build(), creds(), null)
+                .postPullRequestComment("contoso", "MyProject/my-service", 42L, "hello"));
+        server.verify();
+    }
+
+    @Test
+    void updatePullRequestComment_patchesTheCommentInItsThread() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://dev.azure.com/contoso/MyProject/_apis/git/repositories/my-service"
+                                + "/pullRequests/42/threads/5/comments/1?api-version=6.0"))
+                .andExpect(method(HttpMethod.PATCH))
+                .andExpect(jsonPath("$.content").value("Review completed"))
+                .andRespond(withSuccess());
 
         new AzureDevopsApiClient(builder.build(), creds(), null)
-                .postIssueComment("contoso", "MyProject/my-service", 42L, "hello");
+                .updatePullRequestComment("contoso", "MyProject/my-service", 42L,
+                        ThreadCommentId.of(5L, 1L), "Review completed");
+
+        server.verify();
+    }
+
+    @Test
+    void updatePullRequestComment_errorsReachTheCaller() {
+        // Like the other providers: the progress boundary, not the client, decides
+        // whether a failed update matters.
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(method(HttpMethod.PATCH)).andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), creds(), null);
+        assertThrows(HttpClientErrorException.class, () -> client.updatePullRequestComment(
+                "contoso", "MyProject/my-service", 42L, ThreadCommentId.of(5L, 1L), "Review completed"));
 
         server.verify();
     }
@@ -264,7 +314,7 @@ class AzureDevopsApiClientTest {
                                 + "/pullRequests/42/threads?api-version=6.0"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.comments[0].content").value("summary"))
-                .andExpect(jsonPath("$.status").value(1))
+                .andExpect(jsonPath("$.status").value("active"))
                 .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
 
         new AzureDevopsApiClient(builder.build(), creds(), null)
@@ -280,6 +330,9 @@ class AzureDevopsApiClientTest {
         server.expect(method(HttpMethod.POST))
                 .andExpect(jsonPath("$.threadContext.filePath").value("/src/Foo.java"))
                 .andExpect(jsonPath("$.threadContext.rightFileStart.line").value(12))
+                // Unset left-side anchors are left out rather than sent as null.
+                .andExpect(jsonPath("$.threadContext.leftFileStart").doesNotExist())
+                .andExpect(jsonPath("$.threadContext.leftFileEnd").doesNotExist())
                 .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
 
         new AzureDevopsApiClient(builder.build(), creds(), null)
@@ -430,10 +483,33 @@ class AzureDevopsApiClientTest {
         assertEquals("dev@contoso.com", comments.get(0).getUserLogin());
         // Every comment of a thread inherits the thread's anchor.
         assertEquals("src/Foo.java", comments.get(1).getPath());
-        assertEquals("Dev", comments.get(1).getUserLogin());
+        // displayName is user-editable and never stands in for the author's identity.
+        assertNull(comments.get(1).getUserLogin());
         // A thread without a threadContext is a top-level conversation comment.
         assertNull(comments.get(2).getPath());
         assertNull(comments.get(2).getLine());
+        server.verify();
+    }
+
+    @Test
+    void getReviewComments_unknownStatusAndCommentType_keepTheComments() {
+        // One value newer than this client must not fail the whole thread list, which
+        // getReviewComments would otherwise silently turn into an empty list.
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"value":[
+                          {"id":5,"status":"somethingNew",
+                           "comments":[{"id":1,"content":"first","commentType":"somethingElse"}]}
+                        ]}""", MediaType.APPLICATION_JSON));
+
+        List<ReviewComment> comments = new AzureDevopsApiClient(builder.build(), creds(), null)
+                .getReviewComments("contoso", "MyProject/my-service", 42L, null);
+
+        assertEquals(1, comments.size());
+        assertEquals(ThreadCommentId.of(5L, 1L), comments.get(0).getId());
+        assertEquals("first", comments.get(0).getBody());
         server.verify();
     }
 

@@ -7,15 +7,22 @@ import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.ai.ToolNameSanitizer;
+import org.remus.giteabot.ai.UsageCounterDeserializer;
 import org.springframework.web.client.RestClientException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.JsonToken;
+import tools.jackson.databind.DeserializationContext;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ValueDeserializer;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /** OpenRouter response and usage fields are independent of the OpenAI response model. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-record OpenRouterResponse(String id, String model, List<Choice> choices, Usage usage, Error error) {
+record OpenRouterResponse(String id, String model, List<Choice> choices,
+                          @JsonDeserialize(using = UsageDeserializer.class) Usage usage, Error error) {
 
     ChatTurn toTurn() {
         Choice choice = choices == null || choices.isEmpty() ? null : choices.getFirst();
@@ -45,8 +52,8 @@ record OpenRouterResponse(String id, String model, List<Choice> choices, Usage u
             }
         }
         if (!calls.isEmpty() && reason == StopReason.END_TURN) reason = StopReason.TOOL_USE;
-        return new ChatTurn(message == null ? "" : message.content(), calls, reason,
-                usage == null ? 0 : usage.promptTokens(), usage == null ? 0 : usage.completionTokens(),
+        return ChatTurn.withReportedUsage(message == null ? "" : message.content(), calls, reason,
+                usage == null ? null : usage.promptTokens(), usage == null ? null : usage.completionTokens(),
                 message == null ? null : message.reasoningDetails());
     }
 
@@ -62,12 +69,34 @@ record OpenRouterResponse(String id, String model, List<Choice> choices, Usage u
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Function(String name, String arguments) {}
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Usage(@JsonProperty("prompt_tokens") long promptTokens,
-                 @JsonProperty("completion_tokens") long completionTokens,
-                 @JsonProperty("prompt_tokens_details") PromptTokensDetails promptTokensDetails) {}
+    record Usage(@JsonProperty("prompt_tokens")
+                 @JsonDeserialize(using = UsageCounterDeserializer.LongCounter.class) Long promptTokens,
+                 @JsonProperty("completion_tokens")
+                 @JsonDeserialize(using = UsageCounterDeserializer.LongCounter.class) Long completionTokens,
+                 @JsonProperty("prompt_tokens_details")
+                 @JsonDeserialize(using = PromptTokensDetailsDeserializer.class) PromptTokensDetails promptTokensDetails) {}
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record PromptTokensDetails(@JsonProperty("cached_tokens") Long cachedTokens,
-                               @JsonProperty("cache_write_tokens") Long cacheWriteTokens) {}
+    record PromptTokensDetails(@JsonProperty("cached_tokens")
+                               @JsonDeserialize(using = UsageCounterDeserializer.LongCounter.class) Long cachedTokens,
+                               @JsonProperty("cache_write_tokens")
+                               @JsonDeserialize(using = UsageCounterDeserializer.LongCounter.class) Long cacheWriteTokens) {}
+
+    static final class UsageDeserializer extends ValueDeserializer<Usage> {
+        @Override public Usage deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.hasToken(JsonToken.START_OBJECT)) return context.readValue(parser, Usage.class);
+            parser.skipChildren();
+            return null;
+        }
+    }
+
+    static final class PromptTokensDetailsDeserializer extends ValueDeserializer<PromptTokensDetails> {
+        @Override public PromptTokensDetails deserialize(JsonParser parser, DeserializationContext context) {
+            if (parser.hasToken(JsonToken.START_OBJECT)) return context.readValue(parser, PromptTokensDetails.class);
+            parser.skipChildren();
+            return null;
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Error(JsonNode code, String message) {
         int httpStatus() {

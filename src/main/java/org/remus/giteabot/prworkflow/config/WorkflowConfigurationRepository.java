@@ -17,5 +17,6 @@ public interface WorkflowConfigurationRepository extends JpaRepository<WorkflowC
 
     Optional<WorkflowConfiguration> findByKindAndDefaultEntryTrue(WorkflowConfigurationKind kind);
 
+    Optional<WorkflowConfiguration> findByName(String name);
 }
 

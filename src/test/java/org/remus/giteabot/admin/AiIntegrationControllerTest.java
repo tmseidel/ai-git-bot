@@ -1,5 +1,7 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
+import org.remus.giteabot.ai.ModelFlavor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -67,18 +69,17 @@ class AiIntegrationControllerTest {
 
     @Test
     void newForm_showsGoogleAiProviderAndSetupHints() throws Exception {
-        when(providerRegistry.getProviderTypes()).thenReturn(List.of("google"));
-        when(providerRegistry.getDisplayNames()).thenReturn(Map.of("google", "gemini"));
-        when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of("google", "https://generativelanguage.googleapis.com"));
-        when(providerRegistry.getSuggestedModels()).thenReturn(Map.of("google", List.of("gemini-2.5-flash")));
-        when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of("google", true));
-        when(providerRegistry.getFlavors()).thenReturn(Map.of("google", List.of()));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of(AiProviderType.GOOGLE));
+        when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of(AiProviderType.GOOGLE, "https://generativelanguage.googleapis.com"));
+        when(providerRegistry.getSuggestedModels()).thenReturn(Map.of(AiProviderType.GOOGLE, List.of("gemini-2.5-flash")));
+        when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of(AiProviderType.GOOGLE, true));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of(AiProviderType.GOOGLE, List.of()));
 
         mockMvc.perform(get("/ai-integrations/new").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
                 .andExpect(view().name("ai-integrations/form"))
-                .andExpect(content().string(containsString("value=\"google\"")))
-                .andExpect(content().string(containsString("gemini")))
+                .andExpect(content().string(containsString("value=\"GOOGLE\"")))
+                .andExpect(content().string(containsString(">Google Gemini</option>")))
                 .andExpect(content().string(containsString("https:\\/\\/generativelanguage.googleapis.com")))
                 .andExpect(content().string(containsString("gemini-2.5-flash")))
                 .andExpect(content().string(containsString("Google AI uses the Gemini REST API")))
@@ -89,23 +90,23 @@ class AiIntegrationControllerTest {
     void editForm_showsOpenRouterSettingsWithoutEchoingTheKey() throws Exception {
         AiIntegration integration = new AiIntegration();
         integration.setId(7L);
-        integration.setProviderType("openrouter");
+        integration.setProviderType(AiProviderType.OPENROUTER);
         integration.setApiUrl("https://eu.openrouter.ai/api");
         integration.setApiKey("private-stored-ciphertext");
         integration.setOpenRouterRegion(OpenRouterRegion.EU);
         when(aiIntegrationService.findById(7L)).thenReturn(Optional.of(integration));
-        when(providerRegistry.getProviderTypes()).thenReturn(List.of("openrouter"));
-        when(providerRegistry.getDisplayNames()).thenReturn(Map.of("openrouter", "openrouter"));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of(AiProviderType.OPENROUTER));
         when(providerRegistry.getSuggestedModels()).thenReturn(
-                Map.of("openrouter", OpenRouterProviderMetadata.SUGGESTED_MODELS));
+                Map.of(AiProviderType.OPENROUTER, OpenRouterProviderMetadata.SUGGESTED_MODELS));
 
         mockMvc.perform(get("/ai-integrations/7/edit").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString(">openrouter</option>")))
+                .andExpect(content().string(containsString(">OpenRouter</option>")))
                 .andExpect(content().string(containsString("openrouter\\/auto")))
                 .andExpect(content().string(containsString("deepseek\\/deepseek-v4.1-flash")))
                 .andExpect(content().string(containsString("z-ai\\/glm-5.3-flash")))
                 .andExpect(content().string(containsString("xiaomi\\/mimo-v2.6-flash")))
+                .andExpect(content().string(containsString("class=\"form-control-plaintext\"")))
                 .andExpect(content().string(containsString("readonly=\"readonly\"")))
                 .andExpect(content().string(containsString("id=\"openRouterRegion\"")))
                 .andExpect(content().string(containsString("id=\"openRouterDataCollection\"")))
@@ -117,7 +118,7 @@ class AiIntegrationControllerTest {
     @Test
     void save_bindsOpenRouterPrivacySettings() throws Exception {
         mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
-                        .param("providerType", "openrouter").param("name", "OpenRouter")
+                        .param("providerType", "OPENROUTER").param("name", "OpenRouter")
                         .param("model", "author/model").param("apiKey", "new-key")
                         .param("openRouterRegion", "US").param("openRouterDataCollection", "ALLOW")
                         .param("openRouterZdr", "true"))
@@ -131,7 +132,7 @@ class AiIntegrationControllerTest {
     @Test
     void save_rejectsUnknownOpenRouterRegionBeforeCallingTheService() throws Exception {
         mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
-                        .param("providerType", "openrouter").param("apiKey", "private-new-key")
+                        .param("providerType", "OPENROUTER").param("apiKey", "private-new-key")
                         .param("openRouterRegion", "https://untrusted.example"))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(not(containsString("private-new-key"))));
@@ -147,7 +148,7 @@ class AiIntegrationControllerTest {
     void save_invalidTokenNumbersShowASafeFlashMessage(String field, String value) throws Exception {
         mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
                         .locale(Locale.ENGLISH)
-                        .param("providerType", "openrouter").param("apiKey", "private-new-key")
+                        .param("providerType", "OPENROUTER").param("apiKey", "private-new-key")
                         .param(field, value))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/ai-integrations"))
@@ -165,7 +166,7 @@ class AiIntegrationControllerTest {
     })
     void save_malformedPrivacySettingsStayBadRequestsEvenWithNumericErrors(String field, String value) throws Exception {
         mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
-                        .param("providerType", "openrouter").param("apiKey", "private-new-key")
+                        .param("providerType", "OPENROUTER").param("apiKey", "private-new-key")
                         .param("maxTokens", "").param(field, value))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(not(containsString("private-new-key"))))
@@ -178,7 +179,7 @@ class AiIntegrationControllerTest {
     void save_mixedNumericErrorsUseTheGenericFlashMessage() throws Exception {
         mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
                         .locale(Locale.ENGLISH)
-                        .param("providerType", "ollama").param("maxTokens", "")
+                        .param("providerType", "OLLAMA").param("maxTokens", "")
                         .param("parallelWorkerLimit", "21"))
                 .andExpect(redirectedUrl("/ai-integrations"))
                 .andExpect(flash().attribute("error",
@@ -193,7 +194,7 @@ class AiIntegrationControllerTest {
                         .with(user("admin").roles("ADMIN"))
                         .with(csrf())
                         .param("name", "Google AI")
-                        .param("providerType", "google")
+                        .param("providerType", "GOOGLE")
                         .param("apiUrl", "https://generativelanguage.googleapis.com")
                         .param("apiKey", "gemini-key")
                         .param("model", "gemini-2.5-flash")
@@ -206,7 +207,7 @@ class AiIntegrationControllerTest {
 
         verify(aiIntegrationService).save(argThat(integration ->
                         "Google AI".equals(integration.getName())
-                                && "google".equals(integration.getProviderType())
+                                && integration.getProviderType() == AiProviderType.GOOGLE
                                 && "https://generativelanguage.googleapis.com".equals(integration.getApiUrl())
                                 && "gemini-key".equals(integration.getApiKey())
                                 && "gemini-2.5-flash".equals(integration.getModel())
@@ -221,7 +222,7 @@ class AiIntegrationControllerTest {
                         .with(csrf())
                         .param("id", "7")
                         .param("name", "Google AI")
-                        .param("providerType", "google")
+                        .param("providerType", "GOOGLE")
                         .param("apiUrl", "https://generativelanguage.googleapis.com")
                         .param("apiKey", "")
                         .param("clearApiKey", "true")
@@ -241,16 +242,15 @@ class AiIntegrationControllerTest {
         AiIntegration existing = new AiIntegration();
         existing.setId(7L);
         existing.setName("Existing");
-        existing.setProviderType("anthropic");
+        existing.setProviderType(AiProviderType.ANTHROPIC);
         existing.setApiUrl("https://api.anthropic.com");
         existing.setModel("claude-sonnet-4");
         when(aiIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
-        when(providerRegistry.getProviderTypes()).thenReturn(List.of("anthropic"));
-        when(providerRegistry.getDisplayNames()).thenReturn(Map.of("anthropic", "Anthropic"));
-        when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of("anthropic", "https://api.anthropic.com"));
-        when(providerRegistry.getSuggestedModels()).thenReturn(Map.of("anthropic", List.of("claude-sonnet-4")));
-        when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of("anthropic", true));
-        when(providerRegistry.getFlavors()).thenReturn(Map.of("anthropic", List.of()));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of(AiProviderType.ANTHROPIC));
+        when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of(AiProviderType.ANTHROPIC, "https://api.anthropic.com"));
+        when(providerRegistry.getSuggestedModels()).thenReturn(Map.of(AiProviderType.ANTHROPIC, List.of("claude-sonnet-4")));
+        when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of(AiProviderType.ANTHROPIC, true));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of(AiProviderType.ANTHROPIC, List.of()));
 
         mockMvc.perform(get("/ai-integrations/7/edit").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -260,13 +260,42 @@ class AiIntegrationControllerTest {
     }
 
     @Test
+    void newForm_hidesModelFlavorUntilAProviderWithFlavorsIsSelected() throws Exception {
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of(AiProviderType.OPENAI));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of(AiProviderType.OPENAI,
+                List.of(new ModelFlavor(AiProviderType.OPENAI, "standard", "Standard", ""))));
+
+        mockMvc.perform(get("/ai-integrations/new").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"modelFlavorField\" hidden=\"hidden\"")));
+    }
+
+    @Test
+    void editForm_showsModelFlavorForProviderWithFlavors() throws Exception {
+        AiIntegration existing = new AiIntegration();
+        existing.setId(7L);
+        existing.setName("Existing");
+        existing.setProviderType(AiProviderType.OPENAI);
+        existing.setApiUrl("https://api.openai.com");
+        existing.setModel("gpt-6.1-sol");
+        when(aiIntegrationService.findById(7L)).thenReturn(Optional.of(existing));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of(AiProviderType.OPENAI));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of(AiProviderType.OPENAI,
+                List.of(new ModelFlavor(AiProviderType.OPENAI, "standard", "Standard", ""))));
+
+        mockMvc.perform(get("/ai-integrations/7/edit").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"modelFlavorField\"")))
+                .andExpect(content().string(not(containsString("id=\"modelFlavorField\" hidden"))));
+    }
+
+    @Test
     void newForm_showsParallelWorkerLimitInputAndHelp() throws Exception {
-        when(providerRegistry.getProviderTypes()).thenReturn(List.of("anthropic"));
-        when(providerRegistry.getDisplayNames()).thenReturn(Map.of("anthropic", "Anthropic"));
-        when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of("anthropic", "https://api.anthropic.com"));
-        when(providerRegistry.getSuggestedModels()).thenReturn(Map.of("anthropic", List.of("claude-sonnet-4")));
-        when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of("anthropic", true));
-        when(providerRegistry.getFlavors()).thenReturn(Map.of("anthropic", List.of()));
+        when(providerRegistry.getProviderTypes()).thenReturn(List.of(AiProviderType.ANTHROPIC));
+        when(providerRegistry.getDefaultApiUrls()).thenReturn(Map.of(AiProviderType.ANTHROPIC, "https://api.anthropic.com"));
+        when(providerRegistry.getSuggestedModels()).thenReturn(Map.of(AiProviderType.ANTHROPIC, List.of("claude-sonnet-4")));
+        when(providerRegistry.getApiKeyRequirements()).thenReturn(Map.of(AiProviderType.ANTHROPIC, true));
+        when(providerRegistry.getFlavors()).thenReturn(Map.of(AiProviderType.ANTHROPIC, List.of()));
 
         mockMvc.perform(get("/ai-integrations/new").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -277,7 +306,7 @@ class AiIntegrationControllerTest {
                 .andExpect(content().string(containsString("max=\"20\"")))
                 .andExpect(content().string(containsString("Parallel worker limit")))
                 .andExpect(content().string(containsString(
-                        "Maximum number of jobs that may run at once for this AI integration")));
+                        "0 = unlimited. 1–20 caps concurrent jobs")));
     }
 
     @Test
@@ -288,7 +317,7 @@ class AiIntegrationControllerTest {
                             .with(csrf())
                             .locale(Locale.ENGLISH)
                             .param("name", "Anthropic")
-                            .param("providerType", "anthropic")
+                            .param("providerType", "ANTHROPIC")
                             .param("apiUrl", "https://api.anthropic.com")
                             .param("model", "claude-sonnet-4")
                             .param("parallelWorkerLimit", value))

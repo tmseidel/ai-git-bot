@@ -9,6 +9,7 @@ import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
@@ -97,7 +98,7 @@ public class UnitTestSlashCommandHandler {
         }
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
-        Long commentId = payload.getComment().getId();
+        CommentId commentId = payload.getComment().getId();
         try {
             RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
             client.addReaction(owner, repo, commentId, "eyes");

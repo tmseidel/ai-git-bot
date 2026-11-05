@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
@@ -24,6 +25,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.session.SessionService;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
@@ -544,7 +546,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -604,7 +606,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -700,7 +702,7 @@ class BotWebhookServiceTest {
         makeWriterBot(bot);
         WebhookPayload payload = buildIssuePayload("Test", "my-repo", 12L, "Vague issue", "Do something");
         AgentSession session = new AgentSession("Test", "my-repo", 12L, "Vague issue");
-        Path workspace = Path.of("/tmp/writer-test-workspace");
+        Workspace workspace = Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"));
 
         when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
         when(aiClientFactory.getClient(any())).thenReturn(aiClient);
@@ -774,7 +776,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -808,7 +810,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096)))
@@ -838,7 +840,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -859,7 +861,7 @@ class BotWebhookServiceTest {
         makeWriterBot(bot);
         WebhookPayload payload = buildIssuePayload("Test", "my-repo", 12L, "Vague issue", "Do something");
         AgentSession session = new AgentSession("Test", "my-repo", 12L, "Vague issue");
-        Path workspace = Path.of("/tmp/writer-test-workspace");
+        Workspace workspace = Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"));
         String contextRequest = """
                 {"qualityAssessment":"Needs context","requestTools":[{"id":"1","tool":"cat","args":["README.md"]}],"readyToCreate":true}
                 """;
@@ -897,7 +899,7 @@ class BotWebhookServiceTest {
         makeWriterBot(bot);
         WebhookPayload payload = buildIssuePayload("Test", "my-repo", 12L, "Vague issue", "Do something");
         AgentSession session = new AgentSession("Test", "my-repo", 12L, "Vague issue");
-        Path workspace = Path.of("/tmp/writer-test-workspace");
+        Workspace workspace = Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"));
         String contextRequest = """
                 {"qualityAssessment":"Needs context","requestTools":[{"id":"1","tool":"cat","args":["README.md"]}],"readyToCreate":false}
                 """;
@@ -954,7 +956,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096)))
                 .thenThrow(new RuntimeException("follow-up failure"));
@@ -1514,7 +1516,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -1595,7 +1597,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -1642,7 +1644,7 @@ class BotWebhookServiceTest {
         when(repositoryApiClient.getDefaultBranch("Test", "my-repo")).thenReturn("main");
         when(workspaceService.prepareWorkspace(
                 eq(repositoryApiClient), eq("Test"), eq("my-repo"), eq("main"), any()))
-                .thenReturn(WorkspaceResult.success(Path.of("/tmp/writer-test-workspace")));
+                .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/writer-test-workspace"))));
         when(repositoryApiClient.getRepositoryTree("Test", "my-repo", "main")).thenReturn(java.util.List.of());
         when(agentSessionService.toAiMessages(session)).thenReturn(java.util.List.of());
         when(aiClient.chat(any(), any(), startsWith("Writer prompt"), any(), eq(4096))).thenReturn("""
@@ -1883,7 +1885,7 @@ class BotWebhookServiceTest {
 
         // Comment
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(commentId);
+        comment.setId(CommentId.NumericCommentId.of(commentId));
         comment.setBody(commentBody);
         WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
         commentUser.setLogin("tom");
@@ -1946,7 +1948,7 @@ class BotWebhookServiceTest {
         WebhookPayload payload = buildIssuePayload(owner, repo, issueNumber, title, body);
         payload.setAction("created");
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(42L);
+        comment.setId(CommentId.NumericCommentId.of(42L));
         comment.setBody(commentBody);
         WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
         commentUser.setLogin(commenter);
@@ -1987,7 +1989,7 @@ class BotWebhookServiceTest {
         pr.setBase(base);
         payload.setPullRequest(pr);
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(commentId);
+        comment.setId(CommentId.NumericCommentId.of(commentId));
         comment.setBody(commentBody);
         WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
         commentUser.setLogin("tom");

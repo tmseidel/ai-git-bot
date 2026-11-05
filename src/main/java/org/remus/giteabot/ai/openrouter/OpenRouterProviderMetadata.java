@@ -3,7 +3,8 @@ package org.remus.giteabot.ai.openrouter;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
-import org.remus.giteabot.ai.ModelFlavor;
+import org.remus.giteabot.ai.AiProviderType;
+import org.remus.giteabot.config.ApplicationName;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
@@ -28,23 +29,20 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
             "xiaomi/mimo-v2.6-flash"
     );
     private final RestClient.Builder restClientBuilder;
+    private final ApplicationName applicationName;
 
     /** Retains configured timeouts/TLS settings, but never redirects a credential to another host. */
-    public OpenRouterProviderMetadata(ObjectProvider<RestClient.Builder> builders, HttpClientSettings settings) {
+    public OpenRouterProviderMetadata(ObjectProvider<RestClient.Builder> builders, HttpClientSettings settings,
+                                      ApplicationName applicationName) {
         this.restClientBuilder = builders.getObject().requestFactory(ClientHttpRequestFactoryBuilder.detect()
                 .build(settings.withRedirects(HttpRedirects.DONT_FOLLOW)));
+        this.applicationName = applicationName;
     }
 
-    @Override public String getProviderType() { return "openrouter"; }
+    @Override public AiProviderType getProviderType() { return AiProviderType.OPENROUTER; }
     @Override public String getDefaultApiUrl() { return OpenRouterRegion.GLOBAL.getApiRoot(); }
     @Override public List<String> getSuggestedModels() { return SUGGESTED_MODELS; }
     @Override public boolean requiresApiKey() { return true; }
-
-    @Override
-    public List<ModelFlavor> getFlavors() {
-        return List.of(new ModelFlavor("openrouter", "standard", "Provider default",
-                "Use the selected model's default reasoning behavior."));
-    }
 
     @Override
     public boolean requiresRetainedKeyValidation(AiIntegration previous, AiIntegration updated) {
@@ -114,7 +112,8 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
         validateSettings(integration);
         return new OpenRouterClient(restClient, integration.getModel(), integration.getMaxTokens(),
                 !integration.isUseLegacyToolCalling(), new OpenRouterRequest.ProviderPreferences(true, false,
-                integration.getOpenRouterDataCollection().getWireValue(), integration.isOpenRouterZdr()));
+                integration.getOpenRouterDataCollection().getWireValue(), integration.isOpenRouterZdr()),
+                applicationName.get());
     }
 
     private void validateSettings(AiIntegration integration) {

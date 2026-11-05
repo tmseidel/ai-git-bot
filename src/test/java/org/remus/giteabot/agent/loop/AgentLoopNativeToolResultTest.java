@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.session.PendingMessage;
@@ -59,7 +60,7 @@ class AgentLoopNativeToolResultTest {
     void setUp() {
         AgentSession session = new AgentSession("owner", "repo", 11L, "issue title");
         session.setId(1L); // persisted session — the loop flushes id-bearing sessions
-        ctx = new AgentRunContext(session, "owner", "repo", 11L, Path.of("/tmp/ws"), "main");
+        ctx = new AgentRunContext(session, "owner", "repo", 11L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
 

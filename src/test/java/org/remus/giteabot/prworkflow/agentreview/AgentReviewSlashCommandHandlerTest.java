@@ -11,6 +11,7 @@ import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 
 import java.util.List;
 import java.util.Map;
@@ -184,19 +185,19 @@ class AgentReviewSlashCommandHandlerTest {
     @Test
     void addsEyesReactionWhenSlashCommandRecognised() {
         WebhookPayload payload = payloadWithCommentAndIdentity(
-                "@ai-bot clarify Why?", 4242L, "acme", "web");
+                "@ai-bot clarify Why?", CommentId.NumericCommentId.of(4242L), "acme", "web");
 
         boolean handled = handler.tryHandle(bot, payload);
 
         assertThat(handled).isTrue();
-        verify(repoClient).addReaction("acme", "web", 4242L, "eyes");
+        verify(repoClient).addReaction("acme", "web", CommentId.NumericCommentId.of(4242L), "eyes");
     }
 
     @Test
     void doesNotReactWhenAgenticReviewDisabled() {
         when(selectionService.enabledWorkflowKeys(7L)).thenReturn(List.of("review"));
         WebhookPayload payload = payloadWithCommentAndIdentity(
-                "@ai-bot clarify Why?", 99L, "acme", "web");
+                "@ai-bot clarify Why?", CommentId.NumericCommentId.of(99L), "acme", "web");
 
         boolean handled = handler.tryHandle(bot, payload);
 
@@ -207,7 +208,7 @@ class AgentReviewSlashCommandHandlerTest {
     @Test
     void doesNotReactOnUnrelatedComment() {
         WebhookPayload payload = payloadWithCommentAndIdentity(
-                "No mention here", 100L, "acme", "web");
+                "No mention here", CommentId.NumericCommentId.of(100L), "acme", "web");
 
         boolean handled = handler.tryHandle(bot, payload);
 
@@ -218,7 +219,7 @@ class AgentReviewSlashCommandHandlerTest {
     @Test
     void reactionFailureDoesNotBlockDispatch() {
         WebhookPayload payload = payloadWithCommentAndIdentity(
-                "@ai-bot clarify Why?", 7L, "acme", "web");
+                "@ai-bot clarify Why?", CommentId.NumericCommentId.of(7L), "acme", "web");
         org.mockito.Mockito.doThrow(new RuntimeException("API down"))
                 .when(repoClient).addReaction(any(), any(), any(), any());
 
@@ -270,7 +271,7 @@ class AgentReviewSlashCommandHandlerTest {
         return payload;
     }
 
-    private WebhookPayload payloadWithCommentAndIdentity(String body, long commentId,
+    private WebhookPayload payloadWithCommentAndIdentity(String body, CommentId commentId,
                                                          String owner, String repo) {
         WebhookPayload payload = new WebhookPayload();
         WebhookPayload.Comment comment = new WebhookPayload.Comment();

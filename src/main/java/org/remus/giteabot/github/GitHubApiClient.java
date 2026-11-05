@@ -7,11 +7,14 @@ import org.remus.giteabot.github.model.GitHubReview;
 import org.remus.giteabot.github.model.GitHubTree;
 import org.remus.giteabot.github.model.GitHubReviewComment;
 import org.remus.giteabot.repository.PostReviewAction;
+import org.remus.giteabot.repository.PullRequestHeads;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
@@ -21,6 +24,7 @@ import org.springframework.web.client.RestClient;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -47,6 +51,54 @@ public class GitHubApiClient implements RepositoryApiClient {
     @Override
     public RepositoryCredentials getCredentials() {
         return credentials;
+    }
+
+    @Override
+    public boolean requiresAuthoritativePullRequestHead() {
+        return true;
+    }
+
+    /**
+     * Resolves the head from {@code GET /repos/{owner}/{repo}/pulls/{n}}: GitHub
+     * reports the head repository inline as {@code head.repo}, so a fork PR
+     * names the contributor's repository without a second request.
+     */
+    @Override
+    public PullRequestHead getPullRequestHead(String owner, String repo, Long pullNumber,
+                                              String expectedBranch) {
+        GitHubPullRequest pr = fetchPullRequest(owner, repo, pullNumber);
+        GitHubPullRequest.GitHubBranch head = pr != null ? pr.getHead() : null;
+        if (head == null) {
+            throw new IllegalStateException("GitHub pull request did not provide a head object");
+        }
+        String branch = PullRequestHeads.requiredString(head.getRef(),
+                "GitHub pull request head ref is missing");
+        String expected = PullRequestHeads.normalizeBranch(expectedBranch);
+        String actual = PullRequestHeads.normalizeBranch(branch);
+        if (expected == null || !Objects.equals(actual, expected)) {
+            throw new IllegalStateException("GitHub pull request head branch '" + actual
+                    + "' does not match expected branch '" + expected + "'");
+        }
+        GitHubPullRequest.GitHubRepository repository = head.getRepo();
+        if (repository == null) {
+            throw new IllegalStateException("GitHub pull request head repository is missing");
+        }
+        String repositoryName = PullRequestHeads.nonBlank(repository.getName());
+        String sourceOwner = repository.getOwner() != null
+                ? PullRequestHeads.nonBlank(repository.getOwner().getLogin()) : null;
+        String fullName = PullRequestHeads.nonBlank(repository.getFullName());
+        if ((sourceOwner == null || repositoryName == null) && fullName != null) {
+            int separator = fullName.indexOf('/');
+            if (separator > 0 && separator < fullName.length() - 1) {
+                sourceOwner = sourceOwner == null ? fullName.substring(0, separator) : sourceOwner;
+                repositoryName = repositoryName == null ? fullName.substring(separator + 1) : repositoryName;
+            }
+        }
+        if (sourceOwner == null || repositoryName == null) {
+            throw new IllegalStateException("GitHub pull request head repository coordinates are incomplete");
+        }
+        return new PullRequestHead(sourceOwner, repositoryName, actual,
+                PullRequestHeads.nonBlank(head.getSha()));
     }
 
     // ---- Pull request operations ----
@@ -115,7 +167,7 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public Long postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+    public CommentId postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
         log.info("Posting top-level comment on PR #{} in {}/{}", pullNumber, owner, repo);
         Map<?, ?> response = commentCreationRequest(owner, repo, pullNumber, body).body(Map.class);
         log.info("Comment posted successfully");
@@ -123,7 +175,7 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+    public void updatePullRequestComment(String owner, String repo, Long pullNumber, CommentId commentId, String body) {
         restClient.patch()
                 .uri("/repos/{owner}/{repo}/issues/comments/{comment_id}", owner, repo, commentId)
                 .body(new CommentRequest(body))
@@ -169,7 +221,7 @@ public class GitHubApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void addReaction(String owner, String repo, Long commentId, String reaction) {
+    public void addReaction(String owner, String repo, CommentId commentId, String reaction) {
         log.info("Adding '{}' reaction to comment #{} in {}/{}", reaction, commentId, owner, repo);
         restClient.post()
                 .uri("/repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
@@ -263,12 +315,16 @@ public class GitHubApiClient implements RepositoryApiClient {
 
     @Override
     public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        return Optional.ofNullable(fetchPullRequest(owner, repo, pullNumber))
+                .map(GitHubPullRequest::toPullRequestDetails);
+    }
+
+    private GitHubPullRequest fetchPullRequest(String owner, String repo, Long pullNumber) {
         log.info("Fetching pull-request #{} details in {}/{}", pullNumber, owner, repo);
-        GitHubPullRequest pr = restClient.get()
+        return restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{pull_number}", owner, repo, pullNumber)
                 .retrieve()
                 .body(GitHubPullRequest.class);
-        return Optional.ofNullable(pr).map(GitHubPullRequest::toPullRequestDetails);
     }
 
     @Override

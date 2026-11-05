@@ -92,6 +92,77 @@ volumes:
 | `DATABASE_USERNAME` | Database username (default: `giteabot`) |
 | `DATABASE_PASSWORD` | Database password |
 
+### Configuration Document (Optional)
+
+Back an instance from a configuration document instead of clicking through the admin UI.
+The generator on [gitbot.eu/trial](https://gitbot.eu/trial) writes one, together with a
+compose file that sets these variables. A complete reference — every editable property of
+every entity — is in
+[`doc/examples/full-configuration`](examples/full-configuration/docker-compose.yml).
+
+| Variable | Description |
+|----------|-------------|
+| `APP_CONFIG_JSON` | The document itself, inline (a YAML literal block in a compose file). |
+| `APP_CONFIG_FILE` | Path to the document. Wins over `APP_CONFIG_JSON` when both are set. |
+
+Without either variable the application behaves exactly as before: the administrator account,
+the AI and Git integrations and the bot are created in the admin UI, and no banner appears.
+With a document, these rules apply:
+
+- The import runs **only while no admin user exists**, i.e. only into an empty database.
+  On an in-memory database (`jdbc:h2:mem:…`) that is every start; on a persistent database
+  it is the first start of an empty volume and never again. A restart therefore cannot
+  overwrite changes made in the UI.
+- The document is the entity model — one array per configuration table, entities with
+  their own field names, `@ManyToOne` references as `{"name": …}`. Unknown keys are
+  ignored, so an older image tolerates a newer generator.
+- A row the document declares **overrides** the seeded row of the same name, field by
+  field: omitted values keep their stored value, and a declared `selectedTools` /
+  `selectedWorkflows` list replaces the existing selection. The import only runs on an
+  empty database, so the only rows it can meet are Flyway seeds — operator-created data is
+  never modified. The `defaultEntry` flag is never taken from a document.
+- The default tool configuration is extended at startup with every built-in tool the running
+  build ships, **except** `execute-code` (see `DefaultToolSetInitializer`, and
+  `BotToolConfigurationService.OPT_IN_TOOLS` for the list). Neither the migrations nor the
+  startup extension put it in the Default row: that row cannot be edited afterwards, so a
+  code-execution tool in it would be permanent and opt-out for every bot that never attached a
+  tool configuration of its own. A bot gets it only from a configuration that selects it.
+  Instances upgraded from an older image gain the other new tools on the next start;
+  `execute-code` is never among them.
+- At least one `adminUsers` entry needs both a `username` and a plaintext `password` (hashed
+  on import). A document without such an entry is refused before the first row is written:
+  nothing is imported and the instance starts unconfigured, ready for `/setup`. The alternative
+  would be worse — the importer only runs while no admin user exists, so a document that creates
+  none would be applied again on every start, merged over its own previous import, and `/setup`
+  would stay claimable on a persistent instance. Exported documents carry no password by
+  design, so an export needs one added before it can serve as a document. Any further
+  passwordless entry is skipped with a warning.
+- Credentials are plaintext in the document and encrypted on import
+  (`APP_ENCRYPTION_KEY`); the document itself is a secret file. Remove the variable after
+  the first start.
+- `workflowConfigurations[*].selectedWorkflows[*].workflowKey` is validated against the
+  registered workflows of that kind; an unknown key fails the import instead of silently
+  disabling a workflow.
+- `eventHookEndpoints[*].bot` scopes an endpoint to one bot and is written as a reference,
+  `{"name": "demo-bot"}`; a name the document does not declare fails the import. Leaving it
+  out means the endpoint receives every bot's events (`repoOwner` / `repoName` narrow it
+  further). The internal id never appears in the document, and an exported endpoint carries its
+  bot by name so a re-import keeps the scope instead of widening it.
+- `GET /config/export` (authenticated, admin UI session) returns the running instance in
+  the same shape. The same download is a button in the admin UI under **System settings →
+  General application settings**, so it is always reachable — not only through the banner.
+  The response carries every decrypted credential, so it is sent with `Cache-Control:
+  no-store` and every fetch is logged with the account that asked for it.
+
+A failure is logged at ERROR and never aborts the container: the instance starts
+unconfigured and `/setup` remains available. The import runs before the servlet container
+binds its port, so `/setup` cannot be reached while a document is being applied — on a public
+trial instance that would otherwise let a visitor create a competing administrator account.
+The admin UI shows a banner stating whether the document is applied on every start (in-memory
+database), was applied once (persistent), is present but ignored because the database already
+has data, or was present and could not be imported (the log names the cause; `/setup` finishes
+the job).
+
 ### Secret References (Optional)
 
 Configuration fields that support [secret references](SECRET_REFERENCES.md) can pull values from the environment with `${env:NAME}` instead of holding the credential itself. Only explicitly whitelisted variables are readable:
@@ -184,7 +255,9 @@ These variables control the optional raw request/response payload capture on the
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AI_USAGE_RAW_PAYLOADS_ENABLED` | `false` | Set to `true` to store raw AI request/response JSON in the audit log and show the **Details** column on the Usage page. |
-| `AI_USAGE_MAX_RAW_PAYLOAD_LENGTH` | `65535` | Maximum characters stored per raw payload. Longer payloads are truncated to this length (capped at the database column size). |
+| `AI_USAGE_MAX_RAW_PAYLOAD_LENGTH` | `65535` | Maximum characters stored per raw payload. Longer payloads are truncated to this length. `0` stores payloads in full. Agent runs send the whole conversation with every request, so full payloads grow the database quickly. |
+
+Usage entries are never deleted automatically; the only cleanup is **Clear all** on the Usage page. With `AI_USAGE_MAX_RAW_PAYLOAD_LENGTH=0`, clear the log regularly (the bot logs a warning at startup when this combination is set), or keep a limit and raise it only while you investigate a run.
 
 ### Anthropic Extended Thinking (Optional)
 

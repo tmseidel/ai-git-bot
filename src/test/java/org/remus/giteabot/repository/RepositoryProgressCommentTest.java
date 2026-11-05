@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.github.GitHubApiClient;
 import org.remus.giteabot.gitlab.GitLabApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -39,8 +40,8 @@ class RepositoryProgressCommentTest {
         fixture.server().expect(requestTo(fixture.updateUrl())).andExpect(method(fixture.updateMethod()))
                 .andExpect(content().json(fixture.body("Review completed"))).andRespond(withSuccess());
 
-        Long id = fixture.client().postPullRequestComment("owner", "repo", 7L, "Starting review");
-        assertEquals(2147483648L, id);
+        CommentId id = fixture.client().postPullRequestComment("owner", "repo", 7L, "Starting review");
+        assertEquals(CommentId.NumericCommentId.of(2147483648L), id);
         fixture.client().updatePullRequestComment("owner", "repo", 7L, id, "Review completed");
 
         fixture.server().verify();
@@ -92,7 +93,7 @@ class RepositoryProgressCommentTest {
                 .andRespond(withStatus(HttpStatus.FORBIDDEN));
 
         assertThrows(HttpClientErrorException.class, () -> fixture.client()
-                .updatePullRequestComment("owner", "repo", 7L, 2147483648L, "Review completed"));
+                .updatePullRequestComment("owner", "repo", 7L, CommentId.NumericCommentId.of(2147483648L), "Review completed"));
 
         fixture.server().verify();
     }

@@ -35,7 +35,7 @@ class ProviderCacheUsageTest {
             case "google" -> new GoogleAiClient(http.build(), "test-model", 128, nativeTools);
             case "ollama" -> new OllamaClient(http.build(), "test-model", 128, nativeTools);
             case "llamacpp" -> new LlamaCppClient(http.build(), "test-model", 128);
-            case "openrouter" -> new OpenRouterClient(http.build(), "author/model", 128, nativeTools);
+            case "openrouter" -> new OpenRouterClient(http.build(), "author/model", 128, nativeTools, "AI Git Bot");
             case "anthropic" -> new AnthropicAiClient(http.build(), "test-model", 128,
                     nativeTools, false, false, null);
             default -> throw new IllegalArgumentException(provider);

@@ -9,7 +9,7 @@ package org.remus.giteabot.repository.model;
  */
 public interface ReviewComment {
 
-    Long getId();
+    CommentId getId();
 
     String getBody();
 

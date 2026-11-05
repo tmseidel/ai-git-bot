@@ -107,35 +107,10 @@
                                         <td th:text="${entry.cacheReadInputTokens}">0</td>
                                         <td th:if="${rawPayloadsEnabled}">
                                             <button type="button" class="btn btn-outline-primary btn-sm"
-                                                    data-bs-toggle="modal"
-                                                    th:data-bs-target="'#rawPayloadModal-' + ${entry.id}">
+                                                    data-bs-toggle="modal" data-bs-target="#rawPayloadModal"
+                                                    th:data-raw-url="@{/usage/{id}/raw(id=${entry.id})}">
                                                 <i class="bi bi-eye"></i> <span th:text="#{button.raw}">Raw</span>
                                             </button>
-                                            <div class="modal fade" th:id="'rawPayloadModal-' + ${entry.id}" tabindex="-1"
-                                                 aria-hidden="true">
-                                                <div class="modal-dialog modal-lg modal-dialog-scrollable">
-                                                    <div class="modal-content">
-                                                        <div class="modal-header">
-                                                            <h5 class="modal-title" th:text="#{usage.rawPayloads}">Raw LLM payloads</h5>
-                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"
-                                                                    th:aria-label="#{button.close}"></button>
-                                                        </div>
-                                                        <div class="modal-body">
-                                                            <h6 th:text="#{usage.request}">Request</h6>
-                                                            <pre class="error-log-pre border rounded p-2 small mb-3"
-                                                                 th:text="${entry.rawRequest != null ? entry.rawRequest : '—'}"></pre>
-                                                            <h6 th:text="#{usage.response}">Response</h6>
-                                                            <pre class="error-log-pre border rounded p-2 small mb-0"
-                                                                 th:text="${entry.rawResponse != null ? entry.rawResponse : '—'}"></pre>
-                                                        </div>
-                                                        <div class="modal-footer">
-                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{button.close}">
-                                                                Close
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </td>
                                     </tr>
                                     </tbody>
@@ -408,8 +383,77 @@
 
         </div>
 
+        <!-- One modal for all rows: the payloads are fetched when it opens, so the page never carries them. -->
+        <div th:if="${rawPayloadsEnabled}" class="modal fade" id="rawPayloadModal" tabindex="-1" aria-hidden="true"
+             th:data-loading="#{usage.rawLoading}" th:data-failed="#{usage.rawLoadFailed}">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" th:text="#{usage.rawPayloads}">Raw LLM payloads</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                th:aria-label="#{button.close}"></button>
+                    </div>
+                    <div class="modal-body">
+                        <h6 th:text="#{usage.request}">Request</h6>
+                        <pre class="error-log-pre border rounded p-2 small mb-3" data-raw="rawRequest"></pre>
+                        <h6 th:text="#{usage.response}">Response</h6>
+                        <pre class="error-log-pre border rounded p-2 small mb-0" data-raw="rawResponse"></pre>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{button.close}">
+                            Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <script>
             document.addEventListener('DOMContentLoaded', function () {
+                const rawModal = document.getElementById('rawPayloadModal');
+                if (rawModal) {
+                    const fields = rawModal.querySelectorAll('[data-raw]');
+                    let pending = null;
+                    rawModal.addEventListener('show.bs.modal', function (event) {
+                        const url = event.relatedTarget && event.relatedTarget.getAttribute('data-raw-url');
+                        if (pending) {
+                            pending.abort();
+                        }
+                        fields.forEach(function (field) { field.textContent = rawModal.dataset.loading; });
+                        if (!url) {
+                            return;
+                        }
+                        pending = new AbortController();
+                        fetch(url, {headers: {'Accept': 'application/json'}, signal: pending.signal})
+                            .then(function (response) {
+                                if (!response.ok) {
+                                    throw new Error('HTTP ' + response.status);
+                                }
+                                return response.json();
+                            })
+                            .then(function (payload) {
+                                // textContent, never innerHTML: the payloads are untrusted prompt content
+                                fields.forEach(function (field) {
+                                    const value = payload[field.dataset.raw];
+                                    field.textContent = value != null ? value : '—';
+                                });
+                            })
+                            .catch(function (error) {
+                                if (error.name !== 'AbortError') {
+                                    fields.forEach(function (field) { field.textContent = rawModal.dataset.failed; });
+                                }
+                            });
+                    });
+                    rawModal.addEventListener('hidden.bs.modal', function () {
+                        // cancel a request that is still running, or its late response would refill the
+                        // hidden modal; then drop the text so a large payload does not stay in the DOM
+                        if (pending) {
+                            pending.abort();
+                            pending = null;
+                        }
+                        fields.forEach(function (field) { field.textContent = ''; });
+                    });
+                }
                 initCollapsibleSections({
                     storageKey: 'usage.collapsedSections',
                     collapses: document.querySelectorAll('[id^="section-"].collapse'),

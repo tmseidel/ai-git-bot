@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -294,7 +295,7 @@ public class GitHubWebhookHandler {
     private WebhookPayload.Comment extractComment(Map<String, Object> comment) {
         if (comment == null) return null;
         WebhookPayload.Comment c = new WebhookPayload.Comment();
-        c.setId(toLong(comment.get("id")));
+        c.setId(CommentId.NumericCommentId.of(toLong(comment.get("id"))));
         c.setBody((String) comment.get("body"));
         Map<String, Object> user = (Map<String, Object>) comment.get("user");
         if (user != null) {

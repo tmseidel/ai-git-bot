@@ -7,6 +7,7 @@ import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.ReviewConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.remus.giteabot.review.enrichment.PrContextEnricher;
@@ -162,7 +163,7 @@ public class CodeReviewService {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getIssue().getNumber();
-        Long commentId = payload.getComment().getId();
+        CommentId commentId = payload.getComment().getId();
         String commentBody = payload.getComment().getBody();
 
         log.info("Handling bot command in comment #{} for PR #{} in {}/{}", commentId, prNumber, owner, repo);
@@ -276,7 +277,7 @@ public class CodeReviewService {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = resolvePrNumber(payload);
-        Long commentId = payload.getComment().getId();
+        CommentId commentId = payload.getComment().getId();
         String commentBody = payload.getComment().getBody();
         String filePath = payload.getComment().getPath();
         String diffHunk = payload.getComment().getDiffHunk();
@@ -491,7 +492,7 @@ public class CodeReviewService {
     private void processReviewComment(String owner, String repo, Long prNumber,
                                       ReviewComment reviewComment, ReviewSession session,
                                       String systemPrompt, String modelOverride) {
-        Long commentId = reviewComment.getId();
+        CommentId commentId = reviewComment.getId();
         String filePath = reviewComment.getPath();
         String diffHunk = reviewComment.getDiffHunk();
         String commentBody = reviewComment.getBody();

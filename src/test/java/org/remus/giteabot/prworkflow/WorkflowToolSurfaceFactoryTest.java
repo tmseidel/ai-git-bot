@@ -1,6 +1,7 @@
 package org.remus.giteabot.prworkflow;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
@@ -46,7 +47,7 @@ class WorkflowToolSurfaceFactoryTest {
     private WorkflowToolSurface runFor(Set<String> botTools) {
         when(selections.allowedBuiltinTools(any())).thenReturn(botTools);
         return factory.create(mock(Bot.class), mock(RepositoryApiClient.class), WORKFLOW_TOOLS,
-                "acme", "repo", 42L, Path.of("/tmp/ws"));
+                "acme", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")));
     }
 
     @Test

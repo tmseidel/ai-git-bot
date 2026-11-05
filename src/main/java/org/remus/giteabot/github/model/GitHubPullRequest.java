@@ -1,6 +1,7 @@
 package org.remus.giteabot.github.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
@@ -55,5 +56,24 @@ public class GitHubPullRequest {
     public static class GitHubBranch {
         private String ref;
         private String sha;
+        private GitHubRepository repo;
+    }
+
+    /** The head repository of a pull request; a fork PR names the contributor's repository here. */
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class GitHubRepository {
+        private String name;
+
+        @JsonProperty("full_name")
+        private String fullName;
+
+        private GitHubOwner owner;
+    }
+
+    @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class GitHubOwner {
+        private String login;
     }
 }

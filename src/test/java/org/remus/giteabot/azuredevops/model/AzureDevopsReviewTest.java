@@ -1,6 +1,7 @@
 package org.remus.giteabot.azuredevops.model;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.model.CommentId;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -31,11 +32,12 @@ class AzureDevopsReviewTest {
     }
 
     @Test
-    void userLoginFallsBackToDisplayName() {
+    void userLoginIgnoresDisplayName() {
+        // displayName is user-editable, so it must never stand in for the identity.
         AzureDevopsReview review = new AzureDevopsReview();
         review.setDisplayName("AI Bot");
 
-        assertEquals("AI Bot", review.getUserLogin());
+        assertNull(review.getUserLogin());
     }
 
     @Test
@@ -49,13 +51,13 @@ class AzureDevopsReviewTest {
     @Test
     void reviewCommentExposesThreadContext() {
         AzureDevopsReviewComment comment = new AzureDevopsReviewComment();
-        comment.setId(7L);
+        comment.setId(CommentId.NumericCommentId.of(7L));
         comment.setBody("please rename");
         comment.setPath("/src/Foo.java");
         comment.setLine(12);
         comment.setUserLogin("reviewer@contoso.com");
 
-        assertEquals(7L, comment.getId());
+        assertEquals(CommentId.NumericCommentId.of(7L), comment.getId());
         assertEquals("please rename", comment.getBody());
         assertEquals("/src/Foo.java", comment.getPath());
         assertEquals(12, comment.getLine());

@@ -55,13 +55,13 @@ The `ollama-pull` service automatically downloads the configured model on first 
 All AI provider settings are configured through the **web UI**:
 
 1. Go to **AI Integrations → New Integration**
-2. Select **ollama** as the provider type
+2. Select **Ollama** as the provider type
 3. Set the **API URL** to your Ollama instance (e.g., `http://localhost:11434` or `http://ollama:11434` if using Docker networking)
 4. Enter the **Model** name (must match a model you've pulled, e.g., `llama3.2:1b`)
-5. Adjust **Max Tokens**, **Max Diff Chars Per Chunk**, and other settings as needed for local models
+5. Adjust **Max Tokens**, **Context Window (tokens)**, and other settings as needed for local models
 6. Click **Save**
 
-> **Tip:** For local models, consider reducing **Max Diff Chars Per Chunk** to `30000` and **Max Diff Chunks** to `4` to fit within smaller context windows.
+> **Tip:** For local models, consider reducing **Max diff chars per chunk** to `30000` and **Max diff chunks** to `4` on the review workflow to fit within smaller context windows.
 
 ### Using with an Existing Docker Compose
 
@@ -111,7 +111,7 @@ mvn spring-boot:run
 ```
 
 Then configure the AI Integration in the web UI:
-- **Provider type:** ollama
+- **Provider type:** Ollama
 - **API URL:** `http://localhost:11434`
 - **Model:** `llama3.2:1b`
 
@@ -176,14 +176,15 @@ curl http://localhost:11434/api/pull -d '{"name": "llama3.2:1b"}'
 
 ## Tuning for Local Models
 
-Local models typically have smaller context windows and are slower than cloud APIs. Adjust these settings in the **AI Integration** form in the web UI for best results:
+Local models typically have smaller context windows and are slower than cloud APIs. Adjust these settings in the web UI for best results:
 
-| Setting | Recommended Value | Why |
-|---------|-------------------|-----|
-| **Max Tokens** | `2048` | Faster responses with local models |
-| **Max Diff Chars Per Chunk** | `30000` | Fits in smaller context windows |
-| **Max Diff Chunks** | `4` | Reduces processing time |
-| **Retry Truncated Chunk Chars** | `15000` | Smaller retry size for limited context |
+| Where | Setting | Recommended Value | Why |
+|-------|---------|-------------------|-----|
+| AI Integration | **Max Tokens** | `2048` | Faster responses with local models |
+| AI Integration | **Context Window (tokens)** | The model's `num_ctx` | Lets the bot compact history before it overflows the context |
+| Review workflow | **Max diff chars per chunk** | `30000` | Fits in smaller context windows |
+| Review workflow | **Max diff chunks** | `4` | Reduces processing time |
+| Review workflow | **Retry truncated chunk chars** | `15000` | Smaller retry size for limited context |
 
 ## GPU Acceleration
 
@@ -240,7 +241,7 @@ docker compose exec ollama ollama pull llama3.2:1b
 ### Slow Responses
 
 - Use a smaller model (e.g., `llama3.2:1b`)
-- Reduce **Max Diff Chars Per Chunk** and **Max Diff Chunks** in the AI Integration settings
+- Reduce **Max diff chars per chunk** and **Max diff chunks** in the review workflow settings
 - Enable GPU acceleration
 - Increase container memory limits
 

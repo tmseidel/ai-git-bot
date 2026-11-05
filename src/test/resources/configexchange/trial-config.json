@@ -1,0 +1,30 @@
+{
+  "adminUsers": [
+    { "username": "trial-admin", "password": "trial-password" }
+  ],
+  "aiIntegrations": [
+    { "name": "Trial AI", "providerType": "OPENAI",
+      "apiUrl": "https://api.deepseek.com", "apiKey": "sk-trial-key",
+      "model": "deepseek-chat", "maxTokens": 4096, "contextWindowTokens": 131072 }
+  ],
+  "gitIntegrations": [
+    { "name": "Trial Git", "providerType": "GITEA",
+      "url": "https://gitea.example.com", "username": "ai_bot", "token": "gitea-token" }
+  ],
+  "workflowConfigurations": [
+    { "name": "Trial PR", "kind": "PR", "defaultEntry": false,
+      "selectedWorkflows": [ { "workflowKey": "agentic-review" } ] },
+    { "name": "Trial issues", "kind": "ISSUE", "defaultEntry": false,
+      "selectedWorkflows": [ { "workflowKey": "issue-coding" } ] }
+  ],
+  "bots": [
+    { "name": "trial",
+      "webhookSecret": "11111111-2222-3333-4444-555555555555",
+      "webhookSigningSecret": "0123456789abcdef0123456789abcdef",
+      "runOnPrCreation": true, "runOnPrUpdate": true, "runOnIssueCreation": true,
+      "aiIntegration": { "name": "Trial AI" },
+      "gitIntegration": { "name": "Trial Git" },
+      "workflowConfiguration": { "name": "Trial PR" },
+      "issueWorkflowConfiguration": { "name": "Trial issues" } }
+  ]
+}

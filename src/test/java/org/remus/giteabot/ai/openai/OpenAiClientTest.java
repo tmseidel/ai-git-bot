@@ -7,6 +7,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AiAuditRecorder;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolDescriptor;
@@ -16,6 +17,7 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -249,6 +251,35 @@ class OpenAiClientTest {
 
     @Test
     void chatWithTools_sendsReasoningEffortNone_whenNoReasoningFlavorSelected() {
+        RestClient restClient = mock(RestClient.class);
+        RestClient.RequestBodyUriSpec requestBodyUriSpec = mock(RestClient.RequestBodyUriSpec.class);
+        RestClient.RequestBodySpec requestBodySpec = mock(RestClient.RequestBodySpec.class);
+        RestClient.ResponseSpec responseSpec = mock(RestClient.ResponseSpec.class);
+
+        when(restClient.post()).thenReturn(requestBodyUriSpec);
+        when(requestBodyUriSpec.uri("/v1/chat/completions")).thenReturn(requestBodySpec);
+        when(requestBodySpec.retrieve()).thenReturn(responseSpec);
+        when(requestBodySpec.body(any(Object.class))).thenReturn(requestBodySpec);
+        OpenAiResponse okResponse = new OpenAiResponse();
+        OpenAiResponse.Choice choice = new OpenAiResponse.Choice();
+        OpenAiResponse.Message message = new OpenAiResponse.Message();
+        message.setContent("ok");
+        choice.setMessage(message);
+        choice.setFinishReason("stop");
+        okResponse.setChoices(java.util.List.of(choice));
+        when(responseSpec.body(OpenAiResponse.class)).thenReturn(okResponse);
+
+        OpenAiClient client = new OpenAiClient(restClient, "gpt-6-luna", 1024, true, OpenAiFlavor.NO_REASONING, Collections.emptyMap());
+        org.remus.giteabot.ai.ToolDescriptor tool =
+                new org.remus.giteabot.ai.ToolDescriptor("search", "Search the codebase.",
+                        new tools.jackson.databind.ObjectMapper().createObjectNode());
+
+        ChatTurn turn = client.chatWithTools(java.util.List.of(), "review this PR",
+                java.util.List.of(tool), "You are a reviewer.", null, null);
+
+        org.mockito.ArgumentCaptor<OpenAiRequest> captor =
+                org.mockito.ArgumentCaptor.forClass(OpenAiRequest.class);
+        org.mockito.Mockito.verify(requestBodySpec, org.mockito.Mockito.times(1)).body(captor.capture());
         // The flavor value is written into the request body up front.
         assertEquals("none", chatTurnRequest(OpenAiFlavor.NO_REASONING, null).getReasoningEffort());
     }
@@ -310,7 +341,7 @@ class OpenAiClientTest {
         when(requestBodySpec.body(any(Object.class))).thenReturn(requestBodySpec);
         when(responseSpec.body(OpenAiResponse.class)).thenReturn(responseWith(choice("ok", "stop")));
 
-        OpenAiClient client = new OpenAiClient(restClient, "gpt-5.6-sol", 1024, true,
+        OpenAiClient client = new OpenAiClient(restClient, "gpt-6-luna", 1024, true,
                 flavor, chatTemplateKwargs);
         ToolDescriptor tool = new ToolDescriptor("search", "Search the codebase.",
                 new tools.jackson.databind.ObjectMapper().createObjectNode());
@@ -340,7 +371,7 @@ class OpenAiClientTest {
         assertEquals("standard", flavors.get(0).id());
         assertEquals("no_reasoning", flavors.get(1).id());
         // Every flavor carries its provider type so ids are globally unique.
-        flavors.forEach(flavor -> assertEquals("openai", flavor.providerType()));
+        flavors.forEach(flavor -> assertEquals(AiProviderType.OPENAI, flavor.providerType()));
         assertEquals("none", OpenAiFlavor.NO_REASONING.reasoningEffort());
         assertNull(OpenAiFlavor.STANDARD.reasoningEffort());
     }

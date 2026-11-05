@@ -205,7 +205,8 @@ application-level code:
    fresh installations and existing Default configurations expose every
    context-gathering tool. (V30 separately backfills `pr-diff` into custom
    configurations used by bots with the agentic-review workflow.)
-4. `execute-code` is **not** seeded into the Default configuration. Its sandbox
+4. `execute-code` is **not** in the Default configuration — not from the migrations, and not
+   from the startup extension described below. Its sandbox
    confines neither the filesystem nor the network. Where the deployment names a
    sandbox pool (the shipped image does) the program runs as one of its
    identities, one per execution, so it reads neither the service user's files nor
@@ -230,14 +231,21 @@ application-level code:
    Network isolation, on top of the uid separation, is what would make a
    different default defensible.
 
-After migration completes the application performs **no** further auto-seeding
-of tool configurations. Built-in or validation tools added in future releases
-must be enabled manually by an admin via **System settings → Tool
-configurations**.
+Once the migrations have run, `DefaultToolSetInitializer` extends the Default row on every
+start: it adds each built-in tool the running build ships that the row does not select yet, so
+a bot that references Default gains a newly shipped tool on upgrade instead of silently losing
+it. `execute-code` is the exception (`BotToolConfigurationService.OPT_IN_TOOLS`) — the Default
+row cannot be edited afterwards, so a tool that landed in it would be permanent and opt-out for
+every bot that never attached a configuration of its own. A bot gets code execution only from a
+configuration that selects it.
+
+Tool configurations an admin creates are never touched by this: a tool removed there stays
+removed, and a narrower configuration stays narrow.
 
 There is nothing for operators to do on upgrade — existing bots continue to
-expose all built-in tools (because they reference Default), and admins can
-later create narrower configurations and reassign individual bots.
+expose all built-in tools (because they reference Default), `execute-code`
+except, and admins can later create narrower configurations and reassign
+individual bots.
 
 ## Component view
 

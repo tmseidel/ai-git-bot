@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.agentreview;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.agent.loop.AgentRunContext.ProgressUpdate;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -18,7 +19,7 @@ class ReviewProgressTest {
     @Test
     void reusesOneCommentThrottlesActivityAndAlwaysWritesTerminalState() {
         RepositoryApiClient client = mock(RepositoryApiClient.class);
-        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString())).thenReturn(42L);
+        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString())).thenReturn(CommentId.NumericCommentId.of(42L));
         AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-13T00:00:00.123456Z"));
         Clock clock = mock(Clock.class);
         when(clock.instant()).thenAnswer(invocation -> now.get());
@@ -44,7 +45,7 @@ class ReviewProgressTest {
                 - Rounds: 0 · Inspection tool calls completed: 0
                 - Started: 2026-10-13 00:00:00 UTC
                 - Elapsed: 0s · Last update: 2026-10-13 00:00:00 UTC"""));
-        verify(client, times(3)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L), bodies.capture());
+        verify(client, times(3)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)), bodies.capture());
         assertThat(bodies.getAllValues()).satisfiesExactly(
                 body -> assertThat(body).contains("Rounds: 1", "Elapsed: 0s", "Inspection tool calls completed: 0"),
                 body -> assertThat(body).contains("Rounds: 2", "Elapsed: 15s", "Inspection tool calls completed: 1"),
@@ -72,7 +73,7 @@ class ReviewProgressTest {
             progress.finish(true);
         }).doesNotThrowAnyException();
 
-        verify(client, never()).updatePullRequestComment(anyString(), anyString(), anyLong(), anyLong(), anyString());
+        verify(client, never()).updatePullRequestComment(anyString(), anyString(), anyLong(), any(CommentId.class), anyString());
     }
 
     @Test
@@ -89,50 +90,50 @@ class ReviewProgressTest {
         }).doesNotThrowAnyException();
 
         verify(client).postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString());
-        verify(client, never()).updatePullRequestComment(anyString(), anyString(), anyLong(), anyLong(), anyString());
+        verify(client, never()).updatePullRequestComment(anyString(), anyString(), anyLong(), any(CommentId.class), anyString());
     }
 
     @Test
     void failedActivityUpdateIsThrottledAndLaterUpdatesContinue() {
         RepositoryApiClient client = mock(RepositoryApiClient.class);
-        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString())).thenReturn(42L);
+        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString())).thenReturn(CommentId.NumericCommentId.of(42L));
         AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-13T00:00:00Z"));
         Clock clock = mock(Clock.class);
         when(clock.instant()).thenAnswer(invocation -> now.get());
         ReviewProgress progress = new ReviewProgress(client, "owner", "repo", 1L, clock);
         progress.start();
         doThrow(new IllegalStateException("Comment update denied")).doNothing().when(client)
-                .updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L), anyString());
+                .updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), any(CommentId.class), anyString());
 
         assertThatCode(() -> progress.accept(new ProgressUpdate(1, "Waiting for model", 0)))
                 .doesNotThrowAnyException();
         now.set(now.get().plusSeconds(14));
         progress.accept(new ProgressUpdate(1, "Repository inspection completed", 1));
-        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L), anyString());
+        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)), anyString());
         now.set(now.get().plusSeconds(1));
         progress.accept(new ProgressUpdate(2, "Waiting for model", 0));
         progress.finish(true);
-        verify(client, times(3)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L), anyString());
+        verify(client, times(3)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)), anyString());
     }
 
     @Test
     void failedTerminalUpdateDoesNotThrow() {
         RepositoryApiClient client = mock(RepositoryApiClient.class);
-        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString())).thenReturn(42L);
+        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString())).thenReturn(CommentId.NumericCommentId.of(42L));
         ReviewProgress progress = new ReviewProgress(client, "owner", "repo", 1L, Clock.systemUTC());
         progress.start();
         doThrow(new IllegalStateException("Comment update denied")).when(client)
-                .updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L), anyString());
+                .updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), any(CommentId.class), anyString());
 
         assertThatCode(() -> progress.finish(false)).doesNotThrowAnyException();
-        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L),
+        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)),
                 argThat(body -> body.contains("- Latest activity: Failed")));
     }
 
     @Test
     void formatsLongElapsedTimeWithoutAssumingTheServersTimezone() {
         RepositoryApiClient client = mock(RepositoryApiClient.class);
-        when(client.postPullRequestComment(anyString(), anyString(), anyLong(), anyString())).thenReturn(42L);
+        when(client.postPullRequestComment(anyString(), anyString(), anyLong(), anyString())).thenReturn(CommentId.NumericCommentId.of(42L));
         Clock clock = mock(Clock.class);
         when(clock.instant()).thenReturn(Instant.parse("2026-10-13T00:00:00Z"),
                 Instant.parse("2026-10-13T00:00:00Z"), Instant.parse("2026-10-13T01:01:15Z"));
@@ -141,7 +142,7 @@ class ReviewProgressTest {
 
         progress.finish(false);
 
-        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(42L),
+        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)),
                 argThat(body -> body.contains("Elapsed: 1h 1m 15s")
                         && body.contains("Last update: 2026-10-13 01:01:15 UTC")));
     }

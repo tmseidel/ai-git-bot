@@ -26,6 +26,7 @@ License: MIT
 - Built-in Prometheus metrics via `/actuator/prometheus`.
 - Signed, durable, retried outgoing webhooks for workflow-run and issue-assignment events.
 - Self-hosted deployment with Docker Compose and AES-256-GCM secret encryption when `APP_ENCRYPTION_KEY` is configured.
+- First-boot configuration document (`APP_CONFIG_JSON` or `APP_CONFIG_FILE`): an instance can start with its admin account, AI integration, Git integration, workflow selections and bot already in place. Applied only into an empty database, and re-exportable from a running instance via `GET /config/export`.
 
 ## Keywords
 

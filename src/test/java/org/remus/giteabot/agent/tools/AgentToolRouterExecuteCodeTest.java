@@ -3,6 +3,7 @@ package org.remus.giteabot.agent.tools;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.codeexecution.CodeExecutionScope;
 import org.remus.giteabot.agent.codeexecution.ProcessPythonExecutionService;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionOutcome;
@@ -11,7 +12,6 @@ import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
-import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -95,7 +95,7 @@ class AgentToolRouterExecuteCodeTest {
     }
 
     private static ToolCallContext context(Path workspace, String... args) {
-        return new ToolCallContext("owner", "repo", 1L, workspace,
+        return new ToolCallContext("owner", "repo", 1L, Workspace.unmanaged(workspace),
                 ImplementationPlan.ToolRequest.builder()
                         .id("tool-1")
                         .tool("execute-code")
@@ -119,7 +119,7 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-nested");
         Files.writeString(workspace.resolve("Main.java"), "class Main {}\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), mock(WorkspaceService.class));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
         Program program = new Program("cat", "{\"path\": \"Main.java\"}");
 
         ToolResult result = router(tools, botWithExecuteCode(), program)
@@ -200,7 +200,7 @@ class AgentToolRouterExecuteCodeTest {
     void aCallThatNamesTheWrongPropertyIsRefusedInsteadOfRun() throws IOException {
         ToolCatalog catalog = new ToolCatalog(CONFIG);
         ToolCallContext context = new ToolCallContext("owner", "repo", 1L,
-                Files.createTempDirectory("router-wrong-arg"),
+                Workspace.unmanaged(Files.createTempDirectory("router-wrong-arg")),
                 ImplementationPlan.ToolRequest.builder()
                         .id("tool-1")
                         .tool("execute-code")
@@ -237,7 +237,7 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-real-python");
         Files.writeString(workspace.resolve("Main.java"), "class Main {}\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), mock(WorkspaceService.class));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
         String program = """
                 import ai_git_bot
 
@@ -265,7 +265,7 @@ class AgentToolRouterExecuteCodeTest {
         Assumptions.assumeTrue(pythonAvailable, "python3 is not installed");
         Path workspace = Files.createTempDirectory("router-model-args");
         ToolCatalog catalog = new ToolCatalog(CONFIG);
-        ToolCallContext context = new ToolCallContext("owner", "repo", 1L, workspace,
+        ToolCallContext context = new ToolCallContext("owner", "repo", 1L, Workspace.unmanaged(workspace),
                 ImplementationPlan.ToolRequest.builder()
                         .id("tool-1")
                         .tool("execute-code")
@@ -294,7 +294,7 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-repo-stats");
         Files.writeString(workspace.resolve("SWREQ.md"), "one\ntwo\nthree\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), mock(WorkspaceService.class));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
         String program = """
                 import ai_git_bot
 
@@ -325,7 +325,7 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("items/mdeg_110100-11_SWREQ_1.md"), "# One\nalpha\nbravo\n");
         Files.writeString(workspace.resolve("items/mdeg_110100-11_SWREQ_2.md"), "# Two\ncharlie\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), mock(WorkspaceService.class));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
         // `tools` bare, no import: that is the form the tool description gives the model.
         String program = """
                 found = tools.call("find", {"args": ["items/mdeg_*_SWREQ_*.md"]})["output"]
@@ -357,7 +357,7 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-nested-write");
         Files.writeString(workspace.resolve("README.md"), "readable\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), mock(WorkspaceService.class));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
         String program = """
                 written = tools.call("write-file", {"path": "generated.txt", "content": "x"})
                 print("write success:", written["success"])

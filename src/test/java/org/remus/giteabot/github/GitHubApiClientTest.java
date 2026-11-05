@@ -5,6 +5,7 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
@@ -228,6 +229,87 @@ class GitHubApiClientTest {
 
         client.assignIssue("owner", "repo", 42L, "alice");
 
+        server.verify();
+    }
+
+    @Test
+    void requiresAuthoritativePullRequestHead_isEnabled() {
+        assertTrue(new GitHubApiClient(null, CREDS).requiresAuthoritativePullRequestHead());
+    }
+
+    @Test
+    void getPullRequestHead_resolvesForkRepositoryAndBranch() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"head":{"ref":"bugfix/clone-budget","sha":"abc123","repo":{
+                          "name":"project","full_name":"contributor/project",
+                          "owner":{"login":"contributor"}}},
+                         "base":{"ref":"develop","sha":"def456"}}
+                        """, MediaType.APPLICATION_JSON));
+
+        PullRequestHead head = client.getPullRequestHead("base", "project", 7L, "bugfix/clone-budget");
+
+        assertEquals("contributor", head.owner());
+        assertEquals("project", head.repository());
+        assertEquals("bugfix/clone-budget", head.branch());
+        assertEquals("abc123", head.sha());
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_fillsCoordinatesFromFullNameOnly() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
+                .andRespond(withSuccess("""
+                        {"head":{"ref":"main","sha":"abc123","repo":{"full_name":"contributor/project"}}}
+                        """, MediaType.APPLICATION_JSON));
+
+        PullRequestHead head = client.getPullRequestHead("base", "project", 7L, "main");
+
+        assertEquals("contributor", head.owner());
+        assertEquals("project", head.repository());
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_rejectsBranchMismatch() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
+                .andRespond(withSuccess("""
+                        {"head":{"ref":"feature/source","sha":"abc123","repo":{
+                          "name":"project","owner":{"login":"contributor"}}}}
+                        """, MediaType.APPLICATION_JSON));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("base", "project", 7L, "main"));
+
+        assertTrue(error.getMessage().contains("does not match"));
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_rejectsMissingHeadRepository() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
+                .andRespond(withSuccess("{\"head\":{\"ref\":\"main\",\"sha\":\"abc123\"}}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("base", "project", 7L, "main"));
         server.verify();
     }
 }

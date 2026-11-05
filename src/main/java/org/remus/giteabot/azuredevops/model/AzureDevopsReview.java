@@ -46,9 +46,10 @@ public class AzureDevopsReview implements Review {
         };
     }
 
+    /** Only {@code uniqueName} identifies the reviewer; {@code displayName} is user-editable. */
     @Override
     public String getUserLogin() {
-        return uniqueName != null ? uniqueName : displayName;
+        return uniqueName;
     }
 
     /** The reviewers array carries no timestamp. */

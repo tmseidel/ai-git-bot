@@ -2,6 +2,7 @@ package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.CommentId;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.HashMap;
@@ -81,7 +82,7 @@ class BitbucketPayloadTranslationTest {
         assertNotNull(payload);
         assertEquals("created", payload.getAction());
         assertNotNull(payload.getComment());
-        assertEquals(55L, payload.getComment().getId());
+        assertEquals(CommentId.NumericCommentId.of(55L), payload.getComment().getId());
         assertEquals("@ai_bot review this", payload.getComment().getBody());
         assertEquals("commenter", payload.getComment().getUser().getLogin());
         assertNotNull(payload.getIssue());

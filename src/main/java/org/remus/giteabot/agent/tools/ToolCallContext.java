@@ -3,7 +3,7 @@ package org.remus.giteabot.agent.tools;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 
-import java.nio.file.Path;
+import org.remus.giteabot.agent.validation.Workspace;
 import java.util.List;
 
 /**
@@ -14,7 +14,7 @@ import java.util.List;
  * @param owner       repository owner login
  * @param repo        repository name
  * @param issueNumber number of the issue currently being processed
- * @param workspaceDir directory of the cloned workspace
+ * @param workspace   the cloned workspace
  * @param request     parsed tool request from the AI plan
  * @param diffSummary optional parsed diff summary for PR review workflows;
  *                    may be {@code null} when not applicable
@@ -22,7 +22,7 @@ import java.util.List;
 public record ToolCallContext(String owner,
                               String repo,
                               Long issueNumber,
-                              Path workspaceDir,
+                              Workspace workspace,
                               ImplementationPlan.ToolRequest request,
                               DiffSummary diffSummary) {
 
@@ -30,8 +30,8 @@ public record ToolCallContext(String owner,
      * Backward-compatible constructor without a diff summary.
      */
     public ToolCallContext(String owner, String repo, Long issueNumber,
-                           Path workspaceDir, ImplementationPlan.ToolRequest request) {
-        this(owner, repo, issueNumber, workspaceDir, request, null);
+                           Workspace workspace, ImplementationPlan.ToolRequest request) {
+        this(owner, repo, issueNumber, workspace, request, null);
     }
 
     /** Convenience accessor: never returns {@code null}. */

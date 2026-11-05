@@ -6,6 +6,7 @@ import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -280,7 +281,7 @@ public class BitbucketWebhookHandler {
     private WebhookPayload.Comment extractComment(Map<String, Object> comment) {
         if (comment == null) return null;
         WebhookPayload.Comment c = new WebhookPayload.Comment();
-        c.setId(toLong(comment.get("id")));
+        c.setId(CommentId.NumericCommentId.of(toLong(comment.get("id"))));
 
         Map<String, Object> content = (Map<String, Object>) comment.get("content");
         if (content != null) {

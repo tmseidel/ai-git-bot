@@ -9,6 +9,7 @@ import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
@@ -127,7 +128,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public Long postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
+    public CommentId postPullRequestComment(String owner, String repo, Long pullNumber, String body) {
         log.info("Posting comment on PR #{} in {}/{}", pullNumber, owner, repo);
         Map<?, ?> response = commentCreationRequest(owner, repo, pullNumber, body).body(Map.class);
         log.info("Comment posted successfully");
@@ -135,7 +136,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+    public void updatePullRequestComment(String owner, String repo, Long pullNumber, CommentId commentId, String body) {
         restClient.put()
                 .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}/comments/{comment_id}",
                         owner, repo, pullNumber, commentId)
@@ -273,7 +274,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
     }
 
     @Override
-    public void addReaction(String owner, String repo, Long commentId, String reaction) {
+    public void addReaction(String owner, String repo, CommentId commentId, String reaction) {
         // Bitbucket Cloud does not support reactions on comments.
         log.debug("Reactions not supported on Bitbucket Cloud, ignoring reaction '{}' on comment #{}",
                 reaction, commentId);

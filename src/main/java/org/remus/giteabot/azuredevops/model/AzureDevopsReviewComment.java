@@ -2,6 +2,7 @@ package org.remus.giteabot.azuredevops.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.ReviewComment;
 
 /**
@@ -13,7 +14,7 @@ import org.remus.giteabot.repository.model.ReviewComment;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class AzureDevopsReviewComment implements ReviewComment {
 
-    private Long id;
+    private CommentId id;
 
     private String body;
 

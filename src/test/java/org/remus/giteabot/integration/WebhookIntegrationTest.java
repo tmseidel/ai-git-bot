@@ -1,5 +1,6 @@
 package org.remus.giteabot.integration;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.api.*;
 import org.remus.giteabot.admin.*;
 import org.remus.giteabot.systemsettings.SystemPrompt;
@@ -152,7 +153,7 @@ class WebhookIntegrationTest {
         // Set up integrations and bot in the DB
         AiIntegration ai = new AiIntegration();
         ai.setName("Test AI Integration");
-        ai.setProviderType("anthropic");
+        ai.setProviderType(AiProviderType.ANTHROPIC);
         ai.setApiUrl("http://localhost:" + anthropicPort);
         ai.setApiKey("test-api-key");
         ai.setApiVersion("2023-06-01");
@@ -211,7 +212,7 @@ class WebhookIntegrationTest {
     void perBotWebhook_closedPR_closesSession() throws Exception {
         AiIntegration ai = new AiIntegration();
         ai.setName("AI Close Test");
-        ai.setProviderType("anthropic");
+        ai.setProviderType(AiProviderType.ANTHROPIC);
         ai.setApiUrl("http://localhost:" + anthropicPort);
         ai.setApiKey("test-api-key");
         ai.setApiVersion("2023-06-01");

@@ -10,6 +10,7 @@ import org.remus.giteabot.prworkflow.e2e.PrTestCaseStatus;
 import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
@@ -418,9 +419,9 @@ class PrWorkflowToolExecutorTest {
         }
         @Override public String getPullRequestDiff(String o, String r, Long p) { return ""; }
         @Override public void postReviewComment(String o, String r, Long p, String b) { }
-        @Override public Long postPullRequestComment(String o, String r, Long p, String b) { return null; }
+        @Override public CommentId postPullRequestComment(String o, String r, Long p, String b) { return null; }
         @Override public void postIssueComment(String o, String r, Long i, String b) { }
-        @Override public void addReaction(String o, String r, Long c, String x) { }
+        @Override public void addReaction(String o, String r, CommentId c, String x) { }
         @Override public void postInlineReviewComment(String o, String r, Long p, String f, int l, String b) { }
         @Override public List<Review> getReviews(String o, String r, Long p) { return List.of(); }
         @Override public List<ReviewComment> getReviewComments(String o, String r, Long p, Long rid) { return List.of(); }

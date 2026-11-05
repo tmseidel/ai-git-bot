@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -85,7 +86,7 @@ class OllamaReadTimeoutIT {
         AiIntegration integration = new AiIntegration();
         integration.setId(987654L);
         integration.setName("timeout-test");
-        integration.setProviderType("ollama");
+        integration.setProviderType(AiProviderType.OLLAMA);
         integration.setApiUrl("http://localhost:" + server.getAddress().getPort());
         integration.setModel("test-model");
         integration.setMaxTokens(128);
