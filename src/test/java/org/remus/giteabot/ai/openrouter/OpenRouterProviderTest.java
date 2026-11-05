@@ -38,8 +38,11 @@ import org.remus.giteabot.aiusage.AiUsageService;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
+import org.remus.giteabot.config.ApplicationName;
 import org.remus.giteabot.prworkflow.agentreview.ReviewAgentStrategy;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.http.client.HttpClientSettings;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -56,6 +59,7 @@ import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Properties;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -103,7 +107,7 @@ class OpenRouterProviderTest {
         var server = MockRestServiceServer.bindTo(http).build();
         server.expect(requestTo("https://openrouter.ai/api/v1/chat/completions"))
                 .andRespond(withSuccess("", MediaType.APPLICATION_JSON));
-        var client = new OpenRouterClient(http.build(), "author/model", 32, nativeTools);
+        var client = new OpenRouterClient(http.build(), "author/model", 32, nativeTools, "AI Git Bot");
 
         assertThatThrownBy(() -> {
             if (nativeTools) {
@@ -145,7 +149,7 @@ class OpenRouterProviderTest {
         var server = MockRestServiceServer.bindTo(http).build();
         server.expect(requestTo("https://openrouter.ai/api/v1/chat/completions"))
                 .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
-        var client = new OpenRouterClient(http.build(), "author/model", 32, false);
+        var client = new OpenRouterClient(http.build(), "author/model", 32, false, "AI Git Bot");
 
         assertThatThrownBy(() -> client.chat(List.of(), "Question", "sys", null))
                 .hasMessageContaining("incomplete text").hasMessageNotContaining("Partial answer");
@@ -266,6 +270,28 @@ class OpenRouterProviderTest {
         }
     }
 
+    @Test
+    void inferenceRequestsCarryTheAppAttributionHeaders() {
+        RestClient.Builder http = RestClient.builder();
+        try (var context = providerContext(http)) {
+            var server = MockRestServiceServer.bindTo(http).build();
+            server.expect(requestTo("https://openrouter.ai/api/v1/chat/completions"))
+                    .andExpect(header("HTTP-Referer", "https://gitbot.eu/"))
+                    .andExpect(header("X-OpenRouter-Title", "AI Git Bot"))
+                    .andExpect(header("X-OpenRouter-Categories", "programming-app"))
+                    .andRespond(withSuccess("""
+                            {"choices":[{"finish_reason":"stop","message":{"content":"Answer"}}]}
+                            """, MediaType.APPLICATION_JSON));
+            AiIntegration integration = new AiIntegration();
+            integration.setModel("author/test-model");
+            var provider = context.getBean(OpenRouterProviderMetadata.class);
+
+            assertThat(provider.createClient(provider.buildRestClient(integration, "test-key"), integration)
+                    .chat(List.of(), "Question", "sys", null)).isEqualTo("Answer");
+            server.verify();
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
     void chatApisUseOpenRouterCapsAndConfiguredPrivacy(boolean nativeTools) {
@@ -308,7 +334,7 @@ class OpenRouterProviderTest {
                 """.formatted(AgentJackson.mapper().writeValueAsString(arguments));
         server.expect(requestTo("https://openrouter.ai/api/v1/chat/completions"))
                 .andRespond(withSuccess(response, MediaType.APPLICATION_JSON));
-        var client = new OpenRouterClient(http.build(), "author/model", 32, true);
+        var client = new OpenRouterClient(http.build(), "author/model", 32, true, "AI Git Bot");
 
         assertThatThrownBy(() -> client.chatWithTools(List.of(), "Review", List.of(), "sys", null, null))
                 .hasMessage("OpenRouter returned invalid tool arguments")
@@ -326,7 +352,7 @@ class OpenRouterProviderTest {
                           "message":"private-provider-data"}}]}
                         """, MediaType.APPLICATION_JSON));
 
-        var client = new OpenRouterClient(http.build(), "author/model", 32, false);
+        var client = new OpenRouterClient(http.build(), "author/model", 32, false, "AI Git Bot");
         assertThatThrownBy(() -> client.chatWithTools(List.of(), "Review", List.of(), "sys", null, null))
                 .hasMessage("OpenRouter returned a completion error")
                 .hasMessageNotContaining("private-provider-data").hasNoCause();
@@ -445,10 +471,21 @@ class OpenRouterProviderTest {
         var context = new AnnotationConfigApplicationContext();
         context.registerBean(RestClient.Builder.class, () -> http);
         context.registerBean(HttpClientSettings.class, HttpClientSettings::defaults);
+        context.registerBean(ApplicationName.class, OpenRouterProviderTest::applicationName);
         context.register(AiProviderRegistry.class);
         context.scan("org.remus.giteabot.ai.openrouter");
         context.refresh();
         return context;
+    }
+
+    /** The pom {@code <name>} as a packaged build exposes it through the generated build info. */
+    private static ApplicationName applicationName() {
+        Properties entries = new Properties();
+        entries.setProperty("version", "1.30.0-SNAPSHOT");
+        entries.setProperty("name", "AI Git Bot");
+        var beanFactory = new StaticListableBeanFactory();
+        beanFactory.addBean("buildProperties", new BuildProperties(entries));
+        return new ApplicationName(beanFactory.getBeanProvider(BuildProperties.class));
     }
 
     @Test

@@ -17,9 +17,12 @@ import org.remus.giteabot.admin.AiIntegrationRepository;
 import org.remus.giteabot.admin.AiIntegrationService;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.ai.AiProviderRegistry;
+import org.remus.giteabot.config.ApplicationName;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.boot.http.client.HttpClientSettings;
 import org.springframework.boot.http.client.HttpRedirects;
+import org.springframework.boot.info.BuildProperties;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -37,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.headerDoesNotExist;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -55,7 +59,8 @@ class OpenRouterConfigurationTest {
         RestClient.Builder http = RestClient.builder();
         when(builders.getObject()).thenReturn(http);
         service = new AiIntegrationService(repository, encryption,
-                new AiProviderRegistry(List.of(new OpenRouterProviderMetadata(builders, HttpClientSettings.defaults()))),
+                new AiProviderRegistry(List.of(new OpenRouterProviderMetadata(builders, HttpClientSettings.defaults(),
+                        applicationName()))),
                 concurrencyLimiter);
         server = MockRestServiceServer.bindTo(http).build();
     }
@@ -79,6 +84,22 @@ class OpenRouterConfigurationTest {
         assertThat(saved.getApiUrl()).isEqualTo(region.getApiRoot());
         assertThat(saved.getApiKey()).isEqualTo("encrypted-key");
         verify(encryption).encrypt("test-key");
+        server.verify();
+    }
+
+    @Test
+    void keyCheckRequestsCarryNoAppAttribution() {
+        server.expect(requestTo("https://openrouter.ai/api/v1/key"))
+                .andExpect(headerDoesNotExist("HTTP-Referer"))
+                .andExpect(headerDoesNotExist("X-OpenRouter-Title"))
+                .andRespond(withSuccess("""
+                        {"data":{"is_management_key":false,"is_provisioning_key":false,
+                         "allowed_data_regions":["global","europe","us"]}}
+                        """, MediaType.APPLICATION_JSON));
+        when(encryption.encrypt("test-key")).thenReturn("encrypted-key");
+        when(repository.save(any())).thenAnswer(call -> call.getArgument(0));
+
+        assertThat(service.save(integration()).getApiKey()).isEqualTo("encrypted-key");
         server.verify();
     }
 
@@ -288,7 +309,7 @@ class OpenRouterConfigurationTest {
             ObjectProvider<RestClient.Builder> builders = mock(ObjectProvider.class);
             when(builders.getObject()).thenReturn(RestClient.builder());
             var provider = new OpenRouterProviderMetadata(builders,
-                    HttpClientSettings.defaults().withRedirects(HttpRedirects.FOLLOW));
+                    HttpClientSettings.defaults().withRedirects(HttpRedirects.FOLLOW), applicationName());
             var client = provider.buildRestClient(integration(), "test-key");
 
             // Use an absolute local URI to exercise the real transport without contacting OpenRouter.
@@ -391,6 +412,11 @@ class OpenRouterConfigurationTest {
         }
         flyway.target(String.valueOf(OPENROUTER_MIGRATION_VERSION)).load().validate();
         assertThat(flyway.load().migrate().migrationsExecuted).isZero();
+    }
+
+    /** The name falls back to the product name without a generated build info. */
+    private static ApplicationName applicationName() {
+        return new ApplicationName(new StaticListableBeanFactory().getBeanProvider(BuildProperties.class));
     }
 
     private static AiIntegration integration() {

@@ -4,6 +4,7 @@ import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.AiProviderType;
+import org.remus.giteabot.config.ApplicationName;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.http.client.ClientHttpRequestFactoryBuilder;
 import org.springframework.boot.http.client.HttpClientSettings;
@@ -28,11 +29,14 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
             "xiaomi/mimo-v2.6-flash"
     );
     private final RestClient.Builder restClientBuilder;
+    private final ApplicationName applicationName;
 
     /** Retains configured timeouts/TLS settings, but never redirects a credential to another host. */
-    public OpenRouterProviderMetadata(ObjectProvider<RestClient.Builder> builders, HttpClientSettings settings) {
+    public OpenRouterProviderMetadata(ObjectProvider<RestClient.Builder> builders, HttpClientSettings settings,
+                                      ApplicationName applicationName) {
         this.restClientBuilder = builders.getObject().requestFactory(ClientHttpRequestFactoryBuilder.detect()
                 .build(settings.withRedirects(HttpRedirects.DONT_FOLLOW)));
+        this.applicationName = applicationName;
     }
 
     @Override public AiProviderType getProviderType() { return AiProviderType.OPENROUTER; }
@@ -108,7 +112,8 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
         validateSettings(integration);
         return new OpenRouterClient(restClient, integration.getModel(), integration.getMaxTokens(),
                 !integration.isUseLegacyToolCalling(), new OpenRouterRequest.ProviderPreferences(true, false,
-                integration.getOpenRouterDataCollection().getWireValue(), integration.isOpenRouterZdr()));
+                integration.getOpenRouterDataCollection().getWireValue(), integration.isOpenRouterZdr()),
+                applicationName.get());
     }
 
     private void validateSettings(AiIntegration integration) {
