@@ -2,6 +2,9 @@ package org.remus.giteabot.systemsettings;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
 import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
@@ -9,19 +12,26 @@ import org.remus.giteabot.admin.EncryptionService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @Transactional
 @RequiredArgsConstructor
 public class McpConfigurationService {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
+            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private final McpConfigurationRepository mcpConfigurationRepository;
     private final BotRepository botRepository;
     private final EncryptionService encryptionService;
+    private final McpSelectedToolRepository mcpSelectedToolRepository;
+    private final EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public List<McpConfiguration> findAll() {
@@ -48,14 +58,68 @@ public class McpConfigurationService {
             throw new IllegalArgumentException("MCP JSON content is required");
         }
         validateJson(mcpConfiguration.getJsonContent());
+        String name = mcpConfiguration.getName();
+        String json = mcpConfiguration.getJsonContent();
         boolean duplicateName = mcpConfiguration.getId() == null
                 ? mcpConfigurationRepository.existsByName(mcpConfiguration.getName())
                 : mcpConfigurationRepository.existsByNameAndIdNot(mcpConfiguration.getName(), mcpConfiguration.getId());
         if (duplicateName) {
             throw new IllegalArgumentException("An MCP configuration with this name already exists");
         }
-        mcpConfiguration.setJsonContent(encryptionService.encrypt(mcpConfiguration.getJsonContent()));
-        return mcpConfigurationRepository.save(mcpConfiguration);
+        McpConfiguration stored = mcpConfiguration.getId() == null ? new McpConfiguration()
+                : lockForApprovalUpdate(mcpConfiguration.getId());
+        if (stored.getId() != null && !sameConfiguredJson(getDecryptedJsonContent(stored), json)) {
+            stored.setReviewApprovalRevision(UUID.randomUUID().toString());
+            refreshSelectedTools(stored.getId()).forEach(McpSelectedTool::clearReviewReadOnlyApproval);
+        }
+        // Never bind selections/approvals from the configuration form, or replace its orphan-removal collection.
+        stored.setName(name);
+        stored.setJsonContent(encryptionService.encrypt(json));
+        // An existing row is already managed; merging its refreshed orphan-removal collection is unnecessary.
+        return stored.getId() == null ? mcpConfigurationRepository.save(stored) : stored;
+    }
+
+    /** Identity binding to a server-owned opaque revision, never a fingerprint of credential-bearing JSON. */
+    @Transactional(readOnly = true)
+    public String configurationHash(McpConfiguration configuration) {
+        if (configuration.getId() == null || configuration.getReviewApprovalRevision() == null) {
+            throw new IllegalArgumentException("Cannot bind approval to an unsaved MCP configuration");
+        }
+        return approvalHash(Map.of("configurationId", configuration.getId(),
+                "revision", configuration.getReviewApprovalRevision()));
+    }
+
+    McpConfiguration lockForApprovalUpdate(Long id) {
+        McpConfiguration configuration = mcpConfigurationRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new IllegalArgumentException("MCP configuration not found"));
+        entityManager.refresh(configuration, LockModeType.PESSIMISTIC_WRITE);
+        return configuration;
+    }
+
+    List<McpSelectedTool> refreshSelectedTools(Long id) {
+        // The caller holds the parent row lock; cached approval flags may predate that lock.
+        List<McpSelectedTool> selected = mcpSelectedToolRepository.findByMcpConfigurationId(id);
+        selected.forEach(entityManager::refresh);
+        return selected;
+    }
+
+    private boolean sameConfiguredJson(String stored, String incoming) {
+        try {
+            return OBJECT_MAPPER.readTree(stored).equals(OBJECT_MAPPER.readTree(incoming));
+        } catch (Exception e) {
+            // Unreadable previous content is a change; parser errors can quote credentials.
+            return false;
+        }
+    }
+
+    static String approvalHash(Object value) {
+        try {
+            Object jsonValue = OBJECT_MAPPER.convertValue(value, Object.class);
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(OBJECT_MAPPER.writeValueAsBytes(jsonValue)));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Cannot hash MCP approval evidence");
+        }
     }
 
     /** Decrypted JSON content of the configuration (may contain credentials). */
@@ -86,7 +150,7 @@ public class McpConfigurationService {
             String botNames = bots.stream().map(Bot::getName).toList().toString();
             throw new IllegalStateException("MCP configuration is used by bot(s): " + botNames);
         }
-        mcpConfigurationRepository.delete(mcpConfiguration);
+        mcpConfigurationRepository.delete(lockForApprovalUpdate(id));
     }
 
     void validateJson(String jsonContent) {
@@ -94,7 +158,7 @@ public class McpConfigurationService {
         try {
             root = OBJECT_MAPPER.readTree(jsonContent);
         } catch (Exception e) {
-            throw new IllegalArgumentException("MCP configuration must be valid JSON", e);
+            throw new IllegalArgumentException("MCP configuration must be valid JSON");
         }
         if (containsStdioTransport(root)) {
             throw new IllegalArgumentException("stdio MCP transport is not supported");

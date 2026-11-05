@@ -9,6 +9,7 @@ import lombok.ToString;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Data
 @NoArgsConstructor
@@ -26,13 +27,19 @@ public class McpConfiguration {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String jsonContent;
 
+    @Column(nullable = false, length = 36)
+    private String reviewApprovalRevision = UUID.randomUUID().toString();
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
     @Column(nullable = false)
     private Instant updatedAt;
 
-    @OneToMany(mappedBy = "mcpConfiguration", cascade = CascadeType.ALL, orphanRemoval = true)
+    // Approval mutations refresh children explicitly after locking the parent, never by refresh cascade.
+    @OneToMany(mappedBy = "mcpConfiguration", cascade = {
+            CascadeType.PERSIST, CascadeType.MERGE, CascadeType.REMOVE, CascadeType.DETACH
+    }, orphanRemoval = true)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     private List<McpSelectedTool> selectedTools = new ArrayList<>();

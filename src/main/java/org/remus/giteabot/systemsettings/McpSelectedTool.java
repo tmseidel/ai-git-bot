@@ -39,5 +39,19 @@ public class McpSelectedTool {
 
     @Column(columnDefinition = "TEXT")
     private String description;
-}
 
+    @Column(nullable = false)
+    private boolean reviewReadOnlyApproved;
+
+    @Column(length = 64)
+    private String reviewApprovalSchemaHash;
+
+    @Column(length = 64)
+    private String reviewApprovalConfigurationHash;
+
+    void clearReviewReadOnlyApproval() {
+        reviewReadOnlyApproved = false;
+        reviewApprovalSchemaHash = null;
+        reviewApprovalConfigurationHash = null;
+    }
+}
