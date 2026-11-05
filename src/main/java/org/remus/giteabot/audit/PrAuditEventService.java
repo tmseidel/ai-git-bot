@@ -4,17 +4,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.prworkflow.PrWorkflowEventKey;
+import org.remus.giteabot.prworkflow.PrWorkflowRun;
+import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -25,6 +33,83 @@ public class PrAuditEventService {
             .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private final PrAuditEventRepository auditRepository;
+    private final PrWorkflowRunRepository runRepository;
+
+    /** Serializes required payloads without silently dropping serialization failures. */
+    public static String toJsonRequired(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) return null;
+        try {
+            return CANONICAL_MAPPER.writeValueAsString(payload);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Cannot serialize required audit payload", e);
+        }
+    }
+
+    /** Loads a retained required event; this lookup is not a durable completion receipt. */
+    @Transactional(readOnly = true)
+    public Optional<PrAuditEvent> findRequired(PrWorkflowEventKey key) {
+        return auditRepository.findByEventKey(key.value());
+    }
+
+    /**
+     * Joins the completion transaction and locks its run before checking/inserting the key.
+     * Identical content reuses the stored event, timestamp and hash; conflicts and DB failures
+     * abort the transaction. Callers must not catch a failed insert and continue that transaction.
+     * Dedupe/conflict detection lasts only while the audit row is retained. Completion owners
+     * must first call the generic completion gate in the same outer transaction and return on
+     * {@code applied=false} before calling this helper for domain events.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public PrAuditEvent recordRequired(PrWorkflowEventKey key, PrAuditEvent event) {
+        if (key.eventType() != event.getEventType()
+                || !key.runId().equals(event.getRunId())
+                || (event.getEventKey() != null && !key.value().equals(event.getEventKey()))) {
+            throw new IllegalArgumentException("Required audit event does not match its key");
+        }
+        PrWorkflowRun run = runRepository.findByIdForUpdate(key.runId()).orElseThrow(
+                () -> new IllegalArgumentException("Unknown PrWorkflowRun id=" + key.runId()));
+        if (!Objects.equals(run.getBotId(), event.getBotId())
+                || !Objects.equals(run.getRepoOwner(), event.getRepoOwner())
+                || !Objects.equals(run.getRepoName(), event.getRepoName())
+                || !Objects.equals(run.getPrNumber(), event.getPrNumber())) {
+            throw new IllegalArgumentException("Required audit event does not belong to the run");
+        }
+        List<?> content = requiredContent(event);
+        // shortcut: retained rows alone deduplicate here; domain owners must gate terminal replays before this helper.
+        PrAuditEvent existing = auditRepository.findByEventKey(key.value()).orElse(null);
+        if (existing != null) {
+            if ((event.getId() != null && !event.getId().equals(existing.getId()))
+                    || !requiredContent(existing).equals(content)) {
+                throw new IllegalStateException("Conflicting required audit event: " + key.value());
+            }
+            return existing;
+        }
+        if (event.getId() != null) {
+            throw new IllegalArgumentException("A new required audit must not reuse an existing row id");
+        }
+        event.setEventKey(key.value());
+        if (event.getEventTimestamp() != null) {
+            event.setEventTimestamp(event.getEventTimestamp().truncatedTo(ChronoUnit.MILLIS));
+        }
+        String previousHash = resolvePreviousHash(event);
+        event.setPreviousHash(previousHash);
+        event.setHash(computeHash(event.getEventType().name(), event.getEventTimestamp(),
+                event.getEventPayloadJson(), previousHash));
+        return auditRepository.saveAndFlush(event);
+    }
+
+    private static List<?> requiredContent(PrAuditEvent event) {
+        try {
+            return Arrays.asList(event.getEventType(), event.getBotId(), event.getRepoOwner(),
+                    event.getRepoName(), event.getPrNumber(), event.getRunId(), event.getStepIndex(),
+                    event.getStepName(), event.getStepStatus(), event.getActorType(), event.getActorId(),
+                    event.getAiSessionId(), event.getAiUsageSessionId(), event.getCorrelationId(),
+                    event.getDurationMs(), event.getInputTokens(), event.getOutputTokens(),
+                    event.getEventPayloadJson() == null ? null : CANONICAL_MAPPER.readTree(event.getEventPayloadJson()));
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid required audit payload", e);
+        }
+    }
 
     /** Serializes a payload map to canonical JSON (sorted keys). Returns null for null/empty input. */
     public static String toJson(Map<String, Object> payload) {

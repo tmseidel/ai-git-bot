@@ -9,9 +9,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface PrAuditEventRepository extends JpaRepository<PrAuditEvent, Long> {
+
+    Optional<PrAuditEvent> findByEventKey(String eventKey);
 
     List<PrAuditEvent> findByRunIdOrderByIdAsc(Long runId);
 
