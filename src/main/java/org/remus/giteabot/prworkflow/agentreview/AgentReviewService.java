@@ -585,8 +585,8 @@ public class AgentReviewService {
 
                 %s
 
-                To see the diff hunks for a specific file, call the `pr-diff` tool with the \
-                file path. To read the full current content of a file, use `cat`. To understand \
+                To see the diff hunks of changed files, call the `pr-diff` tool with up to 8 \
+                file paths. To read the full current content of a file, use `cat`. To understand \
                 a file's structure before reading it, use `ctags-signatures`.
 
                 When you have gathered enough context, reply with your answer as plain \
@@ -697,10 +697,10 @@ public class AgentReviewService {
         sb.append("Changed files (").append(diffSummary.statLine()).append("):\n\n");
         sb.append(diffSummary.fileTable()).append("\n");
         sb.append("""
-                To see the diff hunks for a specific file, call the `pr-diff` tool with the \
-                file path. To read the full current content of a file, use `cat`. To understand \
+                To see the diff hunks of changed files, call the `pr-diff` tool with up to 8 \
+                file paths. To read the full current content of a file, use `cat`. To understand \
                 a file's structure before reading it, use `ctags-signatures`.
-                
+
                 When you have gathered enough context, reply with your final review as plain \
                 Markdown (no tool calls). Summarise correctness, risks, and concrete suggestions.""");
         return sb.toString();

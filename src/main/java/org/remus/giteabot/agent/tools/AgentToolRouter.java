@@ -12,10 +12,12 @@ import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
+import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import tools.jackson.databind.JsonNode;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +42,12 @@ import java.util.Set;
  */
 @Slf4j
 public class AgentToolRouter {
+
+    /** Files per pr-diff call. */
+    static final int MAX_PR_DIFF_FILES = 8;
+    /** Characters per pr-diff call, about 10k tokens: 8 average file diffs (~5,000 chars) fit, a few large ones
+     * go to another call. A single file is never cut, as the first file of a call is always shown. */
+    static final int MAX_PR_DIFF_CHARS = 40_000;
 
     static final String NEW_FILE_HEADER =
             "(new file: this diff is the complete file content; no need to cat it)\n";
@@ -364,29 +372,78 @@ public class AgentToolRouter {
      * DiffSummary stored in the ToolCallContext.
      */
     private ToolResult executePrDiffTool(ToolCallContext ctx) {
-        List<String> args = ctx.args();
-        if (args.isEmpty() || args.getFirst() == null || args.getFirst().isBlank()) {
+        return prDiff(ctx.diffSummary(), ctx.args());
+    }
+
+    /**
+     * The hunks of every given changed file, at most {@value #MAX_PR_DIFF_FILES} files and about
+     * {@value #MAX_PR_DIFF_CHARS} characters per call; the first file is always shown, however large. With several
+     * files each one gets a {@code ### path} heading. Paths without hunks and paths left for another call are named
+     * in notes that go first.
+     */
+    static ToolResult prDiff(DiffSummary diffSummary, List<String> args) {
+        List<String> paths = args.stream()
+                .filter(p -> p != null && !p.isBlank())
+                .map(String::strip)
+                .distinct()
+                .toList();
+        if (paths.isEmpty()) {
             return new ToolResult(false, -1, "", "pr-diff requires a file path argument");
         }
-        String filePath = args.getFirst();
-
-        if (ctx.diffSummary() == null) {
+        if (diffSummary == null) {
             return new ToolResult(false, -1, "", "No PR diff available in this context");
         }
 
-        String hunk = ctx.diffSummary().numberedFileDiff(filePath);
-        if (hunk == null || hunk.isBlank()) {
-            List<String> changedFiles = ctx.diffSummary().changedFiles();
-            String fileList = String.join(", ", changedFiles);
-            return new ToolResult(true, 0,
-                    "No diff hunks found for: " + filePath
-                            + "\nChanged files: " + fileList, "");
+        List<String> shown = paths.size() > MAX_PR_DIFF_FILES ? paths.subList(0, MAX_PR_DIFF_FILES) : paths;
+        List<String> missing = new ArrayList<>();
+        List<String> deferred = new ArrayList<>(paths.subList(shown.size(), paths.size()));
+        StringBuilder hunks = new StringBuilder();
+        for (String filePath : shown) {
+            String hunk = diffSummary.numberedFileDiff(filePath);
+            if (hunk == null || hunk.isBlank()) {
+                missing.add(filePath);
+                continue;
+            }
+            if (diffSummary.isNewFile(filePath)) {
+                // a new file's diff is its whole content; stop agents from re-reading it with cat
+                hunk = NEW_FILE_HEADER + hunk;
+            }
+            if (!hunks.isEmpty() && hunks.length() + hunk.length() > MAX_PR_DIFF_CHARS) {
+                deferred.add(filePath); // a smaller file after it may still fit
+                continue;
+            }
+            if (paths.size() > 1) {
+                hunks.append(hunks.isEmpty() ? "" : "\n\n").append("### ").append(filePath).append('\n');
+            }
+            hunks.append(withoutTrailingNewlines(hunk));
         }
-        if (ctx.diffSummary().isNewFile(filePath)) {
-            // a new file's diff is its whole content; stop agents from re-reading it with cat
-            hunk = NEW_FILE_HEADER + hunk;
+
+        StringBuilder notes = new StringBuilder();
+        if (!missing.isEmpty()) {
+            notes.append("No diff hunks found for: ").append(String.join(", ", missing)).append('\n');
+            if (hunks.isEmpty()) {
+                notes.append("Changed files: ").append(String.join(", ", diffSummary.changedFiles())).append('\n');
+            }
         }
-        return new ToolResult(true, 0, hunk, "");
+        if (!deferred.isEmpty()) {
+            notes.append("Not shown, call pr-diff again for: ").append(String.join(", ", deferred))
+                    .append(" (at most ").append(MAX_PR_DIFF_FILES).append(" files and about ")
+                    .append(MAX_PR_DIFF_CHARS).append(" characters per call)\n");
+        }
+        if (!notes.isEmpty() && !hunks.isEmpty()) {
+            notes.append('\n');
+        }
+        return new ToolResult(true, 0, withoutTrailingNewlines(notes.toString() + hunks), "");
+    }
+
+    /** Drops only the line breaks at the end: trailing spaces of the last line are content
+     * (a Markdown hard break, the {@code "37 | "} of a blank context line). */
+    static String withoutTrailingNewlines(String text) {
+        int end = text.length();
+        while (end > 0 && (text.charAt(end - 1) == '\n' || text.charAt(end - 1) == '\r')) {
+            end--;
+        }
+        return text.substring(0, end);
     }
 
     private String toJson(Object value) {
