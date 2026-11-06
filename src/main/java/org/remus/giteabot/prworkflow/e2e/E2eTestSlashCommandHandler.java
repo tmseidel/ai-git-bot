@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
@@ -66,7 +66,7 @@ public class E2eTestSlashCommandHandler {
      * (Gitea / GitHub / GitLab / Bitbucket) via {@link RepositoryProviderRegistry}
      * based on {@code bot.getGitIntegration().getProviderType()}.
      */
-    private final RepositoryApiClientFactory repositoryClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /**
      * @return {@code true} when the comment was recognized as an E2E slash
@@ -106,7 +106,7 @@ public class E2eTestSlashCommandHandler {
         // the issue. The downstream workflow needs head ref / SHA / base for the
         // deployment dispatch and tooling, so we hydrate it now from the provider
         // API while we are still on the synchronous webhook thread.
-        PrPayloadHydrator.hydrate(payload, () -> repositoryClientFactory.getApiClient(bot.getGitIntegration()));
+        PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
         try {
             var hints = getHints(verb, feedback);
             orchestrator.run(bot, payload, E2ETestWorkflow.KEY, hints);
@@ -173,7 +173,7 @@ public class E2eTestSlashCommandHandler {
         String repo = payload.getRepository().getName();
         CommentId commentId = payload.getComment().getId();
         try {
-            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             client.addReaction(owner, repo, commentId, "eyes");
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",
@@ -204,7 +204,7 @@ public class E2eTestSlashCommandHandler {
                 + "```\n" + abbreviate(reason, 1500) + "\n```\n\n"
                 + "_Please check the bot logs for the full stack trace._";
         try {
-            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             client.postPullRequestComment(owner, repo, prNumber, body);
         } catch (RuntimeException postError) {
             log.warn("[Bot '{}'] Failed to post internal-error comment on PR #{}: {}",

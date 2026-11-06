@@ -2,7 +2,9 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.SshEndpoint;
+import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.SshCredentials;
 
 import java.io.File;
 import java.io.IOException;
@@ -416,23 +418,26 @@ public class Workspace implements AutoCloseable {
     }
 
     void createAuthenticationFiles(String remote, RepositoryCredentials credentials) throws IOException {
-        if (!credentials.usesSsh()) {
-            if (!authorizationHeaderEnvironment().isEmpty()) {
-                // The token travels as an HTTP header, see authorizationHeaderEnvironment.
-                // Otherwise fall through, so opting in can never drop authentication.
-                return;
+        switch (credentials) {
+            case HttpCredentials http -> {
+                if (!authorizationHeaderEnvironment().isEmpty()) {
+                    // The token travels as an HTTP header, see authorizationHeaderEnvironment.
+                    // Otherwise fall through, so opting in can never drop authentication.
+                    return;
+                }
+                createCredentialsFile(remote, http.username(), http.password());
             }
-            createCredentialsFile(remote, credentials.username(), credentials.token());
-            return;
+            case SshCredentials ssh -> {
+                if (ssh.privateKey() == null || ssh.privateKey().isBlank()
+                        || ssh.knownHosts() == null || ssh.knownHosts().isBlank()) {
+                    throw new IOException("SSH private key and known_hosts are required");
+                }
+                sshPrivateKeyFile = Files.createTempFile(root, "ssh-key-", ".tmp");
+                writeSecretFile(sshPrivateKeyFile, normalizeSecret(ssh.privateKey()));
+                sshKnownHostsFile = Files.createTempFile(root, "known-hosts-", ".tmp");
+                writeSecretFile(sshKnownHostsFile, normalizeSecret(ssh.knownHosts()));
+            }
         }
-        if (credentials.sshPrivateKey() == null || credentials.sshPrivateKey().isBlank()
-                || credentials.sshKnownHosts() == null || credentials.sshKnownHosts().isBlank()) {
-            throw new IOException("SSH private key and known_hosts are required");
-        }
-        sshPrivateKeyFile = Files.createTempFile(root, "ssh-key-", ".tmp");
-        writeSecretFile(sshPrivateKeyFile, normalizeSecret(credentials.sshPrivateKey()));
-        sshKnownHostsFile = Files.createTempFile(root, "known-hosts-", ".tmp");
-        writeSecretFile(sshKnownHostsFile, normalizeSecret(credentials.sshKnownHosts()));
     }
 
     void clearAuthenticationFiles() {
@@ -477,16 +482,15 @@ public class Workspace implements AutoCloseable {
         if (!usesAuthorizationHeader) {
             return Map.of();
         }
-        RepositoryCredentials credentials = repositoryCredentials;
         String remote = repositoryRemote;
-        if (credentials == null || credentials.usesSsh()
-                || credentials.token() == null || credentials.token().isBlank()
+        if (!(repositoryCredentials instanceof HttpCredentials credentials)
+                || credentials.password() == null || credentials.password().isBlank()
                 || remote == null || !remote.toLowerCase(Locale.ROOT).matches("https?://.*")) {
             return Map.of();
         }
         String username = credentials.hasUsername() ? credentials.username() : "";
         String basic = Base64.getEncoder().encodeToString(
-                (username + ":" + credentials.token()).getBytes(StandardCharsets.UTF_8));
+                (username + ":" + credentials.password()).getBytes(StandardCharsets.UTF_8));
         return Map.of(
                 "GIT_CONFIG_COUNT", "1",
                 "GIT_CONFIG_KEY_0", "http." + remote + ".extraheader",

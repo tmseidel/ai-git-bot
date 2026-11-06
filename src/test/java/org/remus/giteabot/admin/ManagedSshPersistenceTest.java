@@ -52,7 +52,7 @@ class ManagedSshPersistenceTest {
     @Autowired private AiIntegrationRepository aiRepository;
     @Autowired private org.remus.giteabot.systemsettings.SystemPromptRepository promptRepository;
     @Autowired private org.remus.giteabot.systemsettings.BotToolConfigurationRepository toolsRepository;
-    @MockitoBean private RepositoryApiClientFactory factory;
+    @MockitoBean private RepositoryPlatformFactory factory;
     @MockitoBean private SshCommandService commands;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private EncryptionService encryption;

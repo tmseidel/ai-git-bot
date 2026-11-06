@@ -1,7 +1,7 @@
 package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
@@ -49,9 +49,9 @@ public class GitDiffService {
      *
      * @return the diff, or {@code null} when the commits could not be fetched or diffed
      */
-    public String diffCommits(RepositoryApiClient repositoryClient, String owner, String repo,
+    public String diffCommits(RepositoryPlatform platform, String owner, String repo,
                               String baseSha, String headSha) {
-        try (Workspace workspace = workspaceService.createEmptyWorkspace(repositoryClient, owner, repo)) {
+        try (Workspace workspace = workspaceService.createEmptyWorkspace(platform, owner, repo)) {
             CommandResult fetch = workspace.gitRemote(120, "fetch", "--depth=1", "--no-tags",
                     "--end-of-options", workspace.repositoryRemote(), baseSha, headSha);
             if (!fetch.success()) {

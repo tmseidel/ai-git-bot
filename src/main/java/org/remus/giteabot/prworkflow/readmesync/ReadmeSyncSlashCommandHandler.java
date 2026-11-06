@@ -3,7 +3,7 @@ package org.remus.giteabot.prworkflow.readmesync;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
@@ -39,7 +39,7 @@ public class ReadmeSyncSlashCommandHandler {
 
     private final PrWorkflowOrchestrator orchestrator;
     private final WorkflowSelectionService selectionService;
-    private final RepositoryApiClientFactory repositoryClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /**
      * @return {@code true} when the comment was recognized as the
@@ -68,7 +68,7 @@ public class ReadmeSyncSlashCommandHandler {
         addEyesReaction(bot, payload);
         log.info("[Bot '{}'] readme-sync slash command detected (guidance='{}'), dispatching {} workflow",
                 bot.getName(), abbreviate(guidance, 80), ReadmeSyncWorkflow.KEY);
-        PrPayloadHydrator.hydrate(payload, () -> repositoryClientFactory.getApiClient(bot.getGitIntegration()));
+        PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
         try {
             Map<String, String> hints = guidance.isBlank()
                     ? Map.of()
@@ -111,7 +111,7 @@ public class ReadmeSyncSlashCommandHandler {
         String repo = payload.getRepository().getName();
         CommentId commentId = payload.getComment().getId();
         try {
-            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             client.addReaction(owner, repo, commentId, "eyes");
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",

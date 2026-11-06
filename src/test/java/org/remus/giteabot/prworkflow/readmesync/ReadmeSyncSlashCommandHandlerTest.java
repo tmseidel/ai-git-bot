@@ -4,7 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
@@ -27,7 +27,7 @@ class ReadmeSyncSlashCommandHandlerTest {
 
     private PrWorkflowOrchestrator orchestrator;
     private WorkflowSelectionService selectionService;
-    private RepositoryApiClientFactory repositoryApiClientFactory;
+    private RepositoryPlatformFactory repositoryPlatformFactory;
     private RepositoryApiClient repoClient;
     private ReadmeSyncSlashCommandHandler handler;
 
@@ -37,10 +37,10 @@ class ReadmeSyncSlashCommandHandlerTest {
     void setUp() {
         orchestrator = mock(PrWorkflowOrchestrator.class);
         selectionService = mock(WorkflowSelectionService.class);
-        repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
+        repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
         repoClient = mock(RepositoryApiClient.class);
-        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
-        handler = new ReadmeSyncSlashCommandHandler(orchestrator, selectionService, repositoryApiClientFactory);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repoClient);
+        handler = new ReadmeSyncSlashCommandHandler(orchestrator, selectionService, repositoryPlatformFactory);
 
         WorkflowConfiguration cfg = new WorkflowConfiguration();
         cfg.setId(7L);

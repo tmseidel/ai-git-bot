@@ -9,6 +9,7 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.gitea.GiteaApiClient;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -49,7 +50,7 @@ class GiteaSshEndToEndTest {
 
     @Autowired private GitIntegrationService gitIntegrationService;
     @Autowired private GiteaSshSetupService setupService;
-    @Autowired private RepositoryApiClientFactory repositoryApiClientFactory;
+    @Autowired private RepositoryPlatformFactory repositoryPlatformFactory;
     @Autowired private WorkspaceService workspaceService;
 
     @Test
@@ -80,13 +81,14 @@ class GiteaSshEndToEndTest {
             assertNotNull(configured.getSshRemoteKeyId());
             assertNotNull(configured.getSshRemoteKeyTitle());
 
-            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(configured);
+            RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(configured);
+            RepositoryApiClient client = platform.getClient();
             assertInstanceOf(GiteaApiClient.class, client);
             GiteaApiClient gitea = (GiteaApiClient) client;
             assertTrue(gitea.getSshKeyIdsByTitle(configured.getSshRemoteKeyTitle())
                     .contains(configured.getSshRemoteKeyId()), "managed key visible via Gitea API");
 
-            WorkspaceResult ws = workspaceService.prepareWorkspace(client, owner, repo, "main", null);
+            WorkspaceResult ws = workspaceService.prepareWorkspace(platform, owner, repo, "main", null);
             assertTrue(ws.success(), "SSH clone via bot workspace: " + ws.error());
             try {
                 assertTrue(Files.exists(ws.workspace().path().resolve("README.md")),

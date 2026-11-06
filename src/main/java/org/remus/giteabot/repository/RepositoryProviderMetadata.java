@@ -1,8 +1,11 @@
 package org.remus.giteabot.repository;
 
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
-import org.springframework.web.client.RestClient;
+import org.remus.giteabot.repository.model.HttpCredentials;
+import org.remus.giteabot.repository.model.SshCredentials;
+
+import java.util.function.Supplier;
 
 /**
  * Metadata and factory interface for Git repository provider integrations.
@@ -17,30 +20,25 @@ public interface RepositoryProviderMetadata {
     RepositoryType getProviderType();
 
     /**
-     * Builds a configured RestClient for this provider.
+     * Creates the credentials for Git over HTTP.
      *
      * @param integration    the Git integration configuration
      * @param decryptedToken the decrypted access token
-     * @return configured RestClient pointing at the API URL
+     * @return the HTTP Git username and password
      */
-    RestClient buildRestClient(GitIntegration integration, String decryptedToken);
+    HttpCredentials createHttpCredentials(GitIntegration integration, String decryptedToken);
 
     /**
-     * Creates the credentials record from the Git integration configuration.
+     * Creates the platform of an integration with this provider, including its API client.
      *
-     * @param integration    the Git integration configuration
-     * @param decryptedToken the decrypted access token
-     * @return credentials containing all authentication information
+     * @param integration     the Git integration configuration
+     * @param decryptedToken  the decrypted access token the API client authenticates with
+     * @param httpCredentials the credentials for Git over HTTP
+     * @param sshCredentials  the credentials for Git over SSH, or {@code null} when SSH is not selected
+     * @return the platform
      */
-    RepositoryCredentials createCredentials(GitIntegration integration, String decryptedToken);
-
-    /**
-     * Creates a RepositoryApiClient instance for this provider.
-     *
-     * @param restClient  the configured RestClient
-     * @param credentials the repository credentials
-     * @return configured RepositoryApiClient
-     */
-    RepositoryApiClient createClient(RestClient restClient, RepositoryCredentials credentials);
+    RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
+                                      HttpCredentials httpCredentials,
+                                      @Nullable Supplier<SshCredentials> sshCredentials);
 }
 

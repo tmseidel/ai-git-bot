@@ -1,11 +1,11 @@
 package org.remus.giteabot.agent.issueimpl;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.model.ImplementationPlan;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 
 import java.util.EnumMap;
 import java.util.List;
@@ -16,15 +16,23 @@ import java.util.Map;
  * to keep users informed about the agent's activity.
  */
 @Slf4j
-@RequiredArgsConstructor
 public class IssueNotificationService {
 
     /** Maximum number of characters shown per tool argument in comments. */
     private static final int MAX_ARG_DISPLAY_CHARS = 40;
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiResponseParser responseParser;
     private final ToolCatalog catalog;
+
+    public IssueNotificationService(RepositoryPlatform repositoryPlatform, AiResponseParser responseParser,
+                                    ToolCatalog catalog) {
+        this.repositoryPlatform = repositoryPlatform;
+        this.repositoryClient = repositoryPlatform.getClient();
+        this.responseParser = responseParser;
+        this.catalog = catalog;
+    }
 
     /**
      * Posts the AI's thinking/reasoning as a comment on the issue, excluding JSON content.
@@ -199,7 +207,7 @@ public class IssueNotificationService {
      */
     public void postSuccessComment(String owner, String repo, Long issueNumber,
                                     ImplementationPlan plan, Long prNumber) {
-        String prRef = repositoryClient.formatPullRequestReference(prNumber);
+        String prRef = repositoryPlatform.formatPullRequestReference(prNumber);
         String summary = (plan != null && plan.getSummary() != null) ? plan.getSummary() : "(no summary)";
         String successComment = String.format(
                 """
@@ -252,7 +260,7 @@ public class IssueNotificationService {
      */
     public void postFollowUpSuccessComment(String owner, String repo, Long issueNumber,
                                             ImplementationPlan plan, Long prNumber) {
-        String prRef = repositoryClient.formatPullRequestReference(prNumber);
+        String prRef = repositoryPlatform.formatPullRequestReference(prNumber);
         String summary = (plan != null && plan.getSummary() != null) ? plan.getSummary() : "(no summary)";
         String updateComment = String.format(
                 """
