@@ -32,7 +32,7 @@ async function createAiIntegration(page: any, uniqueName: string) {
 
   const providerSelect = page.locator('#providerType').first();
   await providerSelect.waitFor({ state: 'visible', timeout: 30_000 });
-  await providerSelect.selectOption('anthropic');
+  await providerSelect.selectOption('ANTHROPIC');
 
   const apiUrlInput = page.locator('#apiUrl').first();
   await apiUrlInput.waitFor({ state: 'visible', timeout: 30_000 });

@@ -23,22 +23,30 @@ import java.util.List;
 
 /** OpenRouter adapter using the shared chat, audit and agent-history infrastructure. */
 public final class OpenRouterClient extends AbstractAiClient {
+    // App attribution (https://openrouter.ai/docs/app-attribution): the referer is the app's primary identifier in
+    // OpenRouter's request logs, rankings and the /apps directory, so only inference requests carry these fixed values.
+    static final String APP_ATTRIBUTION_REFERER = "https://gitbot.eu/";
+    static final String APP_ATTRIBUTION_CATEGORIES = "programming-app";
     private final RestClient restClient;
     private final boolean nativeToolsEnabled;
     private final OpenRouterRequest.ProviderPreferences providerPreferences;
+    /** Reported as {@code X-OpenRouter-Title}: the application name resolved from the pom {@code <name>}. */
+    private final String applicationName;
 
     /** Creates an adapter for an authenticated, official-host OpenRouter transport. */
-    public OpenRouterClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled) {
+    public OpenRouterClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled,
+                            String applicationName) {
         this(restClient, model, maxTokens, nativeToolsEnabled,
-                new OpenRouterRequest.ProviderPreferences(true, false, "deny", false));
+                new OpenRouterRequest.ProviderPreferences(true, false, "deny", false), applicationName);
     }
 
     OpenRouterClient(RestClient restClient, String model, int maxTokens, boolean nativeToolsEnabled,
-                     OpenRouterRequest.ProviderPreferences providerPreferences) {
+                     OpenRouterRequest.ProviderPreferences providerPreferences, String applicationName) {
         super(model, maxTokens);
         this.restClient = restClient;
         this.nativeToolsEnabled = nativeToolsEnabled;
         this.providerPreferences = providerPreferences;
+        this.applicationName = applicationName;
     }
 
     @Override public boolean supportsNativeTools() { return nativeToolsEnabled; }
@@ -75,7 +83,11 @@ public final class OpenRouterClient extends AbstractAiClient {
     private ChatTurn execute(OpenRouterRequest request) {
         OpenRouterResponse response;
         try {
-            response = restClient.post().uri("/v1/chat/completions").body(request)
+            response = restClient.post().uri("/v1/chat/completions")
+                    .header("HTTP-Referer", APP_ATTRIBUTION_REFERER)
+                    .header("X-OpenRouter-Title", applicationName)
+                    .header("X-OpenRouter-Categories", APP_ATTRIBUTION_CATEGORIES)
+                    .body(request)
                     .retrieve().body(OpenRouterResponse.class);
         } catch (RestClientException e) {
             throw sanitizeError(e);

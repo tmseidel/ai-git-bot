@@ -1,18 +1,15 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.bitbucket;
 
 import lombok.NonNull;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.client.RestClient;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
-
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class BitbucketProviderMetadataTest {
 
@@ -104,24 +101,13 @@ class BitbucketProviderMetadataTest {
     }
 
     @Test
-    void buildAuthorizationHeader_emailAndApiToken_usesBasicAuth() {
-        String header = metadata.buildAuthorizationHeader("bot@example.com", "ATATT3xFfGF0token");
-
-        String expected = Base64.getEncoder().encodeToString(
-                "bot@example.com:ATATT3xFfGF0token".getBytes(StandardCharsets.UTF_8));
-        assertThat(header).isEqualTo("Basic " + expected);
-    }
-
-    @Test
-    void buildAuthorizationHeader_withoutEmail_isRejected() {
-        assertThatThrownBy(() -> metadata.buildAuthorizationHeader(" ", "someToken"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("e-mail");
+    void buildAuthorizationHeader_apiToken_usesBearerAuth() {
+        assertThat(metadata.buildAuthorizationHeader("ATATT3xFfGF0token")).isEqualTo("Bearer ATATT3xFfGF0token");
     }
 
     @Test
     void buildAuthorizationHeader_withoutToken_returnsEmpty() {
-        assertThat(metadata.buildAuthorizationHeader("bot@example.com", " ")).isEmpty();
+        assertThat(metadata.buildAuthorizationHeader(" ")).isEmpty();
     }
 
     @Test

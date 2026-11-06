@@ -3,6 +3,7 @@ package org.remus.giteabot.prworkflow.agentreview;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.loop.AgentRunContext.ProgressUpdate;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -28,7 +29,7 @@ final class ReviewProgress implements Consumer<ProgressUpdate> {
     private final Long prNumber;
     private final Clock clock;
     private final Instant startedAt;
-    private Long commentId;
+    private CommentId commentId;
     private Instant lastActivityAt;
     private String activity = "Preparing repository";
     private int round;

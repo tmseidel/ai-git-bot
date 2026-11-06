@@ -10,9 +10,10 @@ package org.remus.giteabot.agent.validation;
 public enum PullRequestWorkspaceMode {
 
     /**
-     * Exploration only. A checkout of the target repository's
-     * {@code refs/pull/&lt;n&gt;/head} is acceptable: it carries the head commit for as
-     * long as the pull request is open. Used by the read-only PR workflows.
+     * Exploration only. A checkout of the target repository's pull-request head
+     * ref ({@link org.remus.giteabot.repository.RepositoryApiClient#getPullRequestHeadRef})
+     * is acceptable: it carries the head commit for as long as the pull request
+     * is open. Used by the read-only PR workflows.
      */
     READ_ONLY,
 

@@ -17,4 +17,5 @@ public interface GitIntegrationRepository extends JpaRepository<GitIntegration, 
     boolean existsByName(String name);
 
     boolean existsByNameAndIdNot(String name, Long id);
+    Optional<GitIntegration> findByName(String name);
 }

@@ -18,6 +18,7 @@ import org.remus.giteabot.notification.IssueCommentAcknowledgement;
 import org.remus.giteabot.notification.WorkflowRetryNotices;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
+import org.remus.giteabot.repository.model.CommentId;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -153,7 +154,7 @@ class IssueWorkflowOrchestratorTest {
         issue.setTitle("Vague issue");
         payload.setIssue(issue);
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(77L);
+        comment.setId(CommentId.NumericCommentId.of(77L));
         payload.setComment(comment);
         return payload;
     }

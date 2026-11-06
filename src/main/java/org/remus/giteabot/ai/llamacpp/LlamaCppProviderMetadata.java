@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.AiProviderType;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -17,7 +18,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class LlamaCppProviderMetadata implements AiProviderMetadata {
 
-    public static final String PROVIDER_TYPE = "llamacpp";
+    public static final AiProviderType PROVIDER_TYPE = AiProviderType.LLAMACPP;
     public static final String DEFAULT_API_URL = "http://localhost:8081";
 
     /**
@@ -29,7 +30,7 @@ public class LlamaCppProviderMetadata implements AiProviderMetadata {
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
     @Override
-    public String getProviderType() {
+    public AiProviderType getProviderType() {
         return PROVIDER_TYPE;
     }
 

@@ -201,7 +201,10 @@ class McpOrchestrationServiceTest {
         List<McpOrchestrationService.McpConnectionAttempt> attempts = service.connectionAttempts(
                 new McpServerDefinition("github", "url", "https://api.githubcopilot.com/mcp/", null, Map.of()));
 
-        assertEquals(List.of("2024-11-05", "2025-03-26", "2025-06-18"), attempts.get(0).protocolVersions());
+        // The MCP client sends the last entry as the requested version and rejects a server answer
+        // that is not contained in the list, so the newest supported version must come last.
+        assertEquals(List.of("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"),
+                attempts.getFirst().protocolVersions());
         assertTrue(attempts.stream().anyMatch(attempt -> attempt.protocolVersions().equals(List.of("2024-11-05", "2025-03-26"))));
         assertTrue(attempts.stream().anyMatch(attempt -> attempt.protocolVersions().equals(List.of("2024-11-05"))));
     }

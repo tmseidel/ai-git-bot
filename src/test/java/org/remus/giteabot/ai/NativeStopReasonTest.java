@@ -131,7 +131,7 @@ class NativeStopReasonTest {
                          "usage":{"prompt_tokens":100,"completion_tokens":32,"total_tokens":132}}
                         """),
                 new Provider("OpenRouter", "/v1/chat/completions",
-                        http -> new OpenRouterClient(http, "test-model", 32, true),
+                        http -> new OpenRouterClient(http, "test-model", 32, true, "AI Git Bot"),
                         "length", "stop", """
                         {"choices":[{"finish_reason":%s,"message":{"role":"assistant","content":"",
                           "tool_calls":[{"id":"call-1","type":"function",

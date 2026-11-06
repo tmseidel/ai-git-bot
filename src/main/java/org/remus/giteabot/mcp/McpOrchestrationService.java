@@ -41,10 +41,20 @@ public class McpOrchestrationService {
 
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(20);
     private static final int MAX_TOOL_OUTPUT_CHARS = 10_000;
+    /**
+     * Protocol versions advertised during {@code initialize}. Order matters twice in the MCP SDK:
+     * the initialize request carries the <em>last</em> entry, and the version a server answers with
+     * must be contained in this list, otherwise the client aborts with "Unsupported protocol
+     * version from the server" ({@code LifecycleInitializer}). So the newest version goes last: a
+     * server that supports it answers with it, a spec-compliant server that only knows an older
+     * version answers with that one (still in the list), and servers that hard-reject an unknown
+     * requested version are covered by {@link #STREAMABLE_HTTP_PROTOCOL_FALLBACKS}.
+     */
     private static final List<String> STREAMABLE_HTTP_PROTOCOL_VERSIONS = List.of(
             ProtocolVersions.MCP_2024_11_05,
             ProtocolVersions.MCP_2025_03_26,
-            ProtocolVersions.MCP_2025_06_18);
+            ProtocolVersions.MCP_2025_06_18,
+            ProtocolVersions.MCP_2025_11_25);
     private static final List<List<String>> STREAMABLE_HTTP_PROTOCOL_FALLBACKS = List.of(
             STREAMABLE_HTTP_PROTOCOL_VERSIONS,
             List.of(ProtocolVersions.MCP_2024_11_05, ProtocolVersions.MCP_2025_03_26),

@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,6 +107,33 @@ class GitDiffServiceTest {
 
         assertThat(service.diffCommits(client, "owner", "repo", injected, head)).isNull();
         assertThat(marker).doesNotExist();
+        assertNoWorkspaceLeft();
+    }
+
+    @Test
+    void diffCommits_returnsNullWithoutAllocatingAWorkspaceWhenProviderResolutionFails() {
+        when(client.getRepositoryRemote("owner", "repo")).thenThrow(new IllegalStateException("provider down"));
+
+        assertThat(service.diffCommits(client, "owner", "repo", "a".repeat(40), "b".repeat(40))).isNull();
+        assertThat(workspaces).doesNotExist();
+    }
+
+    @Test
+    void diffCommits_returnsNullAndCleansUpWhenGitInitFails() throws Exception {
+        WorkspaceService failingInit = new WorkspaceService(workspaces.toString(), 60) {
+            @Override
+            Workspace newWorkspace(Path workspaceRoot, Consumer<Workspace> onCleanedUp) {
+                return new Workspace(workspaceRoot, onCleanedUp) {
+                    @Override
+                    CommandResult init() {
+                        return new CommandResult(false, "init failed");
+                    }
+                };
+            }
+        };
+
+        assertThat(new GitDiffService(failingInit).diffCommits(client, "owner", "repo", "a".repeat(40), "b".repeat(40)))
+                .isNull();
         assertNoWorkspaceLeft();
     }
 

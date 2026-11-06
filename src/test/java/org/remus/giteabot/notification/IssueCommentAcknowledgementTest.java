@@ -10,6 +10,7 @@ import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
@@ -41,7 +42,7 @@ class IssueCommentAcknowledgementTest {
 
         acknowledgement.acknowledge(bot, commentPayload());
 
-        verify(repositoryApiClient).addReaction("Test", "my-repo", 77L, "eyes");
+        verify(repositoryApiClient).addReaction("Test", "my-repo", CommentId.NumericCommentId.of(77L), "eyes");
     }
 
     @Test
@@ -72,7 +73,7 @@ class IssueCommentAcknowledgementTest {
         repository.setOwner(owner);
         payload.setRepository(repository);
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(77L);
+        comment.setId(CommentId.NumericCommentId.of(77L));
         payload.setComment(comment);
         return payload;
     }

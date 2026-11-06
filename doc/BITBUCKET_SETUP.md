@@ -35,7 +35,7 @@ How the credentials are used:
 
 | Operation | Authentication |
 |-----------|----------------|
-| Bitbucket REST API | HTTP Basic with `email:api_token` |
+| Bitbucket REST API | Bearer with the API token |
 | Git over HTTPS (clone, fetch, push) | HTTP Basic with the fixed username `x-bitbucket-api-token-auth` and the API token |
 
 The configured email also defines the bot's **identity** on Bitbucket: the bot resolves the account behind the email/token pair and uses it to recognise when it is requested as a reviewer, when it is mentioned, and to ignore its own comments.

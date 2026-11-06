@@ -1,17 +1,16 @@
-package org.remus.giteabot.repository;
+package org.remus.giteabot.bitbucket;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.bitbucket.BitbucketApiClient;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryProviderMetadata;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 
 /**
  * Metadata and factory for Bitbucket Cloud repository integration.
@@ -20,8 +19,7 @@ import java.util.Base64;
  * <p>
  * Authentication uses Atlassian API tokens:
  * <ul>
- *   <li><b>REST API</b>: HTTP Basic with the account e-mail (stored in
- *       {@link GitIntegration#getUsername()}) and the API token.</li>
+ *   <li><b>REST API</b>: Bearer with the API token.</li>
  *   <li><b>Git over HTTPS</b>: the fixed username {@value #GIT_API_TOKEN_USERNAME}
  *       with the API token.</li>
  * </ul>
@@ -88,30 +86,20 @@ public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
     }
 
     /**
-     * Builds the API {@code Authorization} header: HTTP Basic with the Atlassian account
-     * e-mail and API token. Only Atlassian account API tokens are supported; workspace,
-     * project and repository access tokens (Bearer) are not.
-     *
-     * @throws IllegalStateException when no account e-mail is configured
+     * Builds the API {@code Authorization} header: Bearer with the Atlassian account API token.
      */
-    public String buildAuthorizationHeader(@Nullable String email, @Nullable String token) {
+    public String buildAuthorizationHeader(@Nullable String token) {
         if (token == null || token.isBlank()) {
             log.warn("Bitbucket API token is empty or null");
             return "";
         }
-        if (email == null || email.isBlank()) {
-            throw new IllegalStateException(
-                    "Bitbucket integration has no Atlassian account e-mail configured; "
-                            + "it is required together with the API token");
-        }
-        String encoded = Base64.getEncoder().encodeToString((email + ":" + token).getBytes(StandardCharsets.UTF_8));
-        return "Basic " + encoded;
+        return "Bearer " + token;
     }
 
     @Override
     public RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
-        String authHeader = buildAuthorizationHeader(integration.getUsername(), decryptedToken);
+        String authHeader = buildAuthorizationHeader(decryptedToken);
 
         log.debug("Building Bitbucket RestClient: apiUrl={}", apiUrl);
 
@@ -124,7 +112,7 @@ public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
 
     /**
      * Git operations authenticate with the fixed {@value #GIT_API_TOKEN_USERNAME} username and
-     * the API token; the account e-mail is only used for REST API calls.
+     * the API token.
      */
     @Override
     public RepositoryCredentials createCredentials(GitIntegration integration, String decryptedToken) {

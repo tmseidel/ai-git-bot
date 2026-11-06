@@ -13,6 +13,7 @@ import org.remus.giteabot.gitea.model.GiteaReview;
 import org.remus.giteabot.gitea.model.GiteaReviewComment;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.session.SessionService;
 
@@ -249,7 +250,7 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleBotCommand(payload, null);
 
-        verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
+        verify(repositoryClient).addReaction("testowner", "testrepo", CommentId.NumericCommentId.of(42L), "eyes");
         verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), contains("Here's my explanation"));
     }
 
@@ -445,7 +446,7 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleInlineComment(payload, null);
 
-        verify(repositoryClient).addReaction("testowner", "testrepo", 55L, "eyes");
+        verify(repositoryClient).addReaction("testowner", "testrepo", CommentId.NumericCommentId.of(55L), "eyes");
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(1L),
                 eq("src/main/java/Foo.java"), eq(15),
@@ -536,14 +537,14 @@ class CodeReviewServiceTest {
 
         // Set up review comments - one with bot mention, one without
         GiteaReviewComment botComment = new GiteaReviewComment();
-        botComment.setId(100L);
+        botComment.setId(CommentId.NumericCommentId.of(100L));
         botComment.setBody("@ai_bot explain this");
         botComment.setPath("src/main/java/Foo.java");
         botComment.setDiffHunk("@@ -10,7 +10,7 @@\n code");
         botComment.setLine(15);
 
         GiteaReviewComment normalComment = new GiteaReviewComment();
-        normalComment.setId(101L);
+        normalComment.setId(CommentId.NumericCommentId.of(101L));
         normalComment.setBody("just a regular comment");
         normalComment.setPath("src/main/java/Bar.java");
         normalComment.setLine(5);
@@ -557,14 +558,14 @@ class CodeReviewServiceTest {
         codeReviewService.handleReviewSubmitted(payload, null);
 
         // Should only process the bot-mentioning comment
-        verify(repositoryClient).addReaction("testowner", "testrepo", 100L, "eyes");
+        verify(repositoryClient).addReaction("testowner", "testrepo", CommentId.NumericCommentId.of(100L), "eyes");
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(2L),
                 eq("src/main/java/Foo.java"), eq(15),
                 contains("Here's the explanation"));
 
         // Should NOT react to the normal comment
-        verify(repositoryClient, never()).addReaction("testowner", "testrepo", 101L, "eyes");
+        verify(repositoryClient, never()).addReaction("testowner", "testrepo", CommentId.NumericCommentId.of(101L), "eyes");
     }
 
     @Test
@@ -590,7 +591,7 @@ class CodeReviewServiceTest {
                 .thenReturn(List.of(review));
 
         GiteaReviewComment normalComment = new GiteaReviewComment();
-        normalComment.setId(101L);
+        normalComment.setId(CommentId.NumericCommentId.of(101L));
         normalComment.setBody("just a regular comment");
         when(repositoryClient.getReviewComments("testowner", "testrepo", 2L, 10L))
                 .thenReturn(List.of(normalComment));
@@ -612,7 +613,7 @@ class CodeReviewServiceTest {
 
         // Bot's own comment that mentions itself (e.g. from its formatted response)
         GiteaReviewComment botOwnComment = new GiteaReviewComment();
-        botOwnComment.setId(200L);
+        botOwnComment.setId(CommentId.NumericCommentId.of(200L));
         botOwnComment.setBody("## 🤖 Bot Response\n\nSome answer mentioning @ai_bot");
         botOwnComment.setPath("src/main/java/Foo.java");
         botOwnComment.setLine(10);
@@ -627,7 +628,7 @@ class CodeReviewServiceTest {
 
         // Bot's own comment should be filtered out — no AI call, no reaction
         verify(aiClient, never()).chat(anyList(), anyString(), anyString(), anyString());
-        verify(repositoryClient, never()).addReaction(anyString(), anyString(), anyLong(), anyString());
+        verify(repositoryClient, never()).addReaction(anyString(), anyString(), any(CommentId.class), anyString());
     }
 
     private WebhookPayload createTestPayload() {
@@ -660,7 +661,7 @@ class CodeReviewServiceTest {
         payload.setAction("created");
 
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(42L);
+        comment.setId(CommentId.NumericCommentId.of(42L));
         comment.setBody(body);
         WebhookPayload.Owner commentUser = new WebhookPayload.Owner();
         commentUser.setLogin("testuser");
@@ -688,7 +689,7 @@ class CodeReviewServiceTest {
 
     private WebhookPayload createInlineCommentPayload(String body, String path, String diffHunk, Integer line) {
         WebhookPayload payload = createCommentPayload(body);
-        payload.getComment().setId(55L);
+        payload.getComment().setId(CommentId.NumericCommentId.of(55L));
         payload.getComment().setPath(path);
         payload.getComment().setDiffHunk(diffHunk);
         payload.getComment().setLine(line);
@@ -769,7 +770,7 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleBotCommand(payload, null);
 
-        verify(repositoryClient).addReaction("testowner", "testrepo", 42L, "eyes");
+        verify(repositoryClient).addReaction("testowner", "testrepo", CommentId.NumericCommentId.of(42L), "eyes");
         verify(repositoryClient).postPullRequestComment(eq("testowner"), eq("testrepo"), eq(1L), contains("was empty or could not be generated"));
         verify(sessionService).addMessage(eq(session), eq("user"), eq("@ai_bot explain this"));
         verify(sessionService).addMessage(eq(session), eq("assistant"), contains("was empty or could not be generated"));
@@ -795,7 +796,7 @@ class CodeReviewServiceTest {
 
         codeReviewService.handleInlineComment(payload, null);
 
-        verify(repositoryClient).addReaction("testowner", "testrepo", 55L, "eyes");
+        verify(repositoryClient).addReaction("testowner", "testrepo", CommentId.NumericCommentId.of(55L), "eyes");
         verify(repositoryClient).postInlineReviewComment(
                 eq("testowner"), eq("testrepo"), eq(1L),
                 eq("src/main/java/Foo.java"), eq(15),

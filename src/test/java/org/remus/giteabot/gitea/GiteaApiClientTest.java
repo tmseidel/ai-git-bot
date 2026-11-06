@@ -5,12 +5,14 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -221,6 +223,30 @@ class GiteaApiClientTest {
 
         server.verify();
         assertEquals(List.of(new PullRequestCommit("abc1234567890", "Add login")), commits);
+    }
+
+    @Test
+    void getReviewComments_readsNumericIdIntoCommentId() {
+        // The id arrives as a bare number; NumericCommentId must be built from it directly
+        // rather than expecting a nested {"id": ...} object.
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitea.example.com/api/v1/repos/base/project/pulls/7/reviews/3/comments"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        [{"id":42,"body":"Please rename","path":"src/Foo.java"},
+                         {"id":null,"body":"no id"}]
+                        """, MediaType.APPLICATION_JSON));
+
+        List<ReviewComment> comments = client.getReviewComments("base", "project", 7L, 3L);
+
+        server.verify();
+        assertEquals(2, comments.size());
+        assertEquals(CommentId.NumericCommentId.of(42L), comments.get(0).getId());
+        assertEquals("Please rename", comments.get(0).getBody());
+        assertNull(comments.get(1).getId());
     }
 
     @Test

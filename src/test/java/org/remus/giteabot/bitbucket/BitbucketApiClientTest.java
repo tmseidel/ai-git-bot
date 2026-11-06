@@ -2,6 +2,7 @@ package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
@@ -65,7 +66,7 @@ class BitbucketApiClientTest {
     void addReaction_noOp() {
         // Bitbucket doesn't support reactions; verify no exception is thrown
         BitbucketApiClient client = new BitbucketApiClient(null, creds());
-        assertDoesNotThrow(() -> client.addReaction("workspace", "repo", 1L, "+1"));
+        assertDoesNotThrow(() -> client.addReaction("workspace", "repo", CommentId.NumericCommentId.of(1L), "+1"));
     }
 
     @Test

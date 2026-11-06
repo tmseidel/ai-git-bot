@@ -1,5 +1,6 @@
 package org.remus.giteabot.admin;
 
+import org.remus.giteabot.ai.AiProviderType;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationKind;
@@ -69,7 +70,7 @@ class BotWorkflowConfigurationPersistenceTest {
 
             AiIntegration ai = new AiIntegration();
             ai.setName("ai-" + suffix);
-            ai.setProviderType("OPENAI");
+            ai.setProviderType(AiProviderType.OPENAI);
             ai.setApiUrl("http://localhost");
             ai.setModel("test-model");
             aiIntegrationRepository.save(ai);

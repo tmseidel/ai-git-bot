@@ -30,9 +30,10 @@
                             <label for="name" class="form-label" th:text="#{label.name}">Name</label>
                             <input type="text" class="form-control" id="name" th:field="*{name}"
                                    th:placeholder="#{placeholder.botName}" placeholder="e.g. Code Review Bot" required/>
+                            <div class="form-text" th:text="#{help.bot.name}">A friendly name to identify this bot.</div>
                         </div>
 
-                        <div class="col-12">
+                        <div class="col-md-6">
                             <label for="systemPromptId" class="form-label" th:text="#{label.systemPrompt}">System Prompt</label>
                             <div class="input-group">
                                 <select class="form-select" id="systemPromptId" name="systemPromptId"

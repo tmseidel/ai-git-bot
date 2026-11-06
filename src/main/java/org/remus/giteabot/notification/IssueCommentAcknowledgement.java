@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.CommentId;
 import org.springframework.stereotype.Component;
 
 /**
@@ -29,7 +30,7 @@ public class IssueCommentAcknowledgement {
                 || payload.getComment().getId() == null) {
             return;
         }
-        Long commentId = payload.getComment().getId();
+        CommentId commentId = payload.getComment().getId();
         String owner = payload.getRepository().getOwner() != null
                 ? payload.getRepository().getOwner().getLogin() : null;
         String repo = payload.getRepository().getName();

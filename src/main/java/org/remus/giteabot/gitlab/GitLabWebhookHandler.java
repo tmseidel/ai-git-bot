@@ -5,6 +5,7 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.util.BotMention;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
@@ -418,7 +419,7 @@ public class GitLabWebhookHandler {
 
         // Comment
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
-        comment.setId(toLong(noteAttrs.get("id")));
+        comment.setId(CommentId.NumericCommentId.of(toLong(noteAttrs.get("id"))));
         comment.setBody((String) noteAttrs.get("note"));
         Map<String, Object> author = (Map<String, Object>) noteAttrs.get("author");
         Map<String, Object> user = (Map<String, Object>) gitlabPayload.get("user");

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
@@ -265,6 +266,153 @@ class GitLabApiClientTest {
         assertThrows(IllegalArgumentException.class,
                 () -> client.assignIssue("owner", "repo", 42L, "ghost"));
 
+        server.verify();
+    }
+
+    @Test
+    void requiresAuthoritativePullRequestHead_isEnabled() {
+        assertTrue(new GitLabApiClient(null, CREDS).requiresAuthoritativePullRequestHead());
+    }
+
+    @Test
+    void getPullRequestHeadRef_isTheMergeRequestHeadRef() {
+        // GitLab publishes the head commit under its own ref namespace; the
+        // inherited refs/pull/<n>/head does not exist there.
+        assertEquals("refs/merge-requests/7/head",
+                new GitLabApiClient(null, CREDS).getPullRequestHeadRef(7L));
+    }
+
+    @Test
+    void getPullRequestHead_resolvesForkedProjectPath() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/base%2Fproject/merge_requests/7"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"source_branch":"feature/login","sha":"abc123",
+                         "source_project_id":12,"target_project_id":7}
+                        """, MediaType.APPLICATION_JSON));
+        // The merge request only names the source project *id*; its cloneable path
+        // is a second lookup — the endpoint that makes GitLab differ from Gitea/GitHub.
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/12"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"path_with_namespace\":\"contributor/project\"}",
+                        MediaType.APPLICATION_JSON));
+
+        PullRequestHead head = client.getPullRequestHead("base", "project", 7L, "feature/login");
+
+        assertEquals("contributor", head.owner());
+        assertEquals("project", head.repository());
+        assertEquals("feature/login", head.branch());
+        assertEquals("abc123", head.sha());
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_splitsNestedNamespaceOfForkedProject() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
+                .andRespond(withSuccess("""
+                        {"source_branch":"feature/login","sha":"abc123",
+                         "source_project_id":12,"target_project_id":7}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/12"))
+                .andRespond(withSuccess("{\"path_with_namespace\":\"contributor/sub/project\"}",
+                        MediaType.APPLICATION_JSON));
+
+        PullRequestHead head = client.getPullRequestHead("group", "project", 7L, "feature/login");
+
+        assertEquals("contributor/sub", head.owner());
+        assertEquals("project", head.repository());
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_sameProjectSkipsTheExtraProjectLookup() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        // Identical source and target ids: no fork, so no second request. The
+        // single expectation makes MockRestServiceServer fail on any extra call.
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
+                .andRespond(withSuccess("""
+                        {"source_branch":"feature/login","sha":"abc123",
+                         "source_project_id":7,"target_project_id":7}
+                        """, MediaType.APPLICATION_JSON));
+
+        PullRequestHead head = client.getPullRequestHead("group", "project", 7L, "feature/login");
+
+        assertEquals("group", head.owner());
+        assertEquals("project", head.repository());
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_rejectsBranchMismatch() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
+                .andRespond(withSuccess("""
+                        {"source_branch":"feature/source","sha":"abc123",
+                         "source_project_id":7,"target_project_id":7}
+                        """, MediaType.APPLICATION_JSON));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("group", "project", 7L, "main"));
+
+        assertTrue(error.getMessage().contains("does not match"));
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_failsWhenTheSourceProjectPathIsMissing() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        // Different source and target ids, so this is a fork — but the project
+        // lookup answers without a path. Reporting the target instead would make
+        // WorkspaceService believe this is a same-repository MR.
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
+                .andRespond(withSuccess("""
+                        {"source_branch":"feature/login","sha":"abc123",
+                         "source_project_id":12,"target_project_id":7}
+                        """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/12"))
+                .andRespond(withSuccess("{\"id\":12}", MediaType.APPLICATION_JSON));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("group", "project", 7L, "feature/login"));
+
+        assertTrue(error.getMessage().contains("did not report the project path"));
+        server.verify();
+    }
+
+    @Test
+    void getPullRequestHead_failsWithoutASourceProjectId() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+
+        // Without the source project id the head repository cannot be named at all;
+        // assuming the target would hide a possible fork.
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
+                .andRespond(withSuccess("""
+                        {"source_branch":"feature/login","sha":"abc123","target_project_id":7}
+                        """, MediaType.APPLICATION_JSON));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> client.getPullRequestHead("group", "project", 7L, "feature/login"));
+
+        assertTrue(error.getMessage().contains("did not report a source project id"));
         server.verify();
     }
 }

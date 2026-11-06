@@ -425,6 +425,41 @@ docker run -p 8080:8080 tmseidel/ai-git-bot:latest
 6. 配置 webhook
 7. 完成
 
+### 从配置文档启动
+
+除了在管理界面中逐项操作，实例也可以直接从配置文档启动。
+**[gitbot.eu/trial](https://gitbot.eu/trial)** 的生成器在浏览器内根据所选的 AI 提供商、
+Git 平台与工作流生成该文档，并输出包含 `APP_CONFIG_JSON` 的 `docker-compose.yml`，以及要粘贴
+到仓库中的 Webhook 地址与密钥。输入的凭据不会离开浏览器。
+
+文档就是实体模型的投影：每个配置表对应一个数组（`adminUsers`、`aiIntegrations`、
+`gitIntegrations`、`workflowConfigurations`、`bots`，以及可选的 `systemPrompts`、
+`botToolConfigurations`、`mcpConfigurations`、`deploymentTargets`、`eventHookEndpoints`），
+字段名与实体完全一致，因此不需要单独的模式定义来学习或同步。
+
+- 只有在**空数据库**（尚不存在管理员用户）时才会应用。一次性实例（内存 H2）在每次启动时
+  应用；持久实例仅在空数据卷的首次启动时应用，之后不再应用，因此重启不会覆盖在界面中做的修改。
+- 文档中声明的行会**覆盖**同名的种子行（按字段覆盖）：未声明的值保持原有内容，声明了
+  `selectedTools` / `selectedWorkflows` 时会替换现有选择。导入仅在空数据库上运行，因此可能遇到
+  的行只有 Flyway 种子（`Default` 提示词、默认工具配置、内置工作流配置），绝不会修改运维人员
+  创建的数据。`defaultEntry` 标志不能由文档设置。
+- 默认工具配置会在启动时扩展到当前构建提供的全部内置工具（`execute-code` 除外），因为种子只能
+  列出其编写时存在的工具，而默认行无法在 UI 中编辑。代码执行之所以不在默认配置中也是同一原因：
+  该行一旦写入便无法更改，因此需要执行模型生成代码的机器人只能使用显式选择 `execute-code` 的
+  工具配置。
+- 文档中必须至少有一名带密码的管理员。否则整个文档会被拒绝：不会导入任何内容，实例保持未配置状态，
+  可通过 `/setup` 完成设置。导出的文档不包含密码，需先添加密码才能作为文档使用。
+- 凭据在文档中是明文，导入时按存储加密（`APP_ENCRYPTION_KEY`）。
+- `GET /config/export` 以相同格式返回当前实例，用于把在界面中配置好的实例转换为文档。管理界面在
+  “系统设置” → “应用通用设置”中也提供同样的下载按钮，不依赖横幅提示。
+- [`doc/examples/full-configuration`](doc/examples/full-configuration/docker-compose.yml) 是
+  完整示例：设置了每个实体的全部可编辑属性，并对需要解释的取值加了说明。
+
+设置 `APP_CONFIG_JSON`（内联）或 `APP_CONFIG_FILE`（路径）即可启用。两者都不设置时，行为与以前
+完全一致：管理员账户、AI 与 Git 集成、机器人都由管理界面创建。设置了文档后，管理界面的横幅会
+说明实例处于哪种状态：每次启动都从文档重建、仅在空数据库上初始化过一次、因数据库已有数据而忽略
+该文档，或者文档无法导入（原因记录在日志中，可通过 `/setup` 完成设置）。
+
 ### 生产部署
 
 对于经过配置的生产或长期部署，我们推荐使用 Docker Compose 方式，以便对配置拥有完全控制权：

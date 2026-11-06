@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
+import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.ModelFlavor;
 import org.remus.giteabot.config.OpenAiProperties;
 import org.springframework.beans.factory.ObjectProvider;
@@ -22,12 +23,13 @@ import java.util.Locale;
 @RequiredArgsConstructor
 public class OpenAiProviderMetadata implements AiProviderMetadata {
 
-    public static final String PROVIDER_TYPE = "openai";
+    public static final AiProviderType PROVIDER_TYPE = AiProviderType.OPENAI;
     public static final String DEFAULT_API_URL = "https://api.openai.com";
+    // Recommended models checked at https://developers.openai.com/api/docs/models on 2026-10-18.
     public static final List<String> SUGGESTED_MODELS = List.of(
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna"
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6-luna"
     );
 
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
@@ -35,7 +37,7 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
     private final OpenAiProperties openAiProperties;
 
     @Override
-    public String getProviderType() {
+    public AiProviderType getProviderType() {
         return PROVIDER_TYPE;
     }
 

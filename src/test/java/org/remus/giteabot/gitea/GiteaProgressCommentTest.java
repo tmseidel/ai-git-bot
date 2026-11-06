@@ -3,6 +3,7 @@ package org.remus.giteabot.gitea;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -43,8 +44,8 @@ class GiteaProgressCommentTest {
                 .andExpect(method(HttpMethod.PATCH)).andExpect(content().json("{\"body\":\"Review completed\"}"))
                 .andRespond(withSuccess());
 
-        Long id = client.postPullRequestComment("owner", "repo", 7L, "Starting review");
-        assertEquals(2147483648L, id);
+        CommentId id = client.postPullRequestComment("owner", "repo", 7L, "Starting review");
+        assertEquals(CommentId.NumericCommentId.of(2147483648L), id);
         client.updatePullRequestComment("owner", "repo", 7L, id, "Review completed");
         server.verify();
     }

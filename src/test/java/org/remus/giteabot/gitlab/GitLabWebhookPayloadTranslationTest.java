@@ -6,6 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.CommentId;
 
 import java.util.HashMap;
 import java.util.List;
@@ -165,7 +166,7 @@ class GitLabWebhookPayloadTranslationTest {
         WebhookPayload result = handler.translateNotePayload(gitlabPayload, noteAttrs);
 
         assertNotNull(result.getComment());
-        assertEquals(42L, result.getComment().getId());
+        assertEquals(CommentId.NumericCommentId.of(42L), result.getComment().getId());
         assertEquals("@bot please review", result.getComment().getBody());
         assertEquals("testuser", result.getComment().getUser().getLogin());
 

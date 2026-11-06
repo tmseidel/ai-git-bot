@@ -1,5 +1,6 @@
 package org.remus.giteabot.repository;
 
+import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
@@ -167,21 +168,27 @@ public interface RepositoryApiClient {
      * Providers like GitHub and Gitea can often reuse the same underlying endpoint as issue comments,
      * while GitLab requires a merge-request-specific endpoint.
      *
-     * @return the positive integral comment ID, or {@code null} if the response has no usable ID;
-     *         callers that only need to publish a comment can ignore the return value
+     * @return the provider-specific ID addressing the new comment (e.g. a numeric ID, or a
+     *         thread/comment pair on Azure DevOps) for {@link #updatePullRequestComment}, or
+     *         {@code null} if the response has no usable ID; callers that only need to publish a
+     *         comment can ignore the return value
      */
-    Long postPullRequestComment(String owner, String repo, Long pullNumber, String body);
+    CommentId postPullRequestComment(String owner, String repo, Long pullNumber, String body);
 
-    /** Updates a top-level PR comment owned by the authenticated account. */
-    default void updatePullRequestComment(String owner, String repo, Long pullNumber, long commentId, String body) {
+    /**
+     * Updates a top-level PR comment owned by the authenticated account.
+     *
+     * @param commentId an ID returned by this client's {@link #postPullRequestComment}
+     */
+    default void updatePullRequestComment(String owner, String repo, Long pullNumber, CommentId commentId, String body) {
         throw new UnsupportedOperationException("Updating PR comments is not supported");
     }
 
     /** Returns the positive integral ID from a comment response, or {@code null} if unavailable. */
-    static Long commentId(Map<?, ?> response) {
+    static CommentId.NumericCommentId commentId(Map<?, ?> response) {
         Object id = response == null ? null : response.get("id");
         if ((id instanceof Integer || id instanceof Long) && ((Number) id).longValue() > 0) {
-            return ((Number) id).longValue();
+            return CommentId.NumericCommentId.of(((Number) id).longValue());
         }
         return null;
     }
@@ -230,7 +237,7 @@ public interface RepositoryApiClient {
         return List.of();
     }
 
-    void addReaction(String owner, String repo, Long commentId, String reaction);
+    void addReaction(String owner, String repo, CommentId commentId, String reaction);
 
     /**
      * Adds a reaction to a pull request itself, rather than to a comment.
@@ -340,6 +347,17 @@ public interface RepositoryApiClient {
                                                String expectedBranch) {
         throw new UnsupportedOperationException(
                 "Authoritative pull-request head resolution is not supported by this provider");
+    }
+
+    /**
+     * Returns the ref under which the <em>target</em> repository publishes a pull
+     * request's head commit. Gitea and GitHub use {@code refs/pull/<n>/head};
+     * GitLab keeps the same commit under {@code refs/merge-requests/<n>/head}.
+     * Providers that publish no such ref (Bitbucket Cloud, Azure DevOps) keep the
+     * default — it is only a fallback and fails on its own terms there.
+     */
+    default String getPullRequestHeadRef(Long pullNumber) {
+        return "refs/pull/" + pullNumber + "/head";
     }
 
     // ---- Repository operations ----

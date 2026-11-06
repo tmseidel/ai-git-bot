@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.azuredevops.model.ThreadCommentId;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.springframework.http.ResponseEntity;
@@ -200,7 +201,7 @@ public class AzureDevopsWebhookHandler {
                 yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
             }
             case "ms.vss-code.git-pullrequest-comment-event" ->
-                    handlePullRequestComment(bot, payload, webhookPayload, botAlias);
+                    handlePullRequestComment(bot, webhookPayload, botAlias);
             // Required for exhaustiveness only: anything else already left via the null
             // payload above.
             default -> ResponseEntity.ok("ignored");
@@ -223,8 +224,8 @@ public class AzureDevopsWebhookHandler {
         return ResponseEntity.ok("session closed");
     }
 
-    private ResponseEntity<String> handlePullRequestComment(Bot bot, Map<String, Object> raw,
-                                                            WebhookPayload payload, String botAlias) {
+    private ResponseEntity<String> handlePullRequestComment(Bot bot, WebhookPayload payload,
+                                                            String botAlias) {
         String body = payload.getComment() != null ? payload.getComment().getBody() : null;
         if (body == null || !body.contains(botAlias)) {
             return ResponseEntity.ok("ignored");
@@ -233,7 +234,7 @@ public class AzureDevopsWebhookHandler {
         // Only now — once the comment is known to address the bot — is it worth spending
         // an API call to find out whether it is anchored to a file. Azure DevOps fires
         // this event for every comment on every pull request.
-        hydrateInlineThreadContext(bot, raw, payload);
+        hydrateInlineThreadContext(bot, payload);
 
         // Inline (per-file) comments carry a thread context path.
         if (payload.getComment().getPath() != null) {
@@ -384,20 +385,18 @@ public class AzureDevopsWebhookHandler {
      * <p>
      * The {@code ms.vss-code.git-pullrequest-comment-event} payload carries the comment
      * but never the enclosing thread's {@code threadContext}, so the anchor has to be
-     * fetched. Only {@code _links} betrays which thread the comment belongs to:
-     * {@code _links.threads.href} ends in {@code /threads/{id}} and
-     * {@code _links.self.href} in {@code /threads/{id}/comments/{commentId}}.
+     * fetched, using the thread id {@link #extractComment} read from the comment's
+     * {@code _links}.
      * <p>
      * Every failure path leaves the comment untouched, so an unresolvable anchor degrades
      * to handling the comment as a top-level one rather than dropping it.
      */
-    private void hydrateInlineThreadContext(Bot bot, Map<String, Object> raw,
-                                            WebhookPayload payload) {
+    private void hydrateInlineThreadContext(Bot bot, WebhookPayload payload) {
         if (payload.getComment() == null || payload.getPullRequest() == null
                 || payload.getRepository() == null || payload.getRepository().getOwner() == null) {
             return;
         }
-        Long threadId = threadIdFromComment(raw);
+        Long threadId = payload.getComment().getId() instanceof ThreadCommentId threadCommentId ? threadCommentId.getThreadId() : null;
         if (threadId == null) {
             return;
         }
@@ -421,13 +420,16 @@ public class AzureDevopsWebhookHandler {
         }
     }
 
-    Long threadIdFromComment(Map<String, Object> raw) {
-        Object resource = raw.get("resource");
-        if (!(resource instanceof Map<?, ?> resourceMap)) {
-            return null;
-        }
-        if (!(resourceMap.get("comment") instanceof Map<?, ?> comment)
-                || !(comment.get("_links") instanceof Map<?, ?> links)) {
+    /**
+     * The comment event payload names no thread id, so only {@code _links} betrays which
+     * thread the comment belongs to: {@code _links.threads.href} ends in
+     * {@code /threads/{id}} and {@code _links.self.href} in
+     * {@code /threads/{id}/comments/{commentId}}.
+     *
+     * @see <a href="https://learn.microsoft.com/en-us/azure/devops/service-hooks/events?view=azure-devops#pull-request-commented-on">Pull request commented on</a>
+     */
+    Long threadIdFromComment(Map<String, Object> comment) {
+        if (!(comment.get("_links") instanceof Map<?, ?> links)) {
             return null;
         }
         Long fromThreads = threadIdFromHref(links.get("threads"));
@@ -659,8 +661,10 @@ public class AzureDevopsWebhookHandler {
             return null;
         }
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
-        String uniqueName = (String) user.get("uniqueName");
-        owner.setLogin(uniqueName != null ? uniqueName : (String) user.get("displayName"));
+        // Only uniqueName identifies the user. displayName is user-editable, and the login
+        // feeds the bot-user, whitelist and PR-author checks, so falling back to it would
+        // let anyone match those by renaming themselves.
+        owner.setLogin((String) user.get("uniqueName"));
         return owner;
     }
 
@@ -695,7 +699,14 @@ public class AzureDevopsWebhookHandler {
             return null;
         }
         WebhookPayload.Comment c = new WebhookPayload.Comment();
-        c.setId(toLong(comment.get("id")));
+        // Comment ids are only unique within their thread, so the thread id is needed to
+        // address the comment again (e.g. to update it).
+        Long threadId = threadIdFromComment(comment);
+        Long commentId = toLong(comment.get("id"));
+        if (threadId == null && commentId != null) {
+            log.debug("No thread id in _links of comment #{}; the comment cannot be addressed again", commentId);
+        }
+        c.setId(ThreadCommentId.of(threadId, commentId));
         c.setBody((String) comment.get("content"));
         c.setUser(extractUser((Map<String, Object>) comment.get("author")));
 

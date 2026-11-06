@@ -1,6 +1,7 @@
 package org.remus.giteabot.event.model;
 
 import lombok.Data;
+import org.remus.giteabot.repository.model.CommentId;
 
 import java.util.List;
 
@@ -73,7 +74,7 @@ public class WebhookPayload {
 
     @Data
     public static class Comment {
-        private Long id;
+        private CommentId id;
         private String body;
         private Owner user;
 
