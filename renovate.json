@@ -27,7 +27,6 @@
       "at any time"
     ]
   },
-  "osvVulnerabilityAlerts": true,
   "packageRules": [
     {
       "matchUpdateTypes": [
