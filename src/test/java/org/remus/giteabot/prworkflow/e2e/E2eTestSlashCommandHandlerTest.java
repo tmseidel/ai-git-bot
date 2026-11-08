@@ -4,7 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
@@ -42,7 +42,7 @@ class E2eTestSlashCommandHandlerTest {
 
     private PrWorkflowOrchestrator orchestrator;
     private WorkflowSelectionService selectionService;
-    private RepositoryApiClientFactory repositoryApiClientFactory;
+    private RepositoryPlatformFactory repositoryPlatformFactory;
     private RepositoryApiClient repoClient;
     private E2eTestSlashCommandHandler handler;
 
@@ -53,10 +53,10 @@ class E2eTestSlashCommandHandlerTest {
     void setUp() {
         orchestrator = mock(PrWorkflowOrchestrator.class);
         selectionService = mock(WorkflowSelectionService.class);
-        repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
+        repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
         repoClient = mock(RepositoryApiClient.class);
-        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
-        handler = new E2eTestSlashCommandHandler(orchestrator, selectionService, repositoryApiClientFactory);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repoClient);
+        handler = new E2eTestSlashCommandHandler(orchestrator, selectionService, repositoryPlatformFactory);
 
         workflowConfig = new WorkflowConfiguration();
         workflowConfig.setId(7L);

@@ -31,6 +31,8 @@ import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowResultStatus;
@@ -78,6 +80,7 @@ class AgentReviewCompletionTest {
 
     @Mock private AiClient aiClient;
     @Mock private RepositoryApiClient repositoryClient;
+    private RepositoryPlatform platform;
     @Mock private WorkspaceService workspaceService;
     @Mock private Workspace workspace;
     @Mock private EventHookPublisher eventHooks;
@@ -88,6 +91,7 @@ class AgentReviewCompletionTest {
 
     @BeforeEach
     void setUp() {
+        platform = TestPlatforms.of(repositoryClient);
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("owner");
         WebhookPayload.Repository repository = new WebhookPayload.Repository();
@@ -106,14 +110,14 @@ class AgentReviewCompletionTest {
         config.getBudget().setMaxRounds(3);
         ToolCatalog catalog = new ToolCatalog(config);
         service = new AgentReviewService(
-                new AgentReviewContext(repositoryClient, aiClient, "Review the change.", "bot",
+                new AgentReviewContext(platform, aiClient, "Review the change.", "bot",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog), catalog, workspaceService,
                 config, null, new Bot(), eventHooks, null);
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
         when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
-        lenient().when(workspaceService.preparePullRequestWorkspace(repositoryClient, "owner", "repo",
+        lenient().when(workspaceService.preparePullRequestWorkspace(platform, "owner", "repo",
                         "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
                 .thenReturn(WorkspaceResult.success(workspace));
         lenient().when(workspace.path()).thenReturn(WORKSPACE);

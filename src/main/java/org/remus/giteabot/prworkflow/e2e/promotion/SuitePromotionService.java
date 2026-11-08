@@ -3,7 +3,7 @@ package org.remus.giteabot.prworkflow.e2e.promotion;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.Workspace;
@@ -14,6 +14,7 @@ import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -71,7 +72,7 @@ import java.util.Set;
 public class SuitePromotionService {
 
     private final WorkspaceService workspaceService;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final PrWorkflowRunRepository runRepository;
 
     public Outcome promote(Bot bot, PrWorkflowRun run, PrTestSuite suite,
@@ -97,12 +98,13 @@ public class SuitePromotionService {
             return Outcome.alreadyPromoted(run.getFollowUpPrNumber());
         }
 
-        RepositoryApiClient client;
+        RepositoryPlatform platform;
         try {
-            client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+            platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
         } catch (RuntimeException e) {
             return Outcome.failure("Failed to obtain repository client: " + e.getMessage());
         }
+        RepositoryApiClient client = platform.getClient();
 
         long prNumber = suite.getPrNumber();
         if (mode == SuiteLifecycleMode.OFFER_AS_PR
@@ -137,10 +139,10 @@ public class SuitePromotionService {
 
         WorkspaceResult ws = mode == SuiteLifecycleMode.COMMIT_TO_PR
                 ? workspaceService.preparePullRequestWorkspace(
-                        client, repoOwner, repoName, baseBranch, prNumber,
+                        platform, repoOwner, repoName, baseBranch, prNumber,
                         PullRequestWorkspaceMode.PUSH_BACK)
                 : workspaceService.prepareWorkspace(
-                        client, repoOwner, repoName, baseBranch,
+                        platform, repoOwner, repoName, baseBranch,
                         mode == SuiteLifecycleMode.PROMOTE_ON_MERGE ? null : prNumber);
         if (!ws.success()) {
             return Outcome.failure("Workspace preparation failed: " + ws.error());

@@ -34,6 +34,7 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.McpConfiguration;
@@ -57,6 +58,7 @@ public class IssueImplementationService {
 
     private static final String AGENT_PROMPT_NAME = "agent";
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final PromptService promptService;
@@ -88,7 +90,8 @@ public class IssueImplementationService {
         AgentConfigProperties agentConfig = collaborators.agentConfig();
         ToolExecutionService toolExecutionService = collaborators.toolExecutionService();
         ToolCatalog toolCatalog = collaborators.toolCatalog();
-        this.repositoryClient = context.repositoryClient();
+        this.repositoryPlatform = context.repositoryPlatform();
+        this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = context.aiClient();
         this.promptService = collaborators.promptService();
         this.agentConfig = agentConfig;
@@ -107,7 +110,7 @@ public class IssueImplementationService {
 
         this.responseParser = new AiResponseParser();
         this.promptBuilder = new AgentPromptBuilder(agentConfig != null ? agentConfig.getContext() : null);
-        this.notificationService = new IssueNotificationService(this.repositoryClient, responseParser, toolCatalog);
+        this.notificationService = new IssueNotificationService(this.repositoryPlatform, responseParser, toolCatalog);
         this.errorNotificationService = new AgentErrorNotificationService(this.repositoryClient);
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog, this.mcpOrchestrationService,
@@ -161,7 +164,7 @@ public class IssueImplementationService {
 
             // Clone repository once — all operations happen in this workspace
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, baseBranch, null);
+                    repositoryPlatform, owner, repo, baseBranch, null);
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -394,7 +397,7 @@ public class IssueImplementationService {
 
             // Clone working branch into fresh workspace
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, workingBranch, null);
+                    repositoryPlatform, owner, repo, workingBranch, null);
             if (!wsResult.success()) {
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
                         "⚠️ **AI Agent**: Failed to prepare workspace: " + wsResult.error());

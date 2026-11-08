@@ -7,7 +7,6 @@ import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.PullRequestState;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -30,47 +29,19 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 class GitHubApiClientTest {
 
-    private static final RepositoryCredentials CREDS =
-            RepositoryCredentials.of("https://api.github.com", "https://github.com", "ghp_token");
+    private static final String BASE_URL = "https://api.github.com";
 
     @Test
     void implementsRepositoryApiClient() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
+        GitHubApiClient client = new GitHubApiClient(null);
         assertInstanceOf(RepositoryApiClient.class, client);
-    }
-
-    @Test
-    void getBaseUrl_returnsConfiguredUrl() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
-        assertEquals("https://api.github.com", client.getBaseUrl());
-    }
-
-    @Test
-    void getCloneUrl_returnsConfiguredUrl() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
-        assertEquals("https://github.com", client.getCloneUrl());
-    }
-
-    @Test
-    void getToken_returnsConfiguredToken() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
-        assertEquals("ghp_token", client.getToken());
-    }
-
-    @Test
-    void constructorWithEnterpriseUrl() {
-        var enterpriseCreds = RepositoryCredentials.of(
-                "https://github.example.com/api/v3", "https://github.example.com", "token123");
-        GitHubApiClient client = new GitHubApiClient(null, enterpriseCreds);
-        assertEquals("https://github.example.com/api/v3", client.getBaseUrl());
-        assertEquals("https://github.example.com", client.getCloneUrl());
     }
 
     @Test
     void getIssueComments_fetchesIssueCommentsWithPageLimit() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42/comments?per_page=50"))
                 .andExpect(method(HttpMethod.GET))
@@ -86,9 +57,9 @@ class GitHubApiClientTest {
 
     @Test
     void addPullRequestReaction_postsEyesToIssueReactionEndpoint() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42/reactions"))
                 .andExpect(method(HttpMethod.POST))
@@ -104,7 +75,7 @@ class GitHubApiClientTest {
     void getRepositoryTree_mapsBlobTreeAndSubmoduleEntries() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/git/trees/main?recursive=1"))
                 .andExpect(method(HttpMethod.GET))
@@ -128,7 +99,7 @@ class GitHubApiClientTest {
     void getPullRequestCommits_mapsShaAndNestedMessage() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/42/commits"))
                 .andExpect(method(HttpMethod.GET))
@@ -147,7 +118,7 @@ class GitHubApiClientTest {
     void getPullRequestDetails_mapsTitleBodyAndHead() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/42"))
                 .andExpect(method(HttpMethod.GET))
@@ -167,9 +138,9 @@ class GitHubApiClientTest {
 
     @Test
     void addIssueReaction_postsEyesToIssueReactionEndpoint() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/12/reactions"))
                 .andExpect(method(HttpMethod.POST))
@@ -185,7 +156,7 @@ class GitHubApiClientTest {
     void postReview_requestChanges_submitsSingleReviewWithBodyAndEvent() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/7/reviews"))
                 .andExpect(method(HttpMethod.POST))
@@ -202,7 +173,7 @@ class GitHubApiClientTest {
     void postReview_none_submitsSingleCommentReview() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/7/reviews"))
                 .andExpect(method(HttpMethod.POST))
@@ -219,7 +190,7 @@ class GitHubApiClientTest {
     void assignIssue_postsAssignees() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42/assignees"))
                 .andExpect(method(HttpMethod.POST))
@@ -234,14 +205,14 @@ class GitHubApiClientTest {
 
     @Test
     void requiresAuthoritativePullRequestHead_isEnabled() {
-        assertTrue(new GitHubApiClient(null, CREDS).requiresAuthoritativePullRequestHead());
+        assertTrue(new GitHubApiClient(null).requiresAuthoritativePullRequestHead());
     }
 
     @Test
     void getPullRequestHead_resolvesForkRepositoryAndBranch() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andExpect(method(HttpMethod.GET))
@@ -265,7 +236,7 @@ class GitHubApiClientTest {
     void getPullRequestHead_fillsCoordinatesFromFullNameOnly() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andRespond(withSuccess("""
@@ -283,7 +254,7 @@ class GitHubApiClientTest {
     void getPullRequestHead_rejectsBranchMismatch() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andRespond(withSuccess("""
@@ -302,7 +273,7 @@ class GitHubApiClientTest {
     void getPullRequestHead_rejectsMissingHeadRepository() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andRespond(withSuccess("{\"head\":{\"ref\":\"main\",\"sha\":\"abc123\"}}",

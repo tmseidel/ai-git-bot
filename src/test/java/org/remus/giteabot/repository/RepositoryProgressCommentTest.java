@@ -8,7 +8,6 @@ import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.github.GitHubApiClient;
 import org.remus.giteabot.gitlab.GitLabApiClient;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -114,12 +113,11 @@ class RepositoryProgressCommentTest {
         };
         RestClient.Builder builder = RestClient.builder().baseUrl(baseUrl);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        RepositoryCredentials credentials = RepositoryCredentials.of(baseUrl, baseUrl, "test-token");
         RestClient restClient = builder.build();
         RepositoryApiClient client = switch (provider) {
-            case GITHUB -> new GitHubApiClient(restClient, credentials);
-            case GITLAB -> new GitLabApiClient(restClient, credentials);
-            case BITBUCKET -> new BitbucketApiClient(restClient, credentials);
+            case GITHUB -> new GitHubApiClient(restClient);
+            case GITLAB -> new GitLabApiClient(restClient);
+            case BITBUCKET -> new BitbucketApiClient(restClient, baseUrl);
             default -> throw new IllegalArgumentException("Unexpected test provider: " + provider);
         };
         String createPath = switch (provider) {

@@ -2,14 +2,18 @@ package org.remus.giteabot.gitlab;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryProviderMetadata;
 import org.remus.giteabot.repository.RepositoryType;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.HttpCredentials;
+import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
+import java.util.function.Supplier;
 
 /**
  * Metadata and factory for GitLab repository integration.
@@ -56,8 +60,7 @@ public class GitLabProviderMetadata implements RepositoryProviderMetadata {
         return token;
     }
 
-    @Override
-    public RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
+    private RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
 
         log.debug("Building GitLab RestClient: apiUrl={}", apiUrl);
@@ -70,14 +73,17 @@ public class GitLabProviderMetadata implements RepositoryProviderMetadata {
     }
 
     @Override
-    public RepositoryCredentials createCredentials(GitIntegration integration, String decryptedToken) {
-        String apiUrl = resolveApiUrl(integration);
-        String cloneUrl = resolveCloneUrl(integration);
-        return RepositoryCredentials.of(apiUrl, cloneUrl, decryptedToken);
+    public HttpCredentials createHttpCredentials(GitIntegration integration, String decryptedToken) {
+        return new HttpCredentials(null, decryptedToken);
     }
 
     @Override
-    public RepositoryApiClient createClient(RestClient restClient, RepositoryCredentials credentials) {
-        return new GitLabApiClient(restClient, credentials);
+    public RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
+                                             HttpCredentials httpCredentials,
+                                             @Nullable Supplier<SshCredentials> sshCredentials) {
+        RestClient restClient = buildRestClient(integration, decryptedToken);
+        String cloneUrl = resolveCloneUrl(integration);
+        return new GitLabPlatform(resolveApiUrl(integration), cloneUrl, httpCredentials, sshCredentials,
+                new GitLabApiClient(restClient));
     }
 }

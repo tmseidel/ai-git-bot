@@ -15,7 +15,6 @@ import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestHead;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -43,27 +42,14 @@ public class GitLabApiClient implements RepositoryApiClient {
     private static final String SOURCE_BRANCH = "source_branch";
     private static final String DISCUSSION_PATH = "/api/v4/projects/{projectPath}/merge_requests/{iid}/discussions";
     private final RestClient gitlabRestClient;
-    private final RepositoryCredentials credentials;
 
     /**
-     * Creates a GitLabApiClient with the given RestClient and credentials.
+     * Creates a GitLabApiClient with the given RestClient.
      *
      * @param restClient  pre-configured RestClient pointing at the GitLab API base URL
-     * @param credentials the repository credentials (base URL, clone URL, token)
      */
-    public GitLabApiClient(RestClient restClient, RepositoryCredentials credentials) {
+    public GitLabApiClient(RestClient restClient) {
         this.gitlabRestClient = restClient;
-        this.credentials = credentials;
-    }
-
-    @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
-    }
-
-    @Override
-    public String formatPullRequestReference(Long prNumber) {
-        return "!" + prNumber;
     }
 
     @Override

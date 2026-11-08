@@ -1,9 +1,9 @@
 package org.remus.giteabot.prworkflow.unittest;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.validation.Workspace;
@@ -21,6 +21,8 @@ import org.remus.giteabot.prworkflow.unittest.runner.UnitTestRunner;
 import org.remus.giteabot.prworkflow.unittest.runner.UnitTestOutcome;
 import org.remus.giteabot.prworkflow.unittest.coverage.CoverageResult;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.nio.file.Path;
@@ -47,7 +49,15 @@ class UnitTestServiceTest {
     @Mock private UnitTestRunner runner;
     @Mock private UnitTestSuiteRepository suiteRepository;
     @Mock private WorkflowToolSurfaceFactory surfaceFactory;
-    @InjectMocks private UnitTestService service;
+    private RepositoryPlatform platform;
+    private UnitTestService service;
+
+    @BeforeEach
+    void setUp() {
+        platform = TestPlatforms.of(repositoryClient);
+        service = new UnitTestService(platform, aiClient, systemPrompt, workspaceService, frameworkDetector,
+                authorAgent, runner, suiteRepository, surfaceFactory);
+    }
 
     @Test
     void generate_passesPrNumberForForkSafeCheckoutFallback() {
@@ -58,14 +68,14 @@ class UnitTestServiceTest {
                 context, null, 1, 1, SuiteLifecycleMode.EPHEMERAL);
         when(repositoryClient.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff");
         when(workspaceService.prepareWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L))
+                platform, "acme", "repo", "feature/test", 42L))
                 .thenReturn(WorkspaceResult.failure("stop"));
 
         UnitTestService.Result result = service.generate(request);
 
         assertThat(result.status()).isEqualTo(UnitTestService.Result.Status.FAILED);
         verify(workspaceService).prepareWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L);
+                platform, "acme", "repo", "feature/test", 42L);
     }
 
     @Test
@@ -77,7 +87,7 @@ class UnitTestServiceTest {
                 context, null, 1, 1, SuiteLifecycleMode.COMMIT_TO_PR);
         when(repositoryClient.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff");
         when(workspaceService.preparePullRequestWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L,
+                platform, "acme", "repo", "feature/test", 42L,
                 PullRequestWorkspaceMode.PUSH_BACK))
                 .thenReturn(WorkspaceResult.failure("stop"));
 
@@ -85,7 +95,7 @@ class UnitTestServiceTest {
 
         assertThat(result.status()).isEqualTo(UnitTestService.Result.Status.FAILED);
         verify(workspaceService).preparePullRequestWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L,
+                platform, "acme", "repo", "feature/test", 42L,
                 PullRequestWorkspaceMode.PUSH_BACK);
     }
 
@@ -98,7 +108,7 @@ class UnitTestServiceTest {
                 context, UnitTestFramework.MAVEN, 1, 1, SuiteLifecycleMode.COMMIT_TO_PR);
         when(repositoryClient.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff");
         when(workspaceService.preparePullRequestWorkspace(
-                repositoryClient, "acme", "repo", "feature/test", 42L,
+                platform, "acme", "repo", "feature/test", 42L,
                 PullRequestWorkspaceMode.PUSH_BACK))
                 .thenReturn(WorkspaceResult.success(managedWorkspace));
         when(managedWorkspace.path()).thenReturn(workspace);

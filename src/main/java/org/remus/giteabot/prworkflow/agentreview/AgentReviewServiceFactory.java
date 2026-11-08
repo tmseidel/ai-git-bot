@@ -4,7 +4,7 @@ import lombok.RequiredArgsConstructor;
 
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
@@ -15,7 +15,7 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Component;
@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 public class AgentReviewServiceFactory {
 
     private final AiClientFactory aiClientFactory;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final PythonExecutionService pythonExecution;
     private final McpToolSelectionService mcpToolSelectionService;
     private final McpOrchestrationService mcpOrchestrationService;
@@ -42,7 +42,7 @@ public class AgentReviewServiceFactory {
             throw new IllegalStateException("Bot must have a system prompt assigned");
         }
         AiClient aiClient = aiClientFactory.getClient(bot.getAiIntegration());
-        RepositoryApiClient repoClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
         McpToolCatalog mcpToolCatalog = mcpToolSelectionService.filterCatalogForPrompt(
                 bot.getMcpConfiguration(),
                 mcpOrchestrationService.discoverTools(bot.getMcpConfiguration()));
@@ -50,7 +50,7 @@ public class AgentReviewServiceFactory {
         int contextWindowTokens = bot.getAiIntegration() != null
                 ? bot.getAiIntegration().getContextWindowTokens() : 200_000;
         AgentReviewContext context = new AgentReviewContext(
-                repoClient,
+                platform,
                 aiClient,
                 bot.getSystemPrompt().getReviewAgentSystemPrompt(),
                 bot.getGitIntegration().getUsername(),

@@ -11,7 +11,7 @@ import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
@@ -29,6 +29,8 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
@@ -74,7 +76,7 @@ class IssueTriageServiceTest {
     @Mock
     private AiClientFactory aiClientFactory;
     @Mock
-    private RepositoryApiClientFactory repositoryApiClientFactory;
+    private RepositoryPlatformFactory repositoryPlatformFactory;
     @Mock
     private AgentSessionService sessionService;
     @Mock
@@ -91,6 +93,7 @@ class IssueTriageServiceTest {
     private AiClient aiClient;
     @Mock
     private RepositoryApiClient repoClient;
+    private RepositoryPlatform platform;
 
     private IssueTriageService service;
     private Bot bot;
@@ -98,13 +101,15 @@ class IssueTriageServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new IssueTriageService(aiClientFactory, repositoryApiClientFactory, sessionService,
+        platform = TestPlatforms.of(repoClient);
+        service = new IssueTriageService(aiClientFactory, repositoryPlatformFactory, sessionService,
                 toolExecutionService, new ToolCatalog(new AgentConfigProperties()), workspaceService,
                 mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService,
                 new AgentConfigProperties(), null);
         lenient().when(aiClientFactory.getClient(any())).thenReturn(aiClient);
-        lenient().when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repoClient);
-        lenient().when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
+        lenient().when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repoClient);
+        lenient().when(repositoryPlatformFactory.getPlatform(any())).thenReturn(platform);
+        lenient().when(workspaceService.prepareWorkspace(eq(platform), anyString(), anyString(),
                 anyString(), any()))
                 .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/triage-ws"))));
         lenient().when(repoClient.getDefaultBranch("owner", "repo")).thenReturn("main");
@@ -332,7 +337,7 @@ class IssueTriageServiceTest {
 
     @Test
     void workspacePreparationFails_postsErrorCommentAndFails() {
-        when(workspaceService.prepareWorkspace(eq(repoClient), anyString(), anyString(),
+        when(workspaceService.prepareWorkspace(eq(platform), anyString(), anyString(),
                 anyString(), any()))
                 .thenReturn(WorkspaceResult.failure("disk full"));
 

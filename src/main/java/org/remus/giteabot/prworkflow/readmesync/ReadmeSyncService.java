@@ -1,6 +1,5 @@
 package org.remus.giteabot.prworkflow.readmesync;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
@@ -15,6 +14,7 @@ import org.remus.giteabot.prworkflow.WorkflowToolSurface;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.io.IOException;
@@ -45,7 +45,6 @@ import java.util.stream.Stream;
  * promotion is driven off the live workspace diff.</p>
  */
 @Slf4j
-@RequiredArgsConstructor
 public class ReadmeSyncService {
 
     static final int MAX_DIFF_CHARS_FOR_CONTEXT = 60_000;
@@ -53,6 +52,7 @@ public class ReadmeSyncService {
     static final int MAX_DOC_FILES_IN_CONTEXT = 40;
     static final int MAX_SINGLE_DOC_CHARS = 20_000;
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SystemPrompt systemPrompt;
@@ -60,6 +60,21 @@ public class ReadmeSyncService {
     private final ReadmeSyncAgent agent;
     /** Builds the run's tool surface (own tools + the bot's selected read-only catalogue tools). */
     private final WorkflowToolSurfaceFactory surfaceFactory;
+
+    public ReadmeSyncService(RepositoryPlatform repositoryPlatform,
+                             AiClient aiClient,
+                             SystemPrompt systemPrompt,
+                             WorkspaceService workspaceService,
+                             ReadmeSyncAgent agent,
+                             WorkflowToolSurfaceFactory surfaceFactory) {
+        this.repositoryPlatform = repositoryPlatform;
+        this.repositoryClient = repositoryPlatform.getClient();
+        this.aiClient = aiClient;
+        this.systemPrompt = systemPrompt;
+        this.workspaceService = workspaceService;
+        this.agent = agent;
+        this.surfaceFactory = surfaceFactory;
+    }
 
     /** Inputs resolved from the workflow params by {@link ReadmeSyncWorkflow}. */
     public record Request(PrWorkflowContext context,
@@ -125,10 +140,10 @@ public class ReadmeSyncService {
             context.requireActive("before preparing readme-sync workspace");
             WorkspaceResult ws = request.lifecycleMode() == SuiteLifecycleMode.COMMIT_TO_PR
                     ? workspaceService.preparePullRequestWorkspace(
-                            repositoryClient, owner, repo, headBranch, prNumber,
+                            repositoryPlatform, owner, repo, headBranch, prNumber,
                             PullRequestWorkspaceMode.PUSH_BACK)
                     : workspaceService.prepareWorkspace(
-                            repositoryClient, owner, repo, headBranch, prNumber);
+                            repositoryPlatform, owner, repo, headBranch, prNumber);
             if (!ws.success()) {
                 postComment(owner, repo, prNumber, ReadmeSyncSummaryRenderer.renderFailed(prNumber,
                         "failed to prepare workspace: " + ws.error()));

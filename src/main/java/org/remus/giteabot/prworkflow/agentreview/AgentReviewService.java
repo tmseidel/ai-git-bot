@@ -31,6 +31,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -121,6 +122,7 @@ public class AgentReviewService {
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final AgentToolRouter toolRouter;
@@ -145,7 +147,8 @@ public class AgentReviewService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = workspaceService;
         this.agentConfig = agentConfig;
-        this.repositoryClient = context.repositoryClient();
+        this.repositoryPlatform = context.repositoryPlatform();
+        this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = context.aiClient();
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog,
@@ -215,7 +218,7 @@ public class AgentReviewService {
                 progress.start();
             }
             WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber,
+                    repositoryPlatform, owner, repo, headBranch, prNumber,
                     PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
@@ -329,7 +332,7 @@ public class AgentReviewService {
                 progress.start();
             }
             WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber,
+                    repositoryPlatform, owner, repo, headBranch, prNumber,
                     PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for clarification on PR #{}: {}",

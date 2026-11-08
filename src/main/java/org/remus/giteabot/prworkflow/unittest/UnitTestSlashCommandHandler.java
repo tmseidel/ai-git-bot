@@ -3,7 +3,7 @@ package org.remus.giteabot.prworkflow.unittest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
@@ -38,7 +38,7 @@ public class UnitTestSlashCommandHandler {
 
     private final PrWorkflowOrchestrator orchestrator;
     private final WorkflowSelectionService selectionService;
-    private final RepositoryApiClientFactory repositoryClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /**
      * @return {@code true} when the comment was recognized as a unit-test
@@ -67,7 +67,7 @@ public class UnitTestSlashCommandHandler {
         addEyesReaction(bot, payload);
         log.info("[Bot '{}'] unit-test slash command '{}' detected, dispatching {} workflow",
                 bot.getName(), verb, UnitTestWorkflow.KEY);
-        PrPayloadHydrator.hydrate(payload, () -> repositoryClientFactory.getApiClient(bot.getGitIntegration()));
+        PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
         try {
             orchestrator.run(bot, payload, UnitTestWorkflow.KEY, Map.of());
         } catch (RuntimeException e) {
@@ -100,7 +100,7 @@ public class UnitTestSlashCommandHandler {
         String repo = payload.getRepository().getName();
         CommentId commentId = payload.getComment().getId();
         try {
-            RepositoryApiClient client = repositoryClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             client.addReaction(owner, repo, commentId, "eyes");
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to add 👀 reaction to comment #{}: {}",
