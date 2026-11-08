@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -64,12 +65,13 @@ class ReadmeSyncWritebackTest {
         client = mock(RepositoryApiClient.class, CALLS_REAL_METHODS);
         String remoteUrl = remote.toString();
         RepositoryPlatform platform = new RepositoryPlatform(remoteUrl, remoteUrl,
-                new HttpCredentials(null, ""), null, client) {
+                new HttpCredentials(null, ""), null, client, TestPlatforms.USER_TTL) {
             @Override
             public String getRepositoryRemote(String owner, String repo) {
                 return remoteUrl;
             }
         };
+        doReturn(TestPlatforms.USER).when(client).getAuthenticatedUser("acme");
         when(client.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff --git a/x b/x\n+changed");
         when(client.getPullRequestDetails("acme", "repo", 42L))
                 .thenReturn(Optional.of(details(PullRequestState.OPEN)));

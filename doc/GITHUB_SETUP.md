@@ -57,6 +57,7 @@ The bot authenticates against the GitHub API using a Personal Access Token.
 5. Select the following **scopes**:
    - ✅ `repo` — Full control of private repositories
    - ✅ `write:discussion` — Write access to discussions (optional)
+   - ✅ `user:email` — Read the account's e-mail addresses (optional, see [Commit author](#commit-author))
 6. Click **Generate token**
 7. **Copy the token immediately** — it will not be shown again
 
@@ -75,10 +76,25 @@ The bot authenticates against the GitHub API using a Personal Access Token.
      - ✅ `Issues`: Read and write
      - ✅ `Pull requests`: Read and write
      - ✅ `Metadata`: Read-only (required)
+   - **Account permissions:**
+     - ✅ `Email addresses`: Read-only (optional, see [Commit author](#commit-author))
 6. Click **Generate token**
 7. **Copy the token immediately** — it will not be shown again
 
 You'll enter this token when creating a **Git Integration** in the bot's web UI.
+
+### Commit author
+
+The bot commits under the bot account's name. For the e-mail address it uses, in this order:
+
+1. The account's public e-mail address (profile settings).
+2. The account's GitHub-provided `noreply` address, read from its e-mail addresses. This needs the
+   optional permission above.
+3. On github.com only, the documented `ID+USERNAME@users.noreply.github.com`. GitHub Enterprise
+   documents no `noreply` format, so nothing is guessed there.
+4. Otherwise `ai-agent@bot.local`, which GitHub does not link to the account.
+
+A private primary address is never used.
 
 ## 4. Configure Webhooks
 

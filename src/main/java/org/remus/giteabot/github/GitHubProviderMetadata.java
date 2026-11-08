@@ -13,6 +13,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -100,11 +102,18 @@ public class GitHubProviderMetadata implements RepositoryProviderMetadata {
     @Override
     public RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
                                              HttpCredentials httpCredentials,
-                                             @Nullable Supplier<SshCredentials> sshCredentials) {
+                                             @Nullable Supplier<SshCredentials> sshCredentials,
+                                             Duration userTtl) {
         RestClient restClient = buildRestClient(integration, decryptedToken);
         String cloneUrl = resolveCloneUrl(integration);
         return new GitHubPlatform(resolveApiUrl(integration), cloneUrl, httpCredentials, sshCredentials,
-                new GitHubApiClient(restClient));
+                new GitHubApiClient(restClient, isGitHubCom(cloneUrl)), userTtl);
+    }
+
+    /** Whether the web URL is github.com rather than a GitHub Enterprise instance. */
+    static boolean isGitHubCom(String webUrl) {
+        String host = URI.create(webUrl).getHost();
+        return host != null && host.equalsIgnoreCase("github.com");
     }
 }
 

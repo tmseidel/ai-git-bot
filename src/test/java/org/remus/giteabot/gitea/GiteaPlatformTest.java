@@ -1,6 +1,7 @@
 package org.remus.giteabot.gitea;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.http.MediaType;
@@ -16,7 +17,7 @@ class GiteaPlatformTest {
 
     private static GiteaPlatform httpPlatform(String cloneUrl) {
         return new GiteaPlatform("https://gitea.example.com", cloneUrl,
-                new HttpCredentials(null, "gitea-token"), null, new GiteaApiClient(null), null);
+                new HttpCredentials(null, "gitea-token"), null, new GiteaApiClient(null), null, TestPlatforms.USER_TTL);
     }
 
     @Test
@@ -55,7 +56,7 @@ class GiteaPlatformTest {
         String knownHosts = "gitea.example.com ssh-ed25519 host-key";
         GiteaPlatform platform = new GiteaPlatform("https://gitea.example.com", "https://gitea.example.com",
                 new HttpCredentials(null, "gitea-token"), () -> new SshCredentials("private-key", knownHosts),
-                new GiteaApiClient(builder.build()), knownHosts);
+                new GiteaApiClient(builder.build()), knownHosts, TestPlatforms.USER_TTL);
 
         assertThrows(IllegalStateException.class, () -> platform.getRepositoryRemote("owner", "repo"));
         server.verify();
@@ -65,7 +66,7 @@ class GiteaPlatformTest {
     void getRepositoryRemote_overHttpIgnoresThePinnedHosts() {
         GiteaPlatform platform = new GiteaPlatform("https://gitea.example.com", "https://gitea.example.com",
                 new HttpCredentials(null, "gitea-token"), null, new GiteaApiClient(null),
-                "other.example.com ssh-ed25519 host-key");
+                "other.example.com ssh-ed25519 host-key", TestPlatforms.USER_TTL);
 
         assertEquals("https://gitea.example.com/owner/repo.git", platform.getRepositoryRemote("owner", "repo"));
     }

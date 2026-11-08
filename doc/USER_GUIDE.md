@@ -266,7 +266,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
-     - For Azure DevOps: `https://dev.azure.com` (Services), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
+     - For Azure DevOps: `https://dev.azure.com` (Services, every organization the token can access), `https://dev.azure.com/yourorg` (Services, one organization), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
     - **Username**: The username of the Git account the bot acts as (e.g. `ai_bot`) — not an e-mail address or display name. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). It applies to every bot that uses this integration. For Bitbucket Cloud, enter the **Atlassian account email** instead (see below).
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.

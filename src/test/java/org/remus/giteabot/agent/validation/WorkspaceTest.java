@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
@@ -35,7 +36,7 @@ class WorkspaceTest {
         // The workspace keeps the credential-file reference even when no remote command
         // ran — exactly the situation of the first attempt in the branch-clone fallback.
         // Cleanup must remove the file and the private parent together.
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         Path credentials = workspace.createCredentialsFile(
                 "https://git.example.com/owner/repo.git", null, "test-token");
         assertThat(credentials).isNotNull();
@@ -65,7 +66,7 @@ class WorkspaceTest {
 
     @Test
     void gitRemote_rejectsAClosedWorkspace() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         workspace.setAuthentication("/tmp/remote", new HttpCredentials(null, ""), false);
         workspace.close();
 
@@ -77,7 +78,7 @@ class WorkspaceTest {
 
     @Test
     void git_rejectsAClosedWorkspace() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         workspace.close();
 
         CommandResult result = workspace.git(15, "status");
@@ -97,7 +98,7 @@ class WorkspaceTest {
 
     @Test
     void gitCommand_sshUsesIntegrationKeyAndPinnedHostKeys() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         RepositoryCredentials credentials =
                 new SshCredentials("private key", "gitea.example.com ssh-ed25519 host-key");
         workspace.createAuthenticationFiles("git@gitea.example.com:owner/repo.git", credentials);
@@ -125,7 +126,7 @@ class WorkspaceTest {
 
     @Test
     void createCredentialsFile_keepsTokenOutsideWorkspaceAndCleanupRemovesIt() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         Path directory = workspace.path();
 
         Path credentials = workspace.createCredentialsFile(
@@ -145,7 +146,7 @@ class WorkspaceTest {
 
     @Test
     void authenticationFile_preservesConfiguredUsernameWithUppercaseScheme() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         RepositoryCredentials credentials = new HttpCredentials("alice", "api-token");
 
         workspace.createAuthenticationFiles("HTTPS://bitbucket.org/owner/repo.git", credentials);
@@ -157,7 +158,7 @@ class WorkspaceTest {
 
     @Test
     void authorizationHeader_sendsTokenAsBasicHeaderWithoutCredentialStore() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         String remote = "https://dev.azure.com/org/project/_git/repo";
         RepositoryCredentials credentials =
                 new HttpCredentials(null, "pat");
@@ -181,7 +182,7 @@ class WorkspaceTest {
 
     @Test
     void authorizationHeader_notUsedByDefault() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         workspace.setAuthentication("https://git.example.com/owner/repo.git",
                 new HttpCredentials(null, "token"), false);
 
@@ -194,7 +195,7 @@ class WorkspaceTest {
 
     @Test
     void gitConfigArgs_usesExternalCredentialStore() throws IOException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         Path credentials = workspace.createCredentialsFile(
                 "https://git.example.com/owner/repo.git", null, "test-token");
 
@@ -300,7 +301,7 @@ class WorkspaceTest {
         try {
             assertThat(workspace.commitAndPush(branch, "docs: update", false)).isTrue();
             assertThat(runGitCapture(tempDir.resolve("remote"), "log", "-1", "--format=%an <%ae>|%cn <%ce>", branch))
-                    .isEqualTo("AI Agent <ai-agent@bot.local>|AI Agent <ai-agent@bot.local>");
+                    .isEqualTo("Bot <bot@example.com>|Bot <bot@example.com>");
             // The identity is not persisted into the workspace's repository config
             assertThat(runGitCapture(directory, "config", "user.name")).isEqualTo("Test User");
         } finally {
@@ -343,7 +344,7 @@ class WorkspaceTest {
 
     /** A managed workspace with an initial commit, already pushed to a bare {@code remote} in the temp dir. */
     private Workspace workspaceWithRemote() throws IOException, InterruptedException {
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
         Path directory = workspace.path();
         Files.createDirectories(directory);
         initGitRepository(directory);

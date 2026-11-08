@@ -1,6 +1,7 @@
 package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -25,7 +26,7 @@ class BitbucketPlatformTest {
                         """, MediaType.APPLICATION_JSON));
         BitbucketPlatform platform = new BitbucketPlatform("https://api.bitbucket.org/2.0", "https://bitbucket.org",
                 new HttpCredentials("x-bitbucket-api-token-auth", "bb_token"), null,
-                new BitbucketApiClient(builder.build(), "https://bitbucket.org"));
+                new BitbucketApiClient(builder.build(), "https://bitbucket.org"), TestPlatforms.USER_TTL);
 
         assertEquals(Optional.of("AI Bot"), platform.getBotMentionName());
         server.verify();

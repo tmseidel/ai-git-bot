@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.SshCredentials;
 
 import java.io.File;
@@ -38,10 +39,6 @@ import java.util.stream.Stream;
 @Slf4j
 public class Workspace implements AutoCloseable {
 
-    /** Git author and committer identity for commits the bot pushes. */
-    private static final String GIT_AUTHOR_NAME = "AI Agent";
-    private static final String GIT_AUTHOR_EMAIL = "ai-agent@bot.local";
-
     private static final String REPOSITORY_DIRECTORY_NAME = "repository";
     private static final String CLOSED_MESSAGE = "Workspace was already cleaned up";
 
@@ -56,6 +53,7 @@ public class Workspace implements AutoCloseable {
     private final Path directory;
     private final Path root;
     private final Consumer<Workspace> onCleanedUp;
+    private final RepositoryUser repositoryUser;
     private Path credentialsFile;
     private Path sshPrivateKeyFile;
     private Path sshKnownHostsFile;
@@ -65,17 +63,20 @@ public class Workspace implements AutoCloseable {
     private volatile boolean closed;
 
     /**
-     * @param root        the private temporary parent, which contains the repository directory
-     * @param onCleanedUp called once the directory is gone
+     * @param root           the private temporary parent, which contains the repository directory
+     * @param repositoryUser the commit identity
+     * @param onCleanedUp    called once the directory is gone
      */
-    Workspace(Path root, Consumer<Workspace> onCleanedUp) {
+    Workspace(Path root, RepositoryUser repositoryUser, Consumer<Workspace> onCleanedUp) {
         this.root = root;
+        this.repositoryUser = repositoryUser;
         this.directory = root.resolve(REPOSITORY_DIRECTORY_NAME);
         this.onCleanedUp = onCleanedUp;
     }
 
     private Workspace(Path directory) {
         this.root = null;
+        this.repositoryUser = null;
         this.directory = directory;
         this.onCleanedUp = workspace -> { };
     }
@@ -139,10 +140,10 @@ public class Workspace implements AutoCloseable {
         // user.*, author.* or committer.* entry the workspace's .git/config may contain.
         CommandResult commitResult = GitCommandRunner.run(directory.toFile(),
                 new String[]{"git", "commit", "-m", commitMessage}, 15, Map.of(
-                        "GIT_AUTHOR_NAME", GIT_AUTHOR_NAME,
-                        "GIT_AUTHOR_EMAIL", GIT_AUTHOR_EMAIL,
-                        "GIT_COMMITTER_NAME", GIT_AUTHOR_NAME,
-                        "GIT_COMMITTER_EMAIL", GIT_AUTHOR_EMAIL));
+                        "GIT_AUTHOR_NAME", repositoryUser.displayName(),
+                        "GIT_AUTHOR_EMAIL", repositoryUser.email(),
+                        "GIT_COMMITTER_NAME", repositoryUser.displayName(),
+                        "GIT_COMMITTER_EMAIL", repositoryUser.email()));
         if (!commitResult.success()) {
             // "nothing to commit" is not a real error
             if (commitResult.output().contains("nothing to commit")) {

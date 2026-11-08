@@ -5,6 +5,7 @@ import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /** The platform of a Gitea integration. */
@@ -22,8 +23,9 @@ public class GiteaPlatform extends RepositoryPlatform {
                          HttpCredentials httpCredentials,
                          @Nullable Supplier<SshCredentials> sshCredentials,
                          GiteaApiClient client,
-                         @Nullable String sshKnownHosts) {
-        super(baseUrl, cloneUrl, httpCredentials, sshCredentials, client);
+                         @Nullable String sshKnownHosts,
+                         Duration userTtl) {
+        super(baseUrl, cloneUrl, httpCredentials, sshCredentials, client, userTtl);
         this.giteaClient = client;
         this.sshKnownHosts = sshKnownHosts;
     }

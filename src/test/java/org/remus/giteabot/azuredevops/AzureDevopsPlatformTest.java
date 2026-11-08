@@ -1,6 +1,7 @@
 package org.remus.giteabot.azuredevops;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.web.client.RestClient;
@@ -14,7 +15,7 @@ class AzureDevopsPlatformTest {
     private static AzureDevopsPlatform platform(String cloneUrl) {
         return new AzureDevopsPlatform("https://dev.azure.com", cloneUrl,
                 new HttpCredentials(null, "ado_pat"), null,
-                new AzureDevopsApiClient(RestClient.builder().build(), "https://dev.azure.com", null));
+                new AzureDevopsApiClient(RestClient.builder().build(), "https://dev.azure.com", null), TestPlatforms.USER_TTL);
     }
 
     @Test
@@ -57,7 +58,7 @@ class AzureDevopsPlatformTest {
     void getRepositoryRemote_rejectsSsh() {
         AzureDevopsPlatform platform = new AzureDevopsPlatform("https://dev.azure.com", "https://dev.azure.com",
                 new HttpCredentials(null, "ado_pat"), () -> new SshCredentials("key", "known-hosts"),
-                new AzureDevopsApiClient(RestClient.builder().build(), "https://dev.azure.com", null));
+                new AzureDevopsApiClient(RestClient.builder().build(), "https://dev.azure.com", null), TestPlatforms.USER_TTL);
 
         assertThrows(IllegalStateException.class,
                 () -> platform.getRepositoryRemote("contoso", "MyProject/my-service"));

@@ -3,6 +3,8 @@ package org.remus.giteabot.agent.validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.repository.model.RepositoryUser;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.HttpCredentials;
 
@@ -121,8 +123,8 @@ class GitDiffServiceTest {
     void diffCommits_returnsNullAndCleansUpWhenGitInitFails() throws Exception {
         WorkspaceService failingInit = new WorkspaceService(workspaces.toString(), 60) {
             @Override
-            Workspace newWorkspace(Path workspaceRoot, Consumer<Workspace> onCleanedUp) {
-                return new Workspace(workspaceRoot, onCleanedUp) {
+            Workspace newWorkspace(Path workspaceRoot, RepositoryUser repositoryUser, Consumer<Workspace> onCleanedUp) {
+                return new Workspace(workspaceRoot, repositoryUser, onCleanedUp) {
                     @Override
                     CommandResult init() {
                         return new CommandResult(false, "init failed");

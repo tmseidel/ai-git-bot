@@ -1,11 +1,12 @@
 package org.remus.giteabot.repository;
 
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
-import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.PullRequestState;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
@@ -29,6 +30,18 @@ import java.util.Optional;
  * {@link org.remus.giteabot.admin.RepositoryPlatformFactory}.
  */
 public interface RepositoryApiClient {
+
+    // ---- Authenticated account ----
+
+    /**
+     * Fetches the account this client's token authenticates as. The account is the same for every
+     * owner; {@code owner} only says where to ask. Only Azure DevOps needs that: an integration on
+     * {@code https://dev.azure.com} serves many organizations, and a token scoped to some of them can
+     * only be identified inside one of those. Every other provider ignores {@code owner}. Callers
+     * should go through {@link RepositoryPlatform#getUser(String)}, which caches the result for a
+     * limited time.
+     */
+    RepositoryUser getAuthenticatedUser(String owner);
 
     // ---- Pull request operations ----
 

@@ -1,5 +1,9 @@
 package org.remus.giteabot.bitbucket;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+import org.springframework.http.HttpStatus;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
@@ -175,5 +179,55 @@ class BitbucketApiClientTest {
         assertEquals(1, comments.size());
         assertEquals(301, ((Number) comments.getFirst().get("id")).intValue());
         assertInstanceOf(Map.class, comments.getFirst().get("content"));
+    }
+
+    @Test
+    void getAuthenticatedUser_usesThePrimaryEmailAsUsername() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"nickname\":\"ai-bot\","
+                        + "\"display_name\":\"AI Bot\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withSuccess("{\"values\":[{\"email\":\"old@example.com\",\"is_primary\":false},"
+                        + "{\"email\":\"bot@example.com\",\"is_primary\":true}]}", MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new BitbucketApiClient(builder.build(), CLONE_URL).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("557058:abc", "bot@example.com", "AI Bot", "bot@example.com"), user);
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackWhenTheTokenMayNotReadTheEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"display_name\":\"AI Bot\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new BitbucketApiClient(builder.build(), CLONE_URL).getAuthenticatedUser("owner");
+
+        assertEquals("557058:abc", user.username());
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackWhenTheEmailCannotBeRead() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"display_name\":\"AI Bot\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        RepositoryUser user = new BitbucketApiClient(builder.build(), CLONE_URL).getAuthenticatedUser("owner");
+
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
     }
 }

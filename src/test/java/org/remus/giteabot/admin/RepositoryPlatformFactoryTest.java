@@ -4,7 +4,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.gitea.GiteaApiClient;
@@ -18,6 +17,7 @@ import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,19 +43,19 @@ class RepositoryPlatformFactoryTest {
     @Mock
     private RestClient restClient;
 
-    @InjectMocks
     private RepositoryPlatformFactory factory;
 
     @BeforeEach
     void setUp() {
+        factory = new RepositoryPlatformFactory(integrationService, providerRegistry, Duration.ofMinutes(5));
         when(providerRegistry.getProvider(RepositoryType.GITEA)).thenReturn(provider);
         lenient().when(provider.createHttpCredentials(any(), anyString())).thenAnswer(invocation ->
                 new HttpCredentials(null, invocation.getArgument(1)));
-        when(provider.createPlatform(any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(provider.createPlatform(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             GitIntegration integration = invocation.getArgument(0);
             return new GiteaPlatform(integration.getUrl(), integration.getUrl(),
                     invocation.getArgument(2), invocation.getArgument(3), new GiteaApiClient(restClient),
-                    integration.getSshKnownHosts());
+                    integration.getSshKnownHosts(), invocation.getArgument(4));
         });
     }
 
@@ -159,7 +159,7 @@ class RepositoryPlatformFactoryTest {
 
         assertThat(first).isNotSameAs(second);
         ArgumentCaptor<HttpCredentials> httpCredentials = ArgumentCaptor.forClass(HttpCredentials.class);
-        verify(provider, times(2)).createPlatform(eq(integration), eq("new-token"), httpCredentials.capture(), isNull());
+        verify(provider, times(2)).createPlatform(eq(integration), eq("new-token"), httpCredentials.capture(), isNull(), any());
         assertThat(httpCredentials.getValue()).isEqualTo(new HttpCredentials(null, "new-token"));
         verify(integrationService, never()).decryptToken(any());
         verify(integrationService, never()).decryptSshPrivateKey(any());

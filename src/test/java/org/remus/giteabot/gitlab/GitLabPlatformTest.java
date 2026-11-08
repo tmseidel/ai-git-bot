@@ -1,6 +1,7 @@
 package org.remus.giteabot.gitlab;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 
@@ -11,7 +12,7 @@ class GitLabPlatformTest {
 
     private final GitLabPlatform platform = new GitLabPlatform("https://gitlab.example.com",
             "https://gitlab.example.com", new HttpCredentials(null, "glpat-token"), null,
-            new GitLabApiClient(null));
+            new GitLabApiClient(null), TestPlatforms.USER_TTL);
 
     @Test
     void formatPullRequestReference_usesMergeRequestPrefix() {
@@ -24,7 +25,7 @@ class GitLabPlatformTest {
         // later with an unrelated authentication error.
         GitLabPlatform ssh = new GitLabPlatform("https://gitlab.example.com", "https://gitlab.example.com",
                 new HttpCredentials(null, "glpat-token"), () -> new SshCredentials("key", "known-hosts"),
-                new GitLabApiClient(null));
+                new GitLabApiClient(null), TestPlatforms.USER_TTL);
 
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> ssh.getRepositoryRemote("group", "project"));

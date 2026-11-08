@@ -65,11 +65,18 @@ public record AzureDevopsAddress(String organization, String project, String nam
      *       the hostname, so without it a host like {@code tfs.example.com} serving a
      *       collection named {@code tfs} would wrongly look already-scoped.</li>
      *   <li>the organization as the URL path's last segment — an Azure DevOps Server
-     *       collection, and also the {@code https://dev.azure.com/contoso} misconfiguration
-     *       the setup guide warns against, which this makes harmless.</li>
+     *       collection, or {@code https://dev.azure.com/contoso} for a single organization.</li>
      * </ul>
      */
     public boolean isOrganizationScopedBy(String url) {
+        return isOrganizationScopedBy(url, organization);
+    }
+
+    /**
+     * Whether {@code url} already scopes {@code organization}, for callers holding only an
+     * organization rather than a full address. See {@link #isOrganizationScopedBy(String)}.
+     */
+    public static boolean isOrganizationScopedBy(String url, String organization) {
         if (url == null || url.isBlank() || organization == null || organization.isBlank()) {
             return false;
         }

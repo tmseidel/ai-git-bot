@@ -5,6 +5,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -75,7 +76,8 @@ public class WorkspaceService {
 
         Workspace workspace = null;
         try {
-            workspace = createWorkspace();
+            final RepositoryUser repositoryUser = platform.getUser(owner);
+            workspace = createWorkspace(repositoryUser);
             Path workspaceDir = workspace.path();
             log.info("Cloning repository to {} for workspace", workspaceDir);
 
@@ -101,7 +103,7 @@ public class WorkspaceService {
                 if (!workspace.cleanup()) {
                     return WorkspaceResult.failure("Failed to clean up the initial clone attempt");
                 }
-                workspace = createWorkspace();
+                workspace = createWorkspace(repositoryUser);
                 workspaceDir = workspace.path();
                 workspace.setAuthentication(repositoryRemote, credentials, usesAuthorizationHeader);
 
@@ -271,7 +273,7 @@ public class WorkspaceService {
     Workspace createEmptyWorkspace(RepositoryPlatform platform, String owner, String repo)
             throws IOException {
         CheckoutConfig checkout = resolveCheckout(platform, owner, repo);
-        Workspace workspace = createWorkspace();
+        Workspace workspace = createWorkspace(platform.getUser(owner));
         try {
             workspace.setAuthentication(checkout.remote(), checkout.credentials(), checkout.usesAuthorizationHeader());
             CommandResult init = workspace.init();
@@ -325,8 +327,10 @@ public class WorkspaceService {
 
     /**
      * Creates a new workspace with a private temporary parent.
+     *
+     * @param repositoryUser the commit identity
      */
-    Workspace createWorkspace() throws IOException {
+    Workspace createWorkspace(RepositoryUser repositoryUser) throws IOException {
         retryFailedCleanups();
         Path workspaceRoot;
         if (workspaceBaseDir == null) {
@@ -335,7 +339,7 @@ public class WorkspaceService {
             Files.createDirectories(workspaceBaseDir);
             workspaceRoot = Files.createTempDirectory(workspaceBaseDir, "agent-workspace-");
         }
-        Workspace workspace = newWorkspace(workspaceRoot, workspaces::remove);
+        Workspace workspace = newWorkspace(workspaceRoot, repositoryUser, workspaces::remove);
         workspaces.add(workspace);
         try {
             Workspace.restrictToOwner(workspaceRoot, true);
@@ -346,8 +350,9 @@ public class WorkspaceService {
         }
     }
 
-    Workspace newWorkspace(Path workspaceRoot, Consumer<Workspace> onCleanedUp) {
-        return new Workspace(workspaceRoot, onCleanedUp);
+    Workspace newWorkspace(Path workspaceRoot, RepositoryUser repositoryUser,
+                           Consumer<Workspace> onCleanedUp) {
+        return new Workspace(workspaceRoot, repositoryUser, onCleanedUp);
     }
 
     private void retryFailedCleanups() {

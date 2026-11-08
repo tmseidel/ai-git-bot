@@ -128,7 +128,7 @@ The minimum required scopes for the API token:
 
 | Scope | Required For |
 |-------|--------------|
-| `read:user:bitbucket` | Resolving the bot's own account (reviewer/mention detection, ignoring own comments) |
+| `read:user:bitbucket` | Resolving the bot's own account and e-mail address (reviewer/mention detection, ignoring own comments, linking commits to its profile; without access to the e-mail address, the bot commits as `ai-agent@bot.local`) |
 | `read:repository:bitbucket` | Fetching PR diffs, reading file contents, cloning |
 | `write:repository:bitbucket` | Pushing commits from PR workflows (e.g. generated tests) |
 | `read:pullrequest:bitbucket` | Reading PR information and comments |

@@ -7,6 +7,7 @@ import org.remus.giteabot.gitea.model.GiteaPullRequest;
 import org.remus.giteabot.gitea.model.GiteaReview;
 import org.remus.giteabot.gitea.model.GiteaReviewComment;
 import org.remus.giteabot.gitea.model.GiteaTree;
+import org.remus.giteabot.gitea.model.GiteaUser;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
@@ -16,10 +17,11 @@ import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -138,13 +140,16 @@ public class GiteaApiClient implements RepositoryApiClient {
 
     /** Returns the immutable ID of the user authenticated by this client's token. */
     public long getCurrentUserId() {
-        Map<String, Object> user = giteaRestClient.get().uri("/api/v1/user")
-                .retrieve().body(new ParameterizedTypeReference<>() {});
-        Object id = user == null ? null : user.get("id");
-        if (id instanceof Number userId && userId.longValue() > 0) {
-            return userId.longValue();
-        }
-        throw new IllegalStateException("Gitea did not provide the authenticated user's ID");
+        return fetchAuthenticatedUser().getId();
+    }
+
+    @Override
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        return fetchAuthenticatedUser().toGitUser();
+    }
+
+    private GiteaUser fetchAuthenticatedUser() {
+        return giteaRestClient.get().uri("/api/v1/user").retrieve().body(GiteaUser.class);
     }
 
     /** Returns all SSH key IDs with the exact title, across paginated user keys. */
