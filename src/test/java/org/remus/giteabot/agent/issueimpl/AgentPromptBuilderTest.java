@@ -115,19 +115,55 @@ class AgentPromptBuilderTest {
     }
 
     @Test
-    void buildContinuationPrompt_returnsCommentAsIs() {
-        String result = builder.buildContinuationPrompt("Please fix the typo");
-        assertThat(result).isEqualTo("Please fix the typo");
-    }
-
-    @Test
     void buildContinuationPrompt_withIssueComments_includesDiscussionContext() {
-        String result = builder.buildContinuationPrompt("Please continue", "Comment by alice: original clarification");
+        String result = builder.buildContinuationPrompt(null, null,
+                "Please continue", "Comment by alice: original clarification");
 
         assertThat(result).contains("## New User Comment");
         assertThat(result).contains("Please continue");
         assertThat(result).contains("## Current Issue Comments");
         assertThat(result).contains("original clarification");
+    }
+
+    @Test
+    void buildContinuationPrompt_withIssue_statesTheTaskBeforeTheDiscussion() {
+        String result = builder.buildContinuationPrompt(
+                "Add pagination", "Acceptance: page size 20, offset 0-based",
+                "Please continue", "### Comment 1 by alice\nLooks good so far");
+
+        assertThat(result).contains("**Title**: Add pagination");
+        assertThat(result).contains("Acceptance: page size 20, offset 0-based");
+        assertThat(result).contains("Please continue");
+        assertThat(result).contains("Looks good so far");
+        // A prompt that has to be cut must lose discussion, never the task.
+        assertThat(result.indexOf("## Issue")).isLessThan(result.indexOf("## New User Comment"));
+        assertThat(result.indexOf("## New User Comment"))
+                .isLessThan(result.indexOf("## Current Issue Comments"));
+    }
+
+    @Test
+    void buildContinuationPrompt_truncatesALongIssueBodyButKeepsTheComment() {
+        AgentConfigProperties.ContextConfig contextConfig = new AgentConfigProperties.ContextConfig();
+        contextConfig.setMaxSingleIssueCommentChars(20);
+        AgentPromptBuilder limitedBuilder = new AgentPromptBuilder(contextConfig);
+        String longBody = "Specification ".repeat(20);
+
+        String result = limitedBuilder.buildContinuationPrompt(
+                "Add pagination", longBody, "Please continue", "### Comment 1 by alice\nok");
+
+        assertThat(result).contains("...(comment truncated)");
+        assertThat(result).doesNotContain(longBody);
+        assertThat(result).contains("Please continue");
+        assertThat(result).contains("## Current Issue Comments");
+    }
+
+    @Test
+    void buildContinuationPrompt_withoutIssue_keepsTheDiscussionOnlyPrompt() {
+        String result = builder.buildContinuationPrompt(null, null,
+                "Please continue", "### Comment 1 by alice\nok");
+
+        assertThat(result).doesNotContain("## Issue");
+        assertThat(result).startsWith("## New User Comment");
     }
 
     @Test

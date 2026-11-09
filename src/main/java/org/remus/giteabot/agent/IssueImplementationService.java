@@ -437,7 +437,12 @@ public class IssueImplementationService {
 
         String systemPrompt = resolveAgentSystemPrompt();
         String issueCommentsContext = fetchIssueCommentsContext(owner, repo, threadNumber);
-        String userMessage  = promptBuilder.buildContinuationPrompt(commentBody, issueCommentsContext);
+        // The specification is not part of the persisted history, so after a compaction a
+        // follow-up would carry the whole discussion and no task at all. Re-read the issue the
+        // session implements — not the PR the comment may sit on — on every follow-up.
+        String userMessage  = promptBuilder.buildContinuationPrompt(
+                session.getIssueTitle(), fetchIssueBody(owner, repo, issueNumber),
+                commentBody, issueCommentsContext);
 
         log.info("Requesting AI to continue implementation for issue #{}", issueNumber);
         // The branch, the commit and the context belong to the issue; the replies stay on the
@@ -505,6 +510,24 @@ public class IssueImplementationService {
     }
 
     // ---- helpers ---------------------------------------------------------
+
+    /**
+     * Body of the issue a session implements, for the follow-up prompt. Best effort: a provider
+     * that cannot answer leaves the specification block empty instead of failing the run.
+     */
+    private String fetchIssueBody(String owner, String repo, Long issueNumber) {
+        if (issueNumber == null) {
+            return "";
+        }
+        try {
+            Map<String, Object> details = repositoryClient.getIssueDetails(owner, repo, issueNumber);
+            Object body = details != null ? details.get("body") : null;
+            return body != null ? body.toString() : "";
+        } catch (Exception e) {
+            log.warn("Failed to fetch issue #{} for the follow-up prompt: {}", issueNumber, e.getMessage());
+            return "";
+        }
+    }
 
     private String fetchIssueCommentsContext(String owner, String repo, Long issueNumber) {
         try {
