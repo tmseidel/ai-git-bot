@@ -915,6 +915,8 @@ class IssueImplementationServiceTest {
         WebhookPayload payload = createCommentPayload("Please finish the implementation", 261L);
 
         AgentSession session = new AgentSession("testowner", "testrepo", 260L, "Add new feature X");
+        // No branch yet, so this run has to create one; the pull request already exists, so it
+        // must not open a second one.
         session.setPrNumber(261L);
         session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
 
@@ -955,11 +957,74 @@ class IssueImplementationServiceTest {
         verify(workspace).commitAndPush(eq("ai-agent/issue-260"), commitMessage.capture(), eq(true));
         assertThat(commitMessage.getValue()).contains("#260").doesNotContain("#261");
         verify(sessionService).setBranchName(session, "ai-agent/issue-260");
-        // The reply stays on the thread the user commented in.
+        // The reply stays on the thread the user commented in — including the progress
+        // comments the strategy posts while the tools run.
         verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(261L),
                 contains("additional changes"));
+        verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(261L),
+                contains("🔧 **Tool Execution**"));
         verify(repositoryClient, never()).postIssueComment(eq("testowner"), eq("testrepo"),
                 eq(260L), anyString());
+    }
+
+    /**
+     * A follow-up that runs before the pull request exists. The branch, the commit and the pull
+     * request this run opens all name the issue, while the replies stay on the thread the comment
+     * arrived on.
+     */
+    @Test
+    void handleIssueComment_beforeThePullRequestExists_opensItForTheIssue() {
+        WebhookPayload payload = createCommentPayload("Please finish the implementation", 260L);
+
+        AgentSession session = new AgentSession("testowner", "testrepo", 260L, "Add new feature X");
+        session.setStatus(AgentSession.AgentSessionStatus.IN_PROGRESS);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 260L)).thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 260L)).thenReturn(List.of());
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(new ArrayList<>(List.of(
+                AiMessage.builder().role("user").content("Please finish the implementation").build())));
+        when(workspaceService.prepareWorkspace(eq(repositoryPlatform), eq("testowner"), eq("testrepo"),
+                eq("main"), isNull())).thenReturn(WorkspaceResult.success(workspace));
+
+        String implResponse = """
+                ```json
+                {
+                  "summary": "Implemented",
+                  "runTools": [
+                    {"id": "pr-001", "tool": "patch-file", "args": ["src/F.java", "old", "new"]},
+                    {"id": "pr-002", "tool": "mvn", "args": ["compile"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn(implResponse);
+        when(toolExecutionService.executeFileTool(any(), any(), any()))
+                .thenReturn(new ToolResult(true, 0, "ok", ""));
+        when(toolExecutionService.executeTool(any(), any(), any()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspace.commitAndPush(eq("ai-agent/issue-260"), anyString(), eq(true))).thenReturn(true);
+        when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
+                anyString(), anyString())).thenReturn(261L);
+
+        service.handleIssueComment(payload);
+
+        verify(sessionService).setBranchName(session, "ai-agent/issue-260");
+        verify(workspace).commitAndPush(eq("ai-agent/issue-260"),
+                contains("follow-up for #260"), eq(true));
+        // The pull request this run opens is the issue's, not the number the comment came from.
+        ArgumentCaptor<String> prTitle = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> prBody = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient).createPullRequest(eq("testowner"), eq("testrepo"),
+                prTitle.capture(), prBody.capture(), eq("ai-agent/issue-260"), eq("main"));
+        assertThat(prTitle.getValue()).contains("fixes #260").doesNotContain("#261");
+        assertThat(prBody.getValue()).contains("#260");
+        verify(sessionService).setPrNumber(session, 261L);
+        // Everything the run says lands on the thread the comment came from.
+        verify(repositoryClient, never()).postIssueComment(anyString(), anyString(),
+                eq(261L), anyString());
     }
 
     /**

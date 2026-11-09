@@ -213,9 +213,10 @@ public class IssueImplementationService {
         // by SystemPromptAssembler in LEGACY mode / advertised via the function-calling
         // API in NATIVE mode), so the implementation prompt no longer duplicates them.
         log.info("Starting implementation loop for issue #{}", issueNumber);
+        AgentRunContext ctx = AgentRunContext.forIssue(
+                session, owner, repo, issueNumber, workspace, baseBranch);
         ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                session, implementationPrompt, systemPrompt, workspace, owner, repo, issueNumber,
-                issueNumber, baseBranch);
+                ctx, implementationPrompt, systemPrompt);
         boolean implementationSucceeded = implementationResult.success();
 
         // Answer-only run: the issue needed no repository change. Publish the
@@ -300,13 +301,15 @@ public class IssueImplementationService {
      * {@link CodingAgentStrategy}; this method just wires up the {@link AgentLoop}
      * with that strategy and the per-run context.
      *
+     * @param ctx         the per-run context, built by the caller with
+     *                    {@link AgentRunContext#forIssue} or {@link AgentRunContext#forFollowUp}
+     *                    so that the run's naming and comment placement are decided where the run
+     *                    is started
      * @param userMessage the next user turn to kick off this loop (will be appended to the session)
      * @return success flag plus the branch finally selected for context lookups
      */
     private ToolImplementationLoopResult runToolImplementationLoop(
-            AgentSession session, String userMessage, String systemPrompt,
-            Workspace workspace, String owner, String repo, Long issueNumber,
-            Long commentTargetNumber, String initialContextBranch) {
+            AgentRunContext ctx, String userMessage, String systemPrompt) {
 
         CodingAgentStrategy strategy = new CodingAgentStrategy(
                 systemPrompt,
@@ -336,8 +339,6 @@ public class IssueImplementationService {
                 budgetCfg.getMaxToolResultChars(), budgetCfg.getMaxHistoryChars(),
                 contextWindowTokens, budgetCfg.getProactiveCompactionThreshold());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(
-                session, owner, repo, issueNumber, commentTargetNumber, workspace, initialContextBranch);
         LoopOutcome outcome = loop.run(ctx, userMessage, strategy);
         // The strategy returns the final ImplementationPlan as the outcome payload.
         // Read it from here rather than from the (detached) session object, whose
@@ -439,10 +440,13 @@ public class IssueImplementationService {
         String userMessage  = promptBuilder.buildContinuationPrompt(commentBody, issueCommentsContext);
 
         log.info("Requesting AI to continue implementation for issue #{}", issueNumber);
+        // The branch, the commit and the context belong to the issue; the replies stay on the
+        // thread the comment arrived on, which is the pull request when it is one.
+        AgentRunContext ctx = AgentRunContext.forFollowUp(
+                session, owner, repo, issueNumber, threadNumber, workspace, workingBranch);
         // runToolImplementationLoop handles: AI call, context rounds, tool execution, retries
         ToolImplementationLoopResult implementationResult = runToolImplementationLoop(
-                session, userMessage, systemPrompt, workspace, owner, repo, issueNumber,
-                threadNumber, workingBranch);
+                ctx, userMessage, systemPrompt);
         boolean success = implementationResult.success();
         String selectedContextBranch = implementationResult.selectedBranch();
 

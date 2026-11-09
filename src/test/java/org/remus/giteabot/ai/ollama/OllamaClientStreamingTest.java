@@ -238,7 +238,7 @@ class OllamaClientStreamingTest {
                 .thenReturn(new ToolResult(true, 0, "class Example {}", ""));
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("sys", router, new ToolCatalog(new AgentConfigProperties()),
                 null, Set.of("cat"), null, null, null, 1);
-        AgentRunContext context = new AgentRunContext(null, "owner", "repo", 1L, null, "main");
+        AgentRunContext context = AgentRunContext.forIssue(null, "owner", "repo", 1L, null, "main");
 
         StepDecision decision = strategy.step(context, turn, 1);
 
@@ -314,7 +314,7 @@ class OllamaClientStreamingTest {
         AgentToolRouter router = mock(AgentToolRouter.class);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("sys", router, new ToolCatalog(new AgentConfigProperties()),
                 null, Set.of(), null, null, null, 1);
-        AgentRunContext context = new AgentRunContext(null, "owner", "repo", 1L, null, "main");
+        AgentRunContext context = AgentRunContext.forIssue(null, "owner", "repo", 1L, null, "main");
 
         StepDecision.Finish decision = assertInstanceOf(StepDecision.Finish.class, strategy.step(context, turn, 1));
 

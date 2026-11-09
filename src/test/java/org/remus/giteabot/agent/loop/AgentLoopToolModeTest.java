@@ -43,7 +43,7 @@ class AgentLoopToolModeTest {
     @BeforeEach
     void setUp() {
         AgentSession session = new AgentSession("owner", "repo", 7L, "title");
-        ctx = new AgentRunContext(session, "owner", "repo", 7L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        ctx = AgentRunContext.forIssue(session, "owner", "repo", 7L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
 

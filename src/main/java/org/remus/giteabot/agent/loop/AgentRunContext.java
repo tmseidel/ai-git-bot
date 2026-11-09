@@ -5,6 +5,7 @@ import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 
 import org.remus.giteabot.agent.validation.Workspace;
+import java.util.Objects;
 import java.util.function.Consumer;
 
 /**
@@ -30,28 +31,53 @@ public final class AgentRunContext {
     @Setter
     private Consumer<ProgressUpdate> progressConsumer;
 
-    public AgentRunContext(AgentSession session, String owner, String repo,
-                           Long issueNumber, Workspace workspace, String baseBranch) {
-        this(session, owner, repo, issueNumber, issueNumber, workspace, baseBranch);
-    }
-
-    /**
-     * @param issueNumber          the issue this run implements — names the branch, the commit and
-     *                             every log line
-     * @param commentTargetNumber  where the run's comments go. Equal to the issue number except on a
-     *                             follow-up, which starts from a comment on the pull request: the
-     *                             reader is watching that thread, so the progress stays there.
-     */
-    public AgentRunContext(AgentSession session, String owner, String repo,
-                           Long issueNumber, Long commentTargetNumber,
-                           Workspace workspace, String baseBranch) {
+    private AgentRunContext(AgentSession session, String owner, String repo,
+                            Long issueNumber, Long commentTargetNumber,
+                            Workspace workspace, String baseBranch) {
         this.session = session;
         this.owner = owner;
         this.repo = repo;
         this.issueNumber = issueNumber;
-        this.commentTargetNumber = commentTargetNumber != null ? commentTargetNumber : issueNumber;
+        this.commentTargetNumber = commentTargetNumber;
         this.workspace = workspace;
         this.baseBranch = baseBranch;
+    }
+
+    /**
+     * Context for a run that implements the issue: the branch, the commit message, the pull
+     * request and the run's own comments all name that issue.
+     */
+    public static AgentRunContext forIssue(AgentSession session, String owner, String repo,
+                                           Long issueNumber, Workspace workspace, String baseBranch) {
+        return new AgentRunContext(session, owner, repo, issueNumber, issueNumber, workspace, baseBranch);
+    }
+
+    /**
+     * Context for a follow-up run, which starts from a comment on the pull request.
+     *
+     * @param issueNumber         the issue this run implements — names the branch, the commit and
+     *                            every log line
+     * @param commentTargetNumber where the run's comments go: the thread the comment arrived on.
+     *                            Equal to the issue number unless the comment was posted on the
+     *                            pull request, whose reader is watching that thread instead.
+     */
+    public static AgentRunContext forFollowUp(AgentSession session, String owner, String repo,
+                                              Long issueNumber, Long commentTargetNumber,
+                                              Workspace workspace, String baseBranch) {
+        return new AgentRunContext(session, owner, repo, issueNumber,
+                Objects.requireNonNull(commentTargetNumber, "commentTargetNumber"),
+                workspace, baseBranch);
+    }
+
+    /**
+     * Context for a run whose subject is the pull request itself, such as a review. The number it
+     * names and the thread its comments go to are the same one.
+     */
+    public static AgentRunContext forPullRequest(AgentSession session, String owner, String repo,
+                                                 Long pullRequestNumber, Workspace workspace,
+                                                 String baseBranch) {
+        return new AgentRunContext(session, owner, repo, pullRequestNumber, pullRequestNumber,
+                workspace, baseBranch);
     }
 
     public AgentSession session() { return session; }

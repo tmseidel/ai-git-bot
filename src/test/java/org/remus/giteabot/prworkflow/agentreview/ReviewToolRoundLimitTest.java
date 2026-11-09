@@ -33,7 +33,7 @@ class ReviewToolRoundLimitTest {
     @Mock
     private RepositoryApiClient repositoryClient;
 
-    private final AgentRunContext context = new AgentRunContext(null, "owner", "repo", 1L, null, "main");
+    private final AgentRunContext context = AgentRunContext.forPullRequest(null, "owner", "repo", 1L, null, "main");
 
     @BeforeEach
     void setUp() {
