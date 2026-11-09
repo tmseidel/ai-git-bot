@@ -906,6 +906,63 @@ class IssueImplementationServiceTest {
     }
 
     /**
+     * A comment on a pull request carries the PR number, while the session that answers it belongs
+     * to the issue the PR implements — two different numbers. The branch name, the commit message
+     * and the PR body must name the issue; only the replies belong to the thread the user wrote in.
+     */
+    @Test
+    void handleIssueComment_onPullRequest_namesTheSessionIssueButRepliesOnTheThread() {
+        WebhookPayload payload = createCommentPayload("Please finish the implementation", 261L);
+
+        AgentSession session = new AgentSession("testowner", "testrepo", 260L, "Add new feature X");
+        session.setPrNumber(261L);
+        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
+
+        // The comment sits on the PR, so the issue lookup misses and the PR fallback finds it.
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 261L)).thenReturn(Optional.empty());
+        when(sessionService.getSessionByPr("testowner", "testrepo", 261L)).thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 261L)).thenReturn(List.of());
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(new ArrayList<>(List.of(
+                AiMessage.builder().role("user").content("Please finish the implementation").build())));
+        when(workspaceService.prepareWorkspace(eq(repositoryPlatform), eq("testowner"), eq("testrepo"),
+                eq("main"), isNull())).thenReturn(WorkspaceResult.success(workspace));
+
+        String implResponse = """
+                ```json
+                {
+                  "summary": "Implemented",
+                  "runTools": [
+                    {"id": "pr-001", "tool": "patch-file", "args": ["src/F.java", "old", "new"]},
+                    {"id": "pr-002", "tool": "mvn", "args": ["compile"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn(implResponse);
+        when(toolExecutionService.executeFileTool(any(), any(), any()))
+                .thenReturn(new ToolResult(true, 0, "ok", ""));
+        when(toolExecutionService.executeTool(any(), any(), any()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspace.commitAndPush(eq("ai-agent/issue-260"), anyString(), eq(true))).thenReturn(true);
+
+        service.handleIssueComment(payload);
+
+        // Branch and commit message name the issue the session implements, not the PR.
+        ArgumentCaptor<String> commitMessage = ArgumentCaptor.forClass(String.class);
+        verify(workspace).commitAndPush(eq("ai-agent/issue-260"), commitMessage.capture(), eq(true));
+        assertThat(commitMessage.getValue()).contains("#260").doesNotContain("#261");
+        verify(sessionService).setBranchName(session, "ai-agent/issue-260");
+        // The reply stays on the thread the user commented in.
+        verify(repositoryClient).postIssueComment(eq("testowner"), eq("testrepo"), eq(261L),
+                contains("additional changes"));
+        verify(repositoryClient, never()).postIssueComment(eq("testowner"), eq("testrepo"),
+                eq(260L), anyString());
+    }
+
+    /**
      * The full reported sequence, driven through the real {@link
      * org.remus.giteabot.agent.loop.AgentLoop} + strategy: {@code cat} -> the answer ->
      * the nudge -> a re-answer. The post-nudge reply is what gets published, which is
@@ -996,6 +1053,14 @@ class IssueImplementationServiceTest {
     }
 
     private WebhookPayload createCommentPayload(String commentBody) {
+        return createCommentPayload(commentBody, 42L);
+    }
+
+    /**
+     * @param number the number the comment is attached to: the issue number on an issue, but the
+     *               pull-request number on a PR — both share one number line.
+     */
+    private WebhookPayload createCommentPayload(String commentBody, long number) {
         WebhookPayload payload = new WebhookPayload();
         payload.setAction("created");
 
@@ -1005,7 +1070,7 @@ class IssueImplementationServiceTest {
         payload.setComment(comment);
 
         WebhookPayload.Issue issue = new WebhookPayload.Issue();
-        issue.setNumber(42L);
+        issue.setNumber(number);
         issue.setTitle("Add new feature X");
         issue.setBody("Please implement feature X");
         payload.setIssue(issue);

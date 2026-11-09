@@ -207,7 +207,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         // in native mode, which would otherwise leave the issue silent. Tool args
         // are truncated by the notification service to keep large/sensitive
         // write-file payloads out of issue comments.
-        notificationService.postNativeToolPlanComment(ctx.owner(), ctx.repo(), ctx.issueNumber(),
+        notificationService.postNativeToolPlanComment(ctx.owner(), ctx.repo(), ctx.commentTargetNumber(),
                 turn.assistantText(), requests);
 
         BranchSwitcher.Result branchSwitchResult = branchSwitcher.apply(
@@ -244,7 +244,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         for (int i = 0; i < remaining.size(); i++) {
             ImplementationPlan.ToolRequest req = remaining.get(i);
             if (!catalog.isSilent(req.getTool()) && !isMcpTool(req.getTool())) {
-                notificationService.postToolResultComment(ctx.owner(), ctx.repo(), ctx.issueNumber(),
+                notificationService.postToolResultComment(ctx.owner(), ctx.repo(), ctx.commentTargetNumber(),
                         req, rawResults.get(i));
             }
         }
@@ -442,7 +442,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         log.info("Tool implementation loop for issue #{}, attempt {}/{}",
                 ctx.issueNumber(), attempt, maxRetries);
 
-        notificationService.postAiThinkingComment(ctx.owner(), ctx.repo(), ctx.issueNumber(), aiResponse);
+        notificationService.postAiThinkingComment(ctx.owner(), ctx.repo(), ctx.commentTargetNumber(), aiResponse);
 
         ImplementationPlan plan = responseParser.parseAiResponse(aiResponse);
         if (plan == null) {
@@ -496,7 +496,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
         for (int i = 0; i < requests.size(); i++) {
             ImplementationPlan.ToolRequest req = requests.get(i);
             if (!catalog.isSilent(req.getTool()) && !isMcpTool(req.getTool())) {
-                notificationService.postToolResultComment(ctx.owner(), ctx.repo(), ctx.issueNumber(),
+                notificationService.postToolResultComment(ctx.owner(), ctx.repo(), ctx.commentTargetNumber(),
                         req, results.get(i));
             }
         }
