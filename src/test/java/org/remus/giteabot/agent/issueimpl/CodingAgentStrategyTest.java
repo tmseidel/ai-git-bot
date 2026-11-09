@@ -75,7 +75,7 @@ class CodingAgentStrategyTest {
         promptBuilder = new AgentPromptBuilder();
         responseParser = new AiResponseParser();
         AgentSession session = new AgentSession("o", "r", 1L, "t");
-        ctx = new AgentRunContext(session, "o", "r", 1L, workspace, "main");
+        ctx = AgentRunContext.forIssue(session, "o", "r", 1L, workspace, "main");
         // The native tool path consults the branch switcher on every round.
         lenient().when(branchSwitcher.apply(any(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> new BranchSwitcher.Result("main", "main", inv.getArgument(2)));

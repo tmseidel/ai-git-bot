@@ -217,7 +217,7 @@ public class IssueTriageService {
 
         AgentSession session = new AgentSession(owner, repo, issue.getNumber(), issue.getTitle());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(session, owner, repo, issue.getNumber(),
+        AgentRunContext ctx = AgentRunContext.forIssue(session, owner, repo, issue.getNumber(),
                 workspace, baseBranch);
         LoopOutcome outcome = loop.run(ctx, userMessage, strategy);
 

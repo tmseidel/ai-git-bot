@@ -258,7 +258,7 @@ public class WriterAgentService {
                 agentConfig.getBudget().getMaxToolResultChars(), agentConfig.getBudget().getMaxHistoryChars(),
                 contextWindowTokens, agentConfig.getBudget().getProactiveCompactionThreshold());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(
+        AgentRunContext ctx = AgentRunContext.forIssue(
                 session, owner, repo, issueNumber, workspace, baseBranch);
         loop.run(ctx, userMessage + "\n\n" + outputContract(), strategy);
     }

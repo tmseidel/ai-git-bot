@@ -69,7 +69,8 @@ class WriterAgentStrategyTest {
     void setUp() {
         AgentSession session = new AgentSession("o", "r", ISSUE_NUMBER, "title");
         session.setId(1L);
-        ctx = new AgentRunContext(session, "o", "r", ISSUE_NUMBER, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        ctx = AgentRunContext.forIssue(session, "o", "r", ISSUE_NUMBER,
+                Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         ctx.setToolingMode(ToolingMode.NATIVE);
         strategy = new WriterAgentStrategy("sys", new WriterPromptBuilder(), new WriterResponseParser(),
                 sessionService, repositoryClient, branchSwitcher, toolRouter, mcpToolCatalog,

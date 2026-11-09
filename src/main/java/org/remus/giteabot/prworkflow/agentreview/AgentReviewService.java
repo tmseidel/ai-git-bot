@@ -656,7 +656,8 @@ public class AgentReviewService {
                 context.contextWindowTokens(), budgetCfg.getProactiveCompactionThreshold());
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspace, headBranch);
+        AgentRunContext ctx = AgentRunContext.forPullRequest(session, owner, repo, prNumber,
+                workspace, headBranch);
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
         ctx.setProgressConsumer(progressConsumer);

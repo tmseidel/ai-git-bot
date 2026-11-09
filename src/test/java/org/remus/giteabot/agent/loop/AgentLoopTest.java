@@ -50,7 +50,7 @@ class AgentLoopTest {
     void setUp() {
         AgentSession session = new AgentSession("owner", "repo", 42L, "title");
         session.setId(1L); // persisted session — the loop flushes id-bearing sessions
-        ctx = new AgentRunContext(session, "owner", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        ctx = AgentRunContext.forIssue(session, "owner", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         // lenient: the transient-session test below uses its own id-less session.
         lenient().when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
@@ -93,7 +93,7 @@ class AgentLoopTest {
         // A session with no id (e.g. the read-only review agent) must never be
         // written to the database; the loop is purely an in-memory conversation.
         AgentSession transientSession = new AgentSession("owner", "repo", 42L, "title");
-        AgentRunContext transientCtx = new AgentRunContext(
+        AgentRunContext transientCtx = AgentRunContext.forIssue(
                 transientSession, "owner", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         when(sessionService.toAiMessages(transientSession)).thenReturn(List.of());
 
