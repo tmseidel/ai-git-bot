@@ -207,6 +207,29 @@ class AgentSessionServiceToAiMessagesTest {
         assertThat(messages.get(3).getToolResult()).isEqualTo("two matches");
     }
 
+    @Test
+    void toAiMessages_replaysThePairARunWroteWhenItFinishedOnAToolCallRound() {
+        // The shape a run leaves behind when it executes tools and then stops: the loop
+        // writes the assistant turn and its results in one batch, so the session *ends*
+        // on the tool row. Replaying it must keep the pair — a turn replayed as prose is
+        // an announcement without an outcome, and the follow-up run repeats the edit.
+        AgentSessionService svc = new AgentSessionService(repository);
+        AgentSession session = new AgentSession("o", "r", 1L, "title");
+        addMessageAt(session, "user", "Add the row-filter checkbox", 1);
+        addPayloadMessageAt(session, "assistant", "", toolCallsJson("call_7", "patch-file"), null, 2);
+        addPayloadMessageAt(session, "tool", "[call_7] patched tests/e2e/features/Feature.feature (EXACT)",
+                null, "call_7", 3);
+
+        List<AiMessage> messages = svc.toAiMessages(session);
+
+        assertThat(messages).extracting(AiMessage::getRole)
+                .containsExactly("user", "assistant", "tool");
+        assertThat(messages.get(1).getToolCalls()).extracting(ToolCall::id).containsExactly("call_7");
+        assertThat(messages.get(2).getToolCallId()).isEqualTo("call_7");
+        assertThat(messages.get(2).getToolResult())
+                .isEqualTo("patched tests/e2e/features/Feature.feature (EXACT)");
+    }
+
     private static void addMessageAt(AgentSession session, String role, String content, long offsetSeconds) {
         ConversationMessage msg = new ConversationMessage(role, content);
         msg.setCreatedAt(Instant.ofEpochSecond(1_700_000_000L + offsetSeconds));

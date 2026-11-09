@@ -418,6 +418,74 @@ class CodingAgentStrategyTest {
     }
 
     @Test
+    void step_mutationRoundThatFinishes_handsTheExecutedResultsToTheLoop() {
+        // The coding agent stops as soon as a mutation leaves a diff. Those results have
+        // to travel on the decision: the loop writes the session, and an assistant turn
+        // whose ids nothing answers is replayed as prose — which is why the follow-up run
+        // re-applied a patch whose outcome the previous run never recorded.
+        agentConfig.getValidation().setEnabled(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "File written", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        StepDecision d = newStrategy().step(ctx, nativeWriteOnlyTurn(), 1);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        StepDecision.Finish finish = (StepDecision.Finish) d;
+        assertThat(finish.outcome().success()).isTrue();
+        assertThat(finish.executedCalls()).extracting(StepDecision.ToolCallResult::toolCallId)
+                .containsExactly("call-1");
+        assertThat(finish.executedCalls().get(0).resultText()).contains("File written");
+    }
+
+    @Test
+    void step_toolRoundBudgetExhausted_answersTheCallsItNeverRan() {
+        // The give-up branch stops on a tool-call turn without running anything. Every
+        // announced id still needs an answer, or the turn replays as an announcement with
+        // no outcome and the next run makes the same call again.
+        agentConfig.getValidation().setMaxToolExecutions(0);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        StepDecision d = newStrategy().step(ctx, nativeWriteOnlyTurn(), 1);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        StepDecision.Finish finish = (StepDecision.Finish) d;
+        assertThat(finish.outcome().success()).isFalse();
+        assertThat(finish.executedCalls()).extracting(StepDecision.ToolCallResult::toolCallId)
+                .containsExactly("call-1");
+        assertThat(finish.executedCalls().get(0).resultText())
+                .startsWith("not executed — ")
+                .contains("tool-round budget");
+    }
+
+    @Test
+    void step_attemptBudgetExhausted_answersTheCallsItNeverRan() {
+        // Same contract on the validation-retry give-up: the round that trips the cap
+        // announced tool calls and executed none of them.
+        agentConfig.getBudget().setMaxValidationRetries(1);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "ok", ""))              // write-file
+                .thenReturn(new ToolResult(false, 1, "", "compile error")); // mvn fails
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        assertThat(strategy.step(ctx, nativeWriteAndValidateTurn(), 1))
+                .isInstanceOf(StepDecision.ContinueWithToolResults.class);
+
+        StepDecision d = strategy.step(ctx, nativeWriteAndValidateTurn(), 2);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        StepDecision.Finish finish = (StepDecision.Finish) d;
+        assertThat(finish.outcome().success()).isFalse();
+        assertThat(finish.executedCalls()).extracting(StepDecision.ToolCallResult::toolCallId)
+                .containsExactly("call-1", "call-2");
+        assertThat(finish.executedCalls()).allSatisfy(result ->
+                assertThat(result.resultText()).startsWith("not executed — ")
+                        .contains("attempt budget"));
+    }
+
+    @Test
     void step_fileOnlyResponseWithoutValidationTool_finishesAsSuccess() {
         String response = """
                 ```json
