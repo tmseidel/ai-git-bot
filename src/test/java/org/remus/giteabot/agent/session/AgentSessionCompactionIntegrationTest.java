@@ -1,6 +1,7 @@
 package org.remus.giteabot.agent.session;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ToolCall;
 import org.remus.giteabot.session.ConversationMessage;
@@ -8,12 +9,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * End-to-end persistence test for the AgentSession compaction + batch-flush
@@ -127,9 +130,314 @@ class AgentSessionCompactionIntegrationTest {
 
         List<AiMessage> replay = service.toAiMessages(compacted);
         assertThat(replay).isNotEmpty();
-        assertThat(replay.get(0).getRole()).isEqualTo("assistant");
-        assertThat(replay.get(0).getToolCalls()).extracting(ToolCall::id).containsExactly("call_1");
-        assertThat(replay.get(1).getRole()).isEqualTo("tool");
-        assertThat(replay.get(1).getToolCallId()).isEqualTo("call_1");
+        // The replay opens with the compaction summary, then the retained window — which
+        // has to start on the announcing assistant turn rather than on its tool row.
+        assertThat(replay.get(0).getRole()).isEqualTo("user");
+        assertThat(replay.get(0).getContent()).startsWith("[Previous agent session context");
+        assertThat(replay.get(1).getRole()).isEqualTo("assistant");
+        assertThat(replay.get(1).getToolCalls()).extracting(ToolCall::id).containsExactly("call_1");
+        assertThat(replay.get(2).getRole()).isEqualTo("tool");
+        assertThat(replay.get(2).getToolCallId()).isEqualTo("call_1");
+    }
+
+    @Test
+    void compaction_opensTheReplayWithASummaryThatNamesTheTaskTheBranchAndTheChangedFiles() {
+        Long id = tx.execute(s -> service.createSession(
+                "owner", "repo", 9_000_003L, "Add the row-filter checkbox").getId());
+        tx.executeWithoutResult(s -> {
+            AgentSession session = repository.findById(id).orElseThrow();
+            service.setBranchName(session, "ai-agent/issue-261");
+            service.recordPlan(session,
+                    "patch the feature file, then run the e2e suite", "{\"summary\":\"patch\"}");
+        });
+
+        String big = "z".repeat(17_000); // several of these exceed the 80k threshold
+        var patchArgs = AgentJackson.mapper().readTree(
+                "{\"path\":\"tests/e2e/features/Feature.feature\",\"old\":\"a\",\"new\":\"b\"}");
+        ToolCall patch = new ToolCall("call_9", "patch-file", patchArgs, null);
+
+        // The removed prefix holds the one mutation whose outcome the follow-up run
+        // must not have to rediscover from the codebase.
+        tx.executeWithoutResult(s -> service.flushMessages(id, List.of(
+                new PendingMessage("user", "Add the checkbox filter to the feature file\n" + big),
+                new PendingMessage("assistant", "patching",
+                        new PendingMessage.ToolPayload(List.of(patch), null)),
+                new PendingMessage("tool", "[call_9] patched Feature.feature (EXACT)",
+                        new PendingMessage.ToolPayload(null, "call_9")),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", "and cover the empty state\n" + big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", "follow up")), 0L, 0L));
+
+        AgentSession compacted = tx.execute(s -> service.compactContextWindow(id));
+
+        List<ConversationMessage> ordered = compacted.getMessages().stream()
+                .sorted(Comparator.comparing(ConversationMessage::getCreatedAt))
+                .toList();
+        assertThat(ordered).hasSize(9); // 8 retained + the summary
+        // Position, not just presence: the summary has to sort *before* the retained
+        // window, otherwise it lands right before the new prompt as a closing note.
+        assertThat(ordered.get(0).getContent()).startsWith("[Previous agent session context");
+
+        List<AiMessage> replay = service.toAiMessages(compacted);
+        assertThat(replay.get(0).getRole()).isEqualTo("user");
+        assertThat(replay.get(0).getContent())
+                .contains("Add the row-filter checkbox")
+                .contains("ai-agent/issue-261")
+                .contains("patch the feature file")
+                .contains("tests/e2e/features/Feature.feature")
+                .contains("Add the checkbox filter")
+                .doesNotContain("re-read files or re-run tools");
+    }
+
+    @Test
+    void compaction_thresholdAndRetainedWindowAreConfigurable() {
+        AgentSessionService smallBudget = new AgentSessionService(repository, 20_000, 3);
+        Long id = tx.execute(s -> smallBudget.createSession(
+                "owner", "repo", 9_000_004L, "Small budget").getId());
+
+        String big = "w".repeat(6_000); // 24k in total: over 20k, under the 80k default
+        tx.executeWithoutResult(s -> smallBudget.flushMessages(id, List.of(
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", "follow-up")), 0L, 0L));
+
+        // The container-wired default (80k / 8) leaves this session alone ...
+        AgentSession untouched = tx.execute(s -> service.compactContextWindow(id));
+        assertThat(untouched.getMessages()).hasSize(5);
+
+        // ... while the configured service compacts it and keeps three messages.
+        AgentSession compacted = tx.execute(s -> smallBudget.compactContextWindow(id));
+        assertThat(compacted.getMessages()).hasSize(4);
+    }
+
+    /** The summary row a compaction left behind, in replay order. */
+    private String summaryOf(AgentSession compacted) {
+        return compacted.getMessages().stream()
+                .sorted(Comparator.comparing(ConversationMessage::getCreatedAt))
+                .map(ConversationMessage::getContent)
+                .filter(content -> content != null && content.startsWith("[Previous agent session context"))
+                .findFirst()
+                .orElse("");
+    }
+
+    /** Arguments of a file tool call, in the shape a native provider produces. */
+    private static JsonNode pathArgs(String path) {
+        try {
+            return AgentJackson.mapper().readTree("{\"path\":\"" + path + "\"}");
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Test
+    void compaction_quotesTheBodyOfAFollowUpCommentInsteadOfDroppingIt() {
+        Long id = tx.execute(s -> service.createSession(
+                "owner", "repo", 9_000_101L, "Add the row-filter checkbox").getId());
+
+        // What AgentPromptBuilder.buildContinuationPrompt actually persists: the user's
+        // words sit *under* a markdown heading, so skipping every turn that starts with
+        // "#" dropped the one message this section exists to quote.
+        String comment = "## New User Comment\n"
+                + "Also cover the empty state\n\n## Current Issue Comments\n(none)";
+        String big = "x".repeat(12_000);
+        tx.executeWithoutResult(s -> service.flushMessages(id, List.of(
+                new PendingMessage("user", comment),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big)), 0L, 0L));
+
+        String summary = summaryOf(tx.execute(s -> service.compactContextWindow(id)));
+
+        assertThat(summary).contains("- \"Also cover the empty state\"")
+                .doesNotContain("## New User Comment")
+                .doesNotContain("Current Issue Comments");
+    }
+
+    @Test
+    void compaction_skipsTheScaffoldingTheLoopStoresAsUserTurns() {
+        Long id = tx.execute(s -> service.createSession(
+                "owner", "repo", 9_000_102L, "Add the row-filter checkbox").getId());
+
+        String big = "x".repeat(12_000);
+        tx.executeWithoutResult(s -> service.flushMessages(id, List.of(
+                new PendingMessage("user", "## Issue\n**Title**: Add the checkbox\n**Description**: x"),
+                new PendingMessage("user", "## Tool Execution Results\n\nExit code: 0"),
+                new PendingMessage("user", "The review is approaching its exploration or round limit. Wrap up."),
+                // An opening this code does not know stays: it is far more likely a human
+                // than a shape the loop started emitting.
+                new PendingMessage("user", "## 需求变更：把页大小改成 20"),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big)), 0L, 0L));
+
+        String summary = summaryOf(tx.execute(s -> service.compactContextWindow(id)));
+
+        assertThat(summary).contains("需求变更")
+                .doesNotContain("**Title**")
+                .doesNotContain("Tool Execution Results")
+                .doesNotContain("The review is approaching");
+    }
+
+    @Test
+    void compaction_omitsAFileWhoseOwnToolRowReportedAFailure() {
+        Long id = tx.execute(s -> service.createSession(
+                "owner", "repo", 9_000_103L, "Patch two files").getId());
+
+        ToolCall applied = new ToolCall("call_ok", "patch-file", pathArgs("src/Ok.java"), null);
+        ToolCall rejected = new ToolCall("call_no", "patch-file", pathArgs("src/No.java"), null);
+        String big = "x".repeat(11_000);
+        tx.executeWithoutResult(s -> service.flushMessages(id, List.of(
+                new PendingMessage("user", "patch both files"),
+                new PendingMessage("assistant", "patching both",
+                        new PendingMessage.ToolPayload(List.of(applied, rejected), null)),
+                new PendingMessage("tool", "[call_ok] Exit code: 0\nOutput:\n```\npatched\n```",
+                        new PendingMessage.ToolPayload(null, "call_ok")),
+                new PendingMessage("tool", "[call_no] Exit code: 1\nError: old text not found",
+                        new PendingMessage.ToolPayload(null, "call_no")),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big)), 0L, 0L));
+
+        String summary = summaryOf(tx.execute(s -> service.compactContextWindow(id)));
+
+        assertThat(summary).contains("src/Ok.java").doesNotContain("src/No.java");
+    }
+
+    @Test
+    void compaction_carriesTheFileListOfAPreviousSummaryForward() {
+        Long id = tx.execute(s -> service.createSession(
+                "owner", "repo", 9_000_104L, "Patch the feature file").getId());
+
+        ToolCall patch = new ToolCall("call_1", "patch-file", pathArgs("src/Feature.java"), null);
+        String big = "x".repeat(12_000);
+        tx.executeWithoutResult(s -> service.flushMessages(id, List.of(
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", "patching",
+                        new PendingMessage.ToolPayload(List.of(patch), null)),
+                new PendingMessage("tool", "[call_1] Exit code: 0\nOutput:\n```\npatched\n```",
+                        new PendingMessage.ToolPayload(null, "call_1")),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big)), 0L, 0L));
+
+        AgentSession first = tx.execute(s -> service.compactContextWindow(id));
+        assertThat(summaryOf(first)).contains("src/Feature.java");
+
+        // The summary of the first round now sits inside the window the second round
+        // removes. Only it still names the file edited before the first compaction.
+        tx.executeWithoutResult(s -> service.flushMessages(id, List.of(
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big)), 0L, 0L));
+
+        AgentSession second = tx.execute(s -> service.compactContextWindow(id));
+        String summary = summaryOf(second);
+
+        assertThat(summary).contains("src/Feature.java");
+        // Its own text is not something a human asked for, so it must not be quoted back.
+        assertThat(summary).doesNotContain("- \"[Previous agent session context");
+        assertThat(second.getMessages().stream()
+                .map(ConversationMessage::getContent)
+                .filter(content -> content != null && content.startsWith("[Previous agent session context"))
+                .count()).isEqualTo(1);
+    }
+
+    @Test
+    void compaction_namesAtMostTwentyFiles() {
+        AgentSessionService smallBudget = new AgentSessionService(repository, 20_000, 3);
+        Long id = tx.execute(s -> smallBudget.createSession(
+                "owner", "repo", 9_000_105L, "Touch many files").getId());
+
+        List<ToolCall> calls = new ArrayList<>();
+        for (int i = 1; i <= 25; i++) {
+            calls.add(new ToolCall("call_" + i, "patch-file", pathArgs("src/F" + i + ".java"), null));
+        }
+        String big = "x".repeat(6_000);
+        tx.executeWithoutResult(s -> smallBudget.flushMessages(id, List.of(
+                new PendingMessage("assistant", "patching all",
+                        new PendingMessage.ToolPayload(calls, null)),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big),
+                new PendingMessage("assistant", big),
+                new PendingMessage("user", big)), 0L, 0L));
+
+        String summary = summaryOf(tx.execute(s -> smallBudget.compactContextWindow(id)));
+
+        assertThat(summary).contains("src/F20.java").doesNotContain("src/F21.java");
+    }
+
+    @Test
+    void compaction_quotesAtMostFiveEarlierRequests() {
+        AgentSessionService smallBudget = new AgentSessionService(repository, 20_000, 3);
+        Long id = tx.execute(s -> smallBudget.createSession(
+                "owner", "repo", 9_000_106L, "Many requests").getId());
+
+        List<PendingMessage> batch = new ArrayList<>();
+        for (int i = 1; i <= 7; i++) {
+            batch.add(new PendingMessage("user", "request number " + i));
+        }
+        String big = "x".repeat(6_000);
+        for (int i = 0; i < 5; i++) {
+            batch.add(new PendingMessage("assistant", big));
+        }
+        tx.executeWithoutResult(s -> smallBudget.flushMessages(id, batch, 0L, 0L));
+
+        String summary = summaryOf(tx.execute(s -> smallBudget.compactContextWindow(id)));
+
+        assertThat(summary).contains("request number 3").contains("request number 7")
+                .doesNotContain("request number 1").doesNotContain("request number 2");
+    }
+
+    @Test
+    void compaction_rejectsAWindowOrThresholdThatCannotWork() {
+        // A keep of 0 leaves removeCount equal to the window size, so the boundary
+        // lookup throws on every follow-up of a long session; fail at construction.
+        assertThatThrownBy(() -> new AgentSessionService(repository, 80_000, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("compact-keep-messages");
+        assertThatThrownBy(() -> new AgentSessionService(repository, 0, 8))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("compact-threshold-chars");
     }
 }
+

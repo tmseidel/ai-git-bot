@@ -147,6 +147,8 @@ Common issue-agent settings can be set as environment variables or Spring proper
 | `AGENT_BUDGET_MAX_VALIDATION_RETRIES` | `agent.budget.max-validation-retries` | `10` | Coding | AI correction attempts after validation failure |
 | `AGENT_BUDGET_MAX_HISTORY_CHARS` | `agent.budget.max-history-chars` | `180000` | Both | Maximum characters for agent conversation history |
 | `AGENT_BUDGET_MAX_TOOL_RESULT_CHARS` | `agent.budget.max-tool-result-chars` | `8000` | Both | Maximum characters for tool execution results |
+| `AGENT_SESSION_COMPACT_THRESHOLD_CHARS` | `agent.session.compact-threshold-chars` | `80000` | Both | Persisted session size that triggers compaction |
+| `AGENT_SESSION_COMPACT_KEEP_MESSAGES` | `agent.session.compact-keep-messages` | `8` | Both | Messages retained after a compaction |
 | `AGENT_TRIAGE_MAX_TOOL_ROUNDS` | `agent.triage.max-tool-rounds` | `5` | Triage | Context-gathering rounds before a routing decision is required |
 | `AGENT_TRIAGE_MAX_INITIAL_TREE_FILES` | `agent.triage.max-initial-tree-files` | `100` | Triage | Repository tree entries in the initial triage prompt |
 | `AGENT_WRITER_MAX_TOOL_ROUNDS` | `agent.writer.max-tool-rounds` | `5` | Writer | Repository-context rounds before the wrap-up round requires an answer |
