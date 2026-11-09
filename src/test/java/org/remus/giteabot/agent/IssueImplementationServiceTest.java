@@ -1028,6 +1028,60 @@ class IssueImplementationServiceTest {
     }
 
     /**
+     * A follow-up may arrive after compaction, when the persisted history no longer holds the
+     * specification. The prompt must still state the task, so the issue is re-read and put in
+     * front of the comment thread.
+     */
+    @Test
+    void handleIssueComment_promptCarriesTheIssueSpecification() {
+        WebhookPayload payload = createCommentPayload("Please adjust the page size");
+
+        AgentSession session = new AgentSession("testowner", "testrepo", 42L, "Add new feature X");
+        session.setBranchName("ai-agent/issue-42");
+        session.setPrNumber(1L);
+        session.setStatus(AgentSession.AgentSessionStatus.PR_CREATED);
+
+        when(sessionService.getSessionByIssue("testowner", "testrepo", 42L)).thenReturn(Optional.of(session));
+        when(sessionService.compactContextWindow(any())).thenReturn(session);
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L)).thenReturn(List.of());
+        when(repositoryClient.getIssueDetails("testowner", "testrepo", 42L))
+                .thenReturn(Map.of("title", "Add new feature X", "body", "Acceptance: page size 20"));
+        when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
+        when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
+        when(sessionService.toAiMessages(any())).thenReturn(new ArrayList<>());
+        when(workspaceService.prepareWorkspace(eq(repositoryPlatform), eq("testowner"), eq("testrepo"),
+                eq("ai-agent/issue-42"), isNull())).thenReturn(WorkspaceResult.success(workspace));
+
+        String implResponse = """
+                ```json
+                {
+                  "summary": "Adjusted the page size",
+                  "runTools": [
+                    {"id": "s-001", "tool": "patch-file", "args": ["src/Page.java", "10", "20"]},
+                    {"id": "s-002", "tool": "mvn", "args": ["compile"]}
+                  ]
+                }
+                ```
+                """;
+        when(aiClient.chat(anyList(), anyString(), anyString(), isNull(), anyInt())).thenReturn(implResponse);
+        when(toolExecutionService.executeFileTool(any(), any(), any()))
+                .thenReturn(new ToolResult(true, 0, "ok", ""));
+        when(toolExecutionService.executeTool(any(), any(), any()))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        when(workspace.commitAndPush(any(), any(), anyBoolean())).thenReturn(true);
+
+        service.handleIssueComment(payload);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(aiClient, atLeastOnce()).chat(anyList(), prompt.capture(), anyString(), isNull(), anyInt());
+        assertThat(prompt.getValue()).contains("**Title**: Add new feature X");
+        assertThat(prompt.getValue()).contains("Acceptance: page size 20");
+        assertThat(prompt.getValue()).contains("Please adjust the page size");
+        assertThat(prompt.getValue().indexOf("## Issue"))
+                .isLessThan(prompt.getValue().indexOf("## New User Comment"));
+    }
+
+    /**
      * The full reported sequence, driven through the real {@link
      * org.remus.giteabot.agent.loop.AgentLoop} + strategy: {@code cat} -> the answer ->
      * the nudge -> a re-answer. The post-nudge reply is what gets published, which is
