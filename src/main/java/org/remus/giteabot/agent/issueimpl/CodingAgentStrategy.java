@@ -191,7 +191,10 @@ public final class CodingAgentStrategy implements AgentStrategy {
         }
         if (attempt > maxRetries) {
             log.warn("Tool implementation loop exhausted {} attempts without full success", maxRetries);
-            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()));
+            // The calls this round announced were never run, but the round is still the
+            // last one in the session: answering them keeps the turn replayable.
+            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()),
+                    notExecuted(turn, "the implementation attempt budget for this run is exhausted"));
         }
         log.info("Tool implementation loop for issue #{}, attempt {}/{} (native, {} calls)",
                 ctx.issueNumber(), attempt, maxRetries, turn.toolCalls().size());
@@ -232,7 +235,8 @@ public final class CodingAgentStrategy implements AgentStrategy {
         // 3) Tool-execution round: respect the retry cap.
         if (toolRounds >= maxToolRounds) {
             log.warn("Reached max tool rounds ({}) — returning current result", maxToolRounds);
-            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()));
+            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch()),
+                    notExecuted(turn, "the tool-round budget for this run is exhausted"));
         }
         toolRounds++;
 
@@ -284,7 +288,9 @@ public final class CodingAgentStrategy implements AgentStrategy {
                         .toolRequests(remaining)
                         .build();
                 sessionService.recordPlan(ctx.session(), plan.getSummary(), turn.assistantText());
-                return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan));
+                // The round already ran its tools; hand the results to the loop so the
+                // session keeps the pair instead of the announcement alone.
+                return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), plan), packaged);
             }
             log.info("Native tool round produced no Git-detectable workspace changes; continuing");
             attempt++;
@@ -402,6 +408,24 @@ public final class CodingAgentStrategy implements AgentStrategy {
      */
     private boolean isMutation(ImplementationPlan.ToolRequest req) {
         return catalog.isFile(req.getTool());
+    }
+
+    /**
+     * Answers every call the round announced with a synthetic "not executed" result.
+     *
+     * <p>A give-up branch ends the loop on a tool-call turn without running the calls.
+     * Left unanswered, the assistant turn loses its payload when the session is
+     * replayed (providers reject a {@code tool_calls} block without a matching
+     * {@code tool_result}), so the follow-up run reads the turn as an announcement
+     * with no outcome and repeats the call. The writer's wrap-up round already
+     * answers refused calls this way.</p>
+     */
+    private static List<StepDecision.ToolCallResult> notExecuted(ChatTurn turn, String reason) {
+        List<StepDecision.ToolCallResult> results = new ArrayList<>(turn.toolCalls().size());
+        for (ToolCall call : turn.toolCalls()) {
+            results.add(new StepDecision.ToolCallResult(call.id(), "not executed — " + reason));
+        }
+        return results;
     }
 
     /** Execute {@code requests} and turn the results into
