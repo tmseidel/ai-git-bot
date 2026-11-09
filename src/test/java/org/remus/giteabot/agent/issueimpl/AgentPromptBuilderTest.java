@@ -115,14 +115,9 @@ class AgentPromptBuilderTest {
     }
 
     @Test
-    void buildContinuationPrompt_returnsCommentAsIs() {
-        String result = builder.buildContinuationPrompt("Please fix the typo");
-        assertThat(result).isEqualTo("Please fix the typo");
-    }
-
-    @Test
     void buildContinuationPrompt_withIssueComments_includesDiscussionContext() {
-        String result = builder.buildContinuationPrompt("Please continue", "Comment by alice: original clarification");
+        String result = builder.buildContinuationPrompt(null, null,
+                "Please continue", "Comment by alice: original clarification");
 
         assertThat(result).contains("## New User Comment");
         assertThat(result).contains("Please continue");
@@ -164,7 +159,8 @@ class AgentPromptBuilderTest {
 
     @Test
     void buildContinuationPrompt_withoutIssue_keepsTheDiscussionOnlyPrompt() {
-        String result = builder.buildContinuationPrompt("Please continue", "### Comment 1 by alice\nok");
+        String result = builder.buildContinuationPrompt(null, null,
+                "Please continue", "### Comment 1 by alice\nok");
 
         assertThat(result).doesNotContain("## Issue");
         assertThat(result).startsWith("## New User Comment");

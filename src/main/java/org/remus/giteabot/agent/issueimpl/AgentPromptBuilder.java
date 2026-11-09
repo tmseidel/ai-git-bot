@@ -115,20 +115,6 @@ public class AgentPromptBuilder {
     }
 
     /**
-     * Builds the continuation prompt for follow-up comments.
-     */
-    public String buildContinuationPrompt(String userComment) {
-        return userComment;
-    }
-
-    /**
-     * Builds the continuation prompt for follow-up comments with the current issue discussion included.
-     */
-    public String buildContinuationPrompt(String userComment, String issueCommentsContext) {
-        return buildContinuationPrompt(null, null, userComment, issueCommentsContext);
-    }
-
-    /**
      * Builds the continuation prompt for follow-up comments with the issue itself in front.
      * <p>
      * The specification is not part of the persisted session history, so after a compaction a
