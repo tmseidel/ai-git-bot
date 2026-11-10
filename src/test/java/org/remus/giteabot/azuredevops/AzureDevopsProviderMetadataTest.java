@@ -3,6 +3,7 @@ package org.remus.giteabot.azuredevops;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.agent.validation.GitDiffService;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.springframework.beans.factory.ObjectProvider;
@@ -69,7 +70,7 @@ class AzureDevopsProviderMetadataTest {
         integration.setUrl("https://dev.azure.com/");
 
         var platform = metadata.createPlatform(integration, "ado_pat",
-                new HttpCredentials(null, "ado_pat"), null);
+                new HttpCredentials(null, "ado_pat"), null, TestPlatforms.USER_TTL);
 
         assertInstanceOf(AzureDevopsPlatform.class, platform);
         assertInstanceOf(AzureDevopsApiClient.class, platform.getClient());
@@ -98,7 +99,7 @@ class AzureDevopsProviderMetadataTest {
         integration.setUrl("https://dev.azure.com");
 
         var platform = bindingMetadata.createPlatform(integration, "ado_pat",
-                new HttpCredentials(null, "ado_pat"), null);
+                new HttpCredentials(null, "ado_pat"), null, TestPlatforms.USER_TTL);
         when(gitDiffService.diffCommits(platform, "contoso", "MyProject/my-service",
                 "1111111111111111111111111111111111111111", "3333333333333333333333333333333333333333"))
                 .thenReturn("diff");

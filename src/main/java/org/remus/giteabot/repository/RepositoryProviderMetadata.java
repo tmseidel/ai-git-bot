@@ -5,6 +5,7 @@ import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -35,10 +36,12 @@ public interface RepositoryProviderMetadata {
      * @param decryptedToken  the decrypted access token the API client authenticates with
      * @param httpCredentials the credentials for Git over HTTP
      * @param sshCredentials  the credentials for Git over SSH, or {@code null} when SSH is not selected
+     * @param userTtl         how long the account the token authenticates as is cached
      * @return the platform
      */
     RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
                                       HttpCredentials httpCredentials,
-                                      @Nullable Supplier<SshCredentials> sshCredentials);
+                                      @Nullable Supplier<SshCredentials> sshCredentials,
+                                      Duration userTtl);
 }
 

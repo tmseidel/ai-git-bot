@@ -1,6 +1,7 @@
 package org.remus.giteabot.azuredevops;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.agent.validation.GitDiffService;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.springframework.http.MediaType;
@@ -35,7 +36,7 @@ class AzureDevopsApiClientDiffTest {
     private AzureDevopsApiClient client(RestClient restClient) {
         AzureDevopsApiClient client = new AzureDevopsApiClient(restClient, "https://dev.azure.com", gitDiffService);
         platform = new AzureDevopsPlatform("https://dev.azure.com", "https://dev.azure.com",
-                new HttpCredentials(null, "ado_pat"), null, client);
+                new HttpCredentials(null, "ado_pat"), null, client, TestPlatforms.USER_TTL);
         client.bindPlatform(platform);
         return client;
     }

@@ -7,8 +7,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -296,6 +298,7 @@ class WorkspaceServiceTest {
                 .thenReturn(forkRemote.toString());
         when(platform.getCredentials())
                 .thenReturn(new HttpCredentials(null, "dummy-token"));
+        when(platform.getUser("contributor")).thenReturn(TestPlatforms.USER);
 
         WorkspaceResult result = workspaceService.preparePullRequestWorkspace(
                 platform, "base", "project", "main", 7L,
@@ -375,12 +378,12 @@ class WorkspaceServiceTest {
     @Test
     void failedCleanupIsRetriedBeforeCreatingAnotherWorkspace() throws IOException {
         FailOnceCleanupWorkspaceService service = new FailOnceCleanupWorkspaceService();
-        Workspace failed = service.createWorkspace();
+        Workspace failed = service.createWorkspace(TestPlatforms.USER);
 
         assertThat(failed.cleanup()).isFalse();
         assertThat(failed.root()).exists();
 
-        Workspace next = service.createWorkspace();
+        Workspace next = service.createWorkspace(TestPlatforms.USER);
         assertThat(failed.root()).doesNotExist();
         next.close();
     }
@@ -407,7 +410,7 @@ class WorkspaceServiceTest {
         Path workspaceBaseDir = tempDir.resolve("sandbox-workspaces");
         workspaceService = new WorkspaceService(workspaceBaseDir.toString(), CLONE_TIMEOUT_SECONDS);
 
-        Workspace workspace = workspaceService.createWorkspace();
+        Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
 
         assertThat(workspace.path().startsWith(workspaceBaseDir.toAbsolutePath().normalize())).isTrue();
         assertThat(workspace.root().getParent()).isEqualTo(workspaceBaseDir.toAbsolutePath().normalize());
@@ -510,8 +513,8 @@ class WorkspaceServiceTest {
         private boolean fail = true;
 
         @Override
-        Workspace newWorkspace(Path workspaceRoot, Consumer<Workspace> onCleanedUp) {
-            return new Workspace(workspaceRoot, onCleanedUp) {
+        Workspace newWorkspace(Path workspaceRoot, RepositoryUser repositoryUser, Consumer<Workspace> onCleanedUp) {
+            return new Workspace(workspaceRoot, repositoryUser, onCleanedUp) {
                 @Override
                 void deleteDirectory(Path dir) throws IOException {
                     if (fail) {

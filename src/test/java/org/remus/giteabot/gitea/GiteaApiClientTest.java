@@ -1,5 +1,7 @@
 package org.remus.giteabot.gitea;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -476,6 +478,21 @@ class GiteaApiClientTest {
 
         client.addIssueReaction("owner", "repo", 12L, "eyes");
 
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_readsLoginFullNameAndEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/v1/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":17,\"login\":\"ai_bot\",\"full_name\":\"AI Bot\","
+                        + "\"email\":\"bot@example.com\"}", MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GiteaApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("17", "ai_bot", "AI Bot", "bot@example.com"), user);
         server.verify();
     }
 }

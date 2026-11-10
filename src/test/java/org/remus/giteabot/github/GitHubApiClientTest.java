@@ -1,5 +1,7 @@
 package org.remus.giteabot.github;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -9,6 +11,7 @@ import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -21,6 +24,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
@@ -282,5 +286,119 @@ class GitHubApiClientTest {
         assertThrows(IllegalStateException.class,
                 () -> client.getPullRequestHead("base", "project", 7L, "main"));
         server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_usesThePublicEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":42,\"login\":\"ai-bot\",\"name\":\"AI Bot\",\"email\":\"public@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("42", "ai-bot", "AI Bot", "public@example.com"), user);
+        server.verify();
+    }
+
+    private static final String PRIVATE_USER =
+            "{\"id\":42,\"login\":\"ai-bot\",\"name\":\"AI Bot\",\"email\":null}";
+
+    @Test
+    void getAuthenticatedUser_prefersTheNoreplyAddressListedByTheServer() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withSuccess("""
+                        [{"email":"private@example.com","primary":true,"verified":true,"visibility":"private"},
+                         {"email":"ai-bot@users.noreply.github.com","primary":false,"verified":true,"visibility":null}]""",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        // The legacy username-only form the server lists wins over the derived ID-based form,
+        // and the private primary address is never used.
+        assertEquals("ai-bot@users.noreply.github.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_usesTheEnterpriseNoreplyAddressListedByTheServer() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withSuccess("[{\"email\":\"42+ai-bot@users.noreply.ghe.example.com\",\"primary\":false}]",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build(), false).getAuthenticatedUser("owner");
+
+        assertEquals("42+ai-bot@users.noreply.ghe.example.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_derivesTheGitHubComNoreplyAddressWhenTheServerListsNone() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withSuccess("[{\"email\":\"private@example.com\",\"primary\":true}]",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("42", "ai-bot", "AI Bot", "42+ai-bot@users.noreply.github.com"), user);
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_derivesTheGitHubComNoreplyAddressWhenTheTokenMayNotReadEmails() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals("42+ai-bot@users.noreply.github.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackOnEnterpriseWhenTheServerListsNoNoreplyAddress() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new GitHubApiClient(builder.build(), false).getAuthenticatedUser("owner");
+
+        // GitHub Enterprise documents no noreply format, so none is guessed.
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_failsClearlyWithoutAnId() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess("{\"login\":\"ai-bot\",\"email\":\"public@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        GitHubApiClient client = new GitHubApiClient(builder.build());
+
+        assertThrows(IllegalArgumentException.class, () -> client.getAuthenticatedUser("owner"));
     }
 }

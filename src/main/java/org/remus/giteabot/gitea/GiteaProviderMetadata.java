@@ -13,6 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -79,11 +80,12 @@ public class GiteaProviderMetadata implements RepositoryProviderMetadata {
     @Override
     public RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
                                              HttpCredentials httpCredentials,
-                                             @Nullable Supplier<SshCredentials> sshCredentials) {
+                                             @Nullable Supplier<SshCredentials> sshCredentials,
+                                             Duration userTtl) {
         RestClient restClient = buildRestClient(integration, decryptedToken);
         String cloneUrl = resolveCloneUrl(integration);
         return new GiteaPlatform(resolveApiUrl(integration), cloneUrl, httpCredentials, sshCredentials,
-                new GiteaApiClient(restClient), integration.getSshKnownHosts());
+                new GiteaApiClient(restClient), integration.getSshKnownHosts(), userTtl);
     }
 }
 

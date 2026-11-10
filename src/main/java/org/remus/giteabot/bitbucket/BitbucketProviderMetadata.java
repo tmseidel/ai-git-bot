@@ -13,6 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -124,10 +125,11 @@ public class BitbucketProviderMetadata implements RepositoryProviderMetadata {
     @Override
     public RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
                                              HttpCredentials httpCredentials,
-                                             @Nullable Supplier<SshCredentials> sshCredentials) {
+                                             @Nullable Supplier<SshCredentials> sshCredentials,
+                                             Duration userTtl) {
         RestClient restClient = buildRestClient(integration, decryptedToken);
         String cloneUrl = resolveCloneUrl(integration);
         return new BitbucketPlatform(resolveApiUrl(integration), cloneUrl, httpCredentials, sshCredentials,
-                new BitbucketApiClient(restClient, cloneUrl));
+                new BitbucketApiClient(restClient, cloneUrl), userTtl);
     }
 }

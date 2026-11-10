@@ -1,6 +1,5 @@
 package org.remus.giteabot.admin;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -9,8 +8,10 @@ import org.remus.giteabot.repository.RepositoryProviderMetadata;
 import org.remus.giteabot.repository.RepositoryProviderRegistry;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
@@ -36,14 +37,23 @@ import java.util.function.Supplier;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class RepositoryPlatformFactory {
 
     private final GitIntegrationService gitIntegrationService;
     private final RepositoryProviderRegistry providerRegistry;
+    /** How long a platform caches the account its token authenticates as. */
+    private final Duration userTtl;
 
     /** Cache key = integrationId, value = (updatedAt-millis, platform). */
     private final ConcurrentMap<Long, CachedPlatform> cache = new ConcurrentHashMap<>();
+
+    public RepositoryPlatformFactory(GitIntegrationService gitIntegrationService,
+                                     RepositoryProviderRegistry providerRegistry,
+                                     @Value("${giteabot.git-user.cache-ttl:PT5M}") Duration userTtl) {
+        this.gitIntegrationService = gitIntegrationService;
+        this.providerRegistry = providerRegistry;
+        this.userTtl = userTtl;
+    }
 
     /**
      * Returns the {@link RepositoryPlatform} for the given Git integration.
@@ -62,7 +72,7 @@ public class RepositoryPlatformFactory {
     public RepositoryApiClient createApiClient(GitIntegration integration, String token) {
         RepositoryProviderMetadata provider = providerRegistry.getProvider(integration.getProviderType());
         return provider.createPlatform(integration, token,
-                provider.createHttpCredentials(integration, token), null).getClient();
+                provider.createHttpCredentials(integration, token), null, userTtl).getClient();
     }
 
     private CachedPlatform getCachedPlatform(GitIntegration integration) {
@@ -95,7 +105,7 @@ public class RepositoryPlatformFactory {
                         integration.getSshKnownHosts())
                 : null;
         RepositoryPlatform platform = provider.createPlatform(
-                integration, decryptedToken, httpCredentials, sshCredentials);
+                integration, decryptedToken, httpCredentials, sshCredentials, userTtl);
 
         return new CachedPlatform(integration.getUpdatedAt().toEpochMilli(), platform);
     }

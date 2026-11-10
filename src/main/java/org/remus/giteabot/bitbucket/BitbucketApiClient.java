@@ -2,6 +2,7 @@ package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.bitbucket.model.BitbucketCommit;
+import org.remus.giteabot.bitbucket.model.BitbucketEmail;
 import org.remus.giteabot.bitbucket.model.BitbucketReviewComment;
 import org.remus.giteabot.bitbucket.model.BitbucketTreeEntry;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
@@ -12,6 +13,7 @@ import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -21,7 +23,9 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -60,16 +64,60 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public BitbucketAccount getAuthenticatedAccount() {
         BitbucketAccount account = authenticatedAccount;
         if (account == null) {
-            account = restClient.get()
-                    .uri("/user")
-                    .retrieve()
-                    .body(BitbucketAccount.class);
-            if (account == null || (account.accountId() == null && account.uuid() == null)) {
-                throw new IllegalStateException("Bitbucket /user returned neither account_id nor uuid");
-            }
+            account = fetchAuthenticatedAccount();
             authenticatedAccount = account;
         }
         return account;
+    }
+
+    /**
+     * Bitbucket Cloud has no real usernames: accounts log in with their e-mail address and are
+     * best identified by the account id. The username is therefore the primary e-mail address,
+     * which Bitbucket only returns from a second endpoint. A token without permission for that
+     * yields no e-mail: the username is then the account id and the commit address
+     * {@link RepositoryUser#FALLBACK_EMAIL}.
+     */
+    @Override
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        BitbucketAccount account = fetchAuthenticatedAccount();
+        String email = fetchPrimaryEmail();
+        String username = email != null ? email : account.accountId();
+        return new RepositoryUser(account.accountId(), username, account.displayName(), email);
+    }
+
+    private BitbucketAccount fetchAuthenticatedAccount() {
+        BitbucketAccount account = restClient.get()
+                .uri("/user")
+                .retrieve()
+                .body(BitbucketAccount.class);
+        if (account == null || account.accountId() == null) {
+            throw new IllegalStateException("Bitbucket /user returned no account_id");
+        }
+        return account;
+    }
+
+    private String fetchPrimaryEmail() {
+        try {
+            BitbucketEmail.Page page = restClient.get()
+                    .uri("/user/emails")
+                    .retrieve()
+                    .body(BitbucketEmail.Page.class);
+            if (page != null && page.getValues() != null) {
+                for (BitbucketEmail email : page.getValues()) {
+                    if (email.isPrimary() && email.getEmail() != null) {
+                        return email.getEmail();
+                    }
+                }
+            }
+        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
+            log.warn("The Bitbucket token may not read the account e-mail, so commits will not link to the profile: "
+                    + "check that it has the read:user:bitbucket scope");
+        } catch (RestClientException e) {
+            // The e-mail is optional: a failure here must not fail the account lookup.
+            log.warn("Could not read the Bitbucket account e-mail, so commits will not link to the profile: {}",
+                    e.getMessage());
+        }
+        return null;
     }
 
     // ---- Pull request operations ----

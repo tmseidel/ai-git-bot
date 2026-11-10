@@ -6,6 +6,7 @@ import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 
+import java.time.Duration;
 import java.util.function.Supplier;
 
 /**
@@ -20,8 +21,8 @@ public class AzureDevopsPlatform extends RepositoryPlatform {
     public AzureDevopsPlatform(String baseUrl, String cloneUrl,
                                HttpCredentials httpCredentials,
                                @Nullable Supplier<SshCredentials> sshCredentials,
-                               AzureDevopsApiClient client) {
-        super(baseUrl, cloneUrl, httpCredentials, sshCredentials, client);
+                               AzureDevopsApiClient client, Duration userTtl) {
+        super(baseUrl, cloneUrl, httpCredentials, sshCredentials, client, userTtl);
     }
 
     /**

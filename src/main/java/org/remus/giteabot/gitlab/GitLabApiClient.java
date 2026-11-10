@@ -5,6 +5,7 @@ import org.remus.giteabot.gitlab.model.GitLabCommit;
 import org.remus.giteabot.gitlab.model.GitLabReview;
 import org.remus.giteabot.gitlab.model.GitLabReviewComment;
 import org.remus.giteabot.gitlab.model.GitLabTreeEntry;
+import org.remus.giteabot.gitlab.model.GitLabUserPublic;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
@@ -16,6 +17,7 @@ import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -50,6 +52,12 @@ public class GitLabApiClient implements RepositoryApiClient {
      */
     public GitLabApiClient(RestClient restClient) {
         this.gitlabRestClient = restClient;
+    }
+
+    @Override
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        return gitlabRestClient.get().uri("/api/v4/user")
+                .retrieve().body(GitLabUserPublic.class).toGitUser();
     }
 
     @Override

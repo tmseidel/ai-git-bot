@@ -4,17 +4,21 @@ import lombok.Getter;
 import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.SshCredentials;
 
 import java.net.URI;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
  * Everything needed to work with one Git integration besides its REST API: its URLs, how Git
- * commands reach and authenticate against its repositories, and how the provider names things
- * in comments. The API itself is the {@linkplain #getClient() client}'s job. Each provider has
+ * commands reach and authenticate against its repositories, the account its token authenticates
+ * as, and how the provider names things in comments. The API itself is the
+ * {@linkplain #getClient() client}'s job. Each provider has
  * its own subclass, built by {@link RepositoryProviderMetadata#createPlatform}.
  * <p>
  * The HTTP credentials hold the decrypted API token, which the API client's {@code RestClient}
@@ -38,22 +42,39 @@ public abstract class RepositoryPlatform {
     @Getter
     protected final RepositoryApiClient client;
 
+    /** The account the token authenticates as, the same wherever it is asked. */
+    private final CachedRepositoryUser user;
+
     /**
      * @param baseUrl         the API base URL (e.g. {@code https://api.github.com})
      * @param cloneUrl        the credential-free HTTP clone base URL (e.g. {@code https://github.com})
      * @param httpCredentials the credentials for Git over HTTP
      * @param sshCredentials  the credentials for Git over SSH, or {@code null} when SSH is not selected
      * @param client          the API client of this integration
+     * @param userTtl         how long the account the token authenticates as is cached
      */
     protected RepositoryPlatform(String baseUrl, String cloneUrl,
                                  HttpCredentials httpCredentials,
                                  @Nullable Supplier<SshCredentials> sshCredentials,
-                                 RepositoryApiClient client) {
+                                 RepositoryApiClient client, Duration userTtl) {
         this.baseUrl = baseUrl;
         this.cloneUrl = cloneUrl;
         this.httpCredentials = httpCredentials;
         this.sshCredentials = sshCredentials;
         this.client = client;
+        this.user = new CachedRepositoryUser(client::getAuthenticatedUser, userTtl, Clock.systemUTC());
+    }
+
+    /**
+     * Returns the account the token authenticates as, i.e. the bot's identity on the provider.
+     * {@code owner} only says where to ask when nothing valid is cached, see
+     * {@link RepositoryApiClient#getAuthenticatedUser(String)}; the account is the same for every owner.
+     * This distinction is only relevant for Azure DevOps.
+     *
+     * @throws IllegalStateException when the provider cannot be asked and nothing is cached
+     */
+    public RepositoryUser getUser(String owner) {
+        return user.get(owner);
     }
 
     /** Returns the transport Git commands use. */

@@ -218,6 +218,12 @@ See [Agent Documentation](AGENT.md) for full details.
 | `GITEABOT_WORKSPACES_DIR` |  | Optional host-visible root for private agent workspace parents. |
 | `GITEABOT_WORKSPACES_CLONE_TIMEOUT_SECONDS` | `300` | Budget (seconds) for one clone, PR-head fetch or checkout while preparing an agent workspace. Raise it for very large repositories: a shallow clone of a repo with tens of thousands of files can take minutes on a slow link, and an exhausted budget surfaces as a skipped workflow. |
 
+### Git Integrations (Optional)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GITEABOT_GIT_USER_CACHE_TTL` | `PT5M` | How long the account a Git integration's token authenticates as is cached. The bot commits under that account's display name and e-mail, so a change to either on the provider takes effect after at most this long. Accepts an ISO-8601 duration (`PT5M`) or a simple form such as `5m` or `30s`. |
+
 ### Review Context (Optional)
 
 These variables control how much context is sent to the AI alongside the diff:

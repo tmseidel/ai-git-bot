@@ -16,10 +16,12 @@ import java.util.Map;
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record BitbucketAccount(
-        @Nullable String uuid,
-        @JsonProperty("account_id") @Nullable String accountId,
-        @Nullable String nickname,
-        @JsonProperty("display_name") @Nullable String displayName
+        String uuid,
+        @JsonProperty("account_id") String accountId,
+        // called public name in bitbucket Account Settings
+        String nickname,
+        // called full name in bitbucket Account Settings
+        @JsonProperty("display_name") String displayName
 ) {
 
     /** Treats blank values like missing ones, so an empty id never matches another account. */

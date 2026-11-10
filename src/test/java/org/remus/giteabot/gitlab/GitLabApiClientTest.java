@@ -1,5 +1,7 @@
 package org.remus.giteabot.gitlab;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -384,6 +386,22 @@ class GitLabApiClientTest {
                 () -> client.getPullRequestHead("group", "project", 7L, "feature/login"));
 
         assertTrue(error.getMessage().contains("did not report a source project id"));
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_prefersCommitEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/v4/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":7,\"username\":\"ai_bot\",\"name\":\"AI Bot\","
+                        + "\"email\":\"private@example.com\",\"commit_email\":\"commits@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitLabApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("7", "ai_bot", "AI Bot", "commits@example.com"), user);
         server.verify();
     }
 }

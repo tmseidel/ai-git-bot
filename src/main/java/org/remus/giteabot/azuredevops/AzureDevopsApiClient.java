@@ -7,6 +7,7 @@ import org.remus.giteabot.azuredevops.model.AzureDevopsReviewComment;
 import org.remus.giteabot.azuredevops.model.Comment;
 import org.remus.giteabot.azuredevops.model.CommentPosition;
 import org.remus.giteabot.azuredevops.model.CommentThreadContext;
+import org.remus.giteabot.azuredevops.model.ConnectionData;
 import org.remus.giteabot.azuredevops.model.GitCommitRef;
 import org.remus.giteabot.azuredevops.model.GitPullRequestCommentThread;
 import org.remus.giteabot.azuredevops.model.GitPullRequestIteration;
@@ -20,11 +21,17 @@ import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
+import org.springframework.web.util.UriUtils;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -136,10 +143,14 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
 
     /** The path prefix addressing the organization itself, for organization-level APIs. */
     private Scope organizationScope(AzureDevopsAddress addr) {
-        if (addr.isOrganizationScopedBy(baseUrl)) {
+        return organizationScope(addr.organization());
+    }
+
+    private Scope organizationScope(String organization) {
+        if (AzureDevopsAddress.isOrganizationScopedBy(baseUrl, organization)) {
             return new Scope("/_apis", new Object[0]);
         }
-        return new Scope("/{org}/_apis", new Object[]{addr.organization()});
+        return new Scope("/{org}/_apis", new Object[]{organization});
     }
 
     /** Appends trailing URI template values to a scope's leading ones. */
@@ -828,6 +839,101 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         log.warn("Azure DevOps returned no authenticated identity for organization '{}'; "
                 + "skipping vote", addr.organization());
         cachedReviewerIds.put(cacheKey, NO_IDENTITY);
+        return null;
+    }
+
+    /**
+     * Resolves the identity from {@code connectionData} inside the organization {@code owner}
+     * (the collection on Azure DevOps Server). The identity, its {@code id} and e-mail included, is
+     * the same in every organization; the organization only decides where it is asked. The
+     * username is the {@code Account} property, which on Azure DevOps Server lacks
+     * the domain of the {@code uniqueName}, so it is only informational. It is a UPN or an account
+     * name rather than a mailbox, so the e-mail address is read separately. A token without
+     * permission for that yields no e-mail, see {@link RepositoryUser#FALLBACK_EMAIL}.
+     * <p>
+     * {@code connectionData} only answers inside a scope the token may access. Asking inside the
+     * event's organization, rather than at account level, is what lets an integration on bare
+     * {@code https://dev.azure.com} work with a token scoped to the organizations it serves
+     * instead of to all accessible organizations.
+     *
+     * @throws IllegalStateException when {@code owner} names no organization or the token has no identity there
+     */
+    @Override
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        if (owner == null || owner.isBlank()) {
+            throw new IllegalStateException("Azure DevOps identifies the token per organization, but none was given");
+        }
+        Scope scope = organizationScope(owner);
+        ConnectionData data = restClient.get()
+                .uri(builder -> builder
+                        .path(scope.path() + "/connectionData")
+                        .queryParam("api-version", API_VERSION_CONNECTION_DATA)
+                        .build(scope.vars()))
+                .retrieve()
+                .body(ConnectionData.class);
+        ConnectionData.Identity identity = data == null ? null : data.getAuthenticatedUser();
+        if (identity != null && identity.getId() != null && !identity.getId().isBlank()
+                && identity.getDisplayName() != null) {
+            return new RepositoryUser(identity.getId(), identity.getDisplayName(), identity.getProviderDisplayName(),
+                    fetchIdentityEmail(owner, identity.getId()));
+        }
+        throw new IllegalStateException("Azure DevOps returned no authenticated identity in organization '"
+                + owner + "'");
+    }
+
+    /** Reads the e-mail address from the identity service of the organization. */
+    private String fetchIdentityEmail(String organization, String identityId) {
+        try {
+            String identityHost = identityServiceUrl(baseUrl);
+            RestClient.RequestHeadersSpec<?> request;
+            if (identityHost != null) {
+                // Services: the identity service lives on its own host and is addressed like the
+                // integration URL, so the organization is added exactly where that URL lacks it.
+                String organizationSegment = AzureDevopsAddress.isOrganizationScopedBy(baseUrl, organization)
+                        ? "" : "/" + UriUtils.encodePathSegment(organization, StandardCharsets.UTF_8);
+                request = restClient.get().uri(URI.create(identityHost + organizationSegment
+                        + "/_apis/identities?identityIds=" + UriUtils.encodeQueryParam(identityId, StandardCharsets.UTF_8)
+                        + "&queryMembership=None&api-version=" + API_VERSION));
+            } else {
+                Scope scope = organizationScope(organization);
+                request = restClient.get().uri(builder -> builder
+                        .path(scope.path() + "/identities")
+                        .queryParam("identityIds", identityId)
+                        .queryParam("queryMembership", "None")
+                        .queryParam("api-version", API_VERSION)
+                        .build(scope.vars()));
+            }
+            ConnectionData.Identities identities = request.retrieve().body(ConnectionData.Identities.class);
+            if (identities == null || identities.getValue() == null || identities.getValue().isEmpty()) {
+                return null;
+            }
+            return identities.getValue().getFirst().getMail();
+        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
+            log.warn("The Azure DevOps token may not read the account e-mail, so commits will not link to the "
+                    + "profile: give it the Identity (Read) scope");
+            return null;
+        } catch (RestClientException e) {
+            // The e-mail is optional: a failure here must not fail the identity lookup.
+            log.warn("Could not read the Azure DevOps account e-mail, so commits will not link to the profile: {}",
+                    e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Returns the identity service of an Azure DevOps Services URL, which lives on its own host,
+     * or {@code null} for Azure DevOps Server, which serves it from the integration URL.
+     */
+    private static String identityServiceUrl(String url) {
+        URI uri = URI.create(url);
+        String host = uri.getHost();
+        if ("dev.azure.com".equalsIgnoreCase(host)) {
+            return "https://vssps.dev.azure.com" + uri.getPath().replaceAll("/+$", "");
+        }
+        if (host != null && host.toLowerCase(Locale.ROOT).endsWith(".visualstudio.com")) {
+            return "https://" + host.substring(0, host.length() - ".visualstudio.com".length())
+                    + ".vssps.visualstudio.com";
+        }
         return null;
     }
 
