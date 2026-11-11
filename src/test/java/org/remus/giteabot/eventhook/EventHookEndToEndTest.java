@@ -67,6 +67,7 @@ class EventHookEndToEndTest {
 
     @BeforeEach
     void startReceiver() throws IOException {
+        clearTables();
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/hook", exchange -> {
             byte[] body = exchange.getRequestBody().readAllBytes();
@@ -85,6 +86,10 @@ class EventHookEndToEndTest {
     @AfterEach
     void cleanUp() {
         server.stop(0);
+        clearTables();
+    }
+
+    private void clearTables() {
         deliveryRepository.deleteAll();
         endpointRepository.deleteAll();
     }
