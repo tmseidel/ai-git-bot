@@ -177,13 +177,16 @@ public class ToolCatalog {
                             required("path")))
                 .withHint("**Trace module relationships**: `ctags-deps` gives imports, includes and package declarations."),
             entry("pr-diff", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
-                    "Return the diff hunks for a specific changed file in the current pull request. "
+                    "Return the diff hunks of changed files in the current pull request. "
                             + "Use this after inspecting the changed-file summary to see what exactly "
-                            + "was added, removed, or modified in a file. "
-                            + "Args: [\"path/to/file\"].",
+                            + "was added, removed, or modified. Pass up to 8 paths in one call to "
+                            + "read related files together; with more than one path, each gets a "
+                            + "\"### path\" heading. Added and "
+                            + "context lines carry their line number in the new file (\"37 | +code\"); "
+                            + "removed lines have none. Args: [\"path/to/file\", ...].",
                     objectSchema(
-                            prop("path", "string", "Repository-relative path of the changed file."),
-                            required("path"))),
+                            arrayProp("paths", "Repository-relative paths of changed files, up to 8."),
+                            required("paths"))),
 
             // Additional context aliases (silent at runtime — never advertised to the LLM
             // to avoid duplicate descriptors with conflicting docs).
