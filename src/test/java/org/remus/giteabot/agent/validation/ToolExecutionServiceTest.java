@@ -1,5 +1,10 @@
 package org.remus.giteabot.agent.validation;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -10,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,11 +26,32 @@ class ToolExecutionServiceTest {
     @TempDir
     Path tempDir;
 
+    private Logger serviceLogger;
+    private ListAppender<ILoggingEvent> logEvents;
+
     @BeforeEach
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
                 new org.remus.giteabot.agent.tools.ToolCatalog(config));
+        serviceLogger = (Logger) LoggerFactory.getLogger(ToolExecutionService.class);
+        logEvents = new ListAppender<>();
+        logEvents.start();
+        serviceLogger.addAppender(logEvents);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        serviceLogger.detachAppender(logEvents);
+    }
+
+    /** INFO-and-above messages the service logged about {@code patch-file}. */
+    private List<String> patchFileLogLines() {
+        return logEvents.list.stream()
+                .filter(e -> e.getLevel().isGreaterOrEqual(Level.INFO))
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith("patch-file:"))
+                .toList();
     }
 
     @Test
@@ -486,6 +513,51 @@ class ToolExecutionServiceTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("search text not found");
+    }
+
+    @Test
+    void executeFileTool_patchFile_successfulPatch_logsExactlyOneLineNamingPathAndTier() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "class Service { int x = 1; }");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "int x = 1;", "int x = 2;"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("EXACT"));
+    }
+
+    @Test
+    void executeFileTool_patchFile_searchTextNotFound_logsPathAndStatus() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "class Service {}");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "secret-looking search text", "replacement"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("NOT_FOUND")
+                        .doesNotContain("secret-looking search text"));
+    }
+
+    @Test
+    void executeFileTool_patchFile_ambiguousSearchText_logsPathStatusAndMatchCount() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "int x = 1;\nint y = 1;\nint z = 1;\n");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "= 1;", "= 2;"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("AMBIGUOUS").contains("3"));
+    }
+
+    @Test
+    void executeFileTool_patchFile_identicalReplacement_logsPathAndStatus() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "class Service { int x = 1; }");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "int x = 1;", "int x = 1;"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("NO_CHANGE"));
     }
 
     @Test

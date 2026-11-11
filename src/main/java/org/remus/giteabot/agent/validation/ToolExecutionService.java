@@ -356,23 +356,44 @@ public class ToolExecutionService {
                                     + " — line endings/trailing whitespace normalized)";
                     yield new ToolResult(true, 0, "File patched: " + relativePath + hint, "");
                 }
-                case NOT_FOUND -> new ToolResult(false, 1, "",
-                        "patch-file: search text not found in file: " + relativePath
-                                + ". The search was tried as-is, with normalized line endings, "
-                                + "and with whitespace-tolerant matching. Use `cat` to inspect "
-                                + "the exact current content first.");
-                case AMBIGUOUS -> new ToolResult(false, 1, "",
-                        "patch-file: search text matches " + attempt.occurrences() + " locations in "
-                                + relativePath + " — the replacement would be ambiguous. "
-                                + "Provide a more specific search string that matches exactly once "
-                                + "(use `cat` to identify a unique surrounding context).");
-                case NO_CHANGE -> new ToolResult(false, 1, "",
-                        "patch-file produced no changes in " + relativePath
-                                + ". The replacement is identical to the matched text.");
+                case NOT_FOUND -> {
+                    // The reason otherwise only reaches the model, so an operator reading the log
+                    // could not tell which call failed. The search text itself stays at DEBUG:
+                    // it is repository content.
+                    log.info("patch-file: failed {} (NOT_FOUND)", relativePath);
+                    log.debug("patch-file: NOT_FOUND {}: search text starts with '{}'",
+                            relativePath, firstLineOf(searchText));
+                    yield new ToolResult(false, 1, "",
+                            "patch-file: search text not found in file: " + relativePath
+                                    + ". The search was tried as-is, with normalized line endings, "
+                                    + "and with whitespace-tolerant matching. Use `cat` to inspect "
+                                    + "the exact current content first.");
+                }
+                case AMBIGUOUS -> {
+                    log.info("patch-file: failed {} (AMBIGUOUS, {} matching locations)",
+                            relativePath, attempt.occurrences());
+                    yield new ToolResult(false, 1, "",
+                            "patch-file: search text matches " + attempt.occurrences() + " locations in "
+                                    + relativePath + " — the replacement would be ambiguous. "
+                                    + "Provide a more specific search string that matches exactly once "
+                                    + "(use `cat` to identify a unique surrounding context).");
+                }
+                case NO_CHANGE -> {
+                    log.info("patch-file: failed {} (NO_CHANGE)", relativePath);
+                    yield new ToolResult(false, 1, "",
+                            "patch-file produced no changes in " + relativePath
+                                    + ". The replacement is identical to the matched text.");
+                }
             };
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "patch-file failed: " + e.getMessage());
         }
+    }
+
+    /** First line of {@code text}, cut to a length that is safe to put in a log line. */
+    private static String firstLineOf(String text) {
+        String line = text.lines().findFirst().orElse("");
+        return line.length() > 120 ? line.substring(0, 120) + "..." : line;
     }
 
     // ---- patch-file matching tiers --------------------------------------
