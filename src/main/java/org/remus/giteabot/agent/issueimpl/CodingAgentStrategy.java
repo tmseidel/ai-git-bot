@@ -205,13 +205,17 @@ public final class CodingAgentStrategy implements AgentStrategy {
             requests.add(toRequest(call));
         }
 
-        // Always emit a thinking/plan comment so users see what the agent is about
-        // to do — providers often return only tool_calls with empty assistantText
-        // in native mode, which would otherwise leave the issue silent. Tool args
+        // Emit a thinking/plan comment for rounds that change files or run validation,
+        // so users see what the agent is about to do — providers often return only
+        // tool_calls with empty assistantText in native mode, which would otherwise
+        // leave the issue silent. Rounds that only read the repository (cat/rg/tree/...)
+        // post nothing: announcing every lookup floods the issue thread. Tool args
         // are truncated by the notification service to keep large/sensitive
         // write-file payloads out of issue comments.
-        notificationService.postNativeToolPlanComment(ctx.owner(), ctx.repo(), ctx.commentTargetNumber(),
-                turn.assistantText(), requests);
+        if (requests.stream().anyMatch(this::isMutationOrValidation)) {
+            notificationService.postNativeToolPlanComment(ctx.owner(), ctx.repo(), ctx.commentTargetNumber(),
+                    turn.assistantText(), requests);
+        }
 
         BranchSwitcher.Result branchSwitchResult = branchSwitcher.apply(
                 ctx.workspace(), ctx.baseBranch(), requests, ctx.issueNumber());
