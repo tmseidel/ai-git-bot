@@ -183,28 +183,24 @@ class WorkspaceTest {
     @Test
     void authorizationHeader_notUsedByDefault() throws IOException {
         Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
-        workspace.setAuthentication("https://git.example.com/owner/repo.git",
-                new HttpCredentials(null, "token"), false);
 
-        try {
+        try (workspace) {
+            workspace.setAuthentication("https://git.example.com/owner/repo.git",
+                    new HttpCredentials(null, "token"), false);
             assertThat(workspace.authorizationHeaderEnvironment()).isEmpty();
-        } finally {
-            workspace.close();
         }
     }
 
     @Test
     void gitConfigArgs_usesExternalCredentialStore() throws IOException {
         Workspace workspace = workspaceService.createWorkspace(TestPlatforms.USER);
-        Path credentials = workspace.createCredentialsFile(
-                "https://git.example.com/owner/repo.git", null, "test-token");
 
-        try {
+        try (workspace) {
+            Path credentials = workspace.createCredentialsFile(
+                    "https://git.example.com/owner/repo.git", null, "test-token");
             assertThat(workspace.gitConfigArgs()).containsExactly(
                     "-c", "credential.helper=",
                     "-c", "credential.helper=store --file=" + credentials.toAbsolutePath());
-        } finally {
-            workspace.close();
         }
     }
 
