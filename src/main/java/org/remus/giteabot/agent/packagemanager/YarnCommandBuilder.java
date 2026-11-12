@@ -15,18 +15,21 @@ import java.util.Map;
 /**
  * Turns a {@code yarn …} tool call into the process the workspace actually gets.
  *
- * <p>The model never picks the Yarn version: Corepack does, from the version the
- * checkout pins in {@code packageManager} (or from the lockfile's major when no field
- * is set). Without Corepack the {@code yarn} on {@code PATH} is used. Yarn Classic may
- * be installed through npm as a fallback, but only when the operator set
- * {@code agent.validation.allow-yarn-install=true} — the tool never changes the image
- * on its own, and a modern Yarn release is never installed that way because it is not
- * published as the {@code yarn} npm package.</p>
+ * <p>The model never picks the Yarn version. When {@code packageManager} pins it, the
+ * command is a bare {@code corepack yarn …}: Corepack resolves the version from
+ * {@code package.json} and verifies the {@code +sha512…} integrity hash the repository
+ * opted into, which an explicit {@code yarn@<version>} would bypass. An explicit version
+ * is passed only for the one thing Corepack cannot read off the manifest — the Classic
+ * major inferred from a v1 lockfile. A checkout that vendors its release through
+ * {@code yarnPath} runs that committed file with Node, which is what Yarn's own shim does.
+ * Without Corepack the {@code yarn} on {@code PATH} is used. Yarn Classic may be installed
+ * through npm as a fallback, but only when the operator set
+ * {@code agent.validation.allow-yarn-install=true}.</p>
  *
- * <p>A Yarn-managed checkout that pins no version at all is refused rather than run
- * with Corepack's default, which is Yarn Classic: Classic reads a Berry lockfile as if
- * it were its own and rewrites it in v1 format. Lockfile changes are meant to come from
- * the requested dependency operation, not from a guessed Yarn version.</p>
+ * <p>A Yarn-managed checkout with neither a pinned version nor a {@code yarnPath} is
+ * refused rather than run with Corepack's default, which is Yarn Classic: Classic reads a
+ * Berry lockfile as if it were its own and rewrites it in v1 format. Lockfile changes are
+ * meant to come from the requested dependency operation, not from a guessed Yarn version.</p>
  *
  * <p>Corepack's auto-pin is disabled, so a Yarn run never adds a {@code packageManager}
  * field to {@code package.json} behind the user's back; the same flag is set in the
@@ -90,6 +93,19 @@ public class YarnCommandBuilder {
         List<List<String>> preparation = new ArrayList<>();
         List<String> command;
 
+        // A committed Yarn 2+ release: run it with Node, exactly as Yarn's own shim would.
+        // That covers repositories that pin through yarnPath and predate Corepack.
+        if (detection.yarnPath() != null) {
+            if (!locator.available("node")) {
+                return Invocation.failed("This repository runs Yarn from its committed release ("
+                        + detection.yarnPath() + "), but node is not on PATH. Install Node.js in "
+                        + "the image.");
+            }
+            command = new ArrayList<>(List.of("node", detection.yarnPath()));
+            command.addAll(args);
+            return new Invocation(List.of(), List.copyOf(command), Map.of(), null);
+        }
+
         // A Yarn checkout with no pinned version: running Corepack here would use its
         // default (Yarn Classic 1.x), and Classic rewrites a Berry yarn.lock in v1 format.
         if (detection.isYarn() && versionSpec == null) {
@@ -97,13 +113,16 @@ public class YarnCommandBuilder {
                     + "), but no Yarn version is pinned in package.json. Running Corepack without a "
                     + "pin falls back to its default — Yarn Classic 1.x — which rewrites a modern "
                     + "yarn.lock in the v1 format. Pin the version first, for example "
-                    + "\"packageManager\": \"yarn@4.1.1\".");
+                    + "\"packageManager\": \"yarn@4.1.1\", or commit a release and point yarnPath at it.");
         }
 
         if (locator.available("corepack")) {
             command = new ArrayList<>();
             command.add("corepack");
-            command.add(versionSpec != null ? "yarn@" + versionSpec : "yarn");
+            // A manifest pin is left to Corepack so it also verifies the integrity hash; only
+            // the Classic major inferred from a v1 lockfile is passed explicitly.
+            command.add(detection.yarnVersionFromManifest() || versionSpec == null
+                    ? "yarn" : "yarn@" + versionSpec);
             command.addAll(args);
         } else if (locator.available("yarn")) {
             command = new ArrayList<>(List.of("yarn"));

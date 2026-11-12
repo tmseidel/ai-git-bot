@@ -1,6 +1,7 @@
 package org.remus.giteabot.agent.packagemanager;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.util.WorkspacePaths;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -16,11 +17,13 @@ import java.util.stream.Stream;
  * Decides which package manager a checkout uses, so the tool layer can refuse npm
  * for a Yarn-managed repository instead of relying on the model to notice.
  *
- * <p>Two markers decide it, the authoritative one first:</p>
+ * <p>The markers, most authoritative first:</p>
  * <ol>
  *   <li>the {@code packageManager} field in {@code package.json} (the Corepack contract);</li>
  *   <li>{@code yarn.lock} — its {@code # yarn lockfile v1} header also tells Yarn Classic
  *       from a modern release;</li>
+ *   <li>a {@code yarnPath} release committed in {@code .yarnrc.yml} (Yarn 2+ projects that
+ *       predate Corepack pin their version this way);</li>
  *   <li>{@code package-lock.json} / {@code npm-shrinkwrap.json};</li>
  *   <li>nothing — {@link PackageManager#UNKNOWN}, which keeps the previous behaviour.</li>
  * </ol>
@@ -47,8 +50,13 @@ public class PackageManagerDetector {
         }
 
         Path yarnLock = workspace.resolve("yarn.lock");
+        String yarnPath = yarnPath(workspace);
         if (Files.isRegularFile(yarnLock)) {
-            return PackageManagerDetection.yarn(yarnLockVersionSpec(yarnLock), "yarn.lock");
+            return PackageManagerDetection.yarnFromLockfile(yarnLockVersionSpec(yarnLock), yarnPath,
+                    "yarn.lock");
+        }
+        if (yarnPath != null) {
+            return PackageManagerDetection.yarnFromLockfile(null, yarnPath, ".yarnrc.yml");
         }
         if (Files.isRegularFile(workspace.resolve("package-lock.json"))) {
             return PackageManagerDetection.npm("package-lock.json");
@@ -66,7 +74,7 @@ public class PackageManagerDetector {
         String name = (at < 0 ? value : value.substring(0, at)).strip().toLowerCase();
         String version = at < 0 ? "" : versionWithoutHash(value.substring(at + 1));
         if ("yarn".equals(name)) {
-            return PackageManagerDetection.yarn(version.isBlank() ? null : version,
+            return PackageManagerDetection.yarnFromManifest(version.isBlank() ? null : version,
                     "package.json packageManager field (" + value + ")");
         }
         if ("npm".equals(name)) {
@@ -111,5 +119,54 @@ public class PackageManagerDetector {
             log.debug("Could not read {}: {}", yarnLock, e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * The release {@code .yarnrc.yml} points at through {@code yarnPath}, workspace-relative.
+     * The value is repository content and running it hands the file to Node, so it goes through
+     * the same guard as the file tools: absolute paths, {@code ..} traversal, {@code .git}
+     * internals and symlinked directories are rejected, and the target must be a regular file.
+     * A rejected or missing value is treated as absent.
+     */
+    private static String yarnPath(Path workspace) {
+        Path yarnRc = workspace.resolve(".yarnrc.yml");
+        if (!Files.isRegularFile(yarnRc)) {
+            return null;
+        }
+        Optional<String> configured;
+        try {
+            configured = Files.readAllLines(yarnRc, StandardCharsets.UTF_8).stream()
+                    .map(String::strip)
+                    .filter(line -> line.startsWith("yarnPath:"))
+                    .map(line -> unquote(line.substring("yarnPath:".length()).strip()))
+                    .filter(value -> !value.isEmpty())
+                    .findFirst();
+        } catch (IOException e) {
+            log.debug("Could not read {}: {}", yarnRc, e.getMessage());
+            return null;
+        }
+        if (configured.isEmpty()) {
+            return null;
+        }
+        try {
+            Path release = WorkspacePaths.resolveInsideWorkspace(workspace, configured.get());
+            if (!Files.isRegularFile(release)) {
+                log.debug("yarnPath {} is not a regular file", configured.get());
+                return null;
+            }
+            return workspace.toAbsolutePath().normalize().relativize(release).toString();
+        } catch (IllegalArgumentException e) {
+            log.warn("Ignoring yarnPath '{}': {}", configured.get(), e.getMessage());
+            return null;
+        }
+    }
+
+    private static String unquote(String value) {
+        if (value.length() >= 2
+                && (value.startsWith("\"") && value.endsWith("\"")
+                || value.startsWith("'") && value.endsWith("'"))) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 }

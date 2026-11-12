@@ -138,8 +138,10 @@ most authoritative marker first:
 
 1. the `packageManager` field in `package.json` (`yarn@4.1.1`, `npm@10.5.0`);
 2. `yarn.lock` — its `# yarn lockfile v1` header identifies Yarn Classic;
-3. `package-lock.json` / `npm-shrinkwrap.json`;
-4. nothing — an unmarked JavaScript project keeps the previous behaviour, so
+3. a `yarnPath` release committed in `.yarnrc.yml` (Yarn 2+ projects that predate
+   Corepack pin their version this way);
+4. `package-lock.json` / `npm-shrinkwrap.json`;
+5. nothing — an unmarked JavaScript project keeps the previous behaviour, so
    `npm` still works there.
 
 A repository carrying both `yarn.lock` and a stray `package-lock.json` counts as
@@ -153,16 +155,22 @@ would then carry. npm projects are untouched.
 
 **Version activation.** The model never chooses the Yarn version: it calls
 `yarn install`, `yarn add <pkg>`, `yarn add -D <pkg>`, `yarn remove <pkg>`,
-`yarn run <script>`, `yarn test`, `yarn audit`, and the tool runs
-`corepack yarn[@<version>] …`. Corepack — bundled with Node.js 16+ and enabled
-in the application image — activates the version named by `packageManager` (or
-Yarn Classic for a v1 lockfile), downloading it on demand with the interactive
-prompt disabled. Yarn Classic and modern Yarn (2.x–4.x) are supported this way.
+`yarn run <script>`, `yarn test`, `yarn audit`. When `packageManager` pins the
+version, the tool runs a bare `corepack yarn …`: Corepack resolves the version from
+`package.json` and verifies the `+sha512…` integrity hash the repository opted into,
+which an explicit `yarn@<version>` would bypass. An explicit `yarn@1` is passed only
+for the Classic major inferred from a v1 lockfile. A checkout that vendors its
+release through `yarnPath` runs that committed file with `node`, which is what Yarn's
+own shim does — this is how many Yarn 2+ projects that predate Corepack pin their
+version. Corepack is bundled with Node.js 16+ and enabled in the application image;
+downloads happen on demand with the interactive prompt disabled. Yarn Classic and
+modern Yarn (2.x–4.x) are supported this way.
+
 Corepack's auto-pin is disabled (`COREPACK_ENABLE_AUTO_PIN=0`), so a Yarn run never
 adds a `packageManager` field to `package.json` on its own. A Yarn-managed checkout
-that pins no version at all (a modern `yarn.lock` without `packageManager`) is
-refused instead of being run with Corepack's default: that default is Yarn Classic,
-which rewrites a Berry lockfile in v1 format.
+with neither a `packageManager` pin nor a `yarnPath` release is refused instead of
+being run with Corepack's default: that default is Yarn Classic, which rewrites a
+Berry lockfile in v1 format.
 
 Without Corepack the `yarn` on `PATH` is used. As a fallback, Yarn Classic may be
 installed through npm (`npm install -g yarn@<version>`). That mutates the image,

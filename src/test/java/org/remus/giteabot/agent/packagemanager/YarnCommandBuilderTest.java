@@ -11,27 +11,36 @@ import static org.assertj.core.api.Assertions.assertThat;
 class YarnCommandBuilderTest {
 
     @Test
-    void corepackActivatesThePinnedVersion() {
+    void aManifestPinIsLeftToCorepackSoItsHashIsVerified() {
         YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
-                .build(yarn("4.1.1"), List.of("install", "--immutable"));
+                .build(manifestPinned("4.1.1"), List.of("install", "--immutable"));
 
         assertThat(invocation.failed()).isFalse();
         assertThat(invocation.preparation()).isEmpty();
-        assertThat(invocation.command())
-                .containsExactly("corepack", "yarn@4.1.1", "install", "--immutable");
+        // No explicit @version: Corepack reads package.json and checks its +sha… hash.
+        assertThat(invocation.command()).containsExactly("corepack", "yarn", "install", "--immutable");
         assertThat(invocation.environment())
                 .containsEntry("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0")
                 .containsEntry("COREPACK_ENABLE_AUTO_PIN", "0");
     }
 
     @Test
+    void aClassicLockfilePassesTheMajorExplicitly() {
+        YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
+                .build(classicLockfile(), List.of("install"));
+
+        assertThat(invocation.failed()).isFalse();
+        assertThat(invocation.command()).containsExactly("corepack", "yarn@1", "install");
+    }
+
+    @Test
     void anUnpinnedYarnRepositoryIsRefused() {
         YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
-                .build(yarn(null), List.of("install"));
+                .build(unpinned(), List.of("install"));
 
         assertThat(invocation.failed()).isTrue();
         assertThat(invocation.failure())
-                .contains("no Yarn version is pinned", "packageManager", "v1 format");
+                .contains("no Yarn version is pinned", "packageManager", "v1 format", "yarnPath");
     }
 
     @Test
@@ -49,15 +58,35 @@ class YarnCommandBuilderTest {
     @Test
     void withoutCorepackTheYarnOnPathIsUsed() {
         YarnCommandBuilder.Invocation invocation = builder(Set.of("yarn"))
-                .build(yarn("1"), List.of("add", "left-pad"));
+                .build(classicLockfile(), List.of("add", "left-pad"));
 
         assertThat(invocation.command()).containsExactly("yarn", "add", "left-pad");
     }
 
     @Test
+    void aVendoredReleaseRunsWithNode() {
+        YarnCommandBuilder.Invocation invocation = builder(Set.of("node"))
+                .build(vendoredRelease(".yarn/releases/yarn-4.1.1.cjs"), List.of("install"));
+
+        assertThat(invocation.failed()).isFalse();
+        assertThat(invocation.preparation()).isEmpty();
+        assertThat(invocation.command())
+                .containsExactly("node", ".yarn/releases/yarn-4.1.1.cjs", "install");
+    }
+
+    @Test
+    void aVendoredReleaseNeedsNode() {
+        YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
+                .build(vendoredRelease(".yarn/releases/yarn-4.1.1.cjs"), List.of("install"));
+
+        assertThat(invocation.failed()).isTrue();
+        assertThat(invocation.failure()).contains("node", ".yarn/releases/yarn-4.1.1.cjs");
+    }
+
+    @Test
     void aMissingToolchainFailsWithoutChangingTheImage() {
         YarnCommandBuilder.Invocation invocation = builder(Set.of())
-                .build(yarn("4.1.1"), List.of("install"));
+                .build(manifestPinned("4.1.1"), List.of("install"));
 
         assertThat(invocation.failed()).isTrue();
         assertThat(invocation.failure()).contains(YarnCommandBuilder.YARN_INSTALL_PROPERTY);
@@ -66,7 +95,7 @@ class YarnCommandBuilderTest {
     @Test
     void yarnClassicIsInstalledThroughNpmWhenExplicitlyAllowed() {
         YarnCommandBuilder.Invocation invocation = builder(allowingYarnInstall(), Set.of("npm"))
-                .build(yarn("1"), List.of("install"));
+                .build(classicLockfile(), List.of("install"));
 
         assertThat(invocation.failed()).isFalse();
         assertThat(invocation.preparation()).containsExactly(List.of("npm", "install", "-g", "yarn@1"));
@@ -76,7 +105,7 @@ class YarnCommandBuilderTest {
     @Test
     void modernYarnIsNeverInstalledThroughNpm() {
         YarnCommandBuilder.Invocation invocation = builder(allowingYarnInstall(), Set.of("npm"))
-                .build(yarn("4.1.1"), List.of("install"));
+                .build(manifestPinned("4.1.1"), List.of("install"));
 
         assertThat(invocation.failed()).isTrue();
         assertThat(invocation.failure()).contains("Corepack", "only Yarn Classic");
@@ -85,7 +114,7 @@ class YarnCommandBuilderTest {
     @Test
     void anUnpinnedYarnIsRefusedInsteadOfInstalledThroughNpm() {
         YarnCommandBuilder.Invocation invocation = builder(allowingYarnInstall(), Set.of("npm"))
-                .build(yarn(null), List.of("install"));
+                .build(unpinned(), List.of("install"));
 
         assertThat(invocation.failed()).isTrue();
         assertThat(invocation.failure()).contains("no Yarn version is pinned");
@@ -95,7 +124,7 @@ class YarnCommandBuilderTest {
     @Test
     void npmIsRequiredToPrepareYarnClassic() {
         YarnCommandBuilder.Invocation invocation = builder(allowingYarnInstall(), Set.of())
-                .build(yarn("1"), List.of("install"));
+                .build(classicLockfile(), List.of("install"));
 
         assertThat(invocation.failed()).isTrue();
         assertThat(invocation.failure()).contains("npm");
@@ -115,7 +144,20 @@ class YarnCommandBuilderTest {
         return config;
     }
 
-    private static PackageManagerDetection yarn(String versionSpec) {
-        return new PackageManagerDetection(PackageManager.YARN, versionSpec, "yarn.lock");
+    private static PackageManagerDetection manifestPinned(String version) {
+        return PackageManagerDetection.yarnFromManifest(version,
+                "package.json packageManager field (yarn@" + version + ")");
+    }
+
+    private static PackageManagerDetection classicLockfile() {
+        return PackageManagerDetection.yarnFromLockfile("1", null, "yarn.lock");
+    }
+
+    private static PackageManagerDetection unpinned() {
+        return PackageManagerDetection.yarnFromLockfile(null, null, "yarn.lock");
+    }
+
+    private static PackageManagerDetection vendoredRelease(String yarnPath) {
+        return PackageManagerDetection.yarnFromLockfile(null, yarnPath, "yarn.lock");
     }
 }
