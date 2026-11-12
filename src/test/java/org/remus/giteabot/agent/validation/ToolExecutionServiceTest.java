@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.remus.giteabot.config.AgentConfigProperties;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -51,6 +52,15 @@ class ToolExecutionServiceTest {
                 .filter(e -> e.getLevel().isGreaterOrEqual(Level.INFO))
                 .map(ILoggingEvent::getFormattedMessage)
                 .filter(m -> m.startsWith("patch-file:"))
+                .toList();
+    }
+
+    /** INFO-and-above messages the service logged about the {@code rg} tool. */
+    private List<String> searchLogLines() {
+        return logEvents.list.stream()
+                .filter(e -> e.getLevel().isGreaterOrEqual(Level.INFO))
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith("rg: "))
                 .toList();
     }
 
@@ -453,6 +463,80 @@ class ToolExecutionServiceTest {
         assertThat(searchResult.output()).startsWith("No matches found");
         assertThat(findResult.output()).doesNotContain("linked-secret.txt");
         assertThat(treeResult.output()).doesNotContain("linked-secret.txt");
+    }
+
+    @Test
+    void executeContextTool_search_skipsBinaryFilesInTreeInsteadOfFailing() throws IOException {
+        Path src = tempDir.resolve("src");
+        Files.createDirectories(src.resolve("wwwroot"));
+        Files.writeString(src.resolve("Index.cshtml"), "<input id=\"hide-passed-rows-checkbox\" />\n");
+        // PNG header: NUL byte marks it binary, and the bytes are not valid UTF-8 either.
+        Files.write(src.resolve("wwwroot/logo.png"), new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x00, 0x01, (byte) 0xFF});
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("hide-passed-rows-checkbox", "src"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("src/Index.cshtml:1: ");
+        assertThat(result.output()).doesNotContain("logo.png");
+    }
+
+    @Test
+    void executeContextTool_search_doesNotFailOnNonUtf8TextFile() throws IOException {
+        Path src = tempDir.resolve("src");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("Index.cshtml"), "<input id=\"hide-passed-rows-checkbox\" />\n");
+        // 0xE9 is latin-1 'é' and invalid UTF-8.
+        Files.writeString(src.resolve("legacy.txt"),
+                "café: hide-passed-rows-checkbox", StandardCharsets.ISO_8859_1);
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("hide-passed-rows-checkbox", "src"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("src/Index.cshtml:1: ");
+        assertThat(result.output()).contains("src/legacy.txt:1: ");
+    }
+
+    @Test
+    void executeContextTool_search_zeroHits_succeedsWithNoMatchesMessage() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Index.cshtml"), "nothing relevant here\n");
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("hide-passed-rows-checkbox", "src"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).startsWith("No matches found for pattern: hide-passed-rows-checkbox");
+    }
+
+    @Test
+    void executeContextTool_search_missingPattern_logsOneLineWithReason() {
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of());
+
+        assertThat(result.success()).isFalse();
+        assertThat(searchLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("no pattern argument"));
+    }
+
+    @Test
+    void executeContextTool_search_missingPath_logsOneLineWithPathAndReason() {
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("needle", "src/missing"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(searchLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("src/missing").contains("not found"));
+    }
+
+    @Test
+    void executeContextTool_search_rejectedPath_logsOneLineWithPathAndReason() {
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("needle", "../outside"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(searchLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("../outside").contains("traversal"));
     }
 
     // ---- File tool tests ----
