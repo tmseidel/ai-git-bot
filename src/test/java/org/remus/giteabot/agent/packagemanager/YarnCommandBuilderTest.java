@@ -20,14 +20,29 @@ class YarnCommandBuilderTest {
         assertThat(invocation.command())
                 .containsExactly("corepack", "yarn@4.1.1", "install", "--immutable");
         assertThat(invocation.environment())
-                .containsEntry("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0");
+                .containsEntry("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0")
+                .containsEntry("COREPACK_ENABLE_AUTO_PIN", "0");
     }
 
     @Test
-    void corepackWithoutAPinLetsTheProjectDecide() {
+    void anUnpinnedYarnRepositoryIsRefused() {
         YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
-                .build(yarn(null), List.of("test"));
+                .build(yarn(null), List.of("install"));
 
+        assertThat(invocation.failed()).isTrue();
+        assertThat(invocation.failure())
+                .contains("no Yarn version is pinned", "packageManager", "v1 format");
+    }
+
+    @Test
+    void anUnmarkedProjectStillLetsCorepackChoose() {
+        PackageManagerDetection unknown =
+                PackageManagerDetection.unknown("no package manager marker");
+
+        YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
+                .build(unknown, List.of("test"));
+
+        assertThat(invocation.failed()).isFalse();
         assertThat(invocation.command()).containsExactly("corepack", "yarn", "test");
     }
 
@@ -68,12 +83,13 @@ class YarnCommandBuilderTest {
     }
 
     @Test
-    void anUnpinnedYarnIsNeverInstalledThroughNpm() {
+    void anUnpinnedYarnIsRefusedInsteadOfInstalledThroughNpm() {
         YarnCommandBuilder.Invocation invocation = builder(allowingYarnInstall(), Set.of("npm"))
                 .build(yarn(null), List.of("install"));
 
         assertThat(invocation.failed()).isTrue();
-        assertThat(invocation.failure()).contains("only Yarn Classic");
+        assertThat(invocation.failure()).contains("no Yarn version is pinned");
+        assertThat(invocation.preparation()).isEmpty();
     }
 
     @Test

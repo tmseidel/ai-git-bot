@@ -42,7 +42,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright \
     NPM_CONFIG_PREFIX=/usr/local \
     NODE_PATH=/usr/local/lib/node_modules \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    COREPACK_ENABLE_AUTO_PIN=0
 
 # ---------------------------------------------------------------------------
 # Base utilities + AI-agent build toolchain

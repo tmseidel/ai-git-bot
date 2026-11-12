@@ -158,6 +158,11 @@ would then carry. npm projects are untouched.
 in the application image — activates the version named by `packageManager` (or
 Yarn Classic for a v1 lockfile), downloading it on demand with the interactive
 prompt disabled. Yarn Classic and modern Yarn (2.x–4.x) are supported this way.
+Corepack's auto-pin is disabled (`COREPACK_ENABLE_AUTO_PIN=0`), so a Yarn run never
+adds a `packageManager` field to `package.json` on its own. A Yarn-managed checkout
+that pins no version at all (a modern `yarn.lock` without `packageManager`) is
+refused instead of being run with Corepack's default: that default is Yarn Classic,
+which rewrites a Berry lockfile in v1 format.
 
 Without Corepack the `yarn` on `PATH` is used. As a fallback, Yarn Classic may be
 installed through npm (`npm install -g yarn@<version>`). That mutates the image,

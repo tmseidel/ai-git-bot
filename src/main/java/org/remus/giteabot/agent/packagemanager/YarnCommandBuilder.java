@@ -22,6 +22,15 @@ import java.util.Map;
  * {@code agent.validation.allow-yarn-install=true} — the tool never changes the image
  * on its own, and a modern Yarn release is never installed that way because it is not
  * published as the {@code yarn} npm package.</p>
+ *
+ * <p>A Yarn-managed checkout that pins no version at all is refused rather than run
+ * with Corepack's default, which is Yarn Classic: Classic reads a Berry lockfile as if
+ * it were its own and rewrites it in v1 format. Lockfile changes are meant to come from
+ * the requested dependency operation, not from a guessed Yarn version.</p>
+ *
+ * <p>Corepack's auto-pin is disabled, so a Yarn run never adds a {@code packageManager}
+ * field to {@code package.json} behind the user's back; the same flag is set in the
+ * image's {@code ENV}.</p>
  */
 @Slf4j
 @Component
@@ -30,9 +39,14 @@ public class YarnCommandBuilder {
     /** The property that lets this tool install Yarn Classic into the image. */
     static final String YARN_INSTALL_PROPERTY = "agent.validation.allow-yarn-install";
 
-    /** Corepack asks before downloading a package manager; an agent run has nobody to answer. */
-    private static final Map<String, String> COREPACK_ENVIRONMENT =
-            Map.of("COREPACK_ENABLE_DOWNLOAD_PROMPT", "0");
+    /**
+     * Corepack asks before downloading a package manager, and some Corepack versions
+     * auto-pin by writing a {@code packageManager} field into {@code package.json} —
+     * an agent run has nobody to answer the first and must not produce the second.
+     */
+    private static final Map<String, String> COREPACK_ENVIRONMENT = Map.of(
+            "COREPACK_ENABLE_DOWNLOAD_PROMPT", "0",
+            "COREPACK_ENABLE_AUTO_PIN", "0");
 
     /** Is a binary runnable? Injectable so tests can pin the toolchain an image provides. */
     @FunctionalInterface
@@ -75,6 +89,16 @@ public class YarnCommandBuilder {
         String versionSpec = detection.yarnVersionSpec();
         List<List<String>> preparation = new ArrayList<>();
         List<String> command;
+
+        // A Yarn checkout with no pinned version: running Corepack here would use its
+        // default (Yarn Classic 1.x), and Classic rewrites a Berry yarn.lock in v1 format.
+        if (detection.isYarn() && versionSpec == null) {
+            return Invocation.failed("This repository is managed by Yarn (" + detection.evidence()
+                    + "), but no Yarn version is pinned in package.json. Running Corepack without a "
+                    + "pin falls back to its default — Yarn Classic 1.x — which rewrites a modern "
+                    + "yarn.lock in the v1 format. Pin the version first, for example "
+                    + "\"packageManager\": \"yarn@4.1.1\".");
+        }
 
         if (locator.available("corepack")) {
             command = new ArrayList<>();
