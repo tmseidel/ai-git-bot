@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.codeexecution.ProcessPythonExecutionService;
 import org.remus.giteabot.agent.model.ImplementationPlan;
@@ -92,7 +94,8 @@ class AgentToolRouterTruncationTest {
 
     private ToolResult executeCode(AgentConfigProperties config, String code) {
         ToolCatalog catalog = new ToolCatalog(config);
-        ToolExecutionService tools = new ToolExecutionService(config, catalog);
+        ToolExecutionService tools = new ToolExecutionService(config, catalog,
+                new PackageManagerDetector(), new YarnCommandBuilder(config));
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, Set.of("execute-code", "cat"), new ProcessPythonExecutionService(config));
         ToolCallContext context = new ToolCallContext("owner", "repo", 1L, Workspace.unmanaged(workspace),

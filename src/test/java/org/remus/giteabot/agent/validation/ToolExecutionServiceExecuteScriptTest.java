@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
 
@@ -45,7 +47,8 @@ class ToolExecutionServiceExecuteScriptTest {
     }
 
     private static ToolExecutionService newService(AgentConfigProperties config) {
-        return new ToolExecutionService(config, new ToolCatalog(config));
+        return new ToolExecutionService(config, new ToolCatalog(config),
+                new PackageManagerDetector(), new YarnCommandBuilder(config));
     }
 
     private void git(String... arguments) throws IOException {

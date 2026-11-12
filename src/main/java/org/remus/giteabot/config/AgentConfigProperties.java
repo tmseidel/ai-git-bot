@@ -349,6 +349,7 @@ public class AgentConfigProperties {
                 "mvn",      // Java/Maven
                 "gradle",   // Java/Gradle
                 "npm",      // JavaScript/TypeScript
+                "yarn",     // JavaScript/TypeScript (Yarn-managed repositories)
                 "go",       // Go
                 "cargo",    // Rust
                 "python3",  // Python
@@ -361,5 +362,14 @@ public class AgentConfigProperties {
                 "dotnet",   // .NET
                 "execute"   // repository-provided validation script (repo-relative path)
         );
+
+        /**
+         * Allow the {@code yarn} tool to install Yarn Classic through npm
+         * ({@code npm install -g yarn@<version>}) when the image provides neither
+         * Corepack nor Yarn. Off by default, so a run never modifies the image on its
+         * own; when off, the tool reports what is missing instead. Yarn 2+ is only
+         * available through Corepack and is never installed this way.
+         */
+        private boolean allowYarnInstall = false;
     }
 }

@@ -120,7 +120,7 @@ class ToolCatalogTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"branch-switcher", "write-file", "patch-file", "mkdir", "delete-file",
-            "mvn", "npm", "python3", "pr-test-write", "pr-test-run", "unit-test-write", "doc-write",
+            "mvn", "npm", "yarn", "python3", "pr-test-write", "pr-test-run", "unit-test-write", "doc-write",
             "doc-delete", "i18n-write", "i18n-delete", "grep", "ripgrep", "does-not-exist"})
     void nonReviewToolsStayUnavailableEvenWhenConfigured(String name) {
         assertThat(catalog.describeFor(ToolCatalog.Role.REVIEW, name)).isEmpty();
@@ -177,7 +177,7 @@ class ToolCatalogTest {
                 "get-issue", "search-issues");
         // No mutations, no validation on writer.
         assertThat(names).doesNotContain("write-file", "patch-file", "mkdir", "delete-file",
-                "mvn", "gradle", "npm", "dotnet", "cargo", "go", "python3", "make", "cmake",
+                "mvn", "gradle", "npm", "yarn", "dotnet", "cargo", "go", "python3", "make", "cmake",
                 "execute");
     }
 
@@ -285,6 +285,8 @@ class ToolCatalogTest {
         assertThat(catalog.usageHint("CTAGS-SIGNATURES")).as("normalized").isPresent();
         assertThat(catalog.usageHint("pr-test-write")).isPresent();
         assertThat(catalog.usageHint("execute")).as("validation tool").isPresent();
+        assertThat(catalog.usageHint("npm")).as("npm strategy line").isPresent();
+        assertThat(catalog.usageHint("yarn")).as("yarn strategy line").isPresent();
         // A tool that needs no strategy line contributes none.
         assertThat(catalog.usageHint("write-file")).isEmpty();
         assertThat(catalog.usageHint("mvn")).isEmpty();

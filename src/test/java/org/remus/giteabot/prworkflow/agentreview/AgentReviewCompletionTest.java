@@ -9,6 +9,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
@@ -113,7 +115,8 @@ class AgentReviewCompletionTest {
                 new AgentReviewContext(platform, aiClient, "Review the change.", "bot",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
-                new ToolExecutionService(config, catalog), catalog, workspaceService,
+                new ToolExecutionService(config, catalog, new PackageManagerDetector(),
+                        new YarnCommandBuilder(config)), catalog, workspaceService,
                 config, null, new Bot(), eventHooks, null);
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
         when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);

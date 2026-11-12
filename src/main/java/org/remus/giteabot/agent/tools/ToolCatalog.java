@@ -341,6 +341,7 @@ public class ToolCatalog {
             Map.entry("mvn",     "Run Apache Maven in the workspace root (e.g. compile, test, verify)."),
             Map.entry("gradle",  "Run Gradle in the workspace root (e.g. compileJava, test)."),
             Map.entry("npm",     "Run npm in the workspace root (e.g. run build, test, ci)."),
+            Map.entry("yarn",    "Run Yarn in the workspace root (e.g. install, add <pkg>, run build, test, audit)."),
             Map.entry("dotnet",  "Run the .NET CLI in the workspace root (e.g. build, test)."),
             Map.entry("cargo",   "Run Cargo in the workspace root (e.g. build, test)."),
             Map.entry("go",      "Run the Go toolchain in the workspace root (e.g. build ./..., test ./...)."),
@@ -356,10 +357,12 @@ public class ToolCatalog {
      * from configuration ({@link AgentConfigProperties.ValidationConfig#getAvailableTools()}) rather
      * than from {@link #STATIC_TOOLS}, so their strategy line cannot ride on an {@link Entry} the way
      * {@link #usageHint(String)} reads it — this map is their counterpart. A tool with no entry here
-     * contributes nothing, which is the norm: `mvn` or `npm` need no explanation of when to run them.
+     * contributes nothing, which is the norm: `mvn` or `gradle` need no explanation of when to run them.
      */
     private static final Map<String, String> VALIDATION_USAGE_HINTS = Map.of(
-            "execute", "**A repository with no build command**: `execute` runs a committed script, for example `scripts/validate.sh`; exit code 0 passes."
+            "execute", "**A repository with no build command**: `execute` runs a committed script, for example `scripts/validate.sh`; exit code 0 passes.",
+            "npm", "**An npm-managed repository**: `npm` runs installs and scripts. In a Yarn-managed repository it is refused (`yarn.lock`, `.yarnrc.yml` or `packageManager: yarn@…`) — use `yarn` there.",
+            "yarn", "**A Yarn-managed repository** (`yarn.lock`, `.yarnrc.yml`, `packageManager: yarn@…`): install, add and remove dependencies with `yarn` — it activates the version the project pins. Never run npm or create a `package-lock.json` here."
     );
 
     private final AgentConfigProperties agentConfig;

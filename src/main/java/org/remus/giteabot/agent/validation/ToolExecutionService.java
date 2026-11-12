@@ -2,6 +2,9 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetection;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.util.ProcessSupport;
@@ -53,6 +56,8 @@ public class ToolExecutionService {
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
+    private final PackageManagerDetector packageManagerDetector;
+    private final YarnCommandBuilder yarnCommandBuilder;
 
     /**
      * Executes a configured validation tool in the given workspace:
@@ -72,6 +77,8 @@ public class ToolExecutionService {
 
         return switch (tool) {
             case "execute" -> executeScriptTool(workspaceDir, arguments);
+            case "npm" -> executeNpmTool(workspaceDir, arguments);
+            case "yarn" -> executeYarnTool(workspaceDir, arguments);
             default -> executePathTool(workspaceDir, tool, arguments);
         };
     }
@@ -90,6 +97,66 @@ public class ToolExecutionService {
                 arguments != null ? String.join(" ", arguments) : "");
 
         return executeCommand(workspaceDir, command.toArray(String[]::new));
+    }
+
+    /**
+     * npm for an npm-managed project, refused for a Yarn-managed one. The refusal is the
+     * tool-layer enforcement: an npm install in a Yarn checkout ignores {@code yarn.lock}
+     * and writes a {@code package-lock.json}, which the generated pull request would then
+     * carry. The model's prompt says the same thing, but the prompt is not a guarantee.
+     */
+    private ToolResult executeNpmTool(Path workspaceDir, List<String> arguments) {
+        PackageManagerDetection detection = packageManagerDetector.detect(workspaceDir);
+        if (detection.isYarn()) {
+            log.info("Refusing npm: the workspace is Yarn-managed ({})", detection.evidence());
+            return new ToolResult(false, -1, "",
+                    "This repository is managed by Yarn (" + detection.evidence() + "), so npm is "
+                            + "refused here — it would ignore yarn.lock and create a package-lock.json. "
+                            + "Use the `yarn` tool for installs, dependency changes and scripts. If "
+                            + "`yarn` is not in your tool list, ask the operator to enable it in the "
+                            + "bot's tool configuration.");
+        }
+        return executePathTool(workspaceDir, "npm", arguments);
+    }
+
+    /**
+     * Runs Yarn with the version the checkout pins. The command comes from
+     * {@link YarnCommandBuilder}, which uses Corepack when present and may install Yarn
+     * Classic through npm (only when the operator allowed it). Lockfile changes land in the
+     * workspace like any other file, so the commit ({@code git add -A}) and the pull request
+     * carry {@code package.json} and {@code yarn.lock} together.
+     */
+    private ToolResult executeYarnTool(Path workspaceDir, List<String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return new ToolResult(false, -1, "",
+                    "yarn requires at least one argument, for example install, add <package>, "
+                            + "add -D <package>, remove <package>, run build, test or audit.");
+        }
+
+        PackageManagerDetection detection = packageManagerDetector.detect(workspaceDir);
+        YarnCommandBuilder.Invocation invocation = yarnCommandBuilder.build(detection, arguments);
+        if (invocation.failed()) {
+            log.info("Cannot run yarn in this workspace: {}", invocation.failure());
+            return new ToolResult(false, -1, "", invocation.failure());
+        }
+
+        for (List<String> preparation : invocation.preparation()) {
+            String preparedCommand = String.join(" ", preparation);
+            log.info("Preparing the Yarn toolchain: {}", preparedCommand);
+            ToolResult prepared = executeCommand(workspaceDir,
+                    preparation.toArray(String[]::new), invocation.environment());
+            if (!prepared.success()) {
+                String detail = prepared.error().isBlank()
+                        ? prepared.output() : prepared.error() + "\n" + prepared.output();
+                return new ToolResult(false, prepared.exitCode(), "",
+                        "Preparing the Yarn toolchain failed (" + preparedCommand + "): "
+                                + detail.strip());
+            }
+        }
+
+        log.info("Executing yarn ({}): {}", detection.evidence(), String.join(" ", arguments));
+        return executeCommand(workspaceDir, invocation.command().toArray(String[]::new),
+                invocation.environment());
     }
 
     /**
@@ -1652,6 +1719,16 @@ public class ToolExecutionService {
     }
 
     private ToolResult executeCommand(Path workspaceDir, String[] command) {
+        return executeCommand(workspaceDir, command, Map.of());
+    }
+
+    /**
+     * As {@link #executeCommand(Path, String[])}, plus variables the tool needs beyond the
+     * scrub allow-list (Corepack's non-interactive download switch). They are applied after
+     * the scrub, so they cannot reintroduce an application secret.
+     */
+    private ToolResult executeCommand(Path workspaceDir, String[] command,
+                                      Map<String, String> extraEnvironment) {
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workspaceDir.toFile());
@@ -1659,6 +1736,9 @@ public class ToolExecutionService {
             // Untrusted repository code (package-manager scripts, test fixtures) must
             // never see application secrets such as database or AI provider keys.
             ProcessSupport.scrubEnvironment(pb);
+            if (!extraEnvironment.isEmpty()) {
+                pb.environment().putAll(extraEnvironment);
+            }
 
             int timeoutSeconds = agentConfig.getValidation().getToolTimeoutSeconds();
             // The byte cap is the hard memory bound while draining the pipe; the

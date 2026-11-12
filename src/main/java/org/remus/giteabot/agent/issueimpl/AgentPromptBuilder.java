@@ -410,7 +410,7 @@ public class AgentPromptBuilder {
                 You modified files but did not call any build / test tool in this round, \
                 so the change is unverified. Before we can open the pull request you must \
                 run the project's own build through a validation tool call (for example \
-                `mvn test -q -B`, `gradle build -q`, `npm test`, `cargo build`, `go build ./...`, \
+                `mvn test -q -B`, `gradle build -q`, `npm test`, `yarn test`, `cargo build`, `go build ./...`, \
                 `dotnet test`, etc.), with arguments appropriate for this repository.
                 
                 Please issue one more round that:

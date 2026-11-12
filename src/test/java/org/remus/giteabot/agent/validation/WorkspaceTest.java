@@ -268,6 +268,24 @@ class WorkspaceTest {
     }
 
     @Test
+    void commitAndPush_carriesYarnLockfileChanges() throws Exception {
+        Workspace workspace = workspaceWithRemote();
+        Path directory = workspace.path();
+        String branch = runGitCapture(directory, "branch", "--show-current");
+        Files.writeString(directory.resolve("package.json"),
+                "{\"dependencies\": {\"left-pad\": \"1.3.0\"}}\n");
+        Files.writeString(directory.resolve("yarn.lock"), "# yarn lockfile v1\n");
+
+        try {
+            assertThat(workspace.commitAndPush(branch, "chore: update dependencies", false)).isTrue();
+            assertThat(runGitCapture(tempDir.resolve("remote"), "show", "--name-only", "--format=", branch))
+                    .contains("package.json", "yarn.lock");
+        } finally {
+            workspace.close();
+        }
+    }
+
+    @Test
     void commitAndPush_disablesWorkspaceHooks() throws Exception {
         Assumptions.assumeTrue(Files.getFileStore(tempDir).supportsFileAttributeView("posix"));
         Workspace workspace = workspaceWithRemote();
