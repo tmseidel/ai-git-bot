@@ -180,6 +180,14 @@ the agent cannot rewrite its own checker. Existing installations have to opt in 
 `execute` by hand: it is not part of the Default configuration. See
 [Coding Agent → Custom validation scripts](CODING_AGENT.md#custom-validation-scripts-execute).
 
+The list also ships **`yarn`**, separately from **`npm`**, so a bot for Yarn
+repositories can enable one and leave the other off. The tool layer detects the
+package manager of each checkout and refuses `npm` when the repository is Yarn-managed
+(`packageManager` in `package.json`, `yarn.lock`) — a prompt instruction alone would not
+stop an `npm install` from writing a `package-lock.json`. `yarn` activates the project's
+pinned version through Corepack. See
+[Coding Agent → Yarn projects](CODING_AGENT.md#yarn-projects-yarn).
+
 ### Backwards compatibility
 
 `null` as the whitelist disables enforcement entirely. This path is used by

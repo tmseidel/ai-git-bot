@@ -52,6 +52,7 @@ specific knobs are listed below.
 | `agent.max-files` | `AGENT_MAX_FILES` | `20` | Maximum files the agent may modify |
 | `agent.validation.enabled` | `AGENT_VALIDATION_ENABLED` | `true` | Require build/test validation before finishing |
 | `agent.validation.tool-timeout-seconds` | `AGENT_VALIDATION_TOOL_TIMEOUT_SECONDS` | `300` | Timeout for each build/test/validation command, including `execute` scripts |
+| `agent.validation.allow-yarn-install` | `AGENT_VALIDATION_ALLOW_YARN_INSTALL` | `false` | Let the `yarn` tool install Yarn Classic through npm when the image has no Corepack or Yarn |
 | `agent.budget.max-rounds` | `AGENT_BUDGET_MAX_ROUNDS` | `20` | Maximum agent loop rounds |
 | `agent.budget.max-validation-retries` | `AGENT_BUDGET_MAX_VALIDATION_RETRIES` | `10` | AI correction attempts after validation failure |
 | `agent.context.max-tree-files` | `AGENT_CONTEXT_MAX_TREE_FILES` | `500` | Repository tree entries included in context |
@@ -124,6 +125,51 @@ executable bit) are also not atomic with the launch: the file could be swapped i
 between, which is accepted here because only something already inside the
 workspace could do it. And the contract assumes a POSIX host — shebangs and an
 executable bit have no Windows equivalent.
+
+## Yarn projects (`yarn`)
+
+The coding agent ships **`npm`** and **`yarn`** as separate validation tools
+(kind **VALIDATION**). Both appear in **System settings → Tool configurations**,
+so a bot for Yarn repositories can enable `yarn` and leave `npm` off — or keep
+both and let the tool layer decide, which is what happens by default.
+
+**Detection.** Before every `npm` or `yarn` call the tool inspects the checkout,
+most authoritative marker first:
+
+1. the `packageManager` field in `package.json` (`yarn@4.1.1`, `npm@10.5.0`);
+2. `yarn.lock` — its `# yarn lockfile v1` header identifies Yarn Classic;
+3. `package-lock.json` / `npm-shrinkwrap.json`;
+4. nothing — an unmarked JavaScript project keeps the previous behaviour, so
+   `npm` still works there.
+
+A repository carrying both `yarn.lock` and a stray `package-lock.json` counts as
+Yarn.
+
+**Enforcement.** In a Yarn-managed checkout the `npm` tool refuses the call and
+tells the model why and what to use instead; the refusal is in the tool layer,
+not just in the prompt. That matters because an `npm install` would ignore
+`yarn.lock` and write a `package-lock.json`, which the generated pull request
+would then carry. npm projects are untouched.
+
+**Version activation.** The model never chooses the Yarn version: it calls
+`yarn install`, `yarn add <pkg>`, `yarn add -D <pkg>`, `yarn remove <pkg>`,
+`yarn run <script>`, `yarn test`, `yarn audit`, and the tool runs
+`corepack yarn[@<version>] …`. Corepack — bundled with Node.js 16+ and enabled
+in the application image — activates the version named by `packageManager` (or
+Yarn Classic for a v1 lockfile), downloading it on demand with the interactive
+prompt disabled. Yarn Classic and modern Yarn (2.x–4.x) are supported this way.
+
+Without Corepack the `yarn` on `PATH` is used. As a fallback, Yarn Classic may be
+installed through npm (`npm install -g yarn@<version>`). That mutates the image,
+so it is off unless the operator sets
+`agent.validation.allow-yarn-install=true` (`AGENT_VALIDATION_ALLOW_YARN_INSTALL`);
+with the flag off the tool reports what is missing instead of changing anything.
+A modern Yarn release is never installed through npm — it is only available
+through Corepack.
+
+**Lockfile changes.** `yarn install`, `yarn add` and friends write
+`package.json` and `yarn.lock` into the checkout like any other file change, so
+`git add -A` and the pull request carry them together.
 
 ## Branch naming
 
