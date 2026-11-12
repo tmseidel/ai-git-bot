@@ -44,15 +44,28 @@ class YarnCommandBuilderTest {
     }
 
     @Test
-    void anUnmarkedProjectStillLetsCorepackChoose() {
+    void anUnmarkedWorkspaceIsRefused() {
         PackageManagerDetection unknown =
                 PackageManagerDetection.unknown("no package manager marker");
 
         YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
                 .build(unknown, List.of("test"));
 
-        assertThat(invocation.failed()).isFalse();
-        assertThat(invocation.command()).containsExactly("corepack", "yarn", "test");
+        assertThat(invocation.failed()).isTrue();
+        assertThat(invocation.failure())
+                .contains("does not declare a package manager", "yarn.lock", "`npm` tool");
+    }
+
+    @Test
+    void yarnIsRefusedInAnNpmRepository() {
+        PackageManagerDetection npm = PackageManagerDetection.npm("package-lock.json");
+
+        YarnCommandBuilder.Invocation invocation = builder(Set.of("corepack"))
+                .build(npm, List.of("install"));
+
+        assertThat(invocation.failed()).isTrue();
+        assertThat(invocation.failure())
+                .contains("managed by npm", "package-lock.json", "`npm` tool");
     }
 
     @Test

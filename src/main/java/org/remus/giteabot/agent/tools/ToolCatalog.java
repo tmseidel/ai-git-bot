@@ -361,8 +361,8 @@ public class ToolCatalog {
      */
     private static final Map<String, String> VALIDATION_USAGE_HINTS = Map.of(
             "execute", "**A repository with no build command**: `execute` runs a committed script, for example `scripts/validate.sh`; exit code 0 passes.",
-            "npm", "**An npm-managed repository**: `npm` runs installs and scripts. In a Yarn-managed repository it is refused (`yarn.lock`, `packageManager: yarn@…` or a committed `.yarn/releases` release) — use `yarn` there.",
-            "yarn", "**A Yarn-managed repository** (`yarn.lock`, `packageManager: yarn@…` or a committed `.yarn/releases` release): install, add and remove dependencies with `yarn` — it activates the version the project pins. Never run npm or create a `package-lock.json` here."
+            "npm", "**An npm-managed or unmarked repository**: `npm` runs installs and scripts. In a Yarn-managed repository it is refused (`yarn.lock`, `packageManager: yarn@…` or a committed `.yarn/releases` release) — use `yarn` there.",
+            "yarn", "**A Yarn-managed repository** (`yarn.lock`, `packageManager: yarn@…` or a committed `.yarn/releases` release): install, add and remove dependencies with `yarn` — it activates the version the project pins. Never run npm or create a `package-lock.json` here; in an npm-managed or unmarked repository `yarn` is refused."
     );
 
     private final AgentConfigProperties agentConfig;

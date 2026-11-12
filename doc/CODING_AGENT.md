@@ -151,7 +151,12 @@ Yarn.
 tells the model why and what to use instead; the refusal is in the tool layer,
 not just in the prompt. That matters because an `npm install` would ignore
 `yarn.lock` and write a `package-lock.json`, which the generated pull request
-would then carry. npm projects are untouched.
+would then carry. The rule is symmetric: `yarn` is refused in an npm-managed
+checkout (`package-lock.json` or `packageManager: npm@…`) and in an unmarked
+workspace, because there it would create a `yarn.lock` the project never asked
+for. In practice one manager runs per checkout — YARN uses `yarn`, NPM and
+UNKNOWN use `npm` — so an unmarked project keeps npm as the default and needs a
+marker (or a committed `yarnPath` release) before the agent will use Yarn.
 
 **Version activation.** The model never chooses the Yarn version: it calls
 `yarn install`, `yarn add <pkg>`, `yarn add -D <pkg>`, `yarn remove <pkg>`,

@@ -29,7 +29,10 @@ import java.util.Map;
  * <p>A Yarn-managed checkout with neither a pinned version nor a {@code yarnPath} is
  * refused rather than run with Corepack's default, which is Yarn Classic: Classic reads a
  * Berry lockfile as if it were its own and rewrites it in v1 format. Lockfile changes are
- * meant to come from the requested dependency operation, not from a guessed Yarn version.</p>
+ * meant to come from the requested dependency operation, not from a guessed Yarn version.
+ * The rule holds in the other direction too: in an npm-managed or unmarked workspace the
+ * tool refuses, because running Yarn there would add a {@code yarn.lock} the project never
+ * asked for. Yarn runs only in a checkout that declares Yarn.</p>
  *
  * <p>Corepack's auto-pin is disabled, so a Yarn run never adds a {@code packageManager}
  * field to {@code package.json} behind the user's back; the same flag is set in the
@@ -93,6 +96,23 @@ public class YarnCommandBuilder {
         List<List<String>> preparation = new ArrayList<>();
         List<String> command;
 
+        // One manager per checkout, enforced in both directions: Yarn runs only where the
+        // checkout declares Yarn. Anywhere else it would add a yarn.lock (or rewrite one)
+        // that the project never asked for — the mirror image of refusing npm in a Yarn repo.
+        if (detection.manager() == PackageManager.NPM) {
+            return Invocation.failed("This repository is managed by npm (" + detection.evidence()
+                    + "), so yarn is refused here — it would add a yarn.lock next to "
+                    + "package-lock.json. Use the `npm` tool for installs, dependency changes and "
+                    + "scripts.");
+        }
+        if (detection.manager() != PackageManager.YARN) {
+            return Invocation.failed("This workspace does not declare a package manager (no "
+                    + "packageManager field, yarn.lock or committed yarnPath), so yarn is refused: "
+                    + "it would create a yarn.lock the project never asked for. Use the `npm` tool, "
+                    + "or declare Yarn first with a packageManager field or a committed yarnPath "
+                    + "release.");
+        }
+
         // A committed Yarn 2+ release: run it with Node, exactly as Yarn's own shim would.
         // That covers repositories that pin through yarnPath and predate Corepack.
         if (detection.yarnPath() != null) {
@@ -108,7 +128,7 @@ public class YarnCommandBuilder {
 
         // A Yarn checkout with no pinned version: running Corepack here would use its
         // default (Yarn Classic 1.x), and Classic rewrites a Berry yarn.lock in v1 format.
-        if (detection.isYarn() && versionSpec == null) {
+        if (versionSpec == null) {
             return Invocation.failed("This repository is managed by Yarn (" + detection.evidence()
                     + "), but no Yarn version is pinned in package.json. Running Corepack without a "
                     + "pin falls back to its default — Yarn Classic 1.x — which rewrites a modern "
