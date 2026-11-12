@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -46,6 +48,7 @@ public class ToolExecutionService {
     private static final int MAX_TREE_DEPTH = 6;
     private static final int DEFAULT_GIT_LOG_LIMIT = 10;
     private static final long MAX_TEXT_FILE_SIZE_BYTES = 1_000_000;
+    private static final int BINARY_SNIFF_BYTES = 8_000;
     private static final Pattern SIMPLE_BRANCH_NAME_PATTERN = Pattern.compile("[A-Za-z0-9._\\-/]+");
 
     private final AgentConfigProperties agentConfig;
@@ -627,27 +630,31 @@ public class ToolExecutionService {
 
     private ToolResult executeSearchTool(Path workspaceDir, String tool, List<String> arguments) {
         if (arguments == null || arguments.isEmpty()) {
+            log.info("{}: no pattern argument (path .)", tool);
             return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
         }
 
         SearchRequest searchRequest = parseSearchRequest(arguments);
         String patternText = searchRequest.patternText();
+        String relativePath = searchRequest.relativePath();
         if (patternText == null && !searchRequest.listFiles()) {
+            log.info("{}: no pattern argument (path {})", tool, relativePath);
             return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
         }
-        String relativePath = searchRequest.relativePath();
         Path basePath;
         try {
             basePath = resolveWorkspacePath(workspaceDir, relativePath);
         } catch (IOException e) {
+            log.info("{}: rejected path {}: {}", tool, relativePath, e.getMessage());
             return new ToolResult(false, -1, "", e.getMessage());
         }
 
         if (!Files.exists(basePath)) {
+            log.info("{}: path not found: {}", tool, relativePath);
             return new ToolResult(false, 1, "", "Path not found: " + relativePath);
         }
         if (searchRequest.listFiles()) {
-            return listSearchFiles(workspaceDir, basePath, searchRequest);
+            return listSearchFiles(workspaceDir, tool, basePath, searchRequest);
         }
 
         Pattern compiledPattern;
@@ -669,6 +676,7 @@ public class ToolExecutionService {
                 }
             }
         } catch (IOException e) {
+            log.info("{}: search failed in {}: {}", tool, relativePath, e.getMessage());
             return new ToolResult(false, -1, "", "Search failed: " + e.getMessage());
         }
 
@@ -702,7 +710,10 @@ public class ToolExecutionService {
                     continue;
                 }
 
-                List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                List<String> lines = readSearchableLines(file, relativeFilePath);
+                if (lines == null) {
+                    continue;
+                }
                 for (int i = 0; i < lines.size(); i++) {
                     String line = lines.get(i);
                     if (!pattern.matcher(line).find()) {
@@ -726,10 +737,47 @@ public class ToolExecutionService {
     }
 
     /**
+     * The lines of one file to search, or {@code null} when the file is skipped. One undecodable file
+     * must not abort the walk: a tree carrying binary assets (a .NET {@code wwwroot} with images and
+     * fonts) used to fail the whole search on {@code MalformedInputException}.
+     */
+    private List<String> readSearchableLines(Path file, String relativePath) {
+        try {
+            byte[] content = Files.readAllBytes(file);
+            if (isBinaryContent(content)) {
+                log.debug("Search skipped binary file: {}", relativePath);
+                return null;
+            }
+            // Invalid UTF-8 decodes to U+FFFD instead of throwing, so a non-UTF-8 text file stays
+            // searchable for its decodable parts — the same lossy decoding ripgrep applies.
+            String decoded = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPLACE)
+                    .onUnmappableCharacter(CodingErrorAction.REPLACE)
+                    .decode(ByteBuffer.wrap(content))
+                    .toString();
+            return decoded.lines().toList();
+        } catch (IOException e) {
+            log.info("Search skipped unreadable file: {} ({})", relativePath, e.getMessage());
+            return null;
+        }
+    }
+
+    /** A NUL byte in the head marks a binary file — the heuristic ripgrep uses. */
+    private static boolean isBinaryContent(byte[] content) {
+        int limit = Math.min(content.length, BINARY_SNIFF_BYTES);
+        for (int i = 0; i < limit; i++) {
+            if (content[i] == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * {@code rg --files [path]}: lists the files under the path, filtered by {@code -g} globs. Binary and
      * oversized files are listed too; only the search skips them.
      */
-    private ToolResult listSearchFiles(Path workspaceDir, Path basePath, SearchRequest searchRequest) {
+    private ToolResult listSearchFiles(Path workspaceDir, String tool, Path basePath, SearchRequest searchRequest) {
         List<String> files;
         try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
             files = stream
@@ -741,6 +789,8 @@ public class ToolExecutionService {
                     .limit(MAX_SEARCH_MATCHES + 1L)
                     .toList();
         } catch (IOException e) {
+            log.info("{}: listing files failed in {}: {}", tool,
+                    workspaceDir.relativize(basePath), e.getMessage());
             return new ToolResult(false, -1, "", "Listing files failed: " + e.getMessage());
         }
         if (files.isEmpty()) {
