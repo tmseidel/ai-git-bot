@@ -34,7 +34,9 @@ class ToolExecutionServiceTest {
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
-                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+                new org.remus.giteabot.agent.tools.ToolCatalog(config),
+                new org.remus.giteabot.agent.packagemanager.PackageManagerDetector(),
+                new org.remus.giteabot.agent.packagemanager.YarnCommandBuilder(config));
         serviceLogger = (Logger) LoggerFactory.getLogger(ToolExecutionService.class);
         logEvents = new ListAppender<>();
         logEvents.start();

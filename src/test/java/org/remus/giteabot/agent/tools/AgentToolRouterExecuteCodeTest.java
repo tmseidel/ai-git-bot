@@ -3,6 +3,8 @@ package org.remus.giteabot.agent.tools;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.codeexecution.CodeExecutionScope;
 import org.remus.giteabot.agent.codeexecution.ProcessPythonExecutionService;
@@ -119,7 +121,8 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-nested");
         Files.writeString(workspace.resolve("Main.java"), "class Main {}\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
+                        new YarnCommandBuilder(CONFIG));
         Program program = new Program("cat", "{\"path\": \"Main.java\"}");
 
         ToolResult result = router(tools, botWithExecuteCode(), program)
@@ -237,7 +240,8 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-real-python");
         Files.writeString(workspace.resolve("Main.java"), "class Main {}\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
+                        new YarnCommandBuilder(CONFIG));
         String program = """
                 import ai_git_bot
 
@@ -294,7 +298,8 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-repo-stats");
         Files.writeString(workspace.resolve("SWREQ.md"), "one\ntwo\nthree\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
+                        new YarnCommandBuilder(CONFIG));
         String program = """
                 import ai_git_bot
 
@@ -325,7 +330,8 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("items/mdeg_110100-11_SWREQ_1.md"), "# One\nalpha\nbravo\n");
         Files.writeString(workspace.resolve("items/mdeg_110100-11_SWREQ_2.md"), "# Two\ncharlie\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
+                        new YarnCommandBuilder(CONFIG));
         // `tools` bare, no import: that is the form the tool description gives the model.
         String program = """
                 found = tools.call("find", {"args": ["items/mdeg_*_SWREQ_*.md"]})["output"]
@@ -357,7 +363,8 @@ class AgentToolRouterExecuteCodeTest {
         Path workspace = Files.createTempDirectory("router-nested-write");
         Files.writeString(workspace.resolve("README.md"), "readable\n");
         ToolExecutionService tools =
-                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG));
+                new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
+                        new YarnCommandBuilder(CONFIG));
         String program = """
                 written = tools.call("write-file", {"path": "generated.txt", "content": "x"})
                 print("write success:", written["success"])
