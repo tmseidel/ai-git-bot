@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
 
@@ -23,7 +25,7 @@ class ToolExecutionServiceTruncationTest {
 
     private final AgentConfigProperties config = new AgentConfigProperties();
     private final ToolExecutionService service = new ToolExecutionService(config,
-            new ToolCatalog(config));
+            new ToolCatalog(config), new PackageManagerDetector(), new YarnCommandBuilder(config));
 
     @ParameterizedTest
     @ValueSource(strings = {"ctags-signatures", "ctags-deps"})

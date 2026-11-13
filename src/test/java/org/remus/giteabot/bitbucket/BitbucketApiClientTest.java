@@ -1,12 +1,15 @@
 package org.remus.giteabot.bitbucket;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+import org.springframework.http.HttpStatus;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -24,63 +27,30 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 /**
  * Unit tests for {@link BitbucketApiClient} verifying that it correctly implements
- * {@link RepositoryApiClient} and exposes the expected base URL, clone URL, and token.
+ * {@link RepositoryApiClient}.
  */
 class BitbucketApiClientTest {
 
-    private static RepositoryCredentials credsWithUsername() {
-        return RepositoryCredentials.of(
-                "https://api.bitbucket.org/2.0", "https://bitbucket.org", "myuser", "bb_token");
-    }
-
-    private static RepositoryCredentials creds() {
-        return RepositoryCredentials.of(
-                "https://api.bitbucket.org/2.0", "https://bitbucket.org", "bb_token");
-    }
+    private static final String CLONE_URL = "https://bitbucket.org";
 
     @Test
     void implementsRepositoryApiClient() {
-        BitbucketApiClient client = new BitbucketApiClient(null, creds());
+        BitbucketApiClient client = new BitbucketApiClient(null, CLONE_URL);
         assertInstanceOf(RepositoryApiClient.class, client);
-    }
-
-    @Test
-    void getBaseUrl_returnsConfiguredUrl() {
-        BitbucketApiClient client = new BitbucketApiClient(null, creds());
-        assertEquals("https://api.bitbucket.org/2.0", client.getBaseUrl());
-    }
-
-    @Test
-    void getCloneUrl_returnsConfiguredUrl() {
-        BitbucketApiClient client = new BitbucketApiClient(null, creds());
-        assertEquals("https://bitbucket.org", client.getCloneUrl());
-    }
-
-    @Test
-    void getToken_returnsConfiguredToken() {
-        BitbucketApiClient client = new BitbucketApiClient(null, creds());
-        assertEquals("bb_token", client.getToken());
     }
 
     @Test
     void addReaction_noOp() {
         // Bitbucket doesn't support reactions; verify no exception is thrown
-        BitbucketApiClient client = new BitbucketApiClient(null, creds());
+        BitbucketApiClient client = new BitbucketApiClient(null, CLONE_URL);
         assertDoesNotThrow(() -> client.addReaction("workspace", "repo", CommentId.NumericCommentId.of(1L), "+1"));
-    }
-
-    @Test
-    void getCredentials_returnsUsername() {
-        BitbucketApiClient client = new BitbucketApiClient(null, credsWithUsername());
-        assertEquals("myuser", client.getCredentials().username());
-        assertTrue(client.getCredentials().hasUsername());
     }
 
     @Test
     void getRepositoryTree_mapsCommitFileAndDirectoryEntries() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo(
                         "https://api.bitbucket.org/2.0/repositories/workspace/repo/src/main/?max_depth=100&pagelen=100"))
@@ -103,7 +73,7 @@ class BitbucketApiClientTest {
     void getPullRequestCommits_mapsHashAndMessage() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/7/commits"))
                 .andExpect(method(HttpMethod.GET))
@@ -122,7 +92,7 @@ class BitbucketApiClientTest {
     void getAuthenticatedAccount_fetchesUserOnceAndMemoizesIt() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
                 .andExpect(method(HttpMethod.GET))
@@ -136,7 +106,6 @@ class BitbucketApiClientTest {
         assertEquals(new BitbucketAccount("{bot-uuid}", "557058:bot", "ai-bot", "AI Bot"), account);
         assertSame(account, client.getAuthenticatedAccount());
         assertEquals("@{557058:bot}", account.mention());
-        assertEquals(java.util.Optional.of("AI Bot"), client.getBotMentionName());
         server.verify();
     }
 
@@ -144,7 +113,7 @@ class BitbucketApiClientTest {
     void getAuthenticatedAccount_rejectsBlankIds() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
                 .andRespond(withSuccess("""
@@ -159,7 +128,7 @@ class BitbucketApiClientTest {
     void dispatchWorkflow_postsToPipelinesBelowApiBaseUrl() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pipelines/"))
                 .andExpect(method(HttpMethod.POST))
@@ -178,7 +147,7 @@ class BitbucketApiClientTest {
     void getWorkflowRun_readsPipelineBelowApiBaseUrl() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pipelines/%7Brun-1%7D"))
                 .andExpect(method(HttpMethod.GET))
@@ -196,7 +165,7 @@ class BitbucketApiClientTest {
     void getIssueComments_fetchesIssueCommentsWithPageLength() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), creds());
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo(
                         "https://api.bitbucket.org/2.0/repositories/workspace/repo/issues/42/comments?pagelen=50"))
@@ -210,5 +179,55 @@ class BitbucketApiClientTest {
         assertEquals(1, comments.size());
         assertEquals(301, ((Number) comments.getFirst().get("id")).intValue());
         assertInstanceOf(Map.class, comments.getFirst().get("content"));
+    }
+
+    @Test
+    void getAuthenticatedUser_usesThePrimaryEmailAsUsername() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"nickname\":\"ai-bot\","
+                        + "\"display_name\":\"AI Bot\"}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withSuccess("{\"values\":[{\"email\":\"old@example.com\",\"is_primary\":false},"
+                        + "{\"email\":\"bot@example.com\",\"is_primary\":true}]}", MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new BitbucketApiClient(builder.build(), CLONE_URL).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("557058:abc", "bot@example.com", "AI Bot", "bot@example.com"), user);
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackWhenTheTokenMayNotReadTheEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"display_name\":\"AI Bot\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new BitbucketApiClient(builder.build(), CLONE_URL).getAuthenticatedUser("owner");
+
+        assertEquals("557058:abc", user.username());
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackWhenTheEmailCannotBeRead() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+                .andRespond(withSuccess("{\"account_id\":\"557058:abc\",\"display_name\":\"AI Bot\"}",
+                        MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        RepositoryUser user = new BitbucketApiClient(builder.build(), CLONE_URL).getAuthenticatedUser("owner");
+
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
     }
 }

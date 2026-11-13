@@ -31,6 +31,7 @@ import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -121,6 +122,7 @@ public class AgentReviewService {
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final AgentToolRouter toolRouter;
@@ -145,7 +147,8 @@ public class AgentReviewService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = workspaceService;
         this.agentConfig = agentConfig;
-        this.repositoryClient = context.repositoryClient();
+        this.repositoryPlatform = context.repositoryPlatform();
+        this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = context.aiClient();
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog,
@@ -215,7 +218,7 @@ public class AgentReviewService {
                 progress.start();
             }
             WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber,
+                    repositoryPlatform, owner, repo, headBranch, prNumber,
                     PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
@@ -329,7 +332,7 @@ public class AgentReviewService {
                 progress.start();
             }
             WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
-                    repositoryClient, owner, repo, headBranch, prNumber,
+                    repositoryPlatform, owner, repo, headBranch, prNumber,
                     PullRequestWorkspaceMode.READ_ONLY);
             if (!wsResult.success()) {
                 log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
@@ -582,8 +585,8 @@ public class AgentReviewService {
 
                 %s
 
-                To see the diff hunks for a specific file, call the `pr-diff` tool with the \
-                file path. To read the full current content of a file, use `cat`. To understand \
+                To see the diff hunks of changed files, call the `pr-diff` tool with up to 8 \
+                file paths. To read the full current content of a file, use `cat`. To understand \
                 a file's structure before reading it, use `ctags-signatures`.
 
                 When you have gathered enough context, reply with your answer as plain \
@@ -653,7 +656,8 @@ public class AgentReviewService {
                 context.contextWindowTokens(), budgetCfg.getProactiveCompactionThreshold());
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(session, owner, repo, prNumber, workspace, headBranch);
+        AgentRunContext ctx = AgentRunContext.forPullRequest(session, owner, repo, prNumber,
+                workspace, headBranch);
         ctx.setDiffSummary(diffSummary);
         ctx.setAuditToolCallConsumer(toolCallConsumer);
         ctx.setProgressConsumer(progressConsumer);
@@ -693,10 +697,10 @@ public class AgentReviewService {
         sb.append("Changed files (").append(diffSummary.statLine()).append("):\n\n");
         sb.append(diffSummary.fileTable()).append("\n");
         sb.append("""
-                To see the diff hunks for a specific file, call the `pr-diff` tool with the \
-                file path. To read the full current content of a file, use `cat`. To understand \
+                To see the diff hunks of changed files, call the `pr-diff` tool with up to 8 \
+                file paths. To read the full current content of a file, use `cat`. To understand \
                 a file's structure before reading it, use `ctags-signatures`.
-                
+
                 When you have gathered enough context, reply with your final review as plain \
                 Markdown (no tool calls). Summarise correctness, risks, and concrete suggestions.""");
         return sb.toString();

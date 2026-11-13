@@ -11,8 +11,8 @@ import org.remus.giteabot.prworkflow.e2e.PrTestSuite;
 import org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 
@@ -414,8 +414,8 @@ class PrWorkflowToolExecutorTest {
         }
 
         // ---- unused contract members ----
-        @Override public RepositoryCredentials getCredentials() {
-            return new RepositoryCredentials("http://x", "http://x", "u", "t");
+        @Override public RepositoryUser getAuthenticatedUser(String o) {
+            throw new UnsupportedOperationException();
         }
         @Override public String getPullRequestDiff(String o, String r, Long p) { return ""; }
         @Override public void postReviewComment(String o, String r, Long p, String b) { }

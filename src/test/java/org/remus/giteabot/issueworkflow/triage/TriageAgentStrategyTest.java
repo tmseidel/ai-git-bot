@@ -66,7 +66,7 @@ class TriageAgentStrategyTest {
         strategy = new TriageAgentStrategy("SYS", toolRouter,
                 new ToolCatalog(new AgentConfigProperties()), McpToolCatalog.empty(), null,
                 ALLOWED, "triage-bot", new AiResponseParser(), branchSwitcher, 2);
-        ctx = new AgentRunContext(new AgentSession("owner", "repo", 42L, "Issue"),
+        ctx = AgentRunContext.forIssue(new AgentSession("owner", "repo", 42L, "Issue"),
                 "owner", "repo", 42L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         lenient().when(branchSwitcher.apply(any(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> new BranchSwitcher.Result("main", "main", inv.getArgument(2)));

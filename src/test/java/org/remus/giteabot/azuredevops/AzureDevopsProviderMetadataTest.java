@@ -2,15 +2,35 @@ package org.remus.giteabot.azuredevops;
 
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.agent.validation.GitDiffService;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.repository.RepositoryType;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.HttpCredentials;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.ExpectedCount.manyTimes;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.anything;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 class AzureDevopsProviderMetadataTest {
 
     private final AzureDevopsProviderMetadata metadata =
-            new AzureDevopsProviderMetadata(null, null);
+            new AzureDevopsProviderMetadata(builderProvider(), null);
+
+    private static ObjectProvider<RestClient.Builder> builderProvider() {
+        return new ObjectProvider<>() {
+            @Override
+            public RestClient.Builder getObject() {
+                return RestClient.builder();
+            }
+        };
+    }
 
     @Test
     void providerType_isAzureDevops() {
@@ -45,10 +65,45 @@ class AzureDevopsProviderMetadataTest {
     }
 
     @Test
-    void createClient_returnsAzureDevopsClient() {
-        RepositoryCredentials creds = RepositoryCredentials.of(
-                "https://dev.azure.com", "https://dev.azure.com", "ado_pat");
+    void createPlatform_returnsAzureDevopsPlatformWithItsClient() {
+        GitIntegration integration = new GitIntegration();
+        integration.setUrl("https://dev.azure.com/");
 
-        assertInstanceOf(AzureDevopsApiClient.class, metadata.createClient(null, creds));
+        var platform = metadata.createPlatform(integration, "ado_pat",
+                new HttpCredentials(null, "ado_pat"), null, TestPlatforms.USER_TTL);
+
+        assertInstanceOf(AzureDevopsPlatform.class, platform);
+        assertInstanceOf(AzureDevopsApiClient.class, platform.getClient());
+        assertEquals("https://dev.azure.com", platform.getBaseUrl());
+        assertEquals("https://dev.azure.com", platform.getCloneUrl());
+        assertTrue(platform.usesGitAuthorizationHeader());
+    }
+
+    @Test
+    void createPlatform_bindsTheClientToThePlatformItDiffsThrough() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(manyTimes(), anything()).andRespond(withSuccess(
+                "{\"count\":1,\"value\":[{\"id\":1,"
+                        + "\"commonRefCommit\":{\"commitId\":\"1111111111111111111111111111111111111111\"},"
+                        + "\"sourceRefCommit\":{\"commitId\":\"3333333333333333333333333333333333333333\"}}]}",
+                MediaType.APPLICATION_JSON));
+        GitDiffService gitDiffService = mock(GitDiffService.class);
+        AzureDevopsProviderMetadata bindingMetadata = new AzureDevopsProviderMetadata(new ObjectProvider<>() {
+            @Override
+            public RestClient.Builder getObject() {
+                return builder;
+            }
+        }, gitDiffService);
+        GitIntegration integration = new GitIntegration();
+        integration.setUrl("https://dev.azure.com");
+
+        var platform = bindingMetadata.createPlatform(integration, "ado_pat",
+                new HttpCredentials(null, "ado_pat"), null, TestPlatforms.USER_TTL);
+        when(gitDiffService.diffCommits(platform, "contoso", "MyProject/my-service",
+                "1111111111111111111111111111111111111111", "3333333333333333333333333333333333333333"))
+                .thenReturn("diff");
+
+        assertEquals("diff", platform.getClient().getPullRequestDiff("contoso", "MyProject/my-service", 42L));
     }
 }

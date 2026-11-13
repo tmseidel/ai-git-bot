@@ -217,9 +217,21 @@ public final class AgentLoop {
                             round));
                 }
             }
-            if (decision instanceof StepDecision.Finish(LoopOutcome outcome)) {
-                log.debug("AgentLoop round {}/{} for issue #{}: strategy decided FINISH",
-                        round, budget.maxRounds(), ctx.issueNumber());
+            if (decision instanceof StepDecision.Finish(
+                    LoopOutcome outcome, List<StepDecision.ToolCallResult> executedCalls
+            )) {
+                log.debug("AgentLoop round {}/{} for issue #{}: strategy decided FINISH ({} executed call(s))",
+                        round, budget.maxRounds(), ctx.issueNumber(), executedCalls.size());
+                // The terminal round may have run tools before deciding to stop. Its results
+                // belong to the assistant turn already buffered above, and the session only
+                // keeps the pair when they are flushed in the same batch — a turn whose ids
+                // stay unanswered is replayed as prose, which is how a follow-up run ends up
+                // repeating an edit whose outcome the previous run never recorded.
+                for (StepDecision.ToolCallResult result : executedCalls) {
+                    pending.add(new PendingMessage("tool",
+                            "[" + result.toolCallId() + "] " + result.resultText(),
+                            new PendingMessage.ToolPayload(null, result.toolCallId())));
+                }
                 flushRound(ctx, pending);
                 return outcome;
             }

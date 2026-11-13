@@ -14,6 +14,8 @@ import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.io.IOException;
@@ -37,6 +39,7 @@ import static org.mockito.Mockito.when;
 class I18nCoverageServiceTest {
 
     private RepositoryApiClient repoClient;
+    private RepositoryPlatform platform;
     private WorkspaceService workspaceService;
     private final Workspace managedWorkspace = org.mockito.Mockito.mock(Workspace.class);
     private I18nCoverageAgent agent;
@@ -45,11 +48,12 @@ class I18nCoverageServiceTest {
     @BeforeEach
     void setUp() {
         repoClient = mock(RepositoryApiClient.class);
+        platform = TestPlatforms.of(repoClient);
         workspaceService = mock(WorkspaceService.class);
         agent = mock(I18nCoverageAgent.class);
         AiClient aiClient = mock(AiClient.class);
         SystemPrompt systemPrompt = new SystemPrompt();
-        service = new I18nCoverageService(repoClient, aiClient, systemPrompt, workspaceService, agent,
+        service = new I18nCoverageService(platform, aiClient, systemPrompt, workspaceService, agent,
                 mock(WorkflowToolSurfaceFactory.class));
     }
 
@@ -88,9 +92,9 @@ class I18nCoverageServiceTest {
 
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.SKIPPED);
         verify(workspaceService, never()).prepareWorkspace(
-                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
+                any(RepositoryPlatform.class), anyString(), anyString(), anyString(), anyLong());
         verify(workspaceService, never()).preparePullRequestWorkspace(
-                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong(),
+                any(RepositoryPlatform.class), anyString(), anyString(), anyString(), anyLong(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK));
         verify(repoClient, never()).getDefaultBranch(anyString(), anyString());
     }
@@ -98,7 +102,7 @@ class I18nCoverageServiceTest {
     @Test
     void headRefInPayload_isUsedForClone() {
         when(workspaceService.preparePullRequestWorkspace(
-                eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
+                eq(platform), anyString(), anyString(), anyString(), anyLong(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.failure("stop here"));
 
@@ -106,7 +110,7 @@ class I18nCoverageServiceTest {
 
         ArgumentCaptor<String> branch = ArgumentCaptor.forClass(String.class);
         verify(workspaceService).preparePullRequestWorkspace(
-                eq(repoClient), eq("acme"), eq("my-repo"), branch.capture(), eq(42L),
+                eq(platform), eq("acme"), eq("my-repo"), branch.capture(), eq(42L),
                 eq(PullRequestWorkspaceMode.PUSH_BACK));
         assertThat(branch.getValue()).isEqualTo("feature/login");
     }
@@ -117,7 +121,7 @@ class I18nCoverageServiceTest {
         Files.writeString(ws.resolve("i18n/messages_en.properties"), "a=1", StandardCharsets.UTF_8);
         Files.writeString(ws.resolve("i18n/messages_de.properties"), "a=1", StandardCharsets.UTF_8);
         when(workspaceService.preparePullRequestWorkspace(
-                eq(repoClient), anyString(), anyString(), anyString(), anyLong(),
+                eq(platform), anyString(), anyString(), anyString(), anyLong(),
                 eq(PullRequestWorkspaceMode.PUSH_BACK)))
                 .thenReturn(WorkspaceResult.success(managedWorkspace));
         when(managedWorkspace.path()).thenReturn(ws);
@@ -143,7 +147,7 @@ class I18nCoverageServiceTest {
 
         assertThat(result.status()).isEqualTo(I18nCoverageService.Result.Status.SKIPPED);
         verify(workspaceService, never()).prepareWorkspace(
-                any(RepositoryApiClient.class), anyString(), anyString(), anyString(), anyLong());
+                any(RepositoryPlatform.class), anyString(), anyString(), anyString(), anyLong());
     }
 
     @Test
@@ -165,7 +169,7 @@ class I18nCoverageServiceTest {
         Files.writeString(workspace.resolve("i18n/messages_en.properties"), "a=1\nb=2");
         Files.writeString(workspace.resolve("i18n/messages_de.properties"), "a=1");
         when(workspaceService.prepareWorkspace(
-                repoClient, "acme", "my-repo", "feature/i18n", 42L))
+                platform, "acme", "my-repo", "feature/i18n", 42L))
                 .thenReturn(WorkspaceResult.success(managedWorkspace));
         when(managedWorkspace.path()).thenReturn(workspace);
         when(repoClient.getPullRequestDiff("acme", "my-repo", 42L)).thenReturn("diff");

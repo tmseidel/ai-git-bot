@@ -21,6 +21,7 @@ public final class DiffSummary {
     private static final Pattern PLUS_PLUS_PLUS = Pattern.compile("^\\+\\+\\+ (?:b/)?(.+)$");
     private static final Pattern MINUS_MINUS_MINUS = Pattern.compile("^--- (?:a/)?(.+)$");
     private static final Pattern RENAME_TO = Pattern.compile("^rename to (.+)$");
+    private static final Pattern HUNK_HEADER = Pattern.compile("^@@ -\\d+(?:,\\d+)? \\+(\\d+)(?:,(\\d+))? @@");
 
     /**
      * Represents a single changed file in the diff.
@@ -220,6 +221,79 @@ public final class DiffSummary {
         }
         
         return null;
+    }
+
+    /**
+     * The diff block for {@code filePath} with each added and context line prefixed by
+     * its line number in the new file ({@code "37 | +code"}); removed lines get a blank
+     * number column. Agents need these numbers for inline comments and otherwise count
+     * lines by hand or re-read the file with {@code cat} to verify them.
+     *
+     * @return the numbered block, or null if the file is not part of the diff
+     */
+    public String numberedFileDiff(String filePath) {
+        String block = fileDiff(filePath);
+        return block == null ? null : withNewLineNumbers(block);
+    }
+
+    static String withNewLineNumbers(String block) {
+        String[] lines = block.split("\n", -1);
+        int width = String.valueOf(maxNewLineNumber(lines)).length();
+        String blank = " ".repeat(width) + " | ";
+        StringBuilder sb = new StringBuilder(block.length() + lines.length * (width + 3));
+        int next = -1; // next new-file line number; -1 outside a hunk
+        for (int i = 0; i < lines.length; i++) {
+            String line = lines[i];
+            Matcher hunk = HUNK_HEADER.matcher(line);
+            if (hunk.find()) {
+                next = Integer.parseInt(hunk.group(1));
+                sb.append(line);
+            } else if (next < 0 || (line.isEmpty() && i == lines.length - 1)) {
+                sb.append(line); // file header lines, or the trailing empty split
+            } else if (line.startsWith("+") || line.startsWith(" ") || line.isEmpty()) {
+                sb.append(String.format("%" + width + "d | ", next++)).append(line);
+            } else {
+                sb.append(blank).append(line); // "-" lines and "\ No newline at end of file"
+            }
+            if (i < lines.length - 1) {
+                sb.append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    private static int maxNewLineNumber(String[] lines) {
+        int max = 1;
+        for (String line : lines) {
+            Matcher hunk = HUNK_HEADER.matcher(line);
+            if (hunk.find()) {
+                int start = Integer.parseInt(hunk.group(1));
+                int count = hunk.group(2) == null ? 1 : Integer.parseInt(hunk.group(2));
+                max = Math.max(max, start + Math.max(count - 1, 0));
+            }
+        }
+        return max;
+    }
+
+    /**
+     * True when the PR adds {@code filePath} as a new text file, so its diff block
+     * already carries the file's complete content. Binary files are excluded:
+     * their block holds no content.
+     */
+    public boolean isNewFile(String filePath) {
+        String block = fileDiff(filePath);
+        if (block == null) {
+            return false;
+        }
+        for (String line : block.split("\n")) {
+            if (line.startsWith("@@")) {
+                return false;
+            }
+            if (line.startsWith("new file mode") || line.equals("--- /dev/null")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

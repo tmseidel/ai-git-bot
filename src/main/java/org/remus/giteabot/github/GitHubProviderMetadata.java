@@ -2,14 +2,20 @@ package org.remus.giteabot.github;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryProviderMetadata;
 import org.remus.giteabot.repository.RepositoryType;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.HttpCredentials;
+import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+
+import java.net.URI;
+import java.time.Duration;
+import java.util.function.Supplier;
 
 /**
  * Metadata and factory for GitHub repository integration.
@@ -75,8 +81,7 @@ public class GitHubProviderMetadata implements RepositoryProviderMetadata {
         return "Bearer " + token;
     }
 
-    @Override
-    public RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
+    private RestClient buildRestClient(GitIntegration integration, String decryptedToken) {
         String apiUrl = resolveApiUrl(integration);
         String authHeader = buildAuthorizationHeader(decryptedToken);
 
@@ -90,15 +95,25 @@ public class GitHubProviderMetadata implements RepositoryProviderMetadata {
     }
 
     @Override
-    public RepositoryCredentials createCredentials(GitIntegration integration, String decryptedToken) {
-        String apiUrl = resolveApiUrl(integration);
-        String cloneUrl = resolveCloneUrl(integration);
-        return RepositoryCredentials.of(apiUrl, cloneUrl, decryptedToken);
+    public HttpCredentials createHttpCredentials(GitIntegration integration, String decryptedToken) {
+        return new HttpCredentials(null, decryptedToken);
     }
 
     @Override
-    public RepositoryApiClient createClient(RestClient restClient, RepositoryCredentials credentials) {
-        return new GitHubApiClient(restClient, credentials);
+    public RepositoryPlatform createPlatform(GitIntegration integration, String decryptedToken,
+                                             HttpCredentials httpCredentials,
+                                             @Nullable Supplier<SshCredentials> sshCredentials,
+                                             Duration userTtl) {
+        RestClient restClient = buildRestClient(integration, decryptedToken);
+        String cloneUrl = resolveCloneUrl(integration);
+        return new GitHubPlatform(resolveApiUrl(integration), cloneUrl, httpCredentials, sshCredentials,
+                new GitHubApiClient(restClient, isGitHubCom(cloneUrl)), userTtl);
+    }
+
+    /** Whether the web URL is github.com rather than a GitHub Enterprise instance. */
+    static boolean isGitHubCom(String webUrl) {
+        String host = URI.create(webUrl).getHost();
+        return host != null && host.equalsIgnoreCase("github.com");
     }
 }
 

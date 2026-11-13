@@ -25,6 +25,7 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.springframework.dao.DataIntegrityViolationException;
 
@@ -44,6 +45,7 @@ public class WriterAgentService {
     private static final int DEFAULT_MAX_TOOL_ROUNDS = 5;
     private static final int DEFAULT_MAX_INITIAL_TREE_FILES = 100;
 
+    private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final PromptService promptService;
@@ -64,7 +66,7 @@ public class WriterAgentService {
     private final int contextWindowTokens;
 
 
-    public WriterAgentService(RepositoryApiClient repositoryClient,
+    public WriterAgentService(RepositoryPlatform repositoryPlatform,
                               AiClient aiClient,
                               PromptService promptService,
                               AgentConfigProperties agentConfig,
@@ -80,7 +82,8 @@ public class WriterAgentService {
                               java.util.Set<String> allowedBuiltinTools,
                               int contextWindowTokens,
                               PythonExecutionService pythonExecution) {
-        this.repositoryClient = repositoryClient;
+        this.repositoryPlatform = repositoryPlatform;
+        this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = aiClient;
         this.promptService = promptService;
         this.agentConfig = agentConfig;
@@ -91,10 +94,10 @@ public class WriterAgentService {
         this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
         this.toolCatalog = toolCatalog;
         this.allowedBuiltinTools = allowedBuiltinTools;
-        this.errorNotificationService = new AgentErrorNotificationService(repositoryClient);
+        this.errorNotificationService = new AgentErrorNotificationService(this.repositoryClient);
         this.branchSwitcher = new BranchSwitcher(toolExecutionService);
         this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog, mcpOrchestrationService,
-                mcpConfiguration, this.mcpToolCatalog, repositoryClient, allowedBuiltinTools,
+                mcpConfiguration, this.mcpToolCatalog, this.repositoryClient, allowedBuiltinTools,
                 pythonExecution);
         this.contextWindowTokens = contextWindowTokens;
     }
@@ -137,7 +140,7 @@ public class WriterAgentService {
                     "🤖 **AI Technical Writer**: I've been assigned and will review this issue for completeness.");
 
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, baseBranch, null);
+                    repositoryPlatform, owner, repo, baseBranch, null);
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -210,7 +213,7 @@ public class WriterAgentService {
         try {
             String baseBranch = resolveBaseBranch(owner, repo, payload, session);
             WorkspaceResult wsResult = workspaceService.prepareWorkspace(
-                    repositoryClient, owner, repo, baseBranch, null);
+                    repositoryPlatform, owner, repo, baseBranch, null);
             if (!wsResult.success()) {
                 sessionService.setStatus(session, AgentSession.AgentSessionStatus.FAILED);
                 repositoryClient.postIssueComment(owner, repo, issueNumber,
@@ -255,7 +258,7 @@ public class WriterAgentService {
                 agentConfig.getBudget().getMaxToolResultChars(), agentConfig.getBudget().getMaxHistoryChars(),
                 contextWindowTokens, agentConfig.getBudget().getProactiveCompactionThreshold());
         AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
-        AgentRunContext ctx = new AgentRunContext(
+        AgentRunContext ctx = AgentRunContext.forIssue(
                 session, owner, repo, issueNumber, workspace, baseBranch);
         loop.run(ctx, userMessage + "\n\n" + outputContract(), strategy);
     }

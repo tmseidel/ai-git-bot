@@ -3,7 +3,7 @@ package org.remus.giteabot.agent;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
-import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 
 import java.util.Set;
@@ -18,7 +18,7 @@ import java.util.Set;
  *                            {@code null} disables filtering (legacy/test use).
  */
 public record IssueImplementationContext(
-        RepositoryApiClient repositoryClient,
+        RepositoryPlatform repositoryPlatform,
         AiClient aiClient,
         String issueAgentSystemPrompt,
         String botUsername,

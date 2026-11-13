@@ -91,6 +91,75 @@ class DiffSummaryTest {
         assertThat(summary.fileCount()).isEqualTo(1);
         assertThat(summary.changedFiles()).containsExactly("newfile.java");
         assertThat(summary.statLine()).contains("5 insertions(+)");
+        assertThat(summary.isNewFile("newfile.java")).isTrue();
+    }
+
+    @Test
+    void numberedFileDiff_prefixesNewFileLineNumbers() {
+        String diff = """
+                diff --git a/Svc.java b/Svc.java
+                index abc1234..def5678 100644
+                --- a/Svc.java
+                +++ b/Svc.java
+                @@ -8,3 +8,4 @@ class Svc {
+                 keep
+                -old
+                +new1
+                +new2
+                 tail
+                @@ -98,2 +99,2 @@
+                -x
+                +y
+                \\ No newline at end of file
+                """;
+
+        String numbered = DiffSummary.parse(diff).numberedFileDiff("Svc.java");
+
+        assertThat(numbered).isEqualTo("""
+                index abc1234..def5678 100644
+                --- a/Svc.java
+                +++ b/Svc.java
+                @@ -8,3 +8,4 @@ class Svc {
+                  8 |  keep
+                    | -old
+                  9 | +new1
+                 10 | +new2
+                 11 |  tail
+                @@ -98,2 +99,2 @@
+                    | -x
+                 99 | +y
+                    | \\ No newline at end of file
+                """);
+        assertThat(DiffSummary.parse(diff).numberedFileDiff("missing.java")).isNull();
+    }
+
+    @Test
+    void isNewFile_falseForModifiedDeletedBinaryAndUnknownFiles() {
+        String diff = """
+                diff --git a/mod.java b/mod.java
+                index abc1234..def5678 100644
+                --- a/mod.java
+                +++ b/mod.java
+                @@ -1,2 +1,2 @@
+                -old
+                +new
+                diff --git a/gone.java b/gone.java
+                deleted file mode 100644
+                --- a/gone.java
+                +++ /dev/null
+                @@ -1 +0,0 @@
+                -x
+                diff --git a/logo.png b/logo.png
+                new file mode 100644
+                Binary files /dev/null and b/logo.png differ
+                """;
+
+        DiffSummary summary = DiffSummary.parse(diff);
+
+        assertThat(summary.isNewFile("mod.java")).isFalse();
+        assertThat(summary.isNewFile("gone.java")).isFalse();
+        assertThat(summary.isNewFile("logo.png")).isFalse();
+        assertThat(summary.isNewFile("missing.java")).isFalse();
     }
 
     @Test

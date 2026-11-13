@@ -4,6 +4,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.issueimpl.AiResponseParser;
 import org.remus.giteabot.agent.loop.AgentRunContext;
@@ -44,13 +46,14 @@ class ReviewToolTruncationTest {
         Files.writeString(workspace.resolve("Content.txt"), truncated ? "x".repeat(11_000) : "complete content");
         AgentConfigProperties config = new AgentConfigProperties();
         ToolCatalog catalog = new ToolCatalog(config);
-        ToolExecutionService tools = new ToolExecutionService(config, catalog);
+        ToolExecutionService tools = new ToolExecutionService(config, catalog,
+                new PackageManagerDetector(), new YarnCommandBuilder(config));
         Set<String> allowed = Set.of("cat");
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, allowed, null);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("system", router, catalog, McpToolCatalog.empty(),
                 allowed, new AiResponseParser(), null, null, 5, 2);
-        AgentRunContext context = new AgentRunContext(null, "owner", "repo", 1L, Workspace.unmanaged(workspace), "main");
+        AgentRunContext context = AgentRunContext.forPullRequest(null, "owner", "repo", 1L, Workspace.unmanaged(workspace), "main");
 
         String rendered;
         if (mode == ToolingMode.NATIVE) {

@@ -4,7 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.GitIntegrationService;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
 import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
 import org.remus.giteabot.prworkflow.PrWorkflowRunStatus;
@@ -34,11 +34,11 @@ class CiActionPollerTest {
     private final DeploymentTargetService targetService = mock(DeploymentTargetService.class);
     private final DeploymentCallbackNotifier notifier = mock(DeploymentCallbackNotifier.class);
     private final GitIntegrationService integrationService = mock(GitIntegrationService.class);
-    private final RepositoryApiClientFactory clientFactory = mock(RepositoryApiClientFactory.class);
+    private final RepositoryPlatformFactory repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
     private final RepositoryApiClient apiClient = mock(RepositoryApiClient.class);
 
     private final CiActionPoller poller = new CiActionPoller(
-            runRepository, targetService, notifier, integrationService, clientFactory);
+            runRepository, targetService, notifier, integrationService, repositoryPlatformFactory);
 
     private PrWorkflowRun ciRun(long runId, String handleJson) {
         PrWorkflowRun run = new PrWorkflowRun();
@@ -66,7 +66,7 @@ class CiActionPollerTest {
         integration.setProviderType(RepositoryType.GITHUB);
         integration.setUpdatedAt(Instant.now());
         when(integrationService.findById(99L)).thenReturn(Optional.of(integration));
-        when(clientFactory.getApiClient(any())).thenReturn(apiClient);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(apiClient);
     }
 
     @Test

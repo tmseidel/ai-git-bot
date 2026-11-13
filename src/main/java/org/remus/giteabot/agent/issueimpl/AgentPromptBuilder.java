@@ -115,23 +115,28 @@ public class AgentPromptBuilder {
     }
 
     /**
-     * Builds the continuation prompt for follow-up comments.
+     * Builds the continuation prompt for follow-up comments with the issue itself in front.
+     * <p>
+     * The specification is not part of the persisted session history, so after a compaction a
+     * follow-up would otherwise carry the whole discussion and no task at all. The issue block is
+     * emitted first and bounded by the per-comment budget, while the discussion keeps its own
+     * budget below it — a prompt that has to be cut loses comments, never the task.
      */
-    public String buildContinuationPrompt(String userComment) {
-        return userComment;
-    }
-
-    /**
-     * Builds the continuation prompt for follow-up comments with the current issue discussion included.
-     */
-    public String buildContinuationPrompt(String userComment, String issueCommentsContext) {
-        return String.format("""
-                ## New User Comment
-                %s
-                
-                ## Current Issue Comments
-                %s
-                """, userComment != null ? userComment : "", normalizeIssueCommentsContext(issueCommentsContext));
+    public String buildContinuationPrompt(String issueTitle, String issueBody,
+                                          String userComment, String issueCommentsContext) {
+        StringBuilder prompt = new StringBuilder();
+        if (hasText(issueTitle) || hasText(issueBody)) {
+            prompt.append("## Issue\n")
+                    .append("**Title**: ").append(hasText(issueTitle) ? issueTitle : "(none)").append('\n')
+                    .append("**Description**: ")
+                    .append(hasText(issueBody) ? truncate(issueBody, maxSingleIssueCommentChars) : "(none)")
+                    .append("\n\n");
+        }
+        prompt.append("## New User Comment\n")
+                .append(userComment != null ? userComment : "")
+                .append("\n\n## Current Issue Comments\n")
+                .append(normalizeIssueCommentsContext(issueCommentsContext));
+        return prompt.toString();
     }
 
     /**
@@ -276,6 +281,10 @@ public class AgentPromptBuilder {
         return text.substring(0, maxChars) + "\n...(comment truncated)";
     }
 
+    private static boolean hasText(String text) {
+        return text != null && !text.isBlank();
+    }
+
     /**
      * Builds the feedback message sent to the AI after a single tool execution.
      * Delegates to {@link #buildMultiToolFeedback(List, List)} for consistency.
@@ -401,7 +410,7 @@ public class AgentPromptBuilder {
                 You modified files but did not call any build / test tool in this round, \
                 so the change is unverified. Before we can open the pull request you must \
                 run the project's own build through a validation tool call (for example \
-                `mvn test -q -B`, `gradle build -q`, `npm test`, `cargo build`, `go build ./...`, \
+                `mvn test -q -B`, `gradle build -q`, `npm test`, `yarn test`, `cargo build`, `go build ./...`, \
                 `dotnet test`, etc.), with arguments appropriate for this repository.
                 
                 Please issue one more round that:

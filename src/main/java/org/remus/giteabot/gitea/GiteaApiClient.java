@@ -1,11 +1,13 @@
 package org.remus.giteabot.gitea;
 
 import lombok.extern.slf4j.Slf4j;
+import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.gitea.model.GiteaCommit;
 import org.remus.giteabot.gitea.model.GiteaPullRequest;
 import org.remus.giteabot.gitea.model.GiteaReview;
 import org.remus.giteabot.gitea.model.GiteaReviewComment;
 import org.remus.giteabot.gitea.model.GiteaTree;
+import org.remus.giteabot.gitea.model.GiteaUser;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
@@ -15,11 +17,11 @@ import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
-import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -45,22 +47,14 @@ import java.util.Optional;
 public class GiteaApiClient implements RepositoryApiClient {
 
     private final RestClient giteaRestClient;
-    private final RepositoryCredentials credentials;
 
     /**
-     * Creates a GiteaApiClient with the given RestClient and credentials.
+     * Creates a GiteaApiClient.
      *
-     * @param restClient  pre-configured RestClient pointing at the Gitea API base URL
-     * @param credentials the repository credentials (base URL, clone URL, token)
+     * @param restClient pre-configured RestClient pointing at the Gitea API base URL
      */
-    public GiteaApiClient(RestClient restClient, RepositoryCredentials credentials) {
+    public GiteaApiClient(RestClient restClient) {
         this.giteaRestClient = restClient;
-        this.credentials = credentials;
-    }
-
-    @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
     }
 
     @Override
@@ -106,20 +100,29 @@ public class GiteaApiClient implements RepositoryApiClient {
                 PullRequestHeads.nonBlank(head.getSha()));
     }
 
-    @Override
-    public String getRepositoryRemote(String owner, String repo) {
-        if (!credentials.usesSsh()) {
-            return RepositoryApiClient.super.getRepositoryRemote(owner, repo);
-        }
+    /**
+     * Returns the SSH clone URL Gitea reports for {@code owner/repo}.
+     *
+     * @param knownHosts the pinned {@code known_hosts} entries the URL's endpoint must match;
+     *                   {@code null}, or entries naming no single endpoint, skip that check
+     */
+    public String getSshRepositoryRemote(String owner, String repo, @Nullable String knownHosts) {
         Map<String, Object> repoInfo = giteaRestClient.get()
                 .uri("/api/v1/repos/{owner}/{repo}", owner, repo)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-        return validateSshUrl(repoInfo == null ? null : repoInfo.get("ssh_url"),
+        return validateSshUrl(repoInfo == null ? null : repoInfo.get("ssh_url"), knownHosts,
                 "Gitea did not provide an SSH clone URL for " + owner + "/" + repo);
     }
 
-    /** Returns an SSH clone URL from a repository visible to the authenticated user. */
+    /**
+     * Returns an SSH clone URL from a repository visible to the authenticated user, for the SSH
+     * setup to scan the server's host keys from.
+     * <p>
+     * Deliberately not checked against pinned {@code known_hosts}, unlike
+     * {@link #getSshRepositoryRemote}: the scan exists to discover the host keys, so there is
+     * nothing trustworthy to pin against yet. The operator confirms the scanned keys instead.
+     */
     public String getAnySshCloneUrl() {
         Map<String, Object> searchResult = giteaRestClient.get()
                 .uri(uriBuilder -> uriBuilder.path("/api/v1/repos/search")
@@ -129,7 +132,7 @@ public class GiteaApiClient implements RepositoryApiClient {
         Object data = searchResult == null ? null : searchResult.get("data");
         if (data instanceof List<?> repositories && !repositories.isEmpty()
                 && repositories.getFirst() instanceof Map<?, ?> repository) {
-            return validateSshUrl(repository.get("ssh_url"),
+            return validateSshUrl(repository.get("ssh_url"), null,
                     "Gitea did not provide an SSH URL for a visible repository");
         }
         throw new IllegalStateException("Gitea did not provide an SSH URL for a visible repository");
@@ -137,13 +140,16 @@ public class GiteaApiClient implements RepositoryApiClient {
 
     /** Returns the immutable ID of the user authenticated by this client's token. */
     public long getCurrentUserId() {
-        Map<String, Object> user = giteaRestClient.get().uri("/api/v1/user")
-                .retrieve().body(new ParameterizedTypeReference<>() {});
-        Object id = user == null ? null : user.get("id");
-        if (id instanceof Number userId && userId.longValue() > 0) {
-            return userId.longValue();
-        }
-        throw new IllegalStateException("Gitea did not provide the authenticated user's ID");
+        return fetchAuthenticatedUser().getId();
+    }
+
+    @Override
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        return fetchAuthenticatedUser().toGitUser();
+    }
+
+    private GiteaUser fetchAuthenticatedUser() {
+        return giteaRestClient.get().uri("/api/v1/user").retrieve().body(GiteaUser.class);
     }
 
     /** Returns all SSH key IDs with the exact title, across paginated user keys. */
@@ -213,7 +219,7 @@ public class GiteaApiClient implements RepositoryApiClient {
                 .body(GiteaPullRequest.class);
     }
 
-    private String validateSshUrl(Object sshUrl, String missingMessage) {
+    private String validateSshUrl(Object sshUrl, @Nullable String knownHosts, String missingMessage) {
         if (!(sshUrl instanceof String url) || url.isBlank()) {
             throw new IllegalStateException(missingMessage);
         }
@@ -223,7 +229,7 @@ public class GiteaApiClient implements RepositoryApiClient {
         } catch (IllegalArgumentException e) {
             throw new IllegalStateException("Gitea returned an invalid SSH clone URL", e);
         }
-        SshEndpoint.fromKnownHosts(credentials.sshKnownHosts()).ifPresent(expected -> {
+        SshEndpoint.fromKnownHosts(knownHosts).ifPresent(expected -> {
             if (!expected.matches(endpoint)) {
                 throw new IllegalStateException("Gitea SSH clone URL endpoint " + endpoint.host() + ":"
                         + endpoint.port() + " does not match known_hosts endpoint "

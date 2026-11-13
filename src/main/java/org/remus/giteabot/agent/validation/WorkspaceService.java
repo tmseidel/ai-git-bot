@@ -2,8 +2,10 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -52,16 +54,17 @@ public class WorkspaceService {
      * ({@link RepositoryApiClient#getPullRequestHeadRef}) — the fork-safe ref that
      * carries the head commit in the target repository.
      *
-     * <p>The repository client resolves the credential-free remote and its
+     * <p>The platform resolves the credential-free remote and its
      * credentials once before any workspace is allocated. HTTP credentials use
      * a credential-store file outside the checkout; SSH credentials use private
      * key and {@code known_hosts} files in the same private temporary parent.</p>
      */
-    public WorkspaceResult prepareWorkspace(RepositoryApiClient repositoryClient,
+    public WorkspaceResult prepareWorkspace(RepositoryPlatform platform,
                                             String owner, String repo, String branch, Long prNumber) {
+        final RepositoryApiClient repositoryClient = platform.getClient();
         final CheckoutConfig checkout;
         try {
-            checkout = resolveCheckout(repositoryClient, owner, repo);
+            checkout = resolveCheckout(platform, owner, repo);
         } catch (RuntimeException e) {
             String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             log.error("Failed to resolve repository checkout for {}/{}: {}", owner, repo, message, e);
@@ -73,7 +76,8 @@ public class WorkspaceService {
 
         Workspace workspace = null;
         try {
-            workspace = createWorkspace();
+            final RepositoryUser repositoryUser = platform.getUser(owner);
+            workspace = createWorkspace(repositoryUser);
             Path workspaceDir = workspace.path();
             log.info("Cloning repository to {} for workspace", workspaceDir);
 
@@ -99,7 +103,7 @@ public class WorkspaceService {
                 if (!workspace.cleanup()) {
                     return WorkspaceResult.failure("Failed to clean up the initial clone attempt");
                 }
-                workspace = createWorkspace();
+                workspace = createWorkspace(repositoryUser);
                 workspaceDir = workspace.path();
                 workspace.setAuthentication(repositoryRemote, credentials, usesAuthorizationHeader);
 
@@ -186,14 +190,15 @@ public class WorkspaceService {
      * repository's PR ref, which carries the same commit while the PR is
      * open.</p>
      */
-    public WorkspaceResult preparePullRequestWorkspace(RepositoryApiClient repositoryClient,
+    public WorkspaceResult preparePullRequestWorkspace(RepositoryPlatform platform,
                                                        String owner, String repo,
                                                        String branch, Long prNumber,
                                                        PullRequestWorkspaceMode mode) {
         Objects.requireNonNull(mode, "mode");
         boolean mustPushBack = mode == PullRequestWorkspaceMode.PUSH_BACK;
+        RepositoryApiClient repositoryClient = platform.getClient();
         if (!repositoryClient.requiresAuthoritativePullRequestHead()) {
-            return prepareWorkspace(repositoryClient, owner, repo, branch, prNumber);
+            return prepareWorkspace(platform, owner, repo, branch, prNumber);
         }
         final PullRequestHead head;
         try {
@@ -212,7 +217,7 @@ public class WorkspaceService {
                             + "{} in the target repository instead",
                     owner, repo, prNumber, message,
                     repositoryClient.getPullRequestHeadRef(prNumber));
-            return prepareWorkspace(repositoryClient, owner, repo, branch, prNumber);
+            return prepareWorkspace(platform, owner, repo, branch, prNumber);
         }
 
         boolean sameRepository = owner.equalsIgnoreCase(head.owner())
@@ -221,7 +226,7 @@ public class WorkspaceService {
         // refs/pull/<n>/head inside prepareWorkspace: for a fork head that ref
         // belongs to the target repository, and a PUSH_BACK workspace may use
         // neither.
-        WorkspaceResult result = prepareWorkspace(repositoryClient, head.owner(), head.repository(),
+        WorkspaceResult result = prepareWorkspace(platform, head.owner(), head.repository(),
                 head.branch(), !mustPushBack && sameRepository ? prNumber : null);
         if (result.success() || mustPushBack || sameRepository || prNumber == null) {
             return result;
@@ -231,7 +236,7 @@ public class WorkspaceService {
                         + "{} in {}/{}: {}", head.branch(), head.owner(),
                 head.repository(), prNumber, repositoryClient.getPullRequestHeadRef(prNumber),
                 owner, repo, result.error());
-        WorkspaceResult fallback = prepareWorkspace(repositoryClient, owner, repo, head.branch(),
+        WorkspaceResult fallback = prepareWorkspace(platform, owner, repo, head.branch(),
                 prNumber);
         if (fallback.success()) {
             return fallback;
@@ -263,12 +268,12 @@ public class WorkspaceService {
      * authenticate against the remote, for commands that fetch only what they need.
      *
      * @throws IOException      when the workspace cannot be created or initialized
-     * @throws RuntimeException when the repository client cannot resolve the checkout
+     * @throws RuntimeException when the repository platform cannot resolve the checkout
      */
-    Workspace createEmptyWorkspace(RepositoryApiClient repositoryClient, String owner, String repo)
+    Workspace createEmptyWorkspace(RepositoryPlatform platform, String owner, String repo)
             throws IOException {
-        CheckoutConfig checkout = resolveCheckout(repositoryClient, owner, repo);
-        Workspace workspace = createWorkspace();
+        CheckoutConfig checkout = resolveCheckout(platform, owner, repo);
+        Workspace workspace = createWorkspace(platform.getUser(owner));
         try {
             workspace.setAuthentication(checkout.remote(), checkout.credentials(), checkout.usesAuthorizationHeader());
             CommandResult init = workspace.init();
@@ -289,13 +294,12 @@ public class WorkspaceService {
      * of one checkout. Runs before a workspace is allocated, so a provider failure
      * leaves no directory behind.
      */
-    private CheckoutConfig resolveCheckout(RepositoryApiClient repositoryClient,
-                                           String owner, String repo) {
-        String repositoryRemote = repositoryClient.getRepositoryRemote(owner, repo);
-        RepositoryCredentials credentials = repositoryClient.getCredentials();
-        boolean usesAuthorizationHeader = repositoryClient.usesGitAuthorizationHeader();
+    private CheckoutConfig resolveCheckout(RepositoryPlatform platform, String owner, String repo) {
+        String repositoryRemote = platform.getRepositoryRemote(owner, repo);
+        boolean usesAuthorizationHeader = platform.usesGitAuthorizationHeader();
+        RepositoryCredentials credentials = platform.getCredentials();
         if (repositoryRemote == null || repositoryRemote.isBlank() || credentials == null) {
-            throw new IllegalStateException("Repository client returned incomplete checkout configuration");
+            throw new IllegalStateException("Repository platform returned incomplete checkout configuration");
         }
         return new CheckoutConfig(repositoryRemote, credentials, usesAuthorizationHeader);
     }
@@ -323,8 +327,10 @@ public class WorkspaceService {
 
     /**
      * Creates a new workspace with a private temporary parent.
+     *
+     * @param repositoryUser the commit identity
      */
-    Workspace createWorkspace() throws IOException {
+    Workspace createWorkspace(RepositoryUser repositoryUser) throws IOException {
         retryFailedCleanups();
         Path workspaceRoot;
         if (workspaceBaseDir == null) {
@@ -333,7 +339,7 @@ public class WorkspaceService {
             Files.createDirectories(workspaceBaseDir);
             workspaceRoot = Files.createTempDirectory(workspaceBaseDir, "agent-workspace-");
         }
-        Workspace workspace = newWorkspace(workspaceRoot, workspaces::remove);
+        Workspace workspace = newWorkspace(workspaceRoot, repositoryUser, workspaces::remove);
         workspaces.add(workspace);
         try {
             Workspace.restrictToOwner(workspaceRoot, true);
@@ -344,8 +350,9 @@ public class WorkspaceService {
         }
     }
 
-    Workspace newWorkspace(Path workspaceRoot, Consumer<Workspace> onCleanedUp) {
-        return new Workspace(workspaceRoot, onCleanedUp);
+    Workspace newWorkspace(Path workspaceRoot, RepositoryUser repositoryUser,
+                           Consumer<Workspace> onCleanedUp) {
+        return new Workspace(workspaceRoot, repositoryUser, onCleanedUp);
     }
 
     private void retryFailedCleanups() {

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.remus.giteabot.repository.TestPlatforms;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
@@ -14,9 +15,10 @@ import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.prworkflow.WorkflowToolSurfaceFactory;
 import org.remus.giteabot.prworkflow.e2e.SuiteLifecycleMode;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestState;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
+import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.systemsettings.SystemPrompt;
 
 import java.nio.charset.StandardCharsets;
@@ -61,8 +63,15 @@ class ReadmeSyncWritebackTest {
         git(seed, "push", "origin", "feature/docs");
 
         client = mock(RepositoryApiClient.class, CALLS_REAL_METHODS);
-        doReturn(remote.toString()).when(client).getRepositoryRemote("acme", "repo");
-        when(client.getCredentials()).thenReturn(RepositoryCredentials.of("", remote.toString(), ""));
+        String remoteUrl = remote.toString();
+        RepositoryPlatform platform = new RepositoryPlatform(remoteUrl, remoteUrl,
+                new HttpCredentials(null, ""), null, client, TestPlatforms.USER_TTL) {
+            @Override
+            public String getRepositoryRemote(String owner, String repo) {
+                return remoteUrl;
+            }
+        };
+        doReturn(TestPlatforms.USER).when(client).getAuthenticatedUser("acme");
         when(client.getPullRequestDiff("acme", "repo", 42L)).thenReturn("diff --git a/x b/x\n+changed");
         when(client.getPullRequestDetails("acme", "repo", 42L))
                 .thenReturn(Optional.of(details(PullRequestState.OPEN)));
@@ -80,7 +89,7 @@ class ReadmeSyncWritebackTest {
             context.recordDeleted("obsolete.md");
             return new ReadmeSyncAgent.Result(3, "done", false);
         });
-        service = new ReadmeSyncService(client, mock(AiClient.class), new SystemPrompt(),
+        service = new ReadmeSyncService(platform, mock(AiClient.class), new SystemPrompt(),
                 new WorkspaceService(root.resolve("workspaces").toString(), 60), agent,
                 mock(WorkflowToolSurfaceFactory.class));
     }

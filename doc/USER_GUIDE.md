@@ -266,7 +266,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For GitHub: `https://github.com` or `https://github.yourdomain.com` (Enterprise)
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
-     - For Azure DevOps: `https://dev.azure.com` (Services), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
+     - For Azure DevOps: `https://dev.azure.com` (Services, every organization the token can access), `https://dev.azure.com/yourorg` (Services, one organization), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
     - **Username**: The username of the Git account the bot acts as (e.g. `ai_bot`) — not an e-mail address or display name. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). It applies to every bot that uses this integration. For Bitbucket Cloud, enter the **Atlassian account email** instead (see below).
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.
@@ -702,6 +702,8 @@ When `APP_ENCRYPTION_KEY` is configured, sensitive data is encrypted at rest usi
 
 The web UI is protected by Spring Security. By default it uses the database-backed username/password form (`native`). Set `giteabot.security.login-method=oauth` to use an OAuth 2.0 Authorization Code login instead. The two login methods are mutually exclusive: in OAuth mode, an unauthenticated visit to any protected UI route, including `/login`, is redirected directly to the provider; the native login form is not available. Every successfully authenticated OAuth user is an application administrator.
 
+The native login form offers a **Remember me** checkbox. Ticking it issues a persistent token stored in the `persistent_logins` table, so the browser stays signed in after the session expires or the application restarts; logged-in state is kept for 14 days by default. Logging out revokes the token. The checkbox does not exist in OAuth mode — there, the provider's own session policy applies.
+
 The API webhook endpoints (`/api/webhook/**`) remain unauthenticated to allow Git providers to send webhooks. Each bot has a unique, random webhook secret in its URL path that serves as authentication.
 
 ### Per-Bot User Whitelist (token-spend guard)
@@ -725,6 +727,8 @@ The whitelist is the recommended defence for bots installed on **public reposito
 | `DATABASE_USERNAME` | `sa` | Database username |
 | `DATABASE_PASSWORD` | *(empty)* | Database password |
 | `GITEABOT_SECURITY_LOGIN_METHOD` | `native` | Web UI authentication method: `native` (database username/password) or `oauth` (OAuth 2.0 Authorization Code). |
+| `GITEABOT_SECURITY_REMEMBER_ME_VALIDITY` | `14d` | How long a **Remember me** login stays valid (Spring `Duration` syntax, e.g. `7d`, `36h`). |
+| `GITEABOT_SECURITY_REMEMBER_ME_KEY` | *(random per startup)* | Shared signing key for remember-me tokens. Set the same value on every application instance that shares one database; leave empty for a single instance. |
 
 #### OAuth login mode
 

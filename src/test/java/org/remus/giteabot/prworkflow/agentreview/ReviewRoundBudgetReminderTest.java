@@ -202,7 +202,8 @@ class ReviewRoundBudgetReminderTest {
                 null, Set.of("cat"), new AiResponseParser(), new BranchSwitcher(mock(ToolExecutionService.class)),
                 (owner, repo, ref, files) -> fileContent, scenario.maxContextRounds(), scenario.maxToolRounds());
         var session = new AgentSession("owner", "repo", 76L, "Review example");
-        var context = new AgentRunContext(session, "owner", "repo", 76L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        var context = AgentRunContext.forPullRequest(session, "owner", "repo", 76L,
+                Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         var loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                 new AgentBudget(scenario.maxRounds(), scenario.maxContextRounds(), 2, 4000, 8000, 120000, 200000, 0.7));
         return loop.run(context, "Review the change", strategy);

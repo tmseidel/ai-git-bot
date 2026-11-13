@@ -7,7 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
@@ -22,7 +22,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class IssueCommentAcknowledgementTest {
 
-    @Mock private RepositoryApiClientFactory repositoryApiClientFactory;
+    @Mock private RepositoryPlatformFactory repositoryPlatformFactory;
     @Mock private RepositoryApiClient repositoryApiClient;
 
     private IssueCommentAcknowledgement acknowledgement;
@@ -30,7 +30,7 @@ class IssueCommentAcknowledgementTest {
 
     @BeforeEach
     void setUp() {
-        acknowledgement = new IssueCommentAcknowledgement(repositoryApiClientFactory);
+        acknowledgement = new IssueCommentAcknowledgement(repositoryPlatformFactory);
         bot = new Bot();
         bot.setName("test-bot");
         bot.setGitIntegration(new GitIntegration());
@@ -38,7 +38,7 @@ class IssueCommentAcknowledgementTest {
 
     @Test
     void acknowledge_addsEyesReactionToTheTriggeringComment() {
-        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repositoryApiClient);
 
         acknowledgement.acknowledge(bot, commentPayload());
 
@@ -47,7 +47,7 @@ class IssueCommentAcknowledgementTest {
 
     @Test
     void acknowledge_reactionFailure_isSwallowed() {
-        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(repositoryApiClient);
+        when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repositoryApiClient);
         doThrow(new RuntimeException("reaction api down"))
                 .when(repositoryApiClient).addReaction(any(), any(), any(), any());
 
@@ -61,7 +61,7 @@ class IssueCommentAcknowledgementTest {
 
         acknowledgement.acknowledge(bot, payload);
 
-        verifyNoInteractions(repositoryApiClientFactory);
+        verifyNoInteractions(repositoryPlatformFactory);
     }
 
     private static WebhookPayload commentPayload() {

@@ -60,7 +60,7 @@ class AgentLoopNativeToolResultTest {
     void setUp() {
         AgentSession session = new AgentSession("owner", "repo", 11L, "issue title");
         session.setId(1L); // persisted session — the loop flushes id-bearing sessions
-        ctx = new AgentRunContext(session, "owner", "repo", 11L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        ctx = AgentRunContext.forIssue(session, "owner", "repo", 11L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         when(sessionService.toAiMessages(session)).thenReturn(List.of());
     }
 
@@ -155,6 +155,58 @@ class AgentLoopNativeToolResultTest {
                         new PendingMessage.ToolPayload(null, "call_aaa")),
                 new PendingMessage("tool", "[call_bbb] rg found 3 matches",
                         new PendingMessage.ToolPayload(null, "call_bbb")))),
+                anyLong(), anyLong());
+    }
+
+    @Test
+    void finishOnAToolCallRound_persistsTheAssistantTurnWithTheResultsItRan() {
+        when(aiClient.supportsNativeTools()).thenReturn(true);
+
+        // The coding agent's normal ending: one round announces a patch, runs it, sees a
+        // diff and stops. The loop is the only writer of the session, so a Finish that
+        // drops the results leaves the turn answered by nothing.
+        ToolCall call = new ToolCall("call_aaa", "patch-file", null);
+        ChatTurn round1 = new ChatTurn("", List.of(call), StopReason.TOOL_USE, 0L, 0L);
+        when(aiClient.chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(round1);
+
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                new AgentBudget(3, 2, 2, 4000, 8_000, 120_000, 200_000, 0.7));
+
+        AgentStrategy strategy = new AgentStrategy() {
+            @Override public String systemPrompt() { return "sys"; }
+            @Override public ToolingMode preferredToolMode() { return ToolingMode.NATIVE; }
+            @Override public List<ToolDescriptor> toolDescriptors() {
+                return List.of(new ToolDescriptor("patch-file", "patch", null));
+            }
+            @Override
+            public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
+                return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), null),
+                        List.of(new StepDecision.ToolCallResult("call_aaa",
+                                "patched tests/e2e/features/Feature.feature (EXACT)")));
+            }
+            @Override
+            public StepDecision step(AgentRunContext ctx, String aiResponse, int round) {
+                throw new AssertionError("text step should not be called in NATIVE mode");
+            }
+            @Override
+            public LoopOutcome onBudgetExhausted(AgentRunContext ctx) {
+                return LoopOutcome.fail(ctx.baseBranch());
+            }
+        };
+
+        LoopOutcome outcome = loop.run(ctx, "go", strategy);
+
+        assertThat(outcome.success()).isTrue();
+        // One AI call, one flush: the terminal round carries the pair in its own batch.
+        verify(aiClient, times(1))
+                .chatWithTools(anyList(), anyString(), anyList(), anyString(), isNull(), anyInt());
+        verify(sessionService).flushMessages(any(), eq(List.of(
+                new PendingMessage("user", "go"),
+                new PendingMessage("assistant", "",
+                        new PendingMessage.ToolPayload(List.of(call), null)),
+                new PendingMessage("tool", "[call_aaa] patched tests/e2e/features/Feature.feature (EXACT)",
+                        new PendingMessage.ToolPayload(null, "call_aaa")))),
                 anyLong(), anyLong());
     }
 

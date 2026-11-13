@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -75,7 +76,7 @@ class CodingAgentStrategyTest {
         promptBuilder = new AgentPromptBuilder();
         responseParser = new AiResponseParser();
         AgentSession session = new AgentSession("o", "r", 1L, "t");
-        ctx = new AgentRunContext(session, "o", "r", 1L, workspace, "main");
+        ctx = AgentRunContext.forIssue(session, "o", "r", 1L, workspace, "main");
         // The native tool path consults the branch switcher on every round.
         lenient().when(branchSwitcher.apply(any(), anyString(), anyList(), any()))
                 .thenAnswer(inv -> new BranchSwitcher.Result("main", "main", inv.getArgument(2)));
@@ -123,6 +124,65 @@ class CodingAgentStrategyTest {
         validationArgs.set("args", nodes.arrayNode().add("test"));
         return new ChatTurn("", List.of(new ToolCall("call-1", "mvn", validationArgs)),
                 StopReason.TOOL_USE, 0L, 0L);
+    }
+
+    /** A native round that only reads the repository (rg, cat, tree). */
+    private static ChatTurn nativeContextOnlyTurn() {
+        JsonNodeFactory nodes = JsonNodeFactory.instance;
+        var rgArgs = nodes.objectNode();
+        rgArgs.put("pattern", "class X");
+        var catArgs = nodes.objectNode();
+        catArgs.put("path", "src/X.java");
+        var treeArgs = nodes.objectNode();
+        treeArgs.put("path", "src");
+        return new ChatTurn("", List.of(
+                new ToolCall("call-1", "rg", rgArgs),
+                new ToolCall("call-2", "cat", catArgs),
+                new ToolCall("call-3", "tree", treeArgs)),
+                StopReason.TOOL_USE, 0L, 0L);
+    }
+
+    @Test
+    void step_contextOnlyRound_postsNoPlanComment() {
+        // Read-only lookups used to announce every round on the issue (seven comments in
+        // 22 seconds on one run). Only rounds that change files or run validation are
+        // worth a comment.
+        lenient().when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "ok", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        StepDecision d = newStrategy().step(ctx, nativeContextOnlyTurn(), 1);
+
+        assertThat(d).isInstanceOf(StepDecision.ContinueWithToolResults.class);
+        verify(notificationService, never()).postNativeToolPlanComment(
+                anyString(), anyString(), any(), any(), anyList());
+    }
+
+    @Test
+    void step_fileAndValidationRound_postsExactlyOnePlanComment() {
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "File written", ""))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        newStrategy().step(ctx, nativeWriteAndValidateTurn(), 1);
+
+        verify(notificationService, times(1)).postNativeToolPlanComment(
+                eq("o"), eq("r"), eq(1L), eq(""), anyList());
+    }
+
+    @Test
+    void step_validationOnlyRound_postsExactlyOnePlanComment() {
+        when(workspace.hasUncommittedChanges()).thenReturn(false);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "BUILD SUCCESS", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        newStrategy().step(ctx, nativeValidationOnlyTurn(), 1);
+
+        verify(notificationService, times(1)).postNativeToolPlanComment(
+                eq("o"), eq("r"), eq(1L), eq(""), anyList());
     }
 
     @Test
@@ -415,6 +475,74 @@ class CodingAgentStrategyTest {
         LoopOutcome outcome = ((StepDecision.Finish) third).outcome();
         assertThat(outcome.success()).isTrue();
         assertThat(((LoopOutcome.AgentAnswer) outcome.payload()).text()).isEqualTo(report);
+    }
+
+    @Test
+    void step_mutationRoundThatFinishes_handsTheExecutedResultsToTheLoop() {
+        // The coding agent stops as soon as a mutation leaves a diff. Those results have
+        // to travel on the decision: the loop writes the session, and an assistant turn
+        // whose ids nothing answers is replayed as prose — which is why the follow-up run
+        // re-applied a patch whose outcome the previous run never recorded.
+        agentConfig.getValidation().setEnabled(false);
+        when(workspace.hasUncommittedChanges()).thenReturn(true);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "File written", ""));
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        StepDecision d = newStrategy().step(ctx, nativeWriteOnlyTurn(), 1);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        StepDecision.Finish finish = (StepDecision.Finish) d;
+        assertThat(finish.outcome().success()).isTrue();
+        assertThat(finish.executedCalls()).extracting(StepDecision.ToolCallResult::toolCallId)
+                .containsExactly("call-1");
+        assertThat(finish.executedCalls().get(0).resultText()).contains("File written");
+    }
+
+    @Test
+    void step_toolRoundBudgetExhausted_answersTheCallsItNeverRan() {
+        // The give-up branch stops on a tool-call turn without running anything. Every
+        // announced id still needs an answer, or the turn replays as an announcement with
+        // no outcome and the next run makes the same call again.
+        agentConfig.getValidation().setMaxToolExecutions(0);
+        ctx.setToolingMode(ToolingMode.NATIVE);
+
+        StepDecision d = newStrategy().step(ctx, nativeWriteOnlyTurn(), 1);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        StepDecision.Finish finish = (StepDecision.Finish) d;
+        assertThat(finish.outcome().success()).isFalse();
+        assertThat(finish.executedCalls()).extracting(StepDecision.ToolCallResult::toolCallId)
+                .containsExactly("call-1");
+        assertThat(finish.executedCalls().get(0).resultText())
+                .startsWith("not executed — ")
+                .contains("tool-round budget");
+    }
+
+    @Test
+    void step_attemptBudgetExhausted_answersTheCallsItNeverRan() {
+        // Same contract on the validation-retry give-up: the round that trips the cap
+        // announced tool calls and executed none of them.
+        agentConfig.getBudget().setMaxValidationRetries(1);
+        when(toolRouter.execute(eq(AgentToolRouter.Mode.CODING), any(ToolCallContext.class)))
+                .thenReturn(new ToolResult(true, 0, "ok", ""))              // write-file
+                .thenReturn(new ToolResult(false, 1, "", "compile error")); // mvn fails
+        ctx.setToolingMode(ToolingMode.NATIVE);
+        CodingAgentStrategy strategy = newStrategy();
+
+        assertThat(strategy.step(ctx, nativeWriteAndValidateTurn(), 1))
+                .isInstanceOf(StepDecision.ContinueWithToolResults.class);
+
+        StepDecision d = strategy.step(ctx, nativeWriteAndValidateTurn(), 2);
+
+        assertThat(d).isInstanceOf(StepDecision.Finish.class);
+        StepDecision.Finish finish = (StepDecision.Finish) d;
+        assertThat(finish.outcome().success()).isFalse();
+        assertThat(finish.executedCalls()).extracting(StepDecision.ToolCallResult::toolCallId)
+                .containsExactly("call-1", "call-2");
+        assertThat(finish.executedCalls()).allSatisfy(result ->
+                assertThat(result.resultText()).startsWith("not executed — ")
+                        .contains("attempt budget"));
     }
 
     @Test

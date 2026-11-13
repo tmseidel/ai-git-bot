@@ -1,5 +1,7 @@
 package org.remus.giteabot.github;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
@@ -7,9 +9,9 @@ import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
 import org.remus.giteabot.repository.model.PullRequestState;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -22,6 +24,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
@@ -30,47 +33,19 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 class GitHubApiClientTest {
 
-    private static final RepositoryCredentials CREDS =
-            RepositoryCredentials.of("https://api.github.com", "https://github.com", "ghp_token");
+    private static final String BASE_URL = "https://api.github.com";
 
     @Test
     void implementsRepositoryApiClient() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
+        GitHubApiClient client = new GitHubApiClient(null);
         assertInstanceOf(RepositoryApiClient.class, client);
-    }
-
-    @Test
-    void getBaseUrl_returnsConfiguredUrl() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
-        assertEquals("https://api.github.com", client.getBaseUrl());
-    }
-
-    @Test
-    void getCloneUrl_returnsConfiguredUrl() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
-        assertEquals("https://github.com", client.getCloneUrl());
-    }
-
-    @Test
-    void getToken_returnsConfiguredToken() {
-        GitHubApiClient client = new GitHubApiClient(null, CREDS);
-        assertEquals("ghp_token", client.getToken());
-    }
-
-    @Test
-    void constructorWithEnterpriseUrl() {
-        var enterpriseCreds = RepositoryCredentials.of(
-                "https://github.example.com/api/v3", "https://github.example.com", "token123");
-        GitHubApiClient client = new GitHubApiClient(null, enterpriseCreds);
-        assertEquals("https://github.example.com/api/v3", client.getBaseUrl());
-        assertEquals("https://github.example.com", client.getCloneUrl());
     }
 
     @Test
     void getIssueComments_fetchesIssueCommentsWithPageLimit() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42/comments?per_page=50"))
                 .andExpect(method(HttpMethod.GET))
@@ -86,9 +61,9 @@ class GitHubApiClientTest {
 
     @Test
     void addPullRequestReaction_postsEyesToIssueReactionEndpoint() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42/reactions"))
                 .andExpect(method(HttpMethod.POST))
@@ -104,7 +79,7 @@ class GitHubApiClientTest {
     void getRepositoryTree_mapsBlobTreeAndSubmoduleEntries() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/git/trees/main?recursive=1"))
                 .andExpect(method(HttpMethod.GET))
@@ -128,7 +103,7 @@ class GitHubApiClientTest {
     void getPullRequestCommits_mapsShaAndNestedMessage() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/42/commits"))
                 .andExpect(method(HttpMethod.GET))
@@ -147,7 +122,7 @@ class GitHubApiClientTest {
     void getPullRequestDetails_mapsTitleBodyAndHead() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/42"))
                 .andExpect(method(HttpMethod.GET))
@@ -167,9 +142,9 @@ class GitHubApiClientTest {
 
     @Test
     void addIssueReaction_postsEyesToIssueReactionEndpoint() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/12/reactions"))
                 .andExpect(method(HttpMethod.POST))
@@ -185,7 +160,7 @@ class GitHubApiClientTest {
     void postReview_requestChanges_submitsSingleReviewWithBodyAndEvent() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/7/reviews"))
                 .andExpect(method(HttpMethod.POST))
@@ -202,7 +177,7 @@ class GitHubApiClientTest {
     void postReview_none_submitsSingleCommentReview() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/pulls/7/reviews"))
                 .andExpect(method(HttpMethod.POST))
@@ -219,7 +194,7 @@ class GitHubApiClientTest {
     void assignIssue_postsAssignees() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/owner/repo/issues/42/assignees"))
                 .andExpect(method(HttpMethod.POST))
@@ -234,14 +209,14 @@ class GitHubApiClientTest {
 
     @Test
     void requiresAuthoritativePullRequestHead_isEnabled() {
-        assertTrue(new GitHubApiClient(null, CREDS).requiresAuthoritativePullRequestHead());
+        assertTrue(new GitHubApiClient(null).requiresAuthoritativePullRequestHead());
     }
 
     @Test
     void getPullRequestHead_resolvesForkRepositoryAndBranch() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andExpect(method(HttpMethod.GET))
@@ -265,7 +240,7 @@ class GitHubApiClientTest {
     void getPullRequestHead_fillsCoordinatesFromFullNameOnly() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andRespond(withSuccess("""
@@ -283,7 +258,7 @@ class GitHubApiClientTest {
     void getPullRequestHead_rejectsBranchMismatch() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andRespond(withSuccess("""
@@ -302,7 +277,7 @@ class GitHubApiClientTest {
     void getPullRequestHead_rejectsMissingHeadRepository() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.github.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitHubApiClient client = new GitHubApiClient(builder.build(), CREDS);
+        GitHubApiClient client = new GitHubApiClient(builder.build());
 
         server.expect(requestTo("https://api.github.com/repos/base/project/pulls/7"))
                 .andRespond(withSuccess("{\"head\":{\"ref\":\"main\",\"sha\":\"abc123\"}}",
@@ -311,5 +286,119 @@ class GitHubApiClientTest {
         assertThrows(IllegalStateException.class,
                 () -> client.getPullRequestHead("base", "project", 7L, "main"));
         server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_usesThePublicEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":42,\"login\":\"ai-bot\",\"name\":\"AI Bot\",\"email\":\"public@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("42", "ai-bot", "AI Bot", "public@example.com"), user);
+        server.verify();
+    }
+
+    private static final String PRIVATE_USER =
+            "{\"id\":42,\"login\":\"ai-bot\",\"name\":\"AI Bot\",\"email\":null}";
+
+    @Test
+    void getAuthenticatedUser_prefersTheNoreplyAddressListedByTheServer() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withSuccess("""
+                        [{"email":"private@example.com","primary":true,"verified":true,"visibility":"private"},
+                         {"email":"ai-bot@users.noreply.github.com","primary":false,"verified":true,"visibility":null}]""",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        // The legacy username-only form the server lists wins over the derived ID-based form,
+        // and the private primary address is never used.
+        assertEquals("ai-bot@users.noreply.github.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_usesTheEnterpriseNoreplyAddressListedByTheServer() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withSuccess("[{\"email\":\"42+ai-bot@users.noreply.ghe.example.com\",\"primary\":false}]",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build(), false).getAuthenticatedUser("owner");
+
+        assertEquals("42+ai-bot@users.noreply.ghe.example.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_derivesTheGitHubComNoreplyAddressWhenTheServerListsNone() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withSuccess("[{\"email\":\"private@example.com\",\"primary\":true}]",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("42", "ai-bot", "AI Bot", "42+ai-bot@users.noreply.github.com"), user);
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_derivesTheGitHubComNoreplyAddressWhenTheTokenMayNotReadEmails() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new GitHubApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals("42+ai-bot@users.noreply.github.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackOnEnterpriseWhenTheServerListsNoNoreplyAddress() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess(PRIVATE_USER, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(BASE_URL + "/user/emails?per_page=100"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new GitHubApiClient(builder.build(), false).getAuthenticatedUser("owner");
+
+        // GitHub Enterprise documents no noreply format, so none is guessed.
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_failsClearlyWithoutAnId() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/user"))
+                .andRespond(withSuccess("{\"login\":\"ai-bot\",\"email\":\"public@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        GitHubApiClient client = new GitHubApiClient(builder.build());
+
+        assertThrows(IllegalArgumentException.class, () -> client.getAuthenticatedUser("owner"));
     }
 }

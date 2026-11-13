@@ -1,11 +1,12 @@
 package org.remus.giteabot.gitlab;
 
+import org.remus.giteabot.repository.model.RepositoryUser;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestHead;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -27,40 +28,12 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 class GitLabApiClientTest {
 
-    private static final RepositoryCredentials CREDS =
-            RepositoryCredentials.of("https://gitlab.example.com", "https://gitlab.example.com", "glpat-token123");
+    private static final String BASE_URL = "https://gitlab.example.com";
 
     @Test
     void implementsRepositoryApiClient() {
-        GitLabApiClient client = new GitLabApiClient(null, CREDS);
+        GitLabApiClient client = new GitLabApiClient(null);
         assertInstanceOf(RepositoryApiClient.class, client);
-    }
-
-    @Test
-    void getBaseUrl_returnsConfiguredUrl() {
-        GitLabApiClient client = new GitLabApiClient(null, CREDS);
-        assertEquals("https://gitlab.example.com", client.getBaseUrl());
-    }
-
-    @Test
-    void getCloneUrl_returnsConfiguredUrl() {
-        GitLabApiClient client = new GitLabApiClient(null, CREDS);
-        assertEquals("https://gitlab.example.com", client.getCloneUrl());
-    }
-
-    @Test
-    void getToken_returnsConfiguredToken() {
-        GitLabApiClient client = new GitLabApiClient(null, CREDS);
-        assertEquals("glpat-token123", client.getToken());
-    }
-
-    @Test
-    void constructorWithSelfHostedUrl() {
-        var selfHostedCreds = RepositoryCredentials.of(
-                "https://git.mycompany.com", "https://git.mycompany.com", "glpat-abc");
-        GitLabApiClient client = new GitLabApiClient(null, selfHostedCreds);
-        assertEquals("https://git.mycompany.com", client.getBaseUrl());
-        assertEquals("https://git.mycompany.com", client.getCloneUrl());
     }
 
     @Test
@@ -71,9 +44,9 @@ class GitLabApiClientTest {
 
     @Test
     void addPullRequestReaction_postsEyesToMergeRequestAwardEndpoint() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo(
                         "https://gitlab.example.com/api/v4/projects/owner%2Frepo/merge_requests/42/award_emoji"))
@@ -88,9 +61,9 @@ class GitLabApiClientTest {
 
     @Test
     void addIssueReaction_postsEyesToIssueAwardEndpoint() {
-        RestClient.Builder builder = RestClient.builder().baseUrl(CREDS.baseUrl());
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo(
                         "https://gitlab.example.com/api/v4/projects/owner%2Frepo/issues/12/award_emoji"))
@@ -107,7 +80,7 @@ class GitLabApiClientTest {
     void postReviewActionRequestChanges_callsGitLabRequestChangesEndpoint() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/projects/owner%2Frepo/merge_requests/7/request_changes"))
                 .andExpect(method(HttpMethod.POST))
@@ -122,7 +95,7 @@ class GitLabApiClientTest {
     void getRepositoryTree_mapsBlobAndTreeEntries() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/projects/owner%2Frepo/repository/tree"
                         + "?recursive=true&ref=main&per_page=100"))
@@ -144,7 +117,7 @@ class GitLabApiClientTest {
     void getPullRequestCommits_mapsIdAndMessage() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/projects/owner%2Frepo/merge_requests/7/commits"))
                 .andExpect(method(HttpMethod.GET))
@@ -163,7 +136,7 @@ class GitLabApiClientTest {
     void searchIssues_returnsIssueList() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo(
                         "https://gitlab.example.com/api/v4/projects/owner%2Frepo/issues?search=authentication%20bug&scope=all"))
@@ -183,7 +156,7 @@ class GitLabApiClientTest {
     void searchIssues_returnsEmptyListForEmptyResults() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo(
                         "https://gitlab.example.com/api/v4/projects/owner%2Frepo/issues?search=&scope=all"))
@@ -200,7 +173,7 @@ class GitLabApiClientTest {
     void getIssueComments_fetchesIssueNotesWithPageLimit() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo(
                         "https://gitlab.example.com/api/v4/projects/owner%2Frepo/issues/42/notes?per_page=50"))
@@ -219,7 +192,7 @@ class GitLabApiClientTest {
     void createIssue_returnsIssueIid() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo(
                         "https://gitlab.example.com/api/v4/projects/owner%2Frepo/issues"))
@@ -238,7 +211,7 @@ class GitLabApiClientTest {
     void assignIssue_resolvesUserThenUpdatesIssue() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/users?username=alice"))
                 .andExpect(method(HttpMethod.GET))
@@ -257,7 +230,7 @@ class GitLabApiClientTest {
     void assignIssue_unknownUserThrowsWithoutUpdatingIssue() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/users?username=ghost"))
                 .andExpect(method(HttpMethod.GET))
@@ -271,7 +244,7 @@ class GitLabApiClientTest {
 
     @Test
     void requiresAuthoritativePullRequestHead_isEnabled() {
-        assertTrue(new GitLabApiClient(null, CREDS).requiresAuthoritativePullRequestHead());
+        assertTrue(new GitLabApiClient(null).requiresAuthoritativePullRequestHead());
     }
 
     @Test
@@ -279,14 +252,14 @@ class GitLabApiClientTest {
         // GitLab publishes the head commit under its own ref namespace; the
         // inherited refs/pull/<n>/head does not exist there.
         assertEquals("refs/merge-requests/7/head",
-                new GitLabApiClient(null, CREDS).getPullRequestHeadRef(7L));
+                new GitLabApiClient(null).getPullRequestHeadRef(7L));
     }
 
     @Test
     void getPullRequestHead_resolvesForkedProjectPath() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/projects/base%2Fproject/merge_requests/7"))
                 .andExpect(method(HttpMethod.GET))
@@ -314,7 +287,7 @@ class GitLabApiClientTest {
     void getPullRequestHead_splitsNestedNamespaceOfForkedProject() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
                 .andRespond(withSuccess("""
@@ -336,7 +309,7 @@ class GitLabApiClientTest {
     void getPullRequestHead_sameProjectSkipsTheExtraProjectLookup() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         // Identical source and target ids: no fork, so no second request. The
         // single expectation makes MockRestServiceServer fail on any extra call.
@@ -357,7 +330,7 @@ class GitLabApiClientTest {
     void getPullRequestHead_rejectsBranchMismatch() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"))
                 .andRespond(withSuccess("""
@@ -376,7 +349,7 @@ class GitLabApiClientTest {
     void getPullRequestHead_failsWhenTheSourceProjectPathIsMissing() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         // Different source and target ids, so this is a fork — but the project
         // lookup answers without a path. Reporting the target instead would make
@@ -400,7 +373,7 @@ class GitLabApiClientTest {
     void getPullRequestHead_failsWithoutASourceProjectId() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GitLabApiClient client = new GitLabApiClient(builder.build(), CREDS);
+        GitLabApiClient client = new GitLabApiClient(builder.build());
 
         // Without the source project id the head repository cannot be named at all;
         // assuming the target would hide a possible fork.
@@ -413,6 +386,22 @@ class GitLabApiClientTest {
                 () -> client.getPullRequestHead("group", "project", 7L, "feature/login"));
 
         assertTrue(error.getMessage().contains("did not report a source project id"));
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_prefersCommitEmail() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(BASE_URL + "/api/v4/user"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":7,\"username\":\"ai_bot\",\"name\":\"AI Bot\","
+                        + "\"email\":\"private@example.com\",\"commit_email\":\"commits@example.com\"}",
+                        MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new GitLabApiClient(builder.build()).getAuthenticatedUser("owner");
+
+        assertEquals(new RepositoryUser("7", "ai_bot", "AI Bot", "commits@example.com"), user);
         server.verify();
     }
 }

@@ -2,6 +2,9 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetection;
+import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
+import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.util.ProcessSupport;
@@ -9,6 +12,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -46,10 +51,13 @@ public class ToolExecutionService {
     private static final int MAX_TREE_DEPTH = 6;
     private static final int DEFAULT_GIT_LOG_LIMIT = 10;
     private static final long MAX_TEXT_FILE_SIZE_BYTES = 1_000_000;
+    private static final int BINARY_SNIFF_BYTES = 8_000;
     private static final Pattern SIMPLE_BRANCH_NAME_PATTERN = Pattern.compile("[A-Za-z0-9._\\-/]+");
 
     private final AgentConfigProperties agentConfig;
     private final ToolCatalog catalog;
+    private final PackageManagerDetector packageManagerDetector;
+    private final YarnCommandBuilder yarnCommandBuilder;
 
     /**
      * Executes a configured validation tool in the given workspace:
@@ -69,6 +77,8 @@ public class ToolExecutionService {
 
         return switch (tool) {
             case "execute" -> executeScriptTool(workspaceDir, arguments);
+            case "npm" -> executeNpmTool(workspaceDir, arguments);
+            case "yarn" -> executeYarnTool(workspaceDir, arguments);
             default -> executePathTool(workspaceDir, tool, arguments);
         };
     }
@@ -87,6 +97,66 @@ public class ToolExecutionService {
                 arguments != null ? String.join(" ", arguments) : "");
 
         return executeCommand(workspaceDir, command.toArray(String[]::new));
+    }
+
+    /**
+     * npm for an npm-managed project, refused for a Yarn-managed one. The refusal is the
+     * tool-layer enforcement: an npm install in a Yarn checkout ignores {@code yarn.lock}
+     * and writes a {@code package-lock.json}, which the generated pull request would then
+     * carry. The model's prompt says the same thing, but the prompt is not a guarantee.
+     */
+    private ToolResult executeNpmTool(Path workspaceDir, List<String> arguments) {
+        PackageManagerDetection detection = packageManagerDetector.detect(workspaceDir);
+        if (detection.isYarn()) {
+            log.info("Refusing npm: the workspace is Yarn-managed ({})", detection.evidence());
+            return new ToolResult(false, -1, "",
+                    "This repository is managed by Yarn (" + detection.evidence() + "), so npm is "
+                            + "refused here — it would ignore yarn.lock and create a package-lock.json. "
+                            + "Use the `yarn` tool for installs, dependency changes and scripts. If "
+                            + "`yarn` is not in your tool list, ask the operator to enable it in the "
+                            + "bot's tool configuration.");
+        }
+        return executePathTool(workspaceDir, "npm", arguments);
+    }
+
+    /**
+     * Runs Yarn with the version the checkout pins. The command comes from
+     * {@link YarnCommandBuilder}, which uses Corepack when present and may install Yarn
+     * Classic through npm (only when the operator allowed it). Lockfile changes land in the
+     * workspace like any other file, so the commit ({@code git add -A}) and the pull request
+     * carry {@code package.json} and {@code yarn.lock} together.
+     */
+    private ToolResult executeYarnTool(Path workspaceDir, List<String> arguments) {
+        if (arguments == null || arguments.isEmpty()) {
+            return new ToolResult(false, -1, "",
+                    "yarn requires at least one argument, for example install, add <package>, "
+                            + "add -D <package>, remove <package>, run build, test or audit.");
+        }
+
+        PackageManagerDetection detection = packageManagerDetector.detect(workspaceDir);
+        YarnCommandBuilder.Invocation invocation = yarnCommandBuilder.build(detection, arguments);
+        if (invocation.failed()) {
+            log.info("Cannot run yarn in this workspace: {}", invocation.failure());
+            return new ToolResult(false, -1, "", invocation.failure());
+        }
+
+        for (List<String> preparation : invocation.preparation()) {
+            String preparedCommand = String.join(" ", preparation);
+            log.info("Preparing the Yarn toolchain: {}", preparedCommand);
+            ToolResult prepared = executeCommand(workspaceDir,
+                    preparation.toArray(String[]::new), invocation.environment());
+            if (!prepared.success()) {
+                String detail = prepared.error().isBlank()
+                        ? prepared.output() : prepared.error() + "\n" + prepared.output();
+                return new ToolResult(false, prepared.exitCode(), "",
+                        "Preparing the Yarn toolchain failed (" + preparedCommand + "): "
+                                + detail.strip());
+            }
+        }
+
+        log.info("Executing yarn ({}): {}", detection.evidence(), String.join(" ", arguments));
+        return executeCommand(workspaceDir, invocation.command().toArray(String[]::new),
+                invocation.environment());
     }
 
     /**
@@ -356,23 +426,44 @@ public class ToolExecutionService {
                                     + " — line endings/trailing whitespace normalized)";
                     yield new ToolResult(true, 0, "File patched: " + relativePath + hint, "");
                 }
-                case NOT_FOUND -> new ToolResult(false, 1, "",
-                        "patch-file: search text not found in file: " + relativePath
-                                + ". The search was tried as-is, with normalized line endings, "
-                                + "and with whitespace-tolerant matching. Use `cat` to inspect "
-                                + "the exact current content first.");
-                case AMBIGUOUS -> new ToolResult(false, 1, "",
-                        "patch-file: search text matches " + attempt.occurrences() + " locations in "
-                                + relativePath + " — the replacement would be ambiguous. "
-                                + "Provide a more specific search string that matches exactly once "
-                                + "(use `cat` to identify a unique surrounding context).");
-                case NO_CHANGE -> new ToolResult(false, 1, "",
-                        "patch-file produced no changes in " + relativePath
-                                + ". The replacement is identical to the matched text.");
+                case NOT_FOUND -> {
+                    // The reason otherwise only reaches the model, so an operator reading the log
+                    // could not tell which call failed. The search text itself stays at DEBUG:
+                    // it is repository content.
+                    log.info("patch-file: failed {} (NOT_FOUND)", relativePath);
+                    log.debug("patch-file: NOT_FOUND {}: search text starts with '{}'",
+                            relativePath, firstLineOf(searchText));
+                    yield new ToolResult(false, 1, "",
+                            "patch-file: search text not found in file: " + relativePath
+                                    + ". The search was tried as-is, with normalized line endings, "
+                                    + "and with whitespace-tolerant matching. Use `cat` to inspect "
+                                    + "the exact current content first.");
+                }
+                case AMBIGUOUS -> {
+                    log.info("patch-file: failed {} (AMBIGUOUS, {} matching locations)",
+                            relativePath, attempt.occurrences());
+                    yield new ToolResult(false, 1, "",
+                            "patch-file: search text matches " + attempt.occurrences() + " locations in "
+                                    + relativePath + " — the replacement would be ambiguous. "
+                                    + "Provide a more specific search string that matches exactly once "
+                                    + "(use `cat` to identify a unique surrounding context).");
+                }
+                case NO_CHANGE -> {
+                    log.info("patch-file: failed {} (NO_CHANGE)", relativePath);
+                    yield new ToolResult(false, 1, "",
+                            "patch-file produced no changes in " + relativePath
+                                    + ". The replacement is identical to the matched text.");
+                }
             };
         } catch (IOException e) {
             return new ToolResult(false, -1, "", "patch-file failed: " + e.getMessage());
         }
+    }
+
+    /** First line of {@code text}, cut to a length that is safe to put in a log line. */
+    private static String firstLineOf(String text) {
+        String line = text.lines().findFirst().orElse("");
+        return line.length() > 120 ? line.substring(0, 120) + "..." : line;
     }
 
     // ---- patch-file matching tiers --------------------------------------
@@ -606,27 +697,31 @@ public class ToolExecutionService {
 
     private ToolResult executeSearchTool(Path workspaceDir, String tool, List<String> arguments) {
         if (arguments == null || arguments.isEmpty()) {
+            log.info("{}: no pattern argument (path .)", tool);
             return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
         }
 
         SearchRequest searchRequest = parseSearchRequest(arguments);
         String patternText = searchRequest.patternText();
+        String relativePath = searchRequest.relativePath();
         if (patternText == null && !searchRequest.listFiles()) {
+            log.info("{}: no pattern argument (path {})", tool, relativePath);
             return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
         }
-        String relativePath = searchRequest.relativePath();
         Path basePath;
         try {
             basePath = resolveWorkspacePath(workspaceDir, relativePath);
         } catch (IOException e) {
+            log.info("{}: rejected path {}: {}", tool, relativePath, e.getMessage());
             return new ToolResult(false, -1, "", e.getMessage());
         }
 
         if (!Files.exists(basePath)) {
+            log.info("{}: path not found: {}", tool, relativePath);
             return new ToolResult(false, 1, "", "Path not found: " + relativePath);
         }
         if (searchRequest.listFiles()) {
-            return listSearchFiles(workspaceDir, basePath, searchRequest);
+            return listSearchFiles(workspaceDir, tool, basePath, searchRequest);
         }
 
         Pattern compiledPattern;
@@ -648,6 +743,7 @@ public class ToolExecutionService {
                 }
             }
         } catch (IOException e) {
+            log.info("{}: search failed in {}: {}", tool, relativePath, e.getMessage());
             return new ToolResult(false, -1, "", "Search failed: " + e.getMessage());
         }
 
@@ -681,7 +777,10 @@ public class ToolExecutionService {
                     continue;
                 }
 
-                List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                List<String> lines = readSearchableLines(file, relativeFilePath);
+                if (lines == null) {
+                    continue;
+                }
                 for (int i = 0; i < lines.size(); i++) {
                     String line = lines.get(i);
                     if (!pattern.matcher(line).find()) {
@@ -705,10 +804,47 @@ public class ToolExecutionService {
     }
 
     /**
+     * The lines of one file to search, or {@code null} when the file is skipped. One undecodable file
+     * must not abort the walk: a tree carrying binary assets (a .NET {@code wwwroot} with images and
+     * fonts) used to fail the whole search on {@code MalformedInputException}.
+     */
+    private List<String> readSearchableLines(Path file, String relativePath) {
+        try {
+            byte[] content = Files.readAllBytes(file);
+            if (isBinaryContent(content)) {
+                log.debug("Search skipped binary file: {}", relativePath);
+                return null;
+            }
+            // Invalid UTF-8 decodes to U+FFFD instead of throwing, so a non-UTF-8 text file stays
+            // searchable for its decodable parts — the same lossy decoding ripgrep applies.
+            String decoded = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPLACE)
+                    .onUnmappableCharacter(CodingErrorAction.REPLACE)
+                    .decode(ByteBuffer.wrap(content))
+                    .toString();
+            return decoded.lines().toList();
+        } catch (IOException e) {
+            log.info("Search skipped unreadable file: {} ({})", relativePath, e.getMessage());
+            return null;
+        }
+    }
+
+    /** A NUL byte in the head marks a binary file — the heuristic ripgrep uses. */
+    private static boolean isBinaryContent(byte[] content) {
+        int limit = Math.min(content.length, BINARY_SNIFF_BYTES);
+        for (int i = 0; i < limit; i++) {
+            if (content[i] == 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * {@code rg --files [path]}: lists the files under the path, filtered by {@code -g} globs. Binary and
      * oversized files are listed too; only the search skips them.
      */
-    private ToolResult listSearchFiles(Path workspaceDir, Path basePath, SearchRequest searchRequest) {
+    private ToolResult listSearchFiles(Path workspaceDir, String tool, Path basePath, SearchRequest searchRequest) {
         List<String> files;
         try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
             files = stream
@@ -720,6 +856,8 @@ public class ToolExecutionService {
                     .limit(MAX_SEARCH_MATCHES + 1L)
                     .toList();
         } catch (IOException e) {
+            log.info("{}: listing files failed in {}: {}", tool,
+                    workspaceDir.relativize(basePath), e.getMessage());
             return new ToolResult(false, -1, "", "Listing files failed: " + e.getMessage());
         }
         if (files.isEmpty()) {
@@ -1581,6 +1719,16 @@ public class ToolExecutionService {
     }
 
     private ToolResult executeCommand(Path workspaceDir, String[] command) {
+        return executeCommand(workspaceDir, command, Map.of());
+    }
+
+    /**
+     * As {@link #executeCommand(Path, String[])}, plus variables the tool needs beyond the
+     * scrub allow-list (Corepack's non-interactive download switch). They are applied after
+     * the scrub, so they cannot reintroduce an application secret.
+     */
+    private ToolResult executeCommand(Path workspaceDir, String[] command,
+                                      Map<String, String> extraEnvironment) {
         try {
             ProcessBuilder pb = new ProcessBuilder(command);
             pb.directory(workspaceDir.toFile());
@@ -1588,6 +1736,9 @@ public class ToolExecutionService {
             // Untrusted repository code (package-manager scripts, test fixtures) must
             // never see application secrets such as database or AI provider keys.
             ProcessSupport.scrubEnvironment(pb);
+            if (!extraEnvironment.isEmpty()) {
+                pb.environment().putAll(extraEnvironment);
+            }
 
             int timeoutSeconds = agentConfig.getValidation().getToolTimeoutSeconds();
             // The byte cap is the hard memory bound while draining the pipe; the

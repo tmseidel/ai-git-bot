@@ -1,5 +1,8 @@
 package org.remus.giteabot.azuredevops;
 
+import org.remus.giteabot.repository.model.HttpCredentials;
+import org.remus.giteabot.repository.model.RepositoryUser;
+
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
 import org.remus.giteabot.config.ReviewConfigProperties;
@@ -7,7 +10,6 @@ import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
@@ -32,22 +34,15 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 class AzureDevopsApiClientTest {
 
-    private static RepositoryCredentials creds() {
-        return RepositoryCredentials.of(
-                "https://dev.azure.com", "https://dev.azure.com", "ado_pat");
-    }
+    private static final String URL = "https://dev.azure.com";
 
     @Test
     void implementsRepositoryApiClient() {
         assertInstanceOf(RepositoryApiClient.class,
-                new AzureDevopsApiClient(null, creds(), null));
+                new AzureDevopsApiClient(null, URL, null));
     }
 
     // ---- Organization scoping: dev.azure.com needs it in the path, the other two don't ----
-
-    private static RepositoryCredentials credsFor(String url) {
-        return RepositoryCredentials.of(url, url, "ado_pat");
-    }
 
     @Test
     void requestPath_onServices_carriesTheOrganization() {
@@ -59,7 +54,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor("https://dev.azure.com"), null)
+        new AzureDevopsApiClient(builder.build(), "https://dev.azure.com", null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 7L, "hi");
 
         server.verify();
@@ -77,7 +72,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor(base), null)
+        new AzureDevopsApiClient(builder.build(), base, null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 7L, "hi");
 
         server.verify();
@@ -93,7 +88,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor(base), null)
+        new AzureDevopsApiClient(builder.build(), base, null)
                 .postPullRequestComment("DefaultCollection", "MyProject/my-service", 7L, "hi");
 
         server.verify();
@@ -112,7 +107,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor(base), null)
+        new AzureDevopsApiClient(builder.build(), base, null)
                 .postPullRequestComment("DefaultCollection", "MyProject/my-service", 7L, "hi");
 
         server.verify();
@@ -131,7 +126,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor(base), null)
+        new AzureDevopsApiClient(builder.build(), base, null)
                 .postPullRequestComment("tfs", "MyProject/my-service", 7L, "hi");
 
         server.verify();
@@ -150,7 +145,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor(base), null)
+        new AzureDevopsApiClient(builder.build(), base, null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 7L, "hi");
 
         server.verify();
@@ -171,59 +166,11 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.PUT))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), credsFor(base), null)
+        new AzureDevopsApiClient(builder.build(), base, null)
                 .postReviewAction("contoso", "MyProject/my-service", 7L,
                         PostReviewAction.APPROVE);
 
         server.verify();
-    }
-
-    @Test
-    void getRepositoryRemote_omitsTheOrganizationWhenTheCloneBaseAlreadyCarriesIt() {
-        assertEquals("https://contoso.visualstudio.com/MyProject/_git/my-service",
-                new AzureDevopsApiClient(RestClient.builder().build(),
-                        credsFor("https://contoso.visualstudio.com"), null)
-                        .getRepositoryRemote("contoso", "MyProject/my-service"));
-
-        assertEquals("https://tfs.example.com/tfs/DefaultCollection/MyProject/_git/my-service",
-                new AzureDevopsApiClient(RestClient.builder().build(),
-                        credsFor("https://tfs.example.com/tfs/DefaultCollection"), null)
-                        .getRepositoryRemote("DefaultCollection", "MyProject/my-service"));
-    }
-
-    @Test
-    void getRepositoryRemote_rejectsCredentialBearingHttpBase() {
-        // The remote is passed to git as a command-line argument and echoed back in its
-        // error output, so a PAT in the clone base URL must not survive into it. The
-        // interface default enforces this; the Azure DevOps override builds its own path
-        // and must not lose the guarantee along the way.
-        AzureDevopsApiClient client = new AzureDevopsApiClient(
-                RestClient.builder().build(),
-                RepositoryCredentials.of("https://dev.azure.com",
-                        "https://user:pat@dev.azure.com", "ado_pat"), null);
-
-        IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> client.getRepositoryRemote("contoso", "MyProject/my-service"));
-        assertEquals("HTTP clone base URL must be credential-free", e.getMessage());
-    }
-
-    @Test
-    void getRepositoryRemote_rejectsUnsupportedScheme() {
-        AzureDevopsApiClient client = new AzureDevopsApiClient(
-                RestClient.builder().build(),
-                RepositoryCredentials.of("https://dev.azure.com",
-                        "ssh://dev.azure.com", "ado_pat"), null);
-
-        assertThrows(IllegalStateException.class,
-                () -> client.getRepositoryRemote("contoso", "MyProject/my-service"));
-    }
-
-    @Test
-    void getRepositoryRemote_usesGitSegment() {
-        AzureDevopsApiClient client = new AzureDevopsApiClient(null, creds(), null);
-
-        assertEquals("https://dev.azure.com/contoso/MyProject/_git/my-service",
-                client.getRepositoryRemote("contoso", "MyProject/my-service"));
     }
 
     @Test
@@ -239,7 +186,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.status").value("closed"))
                 .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 42L, "hello");
 
         server.verify();
@@ -254,7 +201,7 @@ class AzureDevopsApiClientTest {
                 .andRespond(withSuccess("{\"id\":5,\"comments\":[{\"id\":1,\"content\":\"hello\"}]}",
                         MediaType.APPLICATION_JSON));
 
-        CommentId id = new AzureDevopsApiClient(builder.build(), creds(), null)
+        CommentId id = new AzureDevopsApiClient(builder.build(), URL, null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 42L, "hello");
 
         assertEquals(ThreadCommentId.of(5L, 1L), id);
@@ -268,7 +215,7 @@ class AzureDevopsApiClientTest {
         server.expect(method(HttpMethod.POST))
                 .andRespond(withSuccess("{\"id\":5,\"comments\":[]}", MediaType.APPLICATION_JSON));
 
-        assertNull(new AzureDevopsApiClient(builder.build(), creds(), null)
+        assertNull(new AzureDevopsApiClient(builder.build(), URL, null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 42L, "hello"));
         server.verify();
     }
@@ -283,7 +230,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.content").value("Review completed"))
                 .andRespond(withSuccess());
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .updatePullRequestComment("contoso", "MyProject/my-service", 42L,
                         ThreadCommentId.of(5L, 1L), "Review completed");
 
@@ -298,7 +245,7 @@ class AzureDevopsApiClientTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         server.expect(method(HttpMethod.PATCH)).andRespond(withStatus(HttpStatus.FORBIDDEN));
 
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), creds(), null);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
         assertThrows(HttpClientErrorException.class, () -> client.updatePullRequestComment(
                 "contoso", "MyProject/my-service", 42L, ThreadCommentId.of(5L, 1L), "Review completed"));
 
@@ -317,7 +264,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.status").value("active"))
                 .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .postReviewComment("contoso", "MyProject/my-service", 42L, "summary");
 
         server.verify();
@@ -335,7 +282,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.threadContext.leftFileEnd").doesNotExist())
                 .andRespond(withSuccess("{\"id\":1}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .postInlineReviewComment("contoso", "MyProject/my-service", 42L,
                         "src/Foo.java", 12, "please rename");
 
@@ -355,7 +302,7 @@ class AzureDevopsApiClientTest {
                         "aaaa1111bbbb2222cccc3333dddd4444eeee5555"))
                 .andRespond(withSuccess("{\"content\":\"hi\"}", MediaType.APPLICATION_JSON));
 
-        String content = new AzureDevopsApiClient(builder.build(), creds(), null)
+        String content = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getFileContent("contoso", "MyProject/my-service", "/src/Foo.java",
                         "aaaa1111bbbb2222cccc3333dddd4444eeee5555");
 
@@ -371,7 +318,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(queryParam("versionDescriptor.version", "feature/login"))
                 .andRespond(withSuccess("{\"content\":\"hi\"}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .getFileContent("contoso", "MyProject/my-service", "/src/Foo.java",
                         "feature/login");
 
@@ -387,7 +334,7 @@ class AzureDevopsApiClientTest {
         server.expect(queryParam("path", "/src/Foo.java"))
                 .andRespond(withSuccess("{\"content\":\"hi\"}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .getFileContent("contoso", "MyProject/my-service", "src/Foo.java", "main");
 
         server.verify();
@@ -400,7 +347,7 @@ class AzureDevopsApiClientTest {
         server.expect(queryParam("versionDescriptor.versionType", "commit"))
                 .andRespond(withSuccess("{\"value\":[]}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .getRepositoryTree("contoso", "MyProject/my-service",
                         "aaaa1111bbbb2222cccc3333dddd4444eeee5555");
 
@@ -422,7 +369,7 @@ class AzureDevopsApiClientTest {
                           {"path":"/src/Foo.java","gitObjectType":"blob","objectId":"abc"}
                         ]}""", MediaType.APPLICATION_JSON));
 
-        List<RepositoryTreeEntry> tree = new AzureDevopsApiClient(builder.build(), creds(), null)
+        List<RepositoryTreeEntry> tree = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getRepositoryTree("contoso", "MyProject/my-service", "main");
 
         // The scopePath root is dropped; the rest keep their order.
@@ -447,7 +394,7 @@ class AzureDevopsApiClientTest {
                          "rightFileStart":{"line":12,"offset":1}}}""",
                         MediaType.APPLICATION_JSON));
 
-        var context = new AzureDevopsApiClient(builder.build(), creds(), null)
+        var context = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getInlineThreadContext("contoso", "MyProject/my-service", 42L, 5L);
 
         assertNotNull(context);
@@ -474,7 +421,7 @@ class AzureDevopsApiClientTest {
                           {"comments":[{"id":3,"content":"top level"}]}
                         ]}""", MediaType.APPLICATION_JSON));
 
-        List<ReviewComment> comments = new AzureDevopsApiClient(builder.build(), creds(), null)
+        List<ReviewComment> comments = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getReviewComments("contoso", "MyProject/my-service", 42L, null);
 
         assertEquals(3, comments.size());
@@ -504,7 +451,7 @@ class AzureDevopsApiClientTest {
                            "comments":[{"id":1,"content":"first","commentType":"somethingElse"}]}
                         ]}""", MediaType.APPLICATION_JSON));
 
-        List<ReviewComment> comments = new AzureDevopsApiClient(builder.build(), creds(), null)
+        List<ReviewComment> comments = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getReviewComments("contoso", "MyProject/my-service", 42L, null);
 
         assertEquals(1, comments.size());
@@ -518,7 +465,7 @@ class AzureDevopsApiClientTest {
         // "/" + null would be sent as the literal path "/null" and answered with an
         // opaque 404; AzureDevopsAddress.parse fails the same way for a blank repo.
         AzureDevopsApiClient client = new AzureDevopsApiClient(
-                RestClient.builder().baseUrl("https://dev.azure.com").build(), creds(), null);
+                RestClient.builder().baseUrl("https://dev.azure.com").build(), URL, null);
 
         assertThrows(IllegalArgumentException.class,
                 () -> client.getFileContent("contoso", "MyProject/my-service", null, "main"));
@@ -534,7 +481,7 @@ class AzureDevopsApiClientTest {
         server.expect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{\"id\":5}", MediaType.APPLICATION_JSON));
 
-        assertNull(new AzureDevopsApiClient(builder.build(), creds(), null)
+        assertNull(new AzureDevopsApiClient(builder.build(), URL, null)
                 .getInlineThreadContext("contoso", "MyProject/my-service", 42L, 5L));
         server.verify();
     }
@@ -547,7 +494,7 @@ class AzureDevopsApiClientTest {
                 .andRespond(withSuccess("{\"defaultBranch\":\"refs/heads/main\"}",
                         MediaType.APPLICATION_JSON));
 
-        String branch = new AzureDevopsApiClient(builder.build(), creds(), null)
+        String branch = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getDefaultBranch("contoso", "MyProject/my-service");
 
         assertEquals("main", branch);
@@ -565,7 +512,7 @@ class AzureDevopsApiClientTest {
                           {"id":"g2","vote":-10,"uniqueName":"b@contoso.com","displayName":"B"}
                         ]}""", MediaType.APPLICATION_JSON));
 
-        List<Review> reviews = new AzureDevopsApiClient(builder.build(), creds(), null)
+        List<Review> reviews = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getReviews("contoso", "MyProject/my-service", 42L);
 
         assertEquals(2, reviews.size());
@@ -586,7 +533,7 @@ class AzureDevopsApiClientTest {
                            "author":{"name":"Dev"}}
                         ]}""", MediaType.APPLICATION_JSON));
 
-        List<PullRequestCommit> commits = new AzureDevopsApiClient(builder.build(), creds(), null)
+        List<PullRequestCommit> commits = new AzureDevopsApiClient(builder.build(), URL, null)
                 .getPullRequestCommits("contoso", "MyProject/my-service", 42L);
 
         assertEquals(List.of(new PullRequestCommit("abc1234def5678", "Fix the thing")), commits);
@@ -609,7 +556,7 @@ class AzureDevopsApiClientTest {
                         ]}""", MediaType.APPLICATION_JSON));
 
         String enriched = new CommitMessagesEnricher(
-                new AzureDevopsApiClient(builder.build(), creds(), null), new ReviewConfigProperties())
+                new AzureDevopsApiClient(builder.build(), URL, null), new ReviewConfigProperties())
                 .enrich(new EnrichmentContext("contoso", "MyProject/my-service", 42L,
                         "", "feature", null));
 
@@ -629,17 +576,11 @@ class AzureDevopsApiClientTest {
         server.expect(method(HttpMethod.GET))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        assertDoesNotThrow(() -> new AzureDevopsApiClient(builder.build(), creds(), null)
+        assertDoesNotThrow(() -> new AzureDevopsApiClient(builder.build(), URL, null)
                 .postReviewAction("contoso", "MyProject/my-service", 42L,
                         PostReviewAction.APPROVE));
 
         server.verify();
-    }
-
-    @Test
-    void formatPullRequestReference_usesHash() {
-        assertEquals("#42", new AzureDevopsApiClient(null, creds(), null)
-                .formatPullRequestReference(42L));
     }
 
     @Test
@@ -656,7 +597,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.vote").value(10))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .postReviewAction("contoso", "MyProject/my-service", 42L,
                         PostReviewAction.APPROVE);
 
@@ -689,7 +630,7 @@ class AzureDevopsApiClientTest {
                 .andExpect(method(HttpMethod.PUT))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), creds(), null);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
         client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
         client.postReviewAction("fabrikam", "OtherProject/other-service", 7L,
                 PostReviewAction.APPROVE);
@@ -707,9 +648,7 @@ class AzureDevopsApiClientTest {
                         + "?api-version=6.0-preview.1"))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(),
-                RepositoryCredentials.of("https://dev.azure.com", "https://dev.azure.com",
-                        "bot@contoso.com", "ado_pat"), null);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
         client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
         client.postReviewAction("contoso", "MyProject/my-service", 43L, PostReviewAction.APPROVE);
 
@@ -729,7 +668,7 @@ class AzureDevopsApiClientTest {
             return withServerError().createResponse(request);
         });
 
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), creds(), null);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
         client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
         client.postReviewAction("contoso", "MyProject/my-service", 43L, PostReviewAction.APPROVE);
 
@@ -749,7 +688,7 @@ class AzureDevopsApiClientTest {
         server.expect(method(HttpMethod.PUT)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         server.expect(method(HttpMethod.PUT)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), creds(), null);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
         client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
         client.postReviewAction("Contoso", "MyProject/my-service", 43L,
                 PostReviewAction.REQUEST_CHANGES);
@@ -768,10 +707,159 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.vote").value(-5))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), creds(), null)
+        new AzureDevopsApiClient(builder.build(), URL, null)
                 .postReviewAction("contoso", "MyProject/my-service", 42L,
                         PostReviewAction.REQUEST_CHANGES);
 
         server.verify();
+    }
+
+    private static final String IDENTITY = "{\"authenticatedUser\":{\"id\":\"guid-1\","
+            + "\"providerDisplayName\":\"AI Bot\","
+            + "\"properties\":{\"Account\":{\"$type\":\"System.String\",\"$value\":\"bot@contoso.com\"}}}}";
+
+    private static final String IDENTITIES = "{\"count\":1,\"value\":[{\"id\":\"guid-1\","
+            + "\"properties\":{\"Mail\":{\"$type\":\"System.String\",\"$value\":\"bot@example.com\"}}}]}";
+
+    @Test
+    void getAuthenticatedUser_asksInsideTheEventsOrganizationOnBareDevAzureCom() {
+        // No account-level lookup: a token scoped to the event's organization is enough.
+        RestClient.Builder builder = RestClient.builder().baseUrl(URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo("https://dev.azure.com/contoso/_apis/connectionData?api-version=6.0-preview.1"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://vssps.dev.azure.com/contoso/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), URL, null).getAuthenticatedUser("contoso");
+
+        assertEquals(new RepositoryUser("guid-1", "bot@contoso.com", "AI Bot", "bot@example.com"), user);
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_asksTheOrganizationNamedInTheUrl() {
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://vssps.dev.azure.com/contoso/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("contoso");
+
+        assertEquals("bot@contoso.com", user.username());
+        assertEquals("bot@example.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_asksTheLegacyHost() {
+        String base = "https://contoso.visualstudio.com";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://contoso.vssps.visualstudio.com/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("contoso");
+
+        assertEquals("bot@example.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_asksTheEventsCollectionOnAServerWithoutCollection() {
+        String base = "https://tfs.example.com/tfs";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/DefaultCollection/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(base + "/DefaultCollection/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("DefaultCollection");
+
+        assertEquals("bot@contoso.com", user.username());
+        assertEquals("bot@example.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_asksTheServerCollectionNamedInTheUrl() {
+        String base = "https://tfs.example.com/tfs/DefaultCollection";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo(base + "/_apis/identities?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("DefaultCollection");
+
+        assertEquals("bot@example.com", user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackWhenTheTokenMayNotReadTheEmail() {
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://vssps.dev.azure.com/contoso/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withStatus(HttpStatus.FORBIDDEN));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("contoso");
+
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_fallsBackWhenTheEmailCannotBeRead() {
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://vssps.dev.azure.com/contoso/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("contoso");
+
+        assertEquals("guid-1", user.id());
+        assertEquals(RepositoryUser.FALLBACK_EMAIL, user.email());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_failsWithoutAnIdentity() {
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        assertThrows(IllegalStateException.class,
+                () -> new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser("contoso"));
+    }
+
+    @Test
+    void getAuthenticatedUser_failsWithoutAnOrganization() {
+        AzureDevopsApiClient client = new AzureDevopsApiClient(null, URL, null);
+
+        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(null));
+        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(" "));
     }
 }

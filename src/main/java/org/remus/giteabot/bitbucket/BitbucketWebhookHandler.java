@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.BotWebhookService;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.util.BotMention;
@@ -37,13 +37,13 @@ import java.util.Map;
 public class BitbucketWebhookHandler {
 
     private final BotWebhookService botWebhookService;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final BotService botService;
 
-    public BitbucketWebhookHandler(BotWebhookService botWebhookService, RepositoryApiClientFactory repositoryApiClientFactory,
+    public BitbucketWebhookHandler(BotWebhookService botWebhookService, RepositoryPlatformFactory repositoryPlatformFactory,
                                    BotService botService) {
         this.botWebhookService = botWebhookService;
-        this.repositoryApiClientFactory = repositoryApiClientFactory;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
         this.botService = botService;
     }
 
@@ -104,7 +104,7 @@ public class BitbucketWebhookHandler {
      */
     private BitbucketAccount resolveBotAccount(Bot bot) {
         try {
-            BitbucketApiClient client = (BitbucketApiClient) repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+            BitbucketApiClient client = (BitbucketApiClient) repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             return client.getAuthenticatedAccount();
         } catch (RuntimeException e) {
             String error = "Could not resolve the Bitbucket account for the configured Atlassian account email/API token: "

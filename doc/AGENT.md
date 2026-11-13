@@ -140,6 +140,7 @@ Common issue-agent settings can be set as environment variables or Spring proper
 | `AGENT_CONTEXT_MAX_SINGLE_ISSUE_COMMENT_CHARS` | `agent.context.max-single-issue-comment-chars` | `4000` | Coding | Per-comment context budget |
 | `AGENT_VALIDATION_ENABLED` | `agent.validation.enabled` | `true` | Coding | Require build/test validation before finishing |
 | `AGENT_VALIDATION_TOOL_TIMEOUT_SECONDS` | `agent.validation.tool-timeout-seconds` | `300` | Coding | Timeout for each build/test/validation command, including `execute` scripts |
+| `AGENT_VALIDATION_ALLOW_YARN_INSTALL` | `agent.validation.allow-yarn-install` | `false` | Coding | Let the `yarn` tool install Yarn Classic through npm when the image has no Corepack or Yarn |
 | `AGENT_BUDGET_MAX_ROUNDS` | `agent.budget.max-rounds` | `20` | Both | Maximum agent loop rounds |
 | `AGENT_BUDGET_MAX_CONTENT_ROUNDS` | `agent.budget.max-context-rounds` | `10` | Both | Maximum context-only rounds |
 | `AGENT_BUDGET_MAX_CONTEXT_TOOL_REQUESTS_PER_ROUND` | `agent.budget.max-context-tool-requests-per-round` | `10` | Coding | Context-tool requests per AI round |
@@ -147,6 +148,8 @@ Common issue-agent settings can be set as environment variables or Spring proper
 | `AGENT_BUDGET_MAX_VALIDATION_RETRIES` | `agent.budget.max-validation-retries` | `10` | Coding | AI correction attempts after validation failure |
 | `AGENT_BUDGET_MAX_HISTORY_CHARS` | `agent.budget.max-history-chars` | `180000` | Both | Maximum characters for agent conversation history |
 | `AGENT_BUDGET_MAX_TOOL_RESULT_CHARS` | `agent.budget.max-tool-result-chars` | `8000` | Both | Maximum characters for tool execution results |
+| `AGENT_SESSION_COMPACT_THRESHOLD_CHARS` | `agent.session.compact-threshold-chars` | `80000` | Both | Persisted session size that triggers compaction |
+| `AGENT_SESSION_COMPACT_KEEP_MESSAGES` | `agent.session.compact-keep-messages` | `8` | Both | Messages retained after a compaction |
 | `AGENT_TRIAGE_MAX_TOOL_ROUNDS` | `agent.triage.max-tool-rounds` | `5` | Triage | Context-gathering rounds before a routing decision is required |
 | `AGENT_TRIAGE_MAX_INITIAL_TREE_FILES` | `agent.triage.max-initial-tree-files` | `100` | Triage | Repository tree entries in the initial triage prompt |
 | `AGENT_WRITER_MAX_TOOL_ROUNDS` | `agent.writer.max-tool-rounds` | `5` | Writer | Repository-context rounds before the wrap-up round requires an answer |
@@ -174,7 +177,9 @@ services:
 
 The coding agent can inspect the repository, edit files, and ask to run validation tools that are enabled for the bot. Validation output is visible on the issue when it fails; successful file edits are not posted as public tool logs.
 
-The default validation tool allow-list includes Maven, Gradle, npm/Node, Go, Cargo/Rust, Python/pip, Make, gcc/g++, Ruby/Bundler, and .NET. The application Docker image is expected to contain those tools. If your image does not, adjust `agent.validation.available-tools` and the bot's **Tool Configuration** so the model only sees commands that can run.
+The default validation tool allow-list includes Maven, Gradle, npm, Yarn, Go, Cargo/Rust, Python/pip, Make, gcc/g++, Ruby/Bundler, and .NET. The application Docker image is expected to contain those tools. If your image does not, adjust `agent.validation.available-tools` and the bot's **Tool Configuration** so the model only sees commands that can run.
+
+`npm` and `yarn` are separate tools. The tool layer detects the checkout's package manager (`packageManager` in `package.json`, `yarn.lock`, a committed `yarnPath`, `package-lock.json`) and refuses `npm` in a Yarn-managed repository, so it cannot ignore `yarn.lock` or create a `package-lock.json`; symmetrically it refuses `yarn` in an npm-managed or unmarked workspace, where it would create a `yarn.lock`. `yarn` activates the version the project pins through Corepack (or runs a committed release); Yarn Classic may be installed through npm only when `agent.validation.allow-yarn-install=true`. See [Coding Agent → Yarn projects](CODING_AGENT.md#yarn-projects-yarn).
 
 Repositories without a conventional build command — documentation-only, CI/CD and infrastructure repositories — can use the **`execute`** validation tool instead. Once it is enabled in the bot's **Tool Configuration**, the agent runs a script committed inside the checkout, addressed by its repository-relative path (`execute scripts/validate.sh`). Exit code `0` means validation passed; any non-zero exit code fails validation and returns the script's stdout/stderr to the model. The path is resolved against the workspace, so absolute paths, `..` traversal and symlinked directories are rejected, the script is executed directly rather than through a shell, and it must be committed with the executable bit. The script must also still match the committed version — `execute` refuses a script the run has changed, so the agent cannot edit the script that validates it. `execute` is additive — it never replaces the built-in tooling. See [Coding Agent → Custom validation scripts](CODING_AGENT.md#custom-validation-scripts-execute).
 

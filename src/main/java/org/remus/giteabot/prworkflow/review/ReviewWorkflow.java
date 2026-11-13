@@ -2,7 +2,7 @@ package org.remus.giteabot.prworkflow.review;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.config.ReviewChunkingProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrWorkflow;
@@ -57,16 +57,16 @@ public class ReviewWorkflow implements PrWorkflow {
     public static final String ACTION_PR_CLOSED = "prClosed";
 
     private final CodeReviewServiceFactory codeReviewServiceFactory;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final WorkflowSelectionService selectionService;
     private final ReviewChunkingProperties chunkingProperties;
 
     public ReviewWorkflow(CodeReviewServiceFactory codeReviewServiceFactory,
-                          RepositoryApiClientFactory repositoryApiClientFactory,
+                          RepositoryPlatformFactory repositoryPlatformFactory,
                           @Lazy WorkflowSelectionService selectionService,
                           ReviewChunkingProperties chunkingProperties) {
         this.codeReviewServiceFactory = codeReviewServiceFactory;
-        this.repositoryApiClientFactory = repositoryApiClientFactory;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
         this.selectionService = selectionService;
         this.chunkingProperties = chunkingProperties;
     }
@@ -173,7 +173,7 @@ public class ReviewWorkflow implements PrWorkflow {
                                     int retryTruncatedChunkChars, String excludedFilePatterns) {
         Bot bot = context.bot();
         WebhookPayload payload = context.payload();
-        RepositoryApiClient repositoryClient = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+        RepositoryApiClient repositoryClient = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
 
         context.requireActive("before invoking CodeReviewService.reviewPullRequest");
 
@@ -206,7 +206,7 @@ public class ReviewWorkflow implements PrWorkflow {
                                         int maxDiffCharsPerChunk, int maxDiffChunks,
                                         int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
-                repositoryApiClientFactory.getApiClient(context.bot().getGitIntegration()),
+                repositoryPlatformFactory.getApiClient(context.bot().getGitIntegration()),
                 maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handleBotCommand(context.payload(), null);
         return WorkflowResult.success("Bot command handled");
@@ -217,7 +217,7 @@ public class ReviewWorkflow implements PrWorkflow {
                                            int maxDiffCharsPerChunk, int maxDiffChunks,
                                            int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
-                repositoryApiClientFactory.getApiClient(context.bot().getGitIntegration()),
+                repositoryPlatformFactory.getApiClient(context.bot().getGitIntegration()),
                 maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handleInlineComment(context.payload(), null);
         return WorkflowResult.success("Inline comment handled");
@@ -228,7 +228,7 @@ public class ReviewWorkflow implements PrWorkflow {
                                              int maxDiffCharsPerChunk, int maxDiffChunks,
                                              int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
-                repositoryApiClientFactory.getApiClient(context.bot().getGitIntegration()),
+                repositoryPlatformFactory.getApiClient(context.bot().getGitIntegration()),
                 maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handleReviewSubmitted(context.payload(), null);
         return WorkflowResult.success("Review submitted handled");
@@ -239,7 +239,7 @@ public class ReviewWorkflow implements PrWorkflow {
                                       int maxDiffCharsPerChunk, int maxDiffChunks,
                                       int retryTruncatedChunkChars, String excludedFilePatterns) {
         CodeReviewService service = codeReviewServiceFactory.create(context.bot(),
-                repositoryApiClientFactory.getApiClient(context.bot().getGitIntegration()),
+                repositoryPlatformFactory.getApiClient(context.bot().getGitIntegration()),
                 maxDiffCharsPerChunk, maxDiffChunks, retryTruncatedChunkChars, excludedFilePatterns);
         service.handlePrClosed(context.payload());
         return WorkflowResult.success("PR closed handled");

@@ -2,6 +2,8 @@ package org.remus.giteabot.github;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.github.model.GitHubCommit;
+import org.remus.giteabot.github.model.GitHubEmail;
+import org.remus.giteabot.github.model.GitHubPrivateUser;
 import org.remus.giteabot.github.model.GitHubPullRequest;
 import org.remus.giteabot.github.model.GitHubReview;
 import org.remus.giteabot.github.model.GitHubTree;
@@ -15,12 +17,14 @@ import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 import java.util.Map;
@@ -34,23 +38,87 @@ import java.util.Optional;
 @Slf4j
 public class GitHubApiClient implements RepositoryApiClient {
 
+    /** The {@code noreply} domain of github.com, the only instance whose format is documented. */
+    static final String GITHUB_COM_NOREPLY_DOMAIN = "users.noreply.github.com";
+
     private final RestClient restClient;
-    private final RepositoryCredentials credentials;
+    private final boolean githubCom;
 
     /**
-     * Creates a GitHubApiClient with the given RestClient and credentials.
+     * Creates a GitHubApiClient for github.com with the given RestClient.
      *
      * @param restClient  pre-configured RestClient pointing at the GitHub API base URL
-     * @param credentials the repository credentials (base URL, clone URL, token)
      */
-    public GitHubApiClient(RestClient restClient, RepositoryCredentials credentials) {
-        this.restClient = restClient;
-        this.credentials = credentials;
+    public GitHubApiClient(RestClient restClient) {
+        this(restClient, true);
     }
 
+    /**
+     * Creates a GitHubApiClient with the given RestClient.
+     *
+     * @param restClient pre-configured RestClient pointing at the GitHub API base URL
+     * @param githubCom  whether the client talks to github.com rather than GitHub Enterprise,
+     *                   which decides whether a {@code noreply} address may be derived
+     */
+    public GitHubApiClient(RestClient restClient, boolean githubCom) {
+        this.restClient = restClient;
+        this.githubCom = githubCom;
+    }
+
+    /**
+     * Resolves the account. The commit address is, in this order:
+     * <ol>
+     *   <li>the address the account made public, from {@code /user};</li>
+     *   <li>a {@code noreply} address listed by {@code /user/emails}, which needs the
+     *       {@code user:email} scope (classic token) or the "Email addresses" read permission
+     *       (fine-grained token);</li>
+     *   <li>on github.com only, the documented {@code ID+login@users.noreply.github.com}. GitHub
+     *       Enterprise documents no format, so nothing is derived there;</li>
+     *   <li>otherwise {@link RepositoryUser#FALLBACK_EMAIL}.</li>
+     * </ol>
+     * A private primary address is never used: it would publish the address in commits, and
+     * GitHub rejects such pushes when the account blocks them.
+     */
     @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        GitHubPrivateUser user = restClient.get().uri("/user").retrieve().body(GitHubPrivateUser.class);
+        if (user == null) {
+            throw new IllegalStateException("GitHub /user returned no body");
+        }
+        String email = user.getEmail();
+        if (email == null || email.isBlank()) {
+            email = fetchNoreplyEmail();
+        }
+        if ((email == null || email.isBlank()) && githubCom && user.getId() != null && user.getLogin() != null) {
+            email = "%d+%s@%s".formatted(user.getId(), user.getLogin(), GITHUB_COM_NOREPLY_DOMAIN);
+        }
+        return user.toGitUser(email);
+    }
+
+    /** Returns the account's {@code noreply} address from {@code /user/emails}, or {@code null}. */
+    private String fetchNoreplyEmail() {
+        try {
+            List<GitHubEmail> emails = restClient.get()
+                    .uri("/user/emails?per_page=100")
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {});
+            if (emails == null) {
+                return null;
+            }
+            return emails.stream()
+                    .filter(GitHubEmail::isNoreply)
+                    .map(GitHubEmail::getEmail)
+                    .findFirst()
+                    .orElse(null);
+        } catch (HttpClientErrorException.Unauthorized | HttpClientErrorException.Forbidden e) {
+            log.warn("The GitHub token may not read the account e-mail addresses; give it the user:email scope "
+                    + "(classic) or the Email addresses read permission (fine-grained) so commits link to the profile");
+            return null;
+        } catch (RestClientException e) {
+            // The e-mail is optional: a failure here must not fail the account lookup.
+            log.warn("Could not read the GitHub account e-mail addresses: {}", e.getMessage());
+            return null;
+        }
     }
 
     @Override
@@ -105,9 +173,7 @@ public class GitHubApiClient implements RepositoryApiClient {
 
     @Override
     public String getPullRequestDiff(String owner, String repo, Long pullNumber) {
-        log.info("Fetching diff for PR #{} in {}/{} from baseUrl={}", pullNumber, owner, repo, credentials.baseUrl());
-        log.debug("Token present: {}, tokenLength: {}", credentials.token() != null && !credentials.token().isBlank(),
-                credentials.token() != null ? credentials.token().length() : 0);
+        log.info("Fetching diff for PR #{} in {}/{}", pullNumber, owner, repo);
         return restClient.get()
                 .uri("/repos/{owner}/{repo}/pulls/{pull_number}", owner, repo, pullNumber)
                 .header("Accept", "application/vnd.github.v3.diff")

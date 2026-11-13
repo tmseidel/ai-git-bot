@@ -2,7 +2,7 @@ package org.remus.giteabot.prworkflow.e2e;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflow;
@@ -82,7 +82,7 @@ public class E2ETestWorkflow implements PrWorkflow {
     private final PrTestWorkspaceManager workspaceManager;
     private final TestSuiteRunnerRegistry runnerRegistry;
     private final WorkflowSelectionService selectionService;
-    private final RepositoryApiClientFactory repositoryApiClientFactory;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final SuitePromotionService suitePromotionService;
     private final PrWorkflowRunRepository runRepository;
 
@@ -98,7 +98,7 @@ public class E2ETestWorkflow implements PrWorkflow {
                            PrTestWorkspaceManager workspaceManager,
                            TestSuiteRunnerRegistry runnerRegistry,
                            @Lazy WorkflowSelectionService selectionService,
-                           RepositoryApiClientFactory repositoryApiClientFactory,
+                           RepositoryPlatformFactory repositoryPlatformFactory,
                            SuitePromotionService suitePromotionService,
                            PrWorkflowRunRepository runRepository) {
         this.deploymentOrchestrator = deploymentOrchestrator;
@@ -106,7 +106,7 @@ public class E2ETestWorkflow implements PrWorkflow {
         this.workspaceManager = workspaceManager;
         this.runnerRegistry = runnerRegistry;
         this.selectionService = selectionService;
-        this.repositoryApiClientFactory = repositoryApiClientFactory;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
         this.suitePromotionService = suitePromotionService;
         this.runRepository = runRepository;
     }
@@ -450,7 +450,7 @@ public class E2ETestWorkflow implements PrWorkflow {
             return;
         }
         try {
-            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             String owner = payload.getRepository().getOwner() == null
                     ? null : payload.getRepository().getOwner().getLogin();
             String repoName = payload.getRepository().getName();
@@ -466,7 +466,7 @@ public class E2ETestWorkflow implements PrWorkflow {
             return;
         }
         try {
-            RepositoryApiClient client = repositoryApiClientFactory.getApiClient(bot.getGitIntegration());
+            RepositoryApiClient client = repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
             String owner = payload.getRepository().getOwner() == null
                     ? null : payload.getRepository().getOwner().getLogin();
             String repoName = payload.getRepository().getName();

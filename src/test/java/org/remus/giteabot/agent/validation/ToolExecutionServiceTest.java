@@ -1,15 +1,22 @@
 package org.remus.giteabot.agent.validation;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.remus.giteabot.config.AgentConfigProperties;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,11 +27,43 @@ class ToolExecutionServiceTest {
     @TempDir
     Path tempDir;
 
+    private Logger serviceLogger;
+    private ListAppender<ILoggingEvent> logEvents;
+
     @BeforeEach
     void setUp() {
         AgentConfigProperties config = new AgentConfigProperties();
         service = new ToolExecutionService(config,
-                new org.remus.giteabot.agent.tools.ToolCatalog(config));
+                new org.remus.giteabot.agent.tools.ToolCatalog(config),
+                new org.remus.giteabot.agent.packagemanager.PackageManagerDetector(),
+                new org.remus.giteabot.agent.packagemanager.YarnCommandBuilder(config));
+        serviceLogger = (Logger) LoggerFactory.getLogger(ToolExecutionService.class);
+        logEvents = new ListAppender<>();
+        logEvents.start();
+        serviceLogger.addAppender(logEvents);
+    }
+
+    @AfterEach
+    void detachLogAppender() {
+        serviceLogger.detachAppender(logEvents);
+    }
+
+    /** INFO-and-above messages the service logged about {@code patch-file}. */
+    private List<String> patchFileLogLines() {
+        return logEvents.list.stream()
+                .filter(e -> e.getLevel().isGreaterOrEqual(Level.INFO))
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith("patch-file:"))
+                .toList();
+    }
+
+    /** INFO-and-above messages the service logged about the {@code rg} tool. */
+    private List<String> searchLogLines() {
+        return logEvents.list.stream()
+                .filter(e -> e.getLevel().isGreaterOrEqual(Level.INFO))
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.startsWith("rg: "))
+                .toList();
     }
 
     @Test
@@ -428,6 +467,80 @@ class ToolExecutionServiceTest {
         assertThat(treeResult.output()).doesNotContain("linked-secret.txt");
     }
 
+    @Test
+    void executeContextTool_search_skipsBinaryFilesInTreeInsteadOfFailing() throws IOException {
+        Path src = tempDir.resolve("src");
+        Files.createDirectories(src.resolve("wwwroot"));
+        Files.writeString(src.resolve("Index.cshtml"), "<input id=\"hide-passed-rows-checkbox\" />\n");
+        // PNG header: NUL byte marks it binary, and the bytes are not valid UTF-8 either.
+        Files.write(src.resolve("wwwroot/logo.png"), new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x00, 0x01, (byte) 0xFF});
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("hide-passed-rows-checkbox", "src"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("src/Index.cshtml:1: ");
+        assertThat(result.output()).doesNotContain("logo.png");
+    }
+
+    @Test
+    void executeContextTool_search_doesNotFailOnNonUtf8TextFile() throws IOException {
+        Path src = tempDir.resolve("src");
+        Files.createDirectories(src);
+        Files.writeString(src.resolve("Index.cshtml"), "<input id=\"hide-passed-rows-checkbox\" />\n");
+        // 0xE9 is latin-1 'é' and invalid UTF-8.
+        Files.writeString(src.resolve("legacy.txt"),
+                "café: hide-passed-rows-checkbox", StandardCharsets.ISO_8859_1);
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("hide-passed-rows-checkbox", "src"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).contains("src/Index.cshtml:1: ");
+        assertThat(result.output()).contains("src/legacy.txt:1: ");
+    }
+
+    @Test
+    void executeContextTool_search_zeroHits_succeedsWithNoMatchesMessage() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Index.cshtml"), "nothing relevant here\n");
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("hide-passed-rows-checkbox", "src"));
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.output()).startsWith("No matches found for pattern: hide-passed-rows-checkbox");
+    }
+
+    @Test
+    void executeContextTool_search_missingPattern_logsOneLineWithReason() {
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of());
+
+        assertThat(result.success()).isFalse();
+        assertThat(searchLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("no pattern argument"));
+    }
+
+    @Test
+    void executeContextTool_search_missingPath_logsOneLineWithPathAndReason() {
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("needle", "src/missing"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(searchLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("src/missing").contains("not found"));
+    }
+
+    @Test
+    void executeContextTool_search_rejectedPath_logsOneLineWithPathAndReason() {
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("needle", "../outside"));
+
+        assertThat(result.success()).isFalse();
+        assertThat(searchLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("../outside").contains("traversal"));
+    }
+
     // ---- File tool tests ----
 
     @Test
@@ -486,6 +599,51 @@ class ToolExecutionServiceTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.error()).contains("search text not found");
+    }
+
+    @Test
+    void executeFileTool_patchFile_successfulPatch_logsExactlyOneLineNamingPathAndTier() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "class Service { int x = 1; }");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "int x = 1;", "int x = 2;"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("EXACT"));
+    }
+
+    @Test
+    void executeFileTool_patchFile_searchTextNotFound_logsPathAndStatus() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "class Service {}");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "secret-looking search text", "replacement"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("NOT_FOUND")
+                        .doesNotContain("secret-looking search text"));
+    }
+
+    @Test
+    void executeFileTool_patchFile_ambiguousSearchText_logsPathStatusAndMatchCount() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "int x = 1;\nint y = 1;\nint z = 1;\n");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "= 1;", "= 2;"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("AMBIGUOUS").contains("3"));
+    }
+
+    @Test
+    void executeFileTool_patchFile_identicalReplacement_logsPathAndStatus() throws IOException {
+        Files.writeString(tempDir.resolve("Service.java"), "class Service { int x = 1; }");
+
+        service.executeFileTool(Workspace.unmanaged(tempDir), "patch-file",
+                List.of("Service.java", "int x = 1;", "int x = 1;"));
+
+        assertThat(patchFileLogLines()).singleElement().satisfies(line ->
+                assertThat(line).contains("Service.java").contains("NO_CHANGE"));
     }
 
     @Test

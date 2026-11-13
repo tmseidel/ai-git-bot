@@ -7,7 +7,7 @@ import org.remus.giteabot.admin.AiClientFactory;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.admin.RepositoryApiClientFactory;
+import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
@@ -25,6 +25,7 @@ import org.remus.giteabot.prworkflow.e2e.agents.TestPlannerAgent;
 import org.remus.giteabot.prworkflow.e2e.agents.TestRunnerAgent;
 import org.remus.giteabot.prworkflow.e2e.tools.PrWorkflowToolExecutor;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.TestPlatforms;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -55,7 +56,7 @@ class PlaywrightTestSuiteRunnerTest {
     @BeforeEach
     void setUp() {
         aiClientFactory = mock(AiClientFactory.class);
-        RepositoryApiClientFactory repositoryApiClientFactory = mock(RepositoryApiClientFactory.class);
+        RepositoryPlatformFactory repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
         RepositoryApiClient apiClient = mock(RepositoryApiClient.class);
         caseRepository = mock(PrTestCaseRepository.class);
         toolExecutor = mock(PrWorkflowToolExecutor.class);
@@ -66,7 +67,7 @@ class PlaywrightTestSuiteRunnerTest {
         TestRunnerAgent runnerAgent = new TestRunnerAgent(catalog, toolExecutor);
 
         suiteRunner = new PlaywrightTestSuiteRunner(
-                aiClientFactory, repositoryApiClientFactory,
+                aiClientFactory, repositoryPlatformFactory,
                 plannerAgent, authorAgent, runnerAgent, caseRepository, toolExecutor,
                 mock(WorkflowToolSurfaceFactory.class));
 
@@ -75,7 +76,7 @@ class PlaywrightTestSuiteRunnerTest {
         bot.setAiIntegration(new AiIntegration());
         bot.setGitIntegration(new GitIntegration());
 
-        when(repositoryApiClientFactory.getApiClient(any())).thenReturn(apiClient);
+        when(repositoryPlatformFactory.getPlatform(any())).thenReturn(TestPlatforms.of(apiClient));
         when(apiClient.getPullRequestDiff(any(), any(), any()))
                 .thenReturn("diff --git a/srv.js b/srv.js\n+console.log('hi');\n");
     }

@@ -81,7 +81,8 @@ class ReviewAgentStrategyLegacyTest {
     }
 
     private AgentRunContext ctx() {
-        return new AgentRunContext(null, "octo", "repo", 1L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        return AgentRunContext.forPullRequest(null, "octo", "repo", 1L,
+                Workspace.unmanaged(Path.of("/tmp/ws")), "main");
     }
 
     @Test
@@ -118,7 +119,8 @@ class ReviewAgentStrategyLegacyTest {
                 new ToolCatalog(new AgentConfigProperties()), null, null, parser,
                 new BranchSwitcher(toolExecutionService), fetcher, 5);
         AgentSession session = new AgentSession("octo", "repo", 1L, "Review example");
-        AgentRunContext context = new AgentRunContext(session, "octo", "repo", 1L, Workspace.unmanaged(Path.of("/tmp/ws")), "main");
+        AgentRunContext context = AgentRunContext.forPullRequest(session, "octo", "repo", 1L,
+                Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         AgentLoop loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                 new AgentBudget(3, 2, 2, 32, 8_000, 120_000, 200_000, 0.7));
 
@@ -139,7 +141,7 @@ class ReviewAgentStrategyLegacyTest {
                                 List.of(), StopReason.END_TURN, 100, 12),
                         new ChatTurn("The change correctly handles missing values.", List.of(), StopReason.END_TURN, 120, 20));
         AgentSession session = new AgentSession("octo", "repo", 1L, "Review example");
-        AgentRunContext context = new AgentRunContext(session, "octo", "repo", 1L,
+        AgentRunContext context = AgentRunContext.forPullRequest(session, "octo", "repo", 1L,
                 Workspace.unmanaged(Path.of("/tmp/ws")), "main");
         AgentLoop loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                 new AgentBudget(3, 2, 2, 4000, 8_000, 120_000, 200_000, 0.7));

@@ -1,7 +1,6 @@
 package org.remus.giteabot.bitbucket;
 
 import org.junit.jupiter.api.Test;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -23,14 +22,13 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 class BitbucketApiClientArtifactUploadTest {
 
-    private static final RepositoryCredentials CREDS = RepositoryCredentials.of(
-            "https://api.bitbucket.org/2.0", "https://bitbucket.org", "bb_token");
+    private static final String CLONE_URL = "https://bitbucket.org";
 
     @Test
     void inlineableTextArtifact_doesNotCallDownloadsEndpoint() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CREDS);
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/3/comments"))
                 .andExpect(method(HttpMethod.POST))
@@ -50,7 +48,7 @@ class BitbucketApiClientArtifactUploadTest {
     void largeBinaryArtifact_uploadsAndLinks() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CREDS);
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/ws/repo/downloads"))
                 .andExpect(method(HttpMethod.POST))
@@ -74,7 +72,7 @@ class BitbucketApiClientArtifactUploadTest {
     void uploadFailure_fallsBackToSummaryComment() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CREDS);
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/ws/repo/downloads"))
                 .andExpect(method(HttpMethod.POST))
@@ -95,7 +93,7 @@ class BitbucketApiClientArtifactUploadTest {
     void downloadUrl_encodesSpacesAndSpecialChars() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CREDS);
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
 
         server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/ws/repo/downloads"))
                 .andExpect(method(HttpMethod.POST))

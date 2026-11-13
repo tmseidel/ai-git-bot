@@ -301,9 +301,9 @@
                     urlField.style.display = 'block';
                     urlInput.required = true;
                     urlInput.placeholder = 'e.g. https://dev.azure.com or https://tfs.example.com/tfs';
-                    urlDescription.textContent = /*[[#{help.git.azureDevopsUrl}]]*/ 'https://dev.azure.com for Azure DevOps Services (without your organization), or your Azure DevOps Server URL, e.g. https://tfs.example.com/tfs. On Azure DevOps Server the collection is optional: without it one integration serves every collection, with it (…/tfs/DefaultCollection) only that one.';
+                    urlDescription.textContent = /*[[#{help.git.azureDevopsUrl}]]*/ 'https://dev.azure.com for Azure DevOps Services, where one integration serves every organization the token can access, https://dev.azure.com/your-organization for a single organization, or your Azure DevOps Server URL, e.g. https://tfs.example.com/tfs. On Azure DevOps Server the collection is optional: without it one integration serves every collection, with it (…/tfs/DefaultCollection) only that one.';
                     tokenLabel.textContent = /*[[#{label.personalAccessToken}]]*/ 'Personal Access Token';
-                    tokenDescription.textContent = /*[[#{help.git.azureDevopsToken}]]*/ 'An Azure DevOps Personal Access Token with Code (read & write) and Pull Request Threads (read & write) scopes. Create one under User settings → Personal access tokens.';
+                    tokenDescription.textContent = /*[[#{help.git.azureDevopsToken}]]*/ 'An Azure DevOps Personal Access Token with Code (read & write), Pull Request Threads (read & write) and Identity (read) scopes. Create one under User settings → Personal access tokens.';
                     reviewTriggerNotice.style.display = 'block';
                     postReviewActionField.style.display = 'block';
                 } else {

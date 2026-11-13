@@ -5,6 +5,7 @@ import org.remus.giteabot.gitlab.model.GitLabCommit;
 import org.remus.giteabot.gitlab.model.GitLabReview;
 import org.remus.giteabot.gitlab.model.GitLabReviewComment;
 import org.remus.giteabot.gitlab.model.GitLabTreeEntry;
+import org.remus.giteabot.gitlab.model.GitLabUserPublic;
 import org.remus.giteabot.repository.ArtifactCommentRenderer;
 import org.remus.giteabot.repository.ArtifactUploadSupport;
 import org.remus.giteabot.repository.PostReviewAction;
@@ -15,8 +16,8 @@ import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
 import org.remus.giteabot.repository.model.PullRequestHead;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.springframework.core.ParameterizedTypeReference;
@@ -43,27 +44,20 @@ public class GitLabApiClient implements RepositoryApiClient {
     private static final String SOURCE_BRANCH = "source_branch";
     private static final String DISCUSSION_PATH = "/api/v4/projects/{projectPath}/merge_requests/{iid}/discussions";
     private final RestClient gitlabRestClient;
-    private final RepositoryCredentials credentials;
 
     /**
-     * Creates a GitLabApiClient with the given RestClient and credentials.
+     * Creates a GitLabApiClient with the given RestClient.
      *
      * @param restClient  pre-configured RestClient pointing at the GitLab API base URL
-     * @param credentials the repository credentials (base URL, clone URL, token)
      */
-    public GitLabApiClient(RestClient restClient, RepositoryCredentials credentials) {
+    public GitLabApiClient(RestClient restClient) {
         this.gitlabRestClient = restClient;
-        this.credentials = credentials;
     }
 
     @Override
-    public RepositoryCredentials getCredentials() {
-        return credentials;
-    }
-
-    @Override
-    public String formatPullRequestReference(Long prNumber) {
-        return "!" + prNumber;
+    public RepositoryUser getAuthenticatedUser(String owner) {
+        return gitlabRestClient.get().uri("/api/v4/user")
+                .retrieve().body(GitLabUserPublic.class).toGitUser();
     }
 
     @Override

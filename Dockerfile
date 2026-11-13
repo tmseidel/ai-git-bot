@@ -41,7 +41,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CYPRESS_CACHE_FOLDER=/home/appuser/.cache/Cypress \
     PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright \
     NPM_CONFIG_PREFIX=/usr/local \
-    NODE_PATH=/usr/local/lib/node_modules
+    NODE_PATH=/usr/local/lib/node_modules \
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    COREPACK_ENABLE_AUTO_PIN=0
 
 # ---------------------------------------------------------------------------
 # Base utilities + AI-agent build toolchain
@@ -70,7 +72,9 @@ RUN set -eux; \
 
 # ---------------------------------------------------------------------------
 # Node.js 22 LTS (NodeSource) — required by Playwright, Cypress and the
-# scaffolded `npx` commands the PR-workflow tools issue.
+# scaffolded `npx` commands the PR-workflow tools issue. Corepack ships with
+# Node and is enabled below, so the coding agent can run the Yarn version a
+# repository pins in `packageManager` instead of whatever Yarn the image has.
 # ---------------------------------------------------------------------------
 RUN set -eux; \
     apt-get clean; \
@@ -80,7 +84,9 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends nodejs; \
     rm -rf /var/lib/apt/lists/*; \
     node --version; \
-    npm --version
+    npm --version; \
+    corepack --version; \
+    corepack enable
 
 # ---------------------------------------------------------------------------
 # .NET 10 SDK (Microsoft package feed)

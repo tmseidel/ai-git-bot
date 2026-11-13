@@ -1,7 +1,6 @@
 package org.remus.giteabot.gitea;
 
 import org.junit.jupiter.api.Test;
-import org.remus.giteabot.repository.model.RepositoryCredentials;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -22,14 +21,12 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
  */
 class GiteaApiClientArtifactUploadTest {
 
-    private static final RepositoryCredentials CREDS =
-            RepositoryCredentials.of("https://gitea.example.com", "https://gitea.example.com", "gitea-token");
 
     @Test
     void inlineableTextArtifact_doesNotCallAssetsEndpoint() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        GiteaApiClient client = new GiteaApiClient(builder.build());
 
         server.expect(requestTo("https://gitea.example.com/api/v1/repos/owner/repo/issues/5/comments"))
                 .andExpect(method(HttpMethod.POST))
@@ -50,7 +47,7 @@ class GiteaApiClientArtifactUploadTest {
     void largeBinaryArtifact_uploadsAndLinks() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        GiteaApiClient client = new GiteaApiClient(builder.build());
 
         server.expect(requestTo("https://gitea.example.com/api/v1/repos/owner/repo/issues/5/assets"))
                 .andExpect(method(HttpMethod.POST))
@@ -78,7 +75,7 @@ class GiteaApiClientArtifactUploadTest {
     void uploadFailure_fallsBackToSummaryComment() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://gitea.example.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GiteaApiClient client = new GiteaApiClient(builder.build(), CREDS);
+        GiteaApiClient client = new GiteaApiClient(builder.build());
 
         server.expect(requestTo("https://gitea.example.com/api/v1/repos/owner/repo/issues/5/assets"))
                 .andExpect(method(HttpMethod.POST))
