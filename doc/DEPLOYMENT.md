@@ -291,6 +291,8 @@ default; requires a Claude 5.x model (`claude-fable-5`, `claude-opus-5`,
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GITEABOT_SECURITY_LOGIN_METHOD` | `native` | Authentication method: `native` (database-backed login form) or `oauth` (OAuth 2.0 / OIDC). |
+| `GITEABOT_SECURITY_REMEMBER_ME_VALIDITY` | `14d` | Lifetime of a **Remember me** login on the native login form (Spring `Duration`, e.g. `7d`). |
+| `GITEABOT_SECURITY_REMEMBER_ME_KEY` | *(random)* | Signing key for remember-me tokens; must be identical on all instances sharing one database. |
 | `GITEABOT_SECURITY_OAUTH_CLIENT_ID` |  | OAuth client ID. |
 | `GITEABOT_SECURITY_OAUTH_CLIENT_SECRET` |  | OAuth client secret. |
 | `GITEABOT_SECURITY_OAUTH_ISSUER_URI` |  | OIDC issuer URI. When set, Spring Security discovers endpoints automatically. |

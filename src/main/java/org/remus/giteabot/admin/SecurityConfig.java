@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,13 +18,24 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.rememberme.PersistentTokenRepository;
 import org.springframework.security.oauth2.client.web.OAuth2AuthorizationRequestRedirectFilter;
 
+import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
 @Configuration
 public class SecurityConfig {
+
+    private final String rememberMeKey;
+    private final Duration rememberMeValidity;
+
+    public SecurityConfig(@Value("${giteabot.security.remember-me.key:}") String rememberMeKey,
+                          @Value("${giteabot.security.remember-me.validity:14d}") Duration rememberMeValidity) {
+        this.rememberMeKey = rememberMeKey;
+        this.rememberMeValidity = rememberMeValidity;
+    }
 
     @Bean
     @ConditionalOnProperty(prefix = "giteabot.security", name = "login-method", havingValue = "native", matchIfMissing = true)
@@ -63,7 +75,8 @@ public class SecurityConfig {
     @Order(2)
     @ConditionalOnProperty(prefix = "giteabot.security", name = "login-method", havingValue = "native", matchIfMissing = true)
     public SecurityFilterChain nativeWebSecurityFilterChain(HttpSecurity http,
-                                                            ObjectProvider<AutoLoginConfig.AutoLoginFilter> autoLoginFilter) {
+                                                            ObjectProvider<AutoLoginConfig.AutoLoginFilter> autoLoginFilter,
+                                                            ObjectProvider<PersistentTokenRepository> rememberMeTokenRepository) {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/login", "/setup", "/setup/**", "/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
@@ -76,6 +89,18 @@ public class SecurityConfig {
                 .logout(logout -> logout
                         .logoutSuccessUrl("/login?logout")
                 );
+        // Remember-me needs the persistent token store; it is absent in @WebMvcTest slices
+        // that import this class without a DataSource.
+        PersistentTokenRepository tokenRepository = rememberMeTokenRepository.getIfAvailable();
+        if (tokenRepository != null) {
+            http.rememberMe(remember -> {
+                remember.tokenRepository(tokenRepository)
+                        .tokenValiditySeconds((int) rememberMeValidity.toSeconds());
+                if (!rememberMeKey.isBlank()) {
+                    remember.key(rememberMeKey);
+                }
+            });
+        }
         // When the auto-login profile is active (giteabot.security.auto-login.enabled=true)
         // an AutoLoginFilter bean is published — insert it before the form-login filter
         // so every request is pre-authenticated and the form is never shown.

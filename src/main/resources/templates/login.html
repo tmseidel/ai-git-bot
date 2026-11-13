@@ -44,6 +44,10 @@
                             <input type="password" class="form-control" id="password" name="password"
                                    th:placeholder="#{page.login.passwordPlaceholder}" required/>
                         </div>
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="remember-me" name="remember-me" value="true"/>
+                            <label class="form-check-label" for="remember-me" th:text="#{page.login.rememberMe}">Remember me</label>
+                        </div>
                         <div class="d-grid">
                             <button type="submit" class="btn btn-primary">
                                 <i class="bi bi-box-arrow-in-right"></i> <span th:text="#{button.signIn}">Login</span>
