@@ -82,6 +82,58 @@ Unselected tools remain hidden from the AI agent.
 
 <img src="screenshots/mcp/screenshot_mcp_tool_selection.png" alt="MCP-Tools selection" width="600"/>
 
+### Read-only approval for the new review protocol (configuration only)
+
+The separate **Read-only approval (new review protocol)** checkbox is an explicit
+ADMIN trust decision. Selection, **select all visible**, descriptions and server
+`readOnlyHint` annotations never grant approval. Existing selections start
+unapproved. Only selected, currently discoverable tools can be approved; an
+unchecked approval revokes it. Filtering, paging and saving an unchanged selection
+preserve the independent approval state. The form submits explicit grant/revoke
+edits, not existing checked rows as new grants, so an old form cannot silently
+restore invalidated trust after a configuration change and revert.
+
+Approval is bound to the configuration ID, qualified/server/tool names, a SHA-256
+of the discovered tool definition (including its input schema and descriptive
+metadata), and a SHA-256 of the configuration ID plus its server-owned opaque
+approval revision. Each configuration has an independent random UUID revision;
+no fingerprint of decrypted credentials is persisted or exposed. A semantic
+configured-JSON change rotates that revision and clears approvals atomically,
+including endpoint, header, token or reference changes. JSON object key order,
+formatting and name-only edits preserve the revision; changing and reverting the
+JSON does not restore an old revision. Resolved runtime secret values and remote
+server implementation changes are not inferred from configuration. An observed
+changed or unavailable definition is not approved. Reapproval requires a fresh
+form and an explicit checkbox; submitted revision/proof metadata is not trusted.
+
+`McpToolSelectionService.readReviewReadOnlyApprovals(observedConfiguration, catalog)`
+returns immutable identity/schema/configuration-hash evidence only for selected,
+approved entries matching that catalog and the current stored configuration.
+It does not discover tools, freeze a run, or authorize execution. Its caller must
+provide a sufficiently fresh trusted catalog and freeze/verify the matching actual
+definitions and configuration for the run. Those runtime requirements belong to
+RR07B, together with descriptor/dispatch enforcement and run fencing.
+The admin form uses `loadSelectionSnapshot` so displayed rows and server-held
+evidence come from the same catalog/configuration read; request fields contain
+only names, explicit edits and a session-bound nonce, not proof hashes.
+Discovery uses a detached configuration capture **before** any row lock. Then
+replacement, validation/invalidation, configuration saves and deletion serialize
+on the same configuration row, refresh persisted state, and reject a configuration
+revision that changed during discovery. No configuration/protocol lock spans MCP
+discovery. This prevents an ordinary stale selection save from undoing a committed
+revocation. The public read seam requires the configuration captured for its
+catalog, rather than pairing an old catalog with whichever configuration is now
+stored. Runtime callers still own catalog freshness and per-run freezing.
+
+**This configuration feature does not activate the new protocol. LEGACY0 and
+current legacy routes are unchanged and do not enforce this new approval.**
+
+The H2 and PostgreSQL `V63__review_mcp_read_only_approval.sql` files are provisional.
+Release is blocked (Draft) until the central V59 (#468) → V60 (#474) → V61 (control)
+→ V62 (completion) → V63 sequence is integrated and qualified. Isolated development
+tests are not qualification of an actual V60/V62 production upgrade; no missing
+migrations are copied or bypassed with `outOfOrder`.
+
 ## 3) View Selected Tools in Bot Configuration
 
 In **Bots → New/Edit**, next to the MCP configuration dropdown, use **Details**.
@@ -204,5 +256,3 @@ HMAC endpoint for an MCP-backed target.
 | You already operate an internal platform MCP server.              | Your deploy lives in Jenkins / CI directly.                  |
 | You want everything (tool whitelist, audit) under one MCP roof.   | You need a callback channel because deploy is fire-and-forget. |
 | Your deploy/status flow is naturally request/response.            | The CI side cannot easily call out to an MCP server.         |
-
-
