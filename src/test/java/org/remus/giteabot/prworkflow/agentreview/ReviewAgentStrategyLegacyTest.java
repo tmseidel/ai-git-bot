@@ -77,7 +77,7 @@ class ReviewAgentStrategyLegacyTest {
                 new AiResponseParser(),
                 new BranchSwitcher(toolExecutionService),
                 (owner, repo, ref, files) -> "FILE-CONTENT",
-                5);
+                5, 5, 5, null);
     }
 
     private AgentRunContext ctx() {
@@ -117,7 +117,7 @@ class ReviewAgentStrategyLegacyTest {
         ReviewAgentStrategy.FileFetcher fetcher = mock(ReviewAgentStrategy.FileFetcher.class);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("system", toolRouter,
                 new ToolCatalog(new AgentConfigProperties()), null, null, parser,
-                new BranchSwitcher(toolExecutionService), fetcher, 5);
+                new BranchSwitcher(toolExecutionService), fetcher, 5, 5, 5, null);
         AgentSession session = new AgentSession("octo", "repo", 1L, "Review example");
         AgentRunContext context = AgentRunContext.forPullRequest(session, "octo", "repo", 1L,
                 Workspace.unmanaged(Path.of("/tmp/ws")), "main");

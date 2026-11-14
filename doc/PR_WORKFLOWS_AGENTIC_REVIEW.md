@@ -20,7 +20,9 @@ context-aware feedback and are willing to spend more time and tokens per review.
   forming an opinion.
 - Focuses on the files that matter first, so it handles large PRs without
   drowning in noise.
-- Posts a single Markdown review comment with its findings.
+- Records its findings and an overall assessment through dedicated review tools;
+  the bot persists them and renders one review comment in a fixed layout (see
+  below). The model never writes the comment text itself.
 - Optionally updates one progress comment with the latest activity,
   round and completed inspection tool-call counts, start time, and elapsed time.
 - Optionally submits a formal review decision (approve / request changes) — see
@@ -55,12 +57,26 @@ not change the review or clarification outcome. If creation fails, that run
 continues without progress. Activity write attempts are at least 15 seconds
 apart, even after a failed update; terminal updates are attempted once immediately.
 
+### The review comment
+
+Every completed agentic review is rendered from the stored review, so the layout
+is identical for every provider: the overall assessment with its reference
+(`O1234-A`), the severity totals, one block per finding (`O1234-F1`, …) with
+title, source locations, evidence, impact and recommendation, and a
+"Coverage and limitations" section. A finding's reference is stable: correcting,
+withdrawing or re-sorting findings never renumbers it. An inconclusive review
+says so prominently, and a review without findings renders an explicit
+zero-findings section.
+
+The model submits findings individually and sets the assessment once; the
+comment is built from those records, not from a prose reply. A reply written as
+text is not published.
+
 ### Formal review decision
 
-When `enableFormalReviewDecision` is on, the model classifies its findings as
-`BLOCKER`, `MEDIUM`, or `LOW` and emits a JSON object such as
-`{"blocker": 0, "medium": 1, "low": 2}`. The application then compares each
-count to the configured thresholds:
+When `enableFormalReviewDecision` is on, every finding carries a severity
+(`BLOCKER`, `MEDIUM`, `LOW`) and the application counts the persisted findings.
+It then compares each count to the configured thresholds:
 
 - If **all configured thresholds** are satisfied, the bot submits `APPROVE`.
 - If **any configured threshold** is exceeded, the bot submits `REQUEST_CHANGES`.
@@ -69,8 +85,10 @@ count to the configured thresholds:
 - An unset threshold is ignored entirely, so you can enforce only the severities
   that matter to you (for example, only `BLOCKER`).
 
-If the model fails to emit a clean classification, the bot falls back to posting
-a plain review comment so the findings are never lost.
+Counts come from the stored findings, so the model cannot state an approval
+decision of its own. If the formal submission is rejected by the Git provider,
+the bot falls back to posting the same review as a plain comment, so the
+findings are never lost.
 
 ## The review prompt
 

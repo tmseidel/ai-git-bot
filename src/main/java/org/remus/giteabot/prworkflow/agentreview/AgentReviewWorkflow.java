@@ -23,10 +23,15 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
     static final int DEFAULT_MAX_TOOL_ROUNDS = 12;
 
+    /**
+     * Operator-editable severity criteria. It carries criteria only: the submission format and the
+     * completion contract live in the runtime protocol, which is appended regardless of what an
+     * operator writes here, and the approve/request-changes decision is never the model's.
+     */
     static final String DEFAULT_FORMAL_REVIEW_DECISION_PROMPT = """
             # Formal Review Decision
 
-            After writing your review findings, classify them by severity:
+            Classify every finding you submit by severity:
 
             - **BLOCKER** — Critical issues that must be fixed before merging:
               bugs, security vulnerabilities, broken tests, missing error handling,
@@ -39,10 +44,9 @@ public class AgentReviewWorkflow implements PrWorkflow {
             - **LOW** — Minor issues, style nits, optional suggestions, or small
               observations that should not block merging.
 
-            The application will decide whether to approve or request changes based
-            on the configured thresholds for each severity class. Do not emit
-            APPROVE, REQUEST_CHANGES, or NONE yourself; only provide the classification
-            counts below.""";
+            The application decides whether to approve or request changes from the
+            configured thresholds on those severities. Do not state an approval decision
+            yourself, and do not invent findings to justify one.""";
 
     private final AgentReviewServiceFactory serviceFactory;
     private final WorkflowSelectionService selectionService;
@@ -57,8 +61,8 @@ public class AgentReviewWorkflow implements PrWorkflow {
     @Override public String displayName() { return "Agentic PR Review"; }
     @Override public String description() {
         return "Reviews the pull request with an LLM that can iteratively call read-only "
-                + "repository and MCP tools to gather context before writing its findings as a "
-                + "Markdown comment.";
+                + "repository and MCP tools, then records findings and an overall assessment "
+                + "that the application renders as the review comment.";
     }
     @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
 

@@ -285,6 +285,23 @@ public class StructuredReviewService {
         return toFinalized(review);
     }
 
+    /**
+     * Closes a draft that will never be finalized, so a later attempt cannot append to it.
+     * A finalized review is never rewritten; only a draft can move to FAILED, CANCELLED or
+     * ABANDONED, and any other target is a programming error.
+     */
+    @Transactional
+    public void closeDraft(long reviewId, ReviewState target) {
+        if (target == ReviewState.DRAFT || target == ReviewState.FINALIZED) {
+            throw new InvalidReviewContentException("state",
+                    "A draft can only be closed as FAILED, CANCELLED or ABANDONED");
+        }
+        reviewRepository.findById(reviewId).filter(ReviewRecord::isMutable).ifPresent(review -> {
+            review.setState(target);
+            log.info("Review draft {} closed as {}", reviewId, target);
+        });
+    }
+
     @Transactional(readOnly = true)
     public Optional<FinalizedReview> findFinalized(long reviewId) {
         return reviewRepository.findById(reviewId)

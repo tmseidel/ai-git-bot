@@ -1,0 +1,451 @@
+package org.remus.giteabot.prworkflow.agentreview;
+
+import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.agent.codeexecution.PythonExecutionService;
+import org.remus.giteabot.agent.issueimpl.AiResponseParser;
+import org.remus.giteabot.agent.loop.AgentBudget;
+import org.remus.giteabot.agent.loop.AgentLoop;
+import org.remus.giteabot.agent.loop.AgentRunContext;
+import org.remus.giteabot.agent.loop.LoopOutcome;
+import org.remus.giteabot.agent.loop.ToolingMode;
+import org.remus.giteabot.agent.session.AgentSession;
+import org.remus.giteabot.agent.session.AgentSessionService;
+import org.remus.giteabot.agent.shared.BranchSwitcher;
+import org.remus.giteabot.agent.shared.SystemPromptAssembler;
+import org.remus.giteabot.agent.tools.AgentToolRouter;
+import org.remus.giteabot.agent.tools.ToolCatalog;
+import org.remus.giteabot.agent.validation.PullRequestWorkspaceMode;
+import org.remus.giteabot.agent.validation.ToolExecutionService;
+import org.remus.giteabot.agent.validation.Workspace;
+import org.remus.giteabot.agent.validation.WorkspaceResult;
+import org.remus.giteabot.agent.validation.WorkspaceService;
+import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
+import org.remus.giteabot.prworkflow.WorkflowCancelledException;
+import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.review.structured.ReviewDraftHandle;
+import org.remus.giteabot.review.structured.ReviewDraftRequest;
+import org.remus.giteabot.review.structured.ReviewInvocation;
+import org.remus.giteabot.review.structured.ReviewState;
+import org.remus.giteabot.review.structured.ReviewSubmissionToolExecutor;
+import org.remus.giteabot.review.structured.StructuredReviewService;
+
+import java.time.Clock;
+import java.util.List;
+import java.util.UUID;
+import java.util.function.Consumer;
+
+/**
+ * Generation half of the agentic review: opens a review draft, runs the read-only agent until it
+ * completes that draft through the submission tools, and returns its identity. Nothing here
+ * publishes anything — {@link ReviewPublisher} renders and posts the stored record.
+ *
+ * <p>Every exit path leaves an explicit draft state. A run that failed, was cancelled or was
+ * superseded closes its draft, so a later attempt can never append to it, and an incomplete draft
+ * can never be mistaken for an empty review.</p>
+ */
+@Slf4j
+public class AgentReviewExecution {
+
+    public enum Outcome { FINALIZED, NO_DIFF, FAILED }
+
+    /**
+     * @param outcome   what happened
+     * @param reviewId  the draft this run opened (present for every outcome but {@link Outcome#NO_DIFF})
+     * @param reference the finalized {@code O<n>} reference when {@code outcome == FINALIZED}
+     */
+    public record Result(Outcome outcome, Long reviewId, String reference) {
+
+        public boolean finalized() {
+            return outcome == Outcome.FINALIZED;
+        }
+    }
+
+    /** Outcome of a clarification run: an answer to post, no diff to discuss, or a failure. */
+    public enum AnswerOutcome { ANSWERED, NO_DIFF, FAILED }
+
+    public record Answer(AnswerOutcome outcome, String text) {
+    }
+
+    /** Operator-tunable inputs of one generation run. */
+    public record Options(int maxToolRounds, boolean enableFormalDecision, String decisionPrompt,
+                          boolean enableProgressComments, Long runId,
+                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+    }
+
+    private final AgentReviewContext context;
+    private final AgentSessionService sessionService;
+    private final ToolCatalog toolCatalog;
+    private final WorkspaceService workspaceService;
+    private final AgentConfigProperties agentConfig;
+    private final Bot bot;
+    private final StructuredReviewService reviewService;
+    private final ReviewSubmissionToolExecutor submissionExecutor;
+
+    private final RepositoryPlatform repositoryPlatform;
+    private final RepositoryApiClient repositoryClient;
+    private final AiClient aiClient;
+    private final AgentToolRouter toolRouter;
+    private final AiResponseParser responseParser = new AiResponseParser();
+    private final BranchSwitcher branchSwitcher;
+    private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler();
+
+    public AgentReviewExecution(AgentReviewContext context,
+                                AgentSessionService sessionService,
+                                ToolExecutionService toolExecutionService,
+                                ToolCatalog toolCatalog,
+                                WorkspaceService workspaceService,
+                                AgentConfigProperties agentConfig,
+                                McpOrchestrationService mcpOrchestrationService,
+                                Bot bot,
+                                StructuredReviewService reviewService,
+                                ReviewSubmissionToolExecutor submissionExecutor,
+                                PythonExecutionService pythonExecution) {
+        this.context = context;
+        this.sessionService = sessionService;
+        this.toolCatalog = toolCatalog;
+        this.workspaceService = workspaceService;
+        this.agentConfig = agentConfig;
+        this.bot = bot;
+        this.reviewService = reviewService;
+        this.submissionExecutor = submissionExecutor;
+        this.repositoryPlatform = context.repositoryPlatform();
+        this.repositoryClient = repositoryPlatform.getClient();
+        this.aiClient = context.aiClient();
+        this.branchSwitcher = new BranchSwitcher(toolExecutionService);
+        this.toolRouter = new AgentToolRouter(toolExecutionService, toolCatalog,
+                mcpOrchestrationService, context.mcpConfiguration(),
+                context.mcpToolCatalog(), this.repositoryClient, context.allowedBuiltinTools(),
+                pythonExecution);
+    }
+
+    /** Runs one review generation for {@code payload}, leaving a finalized draft behind on success. */
+    public Result review(WebhookPayload payload, Options options) {
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long prNumber = payload.getPullRequest().getNumber();
+        String prTitle = payload.getPullRequest().getTitle();
+        String prBody = payload.getPullRequest().getBody();
+
+        log.info("Starting agentic review for PR #{} '{}' in {}/{} (formalDecision={})",
+                prNumber, prTitle, owner, repo, options.enableFormalDecision());
+
+        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+        if (diff == null || diff.isBlank()) {
+            log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
+            return new Result(Outcome.NO_DIFF, null, null);
+        }
+        DiffSummary diffSummary = DiffSummary.parse(diff);
+        log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
+
+        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo,
+                prNumber);
+        if (headBranch == null) {
+            log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
+                    + "(refusing to review the default branch)", prNumber, owner, repo);
+            return new Result(Outcome.FAILED, null, null);
+        }
+
+        ReviewDraftHandle draft = reviewService.createDraft(
+                draftRequest(payload, owner, repo, prNumber, options.runId()));
+        ReviewProgress progress = options.enableProgressComments()
+                ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
+        boolean finalized = false;
+        try {
+            if (progress != null) {
+                progress.start();
+            }
+            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+                    repositoryPlatform, owner, repo, headBranch, prNumber,
+                    PullRequestWorkspaceMode.READ_ONLY);
+            if (!wsResult.success()) {
+                log.warn("Failed to prepare workspace for agentic review of PR #{}: {}",
+                        prNumber, wsResult.error());
+                repositoryClient.postPullRequestComment(owner, repo, prNumber,
+                        "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
+                                + "review was skipped. The bot log holds the Git output.");
+                reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
+                return new Result(Outcome.FAILED, draft.reviewId(), null);
+            }
+            LoopOutcome outcome;
+            try (Workspace workspace = wsResult.workspace()) {
+                AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
+                outcome = runReviewLoop(session, workspace, owner, repo, prNumber, headBranch,
+                        diffSummary, prTitle, prBody, draft, options, progress);
+            }
+            if (!outcome.success() || !(outcome.payload() instanceof String reference)
+                    || !reference.equals(draft.outputReference())) {
+                log.warn("Agentic review for PR #{} ended without a finalized review; nothing will be "
+                        + "published", prNumber);
+                reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
+                return new Result(Outcome.FAILED, draft.reviewId(), null);
+            }
+            finalized = true;
+            return new Result(Outcome.FINALIZED, draft.reviewId(), reference);
+        } catch (WorkflowCancelledException e) {
+            reviewService.closeDraft(draft.reviewId(), ReviewState.CANCELLED);
+            log.warn("Agentic review for PR #{} was cancelled; its draft stays incomplete", prNumber);
+            throw e;
+        } catch (RuntimeException e) {
+            reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
+            throw e;
+        } finally {
+            if (progress != null) {
+                progress.finish(finalized);
+            }
+        }
+    }
+
+    /**
+     * Answers a clarification question about a previously-reviewed PR with a plain answer. No
+     * submission tools are advertised, so nothing here can alter a published review.
+     */
+    public Answer answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds,
+                                      boolean enableProgressComments) {
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long prNumber = payload.getPullRequest().getNumber();
+        String prTitle = payload.getPullRequest().getTitle();
+        String prBody = payload.getPullRequest().getBody();
+
+        String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
+        if (diff == null || diff.isBlank()) {
+            log.warn("No diff found for PR #{} in {}/{} — cannot answer clarification",
+                    prNumber, owner, repo);
+            return new Answer(AnswerOutcome.NO_DIFF, null);
+        }
+        DiffSummary diffSummary = DiffSummary.parse(diff);
+        String headBranch = PrPayloadHydrator.resolveHeadBranch(repositoryClient, payload, owner, repo,
+                prNumber);
+        if (headBranch == null) {
+            log.warn("Could not resolve PR head branch for PR #{} in {}/{} — cannot answer "
+                    + "clarification (refusing to review the default branch)", prNumber, owner, repo);
+            return new Answer(AnswerOutcome.FAILED, null);
+        }
+
+        ReviewProgress progress = enableProgressComments
+                ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
+        boolean completed = false;
+        try {
+            if (progress != null) {
+                progress.start();
+            }
+            WorkspaceResult wsResult = workspaceService.preparePullRequestWorkspace(
+                    repositoryPlatform, owner, repo, headBranch, prNumber,
+                    PullRequestWorkspaceMode.READ_ONLY);
+            if (!wsResult.success()) {
+                log.warn("Failed to prepare workspace for clarification on PR #{}: {}",
+                        prNumber, wsResult.error());
+                repositoryClient.postPullRequestComment(owner, repo, prNumber,
+                        "⚠️ **AI Agent**: Could not check out this pull request, so the question "
+                                + "could not be answered. The bot log holds the Git output.");
+                return new Answer(AnswerOutcome.FAILED, null);
+            }
+            LoopOutcome outcome;
+            try (Workspace workspace = wsResult.workspace()) {
+                String systemPrompt = resolveClarificationPrompt();
+                String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary, userQuestion);
+                AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
+                ReviewAgentStrategy strategy = new ReviewAgentStrategy(systemPrompt, toolRouter,
+                        toolCatalog, context.mcpToolCatalog(), context.allowedBuiltinTools(),
+                        responseParser, branchSwitcher, this::fetchFiles,
+                        agentConfig.getBudget().getMaxContextRounds(), Math.max(1, maxToolRounds),
+                        Math.max(1, maxToolRounds), null);
+                AgentBudget budget = budget(maxToolRounds, maxToolRounds);
+                AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
+                AgentRunContext ctx = AgentRunContext.forPullRequest(session, owner, repo, prNumber,
+                        workspace, headBranch);
+                ctx.setDiffSummary(diffSummary);
+                ctx.setProgressConsumer(progress);
+                outcome = loop.run(ctx, userMessage, strategy);
+            }
+            if (!outcome.success() || !(outcome.payload() instanceof String answer) || answer.isBlank()) {
+                log.warn("Clarification for PR #{} produced no answer", prNumber);
+                return new Answer(AnswerOutcome.FAILED, null);
+            }
+            completed = true;
+            return new Answer(AnswerOutcome.ANSWERED, answer);
+        } catch (WorkflowCancelledException e) {
+            throw e;
+        } finally {
+            if (progress != null) {
+                progress.finish(completed);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ loop wiring
+
+    private LoopOutcome runReviewLoop(AgentSession session, Workspace workspace, String owner,
+                                      String repo, Long prNumber, String headBranch,
+                                      DiffSummary diffSummary, String prTitle, String prBody,
+                                      ReviewDraftHandle draft, Options options,
+                                      ReviewProgress progress) {
+        String systemPrompt = resolveReviewPrompt(options);
+        String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
+
+        int explorationRounds = Math.max(1, options.maxToolRounds());
+        int submissionRounds = Math.max(4, explorationRounds / 2);
+        ReviewInvocation invocation = invocation(draft, owner, repo, prNumber, options.runId());
+        ReviewAgentStrategy strategy = new ReviewAgentStrategy(systemPrompt, toolRouter, toolCatalog,
+                context.mcpToolCatalog(), context.allowedBuiltinTools(), responseParser,
+                branchSwitcher, this::fetchFiles, agentConfig.getBudget().getMaxContextRounds(),
+                explorationRounds, submissionRounds,
+                new ReviewAgentStrategy.Submission(submissionExecutor, invocation, reviewService));
+
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                budget(explorationRounds, submissionRounds));
+        AgentRunContext ctx = AgentRunContext.forPullRequest(session, owner, repo, prNumber,
+                workspace, headBranch);
+        ctx.setDiffSummary(diffSummary);
+        ctx.setAuditToolCallConsumer(options.toolCallConsumer());
+        ctx.setProgressConsumer(progress);
+        return loop.run(ctx, userMessage, strategy);
+    }
+
+    private AgentBudget budget(int explorationRounds, int submissionRounds) {
+        AgentConfigProperties.BudgetConfig budgetCfg = agentConfig.getBudget();
+        int reserve = Math.addExact(explorationRounds, submissionRounds);
+        int hardCap = Math.max(budgetCfg.getMaxRounds(), reserve + 2);
+        return new AgentBudget(hardCap, budgetCfg.getMaxContextRounds(),
+                budgetCfg.getMaxValidationRetries(), budgetCfg.getMaxTokensPerCall(),
+                budgetCfg.getMaxToolResultChars(), budgetCfg.getMaxHistoryChars(),
+                context.contextWindowTokens(), budgetCfg.getProactiveCompactionThreshold());
+    }
+
+    private ReviewInvocation invocation(ReviewDraftHandle draft, String owner, String repo,
+                                        Long prNumber, Long runId) {
+        return new ReviewInvocation(draft.reviewId(), bot.getId(),
+                bot.getGitIntegration() != null ? bot.getGitIntegration().getId() : null,
+                owner, repo, prNumber, runId,
+                () -> Thread.currentThread().isInterrupted());
+    }
+
+    // ------------------------------------------------------------------ prompts
+
+    private String resolveReviewPrompt(Options options) {
+        String base = systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
+                toolCatalog.reviewToolNames(context.allowedBuiltinTools()), context.mcpToolCatalog(),
+                toolingMode(), SystemPromptAssembler.PromptKind.AGENT_REVIEW_AGENT);
+        if (!options.enableFormalDecision()) {
+            return base;
+        }
+        String criteria = options.decisionPrompt() == null || options.decisionPrompt().isBlank()
+                ? AgentReviewWorkflow.DEFAULT_FORMAL_REVIEW_DECISION_PROMPT : options.decisionPrompt();
+        return base + "\n\n" + criteria;
+    }
+
+    private String resolveClarificationPrompt() {
+        return systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
+                toolCatalog.reviewToolNames(context.allowedBuiltinTools()), context.mcpToolCatalog(),
+                toolingMode(), SystemPromptAssembler.PromptKind.AGENT_REVIEW_QA);
+    }
+
+    private ToolingMode toolingMode() {
+        return aiClient != null && aiClient.supportsNativeTools() ? ToolingMode.NATIVE : ToolingMode.LEGACY;
+    }
+
+    private String buildKickoffMessage(String prTitle, String prBody, DiffSummary diffSummary) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Please review the following pull request.\n\n");
+        sb.append("Title: ").append(prTitle == null ? "(none)" : prTitle).append('\n');
+        if (prBody != null && !prBody.isBlank()) {
+            sb.append("Description:\n").append(prBody).append('\n');
+        }
+        sb.append("""
+
+                The repository is checked out in your read-only workspace. Use your available \
+                read-only tools to inspect the surrounding code before judging the change. \
+                You cannot modify the repository.
+
+                """);
+        sb.append("Changed files (").append(diffSummary.statLine()).append("):\n\n");
+        sb.append(diffSummary.fileTable()).append("\n");
+        sb.append("""
+                Record your review with the review tools described in your instructions: one \
+                finding per distinct problem, then the overall assessment, then completion. The \
+                application renders the published comment from those records — a reply written as \
+                text is not published.""");
+        return sb.toString();
+    }
+
+    private String buildClarificationMessage(String prTitle, String prBody, DiffSummary diffSummary,
+                                             String userQuestion) {
+        return """
+                The user has a follow-up question about the pull request you reviewed earlier.
+
+                PR Title: %s
+                PR Description:
+                %s
+
+                The question is:
+
+                %s
+
+                The repository is checked out in your read-only workspace. Use your available \
+                read-only tools to inspect the relevant code and answer the question \
+                concisely. You cannot modify the repository.
+
+                Changed files (%s):
+
+                %s
+
+                To see the diff hunks of changed files, call the `pr-diff` tool with up to 8 \
+                file paths. To read the full current content of a file, use `cat`. To understand \
+                a file's structure before reading it, use `ctags-signatures`.
+
+                When you have gathered enough context, reply with your answer as plain \
+                Markdown (no tool calls). Focus on answering the specific question asked.
+                """.formatted(
+                        prTitle == null ? "(none)" : prTitle,
+                        prBody == null || prBody.isBlank() ? "(none)" : prBody,
+                        userQuestion,
+                        diffSummary.statLine(),
+                        diffSummary.fileTable());
+    }
+
+    // ------------------------------------------------------------------ scope
+
+    private ReviewDraftRequest draftRequest(WebhookPayload payload, String owner, String repo,
+                                            Long prNumber, Long runId) {
+        Long integrationId = bot.getGitIntegration() != null ? bot.getGitIntegration().getId() : null;
+        Long providerRepositoryId = payload.getRepository().getId();
+        String baseSha = payload.getPullRequest().getBase() != null
+                ? payload.getPullRequest().getBase().getSha() : null;
+        String headSha = payload.getPullRequest().getHead() != null
+                ? payload.getPullRequest().getHead().getSha() : null;
+        return new ReviewDraftRequest(integrationId, bot.getId(), owner, repo,
+                providerRepositoryId == null ? null : String.valueOf(providerRepositoryId),
+                prNumber, runId, UUID.randomUUID().toString(), baseSha, headSha);
+    }
+
+    private String fetchFiles(String owner, String repo, String ref, List<String> filePaths) {
+        if (filePaths == null || filePaths.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int totalChars = 0;
+        for (String path : filePaths) {
+            if (totalChars > agentConfig.getMaxFileContentChars()) {
+                sb.append("\n(File context truncated due to size limits)\n");
+                break;
+            }
+            try {
+                String content = repositoryClient.getFileContent(owner, repo, path, ref);
+                if (content != null && !content.isEmpty()) {
+                    sb.append("\n--- File: ").append(path).append(" ---\n");
+                    sb.append(content).append('\n');
+                    totalChars += content.length();
+                }
+            } catch (Exception e) {
+                log.debug("Could not fetch file content for {}: {}", path, e.getMessage());
+            }
+        }
+        return sb.toString();
+    }
+}

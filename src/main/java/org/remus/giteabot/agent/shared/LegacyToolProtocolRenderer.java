@@ -242,6 +242,55 @@ public final class LegacyToolProtocolRenderer {
         return sb.toString();
     }
 
+    /**
+     * Renders the agentic-review legacy protocol: repository exploration through
+     * {@code requestFiles}/{@code requestTools}, and the review itself through {@code runTools}
+     * entries that carry a typed {@code arguments} object. Text is never the review.
+     */
+    public String renderReviewAgent(ToolCatalog catalog, Set<String> allowed) {
+        List<String> repoTools    = catalog.writerRepositoryToolNames(allowed);
+        List<String> contextTools = catalog.contextToolNames(allowed);
+        List<String> reviewTools  = catalog.reviewOutputToolNames();
+
+        StringBuilder exploration = new StringBuilder();
+        for (String name : repoTools)    { appendComma(exploration, name); }
+        for (String name : contextTools) { appendComma(exploration, name); }
+
+        StringBuilder sb = new StringBuilder(2048);
+        sb.append("Repository exploration (read-only):\n");
+        sb.append("Respond with JSON and request repository context before judging the change:\n");
+        sb.append("{\"requestFiles\":[\"src/main/java/App.java\"],\"requestTools\":[]}\n");
+        sb.append("Available exploration tools: ")
+          .append(exploration.isEmpty()
+                  ? "(none — operator disabled all read-only tools)"
+                  : exploration.toString())
+          .append(". Exploration calls carry a positional `args` array.\n\n");
+
+        sb.append("Recording the review:\n");
+        sb.append("Record findings and the assessment with `runTools` entries that carry an "
+                + "`arguments` OBJECT, never a positional `args` array:\n");
+        sb.append("{\"runTools\":[{\"id\":\"<uuid>\",\"tool\":\"review-upsert-finding\","
+                + "\"arguments\":{\"operationId\":\"finding-auth-1\",\"clientKey\":\"auth\","
+                + "\"severity\":\"MEDIUM\",\"category\":\"authorization\","
+                + "\"title\":\"…\",\"explanation\":\"…\",\"impact\":\"…\","
+                + "\"recommendation\":\"…\",\"evidence\":[{\"path\":\"src/Foo.java\","
+                + "\"side\":\"HEAD\",\"startLine\":42,\"endLine\":49,"
+                + "\"description\":\"…\"}]}}]}\n");
+        sb.append("Available review tools: ").append(joinBackticked(reviewTools)).append(".\n");
+        sb.append("Order: submit every finding, then set the overall assessment, then call "
+                + "`review-complete` alone in its own turn. `review-complete` must never share a "
+                + "turn with another call.\n\n");
+
+        sb.append("Rules:\n");
+        sb.append("- A turn mixes either exploration calls or review calls, never both.\n");
+        sb.append("- A review-tool entry carries `arguments`; an entry with both `args` and "
+                + "`arguments` is rejected.\n");
+        sb.append("- Text replies are not published. The application renders the review comment "
+                + "from the recorded findings and assessment.\n");
+        sb.append("- Never fabricate tool results in your text — wait for the bot's actual response.\n");
+        return sb.toString();
+    }
+
     private static void appendComma(StringBuilder sb, String name) {
         if (!sb.isEmpty()) {
             sb.append(", ");

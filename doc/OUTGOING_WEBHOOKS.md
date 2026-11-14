@@ -226,22 +226,23 @@ status); `summary` is present only when the workflow produced one.
 { "workflowKey": "review", "runId": 9182, "error": "AI call failed: …" }
 ```
 
-**`prworkflow.agentreview.finding.detected`** — the review agent's formal
-classification reported findings. Two shapes: one event **per structured
-finding** when the model returned them —
+**`prworkflow.agentreview.finding.detected`** — one event per finding of a
+published agentic review. The review is persisted before it is published, so
+every event carries the finding's stable reference and the review it belongs to:
 
 ```json
-{ "finding": { "severity": "blocker", "category": "security", "title": "SQL injection",
-               "file": "src/Foo.java", "line": 42, "cwe": "CWE-89", "owasp": "A03:2021" } }
+{ "review": "O1234",
+  "finding": { "reference": "O1234-F1", "severity": "blocker", "category": "security",
+               "title": "SQL injection", "file": "src/Foo.java", "side": "HEAD",
+               "line": 42, "endLine": 49 } }
 ```
 
-(all `finding` fields optional and omitted when unknown) — or a **single
-aggregate event** with the severity counts when no structured findings were
-parsed:
-
-```json
-{ "findingCounts": { "blocker": 1, "medium": 0, "low": 2 } }
-```
+`review`, `reference`, `severity`, `category` and `title` are always present. A
+repository-wide finding has no source location, so `file`, `side`, `line` and
+`endLine` are omitted rather than guessed. A review without findings emits no
+finding event; its severity totals are in the review comment itself (formerly an
+aggregate `findingCounts` event carried them, which only existed because older
+models returned counts without findings).
 
 <img src="screenshots/webhooks/delivery-details-finding.png" alt="Payload of a Review-finding" width="600"/>
 

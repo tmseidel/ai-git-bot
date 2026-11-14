@@ -380,7 +380,7 @@ class OpenRouterProviderTest {
             var client = provider.createClient(provider.buildRestClient(integration, "test-key"), integration);
             var router = mock(AgentToolRouter.class);
             var strategy = new ReviewAgentStrategy("sys", router, new ToolCatalog(new AgentConfigProperties()),
-                    null, Set.of("pr-diff"), new AiResponseParser(), null, null, 1);
+                    null, Set.of("pr-diff"), new AiResponseParser(), null, null, 1, 1, 1, null);
             var run = AgentRunContext.forIssue(new AgentSession("owner", "repo", 1L, "test"), "owner", "repo", 1L, null, "main");
             var loop = new AgentLoop(client, new AgentSessionService(mock(AgentSessionRepository.class)),
                     new AgentBudget(2, 1, 1, 32, 8_000, 120_000, 200_000, 0.7));
@@ -430,7 +430,7 @@ class OpenRouterProviderTest {
             retries.setMaxAttempts(2);
             retries.setInitialDelay(Duration.ZERO);
             var strategy = new ReviewAgentStrategy("sys", mock(AgentToolRouter.class), new ToolCatalog(new AgentConfigProperties()),
-                    null, Set.of("pr-diff"), new AiResponseParser(), null, null, 1);
+                    null, Set.of("pr-diff"), new AiResponseParser(), null, null, 1, 1, 1, null);
             var run = AgentRunContext.forIssue(new AgentSession("owner", "repo", 1L, "test"), "owner", "repo", 1L, null, "main");
             var loop = new AgentLoop(new RetryAiClient(client, retries, mock(ProviderRetryNotifier.class)),
                     new AgentSessionService(mock(AgentSessionRepository.class)),

@@ -16,6 +16,8 @@ import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.review.structured.ReviewSubmissionToolExecutor;
+import org.remus.giteabot.review.structured.StructuredReviewService;
 import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Component;
@@ -36,6 +38,9 @@ public class AgentReviewServiceFactory {
     private final WorkspaceService workspaceService;
     private final AgentConfigProperties agentConfig;
     private final EventHookPublisher eventHookPublisher;
+    private final StructuredReviewService structuredReviewService;
+    private final ReviewSubmissionToolExecutor submissionToolExecutor;
+    private final ReviewPublisher reviewPublisher;
 
     public AgentReviewService create(Bot bot) {
         if (bot.getSystemPrompt() == null) {
@@ -61,6 +66,7 @@ public class AgentReviewServiceFactory {
 
         return new AgentReviewService(context, agentSessionService, toolExecutionService,
                 toolCatalog, workspaceService, agentConfig, mcpOrchestrationService,
-                bot, eventHookPublisher, pythonExecution);
+                bot, eventHookPublisher, pythonExecution, structuredReviewService,
+                submissionToolExecutor, reviewPublisher);
     }
 }
