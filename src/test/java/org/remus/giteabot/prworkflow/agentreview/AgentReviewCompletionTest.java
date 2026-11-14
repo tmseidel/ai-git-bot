@@ -453,6 +453,31 @@ class AgentReviewCompletionTest {
                 .doesNotContain("Settings update may bypass authorization"));
     }
 
+    @Test
+    void theProgressCommentReportsWhatEachRoundActuallyDid() {
+        when(repositoryClient.postPullRequestComment(eq("owner"), eq("repo"), eq(1L),
+                contains("Agentic Review Progress"))).thenReturn(CommentId.NumericCommentId.of(42L));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThat(service.reviewPullRequest(payload, 12, false,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true,
+                AgentReviewLearningSettings.DISABLED))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        var bodies = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient, atLeastOnce()).updatePullRequestComment(eq("owner"), eq("repo"),
+                eq(1L), eq(CommentId.NumericCommentId.of(42L)), bodies.capture());
+
+        // "Waiting for model" is the loop's own line while the AI call is in flight; a completed
+        // round must replace it with what that round did, or the comment never leaves that state.
+        // Later rounds are throttled to one write per 15s, which a unit-speed test never reaches.
+        assertThat(bodies.getAllValues()).anySatisfy(body -> assertThat(body)
+                .contains("- Latest activity: recorded a finding"));
+        assertThat(bodies.getAllValues()).last().satisfies(body -> assertThat(body)
+                .contains("- Latest activity: Completed"));
+    }
+
     @ParameterizedTest
     @CsvSource({"create,false", "activity,false", "final,false",
             "create,true", "activity,true", "final,true"})

@@ -286,12 +286,6 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         if (explorationExhausted && !structured()) {
             return new StepDecision.Finish(onBudgetExhausted(ctx));
         }
-        if (ctx.progressConsumer() != null && hasExploration && !explorationExhausted) {
-            ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(round,
-                    "Inspecting repository: "
-                            + String.join(", ", calls.stream().map(ToolCall::name).toList()), 0));
-        }
-
         List<StepDecision.ToolCallResult> results = new ArrayList<>(calls.size());
         for (ToolCall call : calls) {
             if (isSubmission(call.name())) {
@@ -304,11 +298,48 @@ public final class ReviewAgentStrategy implements AgentStrategy {
                 results.add(executeExplorationCall(ctx, call));
             }
         }
-        if (ctx.progressConsumer() != null && hasExploration && !explorationExhausted) {
+        if (ctx.progressConsumer() != null && !calls.isEmpty()) {
+            // What actually happened this round, not a generic "completed": submissions used to
+            // report nothing at all, so the progress comment stayed on "Waiting for model".
             ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
-                    round, "Repository inspection completed", results.size()));
+                    round, describeActivity(calls.stream().map(ToolCall::name).toList()),
+                    results.size()));
         }
         return finishOrContinue(ctx, results);
+    }
+
+    /**
+     * One line describing what this round did, in the terms an operator reads: findings recorded,
+     * assessment set, review completed, files inspected. Tool names are mapped rather than echoed so
+     * the progress comment does not read like the wire protocol.
+     */
+    String describeActivity(List<String> toolNames) {
+        List<String> exploration = new ArrayList<>();
+        List<String> actions = new ArrayList<>();
+        for (String tool : toolNames) {
+            if (isLookup(tool)) {
+                actions.add("looked up the published review");
+            } else if (ReviewSubmissionToolExecutor.TOOL_NAMES.contains(normalize(tool))) {
+                actions.add(describeSubmission(tool));
+            } else {
+                exploration.add(tool);
+            }
+        }
+        if (!exploration.isEmpty()) {
+            actions.add(0, "inspected repository: " + String.join(", ", exploration));
+        }
+        return String.join(" \u00B7 ", actions);
+    }
+
+    private static String describeSubmission(String tool) {
+        return switch (normalize(tool)) {
+            case ReviewSubmissionToolExecutor.UPSERT_FINDING -> "recorded a finding";
+            case ReviewSubmissionToolExecutor.REMOVE_FINDING -> "withdrew a finding";
+            case ReviewSubmissionToolExecutor.SET_ASSESSMENT -> "set the assessment";
+            case ReviewSubmissionToolExecutor.COMPLETE -> "completed the review";
+            case ReviewSubmissionToolExecutor.GET_DRAFT -> "read the draft";
+            default -> "submitted review content";
+        };
     }
 
     private StepDecision finishOrContinue(AgentRunContext ctx, List<StepDecision.ToolCallResult> results) {
@@ -470,7 +501,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     @Override
     public StepDecision step(AgentRunContext ctx, String aiResponse, int round) {
         if (structured()) {
-            StepDecision submissionStep = stepLegacySubmission(ctx, aiResponse);
+            StepDecision submissionStep = stepLegacySubmission(ctx, aiResponse, round);
             if (submissionStep != null) {
                 return submissionStep;
             }
@@ -485,7 +516,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
      * {@link ReviewLegacyProtocol}. A turn mixing submission and exploration entries is refused as
      * a whole rather than half-applied.
      */
-    private StepDecision stepLegacySubmission(AgentRunContext ctx, String aiResponse) {
+    private StepDecision stepLegacySubmission(AgentRunContext ctx, String aiResponse, int round) {
         List<ReviewLegacyProtocol.Entry> entries = ReviewLegacyProtocol.entries(aiResponse);
         if (entries.isEmpty()) {
             return null;
@@ -534,6 +565,11 @@ public final class ReviewAgentStrategy implements AgentStrategy {
                 reference = referenceFromReceipt(result.output());
             }
         }
+        if (ctx.progressConsumer() != null) {
+            ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(round,
+                    describeActivity(submissions.stream().map(ReviewLegacyProtocol.Entry::tool).toList()),
+                    receipts.size()));
+        }
         if (reference != null) {
             return new StepDecision.Finish(LoopOutcome.success(ctx.baseBranch(), reference), receipts);
         }
@@ -576,16 +612,17 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             log.info("Agentic review (legacy) gathering context for PR #{} (round {}/{})",
                     ctx.issueNumber(), contextRounds, maxContextRounds);
 
-            if (ctx.progressConsumer() != null) {
-                ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
-                        round, "Gathering repository context", 0));
-            }
-
             // Review context stays on the original revision; all tools pass through the review policy.
             String context = gatherContext(ctx, requestFiles, toolRequests);
             if (ctx.progressConsumer() != null) {
-                ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(
-                        round, "Repository context gathered", toolRequests.size()));
+                List<String> inspected = new ArrayList<>(
+                        toolRequests.stream().map(ImplementationPlan.ToolRequest::getTool).toList());
+                if (requestFiles != null && !requestFiles.isEmpty()) {
+                    inspected.add("cat " + requestFiles.size() + " file(s)");
+                }
+                ctx.progressConsumer().accept(new AgentRunContext.ProgressUpdate(round,
+                        "inspected repository: " + String.join(", ", inspected),
+                        toolRequests.size()));
             }
             String next = structured()
                     ? "Here is the requested repository context:\n" + context

@@ -40,7 +40,7 @@ PR Review**.
 | Setting | Type | Default | What it controls |
 |---|---|---|---|
 | `maxToolRounds` | integer | `12` | How much exploring the bot may do (1–30). Higher means deeper analysis at higher cost. |
-| `enableProgressComments` | boolean | `false` | Create and update one progress comment per review or clarification. Supported by GitHub, Gitea, GitLab, and Bitbucket Cloud. Activity updates are at least 15 seconds apart; the final update is immediate. |
+| `enableProgressComments` | boolean | `false` | Create and update one progress comment per review or clarification. Supported by GitHub, Gitea, GitLab, and Bitbucket Cloud. The *Latest activity* line names what each finished round did — files inspected, findings recorded, assessment set, review completed — and the counter covers every tool call, not just inspection. Updates are at least 15 seconds apart, except the first round that records tool calls and the final state, which are written immediately. |
 | `enableFormalReviewDecision` | boolean | `false` | Let the bot approve or request changes, not just comment. The decision is computed from the stored findings and the thresholds below — it is never asked of the model. |
 | `blockerThreshold` | integer | *(empty)* | Maximum allowed `BLOCKER` findings for a formal `APPROVE`. Empty means ignored. |
 | `mediumThreshold` | integer | *(empty)* | Maximum allowed `MEDIUM` findings for a formal `APPROVE`. Empty means ignored. |

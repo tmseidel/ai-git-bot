@@ -186,14 +186,12 @@ class ReviewAgentStrategyLegacyTest {
                     StopReason.TOOL_USE, 100, 10);
             assertInstanceOf(StepDecision.ContinueWithToolResults.class, strategy().step(context, turn, 2));
             assertEquals(List.of(
-                    new AgentRunContext.ProgressUpdate(2, "Inspecting repository: cat", 0),
-                    new AgentRunContext.ProgressUpdate(2, "Repository inspection completed", 1)), activities);
+                    new AgentRunContext.ProgressUpdate(2, "inspected repository: cat", 1)), activities);
         } else {
             String request = "{\"requestTools\":[{\"tool\":\"cat\",\"args\":[\"README.md\"]}]}";
             assertInstanceOf(StepDecision.Continue.class, strategy().stepLegacy(context, ChatTurn.text(request), 2));
             assertEquals(List.of(
-                    new AgentRunContext.ProgressUpdate(2, "Gathering repository context", 0),
-                    new AgentRunContext.ProgressUpdate(2, "Repository context gathered", 1)), activities);
+                    new AgentRunContext.ProgressUpdate(2, "inspected repository: cat", 1)), activities);
         }
         verify(toolRouter).execute(eq(AgentToolRouter.Mode.REVIEW), any());
     }
