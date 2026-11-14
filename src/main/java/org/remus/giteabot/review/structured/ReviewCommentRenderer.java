@@ -96,7 +96,7 @@ public class ReviewCommentRenderer {
                 .sorted(Comparator
                         .comparingInt((FinalizedReview.Finding finding) -> rank(finding.severity()))
                         .thenComparingInt(finding -> finding.locations().isEmpty() ? 1 : 0)
-                        .thenComparing(finding -> firstPath(finding), String::compareTo)
+                        .thenComparing(ReviewCommentRenderer::firstPath, String::compareTo)
                         .thenComparingInt(ReviewCommentRenderer::firstStartLine))
                 .toList();
     }
@@ -110,14 +110,14 @@ public class ReviewCommentRenderer {
     }
 
     private static String firstPath(FinalizedReview.Finding finding) {
-        return finding.locations().isEmpty() ? "" : finding.locations().get(0).path();
+        return finding.locations().isEmpty() ? "" : finding.locations().getFirst().path();
     }
 
     private static int firstStartLine(FinalizedReview.Finding finding) {
         if (finding.locations().isEmpty()) {
             return Integer.MAX_VALUE;
         }
-        Integer start = finding.locations().get(0).startLine();
+        Integer start = finding.locations().getFirst().startLine();
         return start == null ? Integer.MAX_VALUE : start;
     }
 

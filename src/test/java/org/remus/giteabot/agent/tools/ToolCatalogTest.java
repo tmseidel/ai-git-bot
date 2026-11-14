@@ -10,6 +10,7 @@ import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -291,6 +292,38 @@ class ToolCatalogTest {
         assertThat(catalog.usageHint("write-file")).isEmpty();
         assertThat(catalog.usageHint("mvn")).isEmpty();
         assertThat(catalog.usageHint("does-not-exist")).isEmpty();
+    }
+
+    @Test
+    void reviewOutputToolsAreAProtocolSurfaceOfTheirOwn() {
+        assertThat(catalog.reviewOutputToolNames()).containsExactly(
+                "review-upsert-finding", "review-remove-finding", "review-get-draft",
+                "review-set-assessment", "review-complete");
+        for (String name : catalog.reviewOutputToolNames()) {
+            assertThat(catalog.kindOf(name)).as(name).isEqualTo(ToolKind.REVIEW_OUTPUT);
+            assertThat(catalog.isSilent(name)).as(name).isTrue();
+        }
+        // Not a repository capability an operator can grant or revoke: no other role sees them.
+        for (ToolCatalog.Role role : ToolCatalog.Role.values()) {
+            if (role == ToolCatalog.Role.REVIEW_OUTPUT) {
+                continue;
+            }
+            assertThat(catalog.builtinToolNames(role)).as(role.name())
+                    .doesNotContainAnyElementsOf(catalog.reviewOutputToolNames());
+        }
+        List<ToolDescriptor> descriptors = catalog.reviewOutputDescriptors();
+        assertThat(descriptors).extracting(ToolDescriptor::name)
+                .containsExactlyInAnyOrderElementsOf(catalog.reviewOutputToolNames());
+
+        // Evidence stays a typed array of objects: flattening it into strings would lose the
+        // path/side/line structure the persisted finding needs.
+        JsonNode evidence = descriptors.stream()
+                .filter(descriptor -> descriptor.name().equals("review-upsert-finding"))
+                .findFirst().orElseThrow()
+                .jsonSchema().get("properties").get("evidence");
+        assertThat(evidence.get("type").asString()).isEqualTo("array");
+        assertThat(evidence.get("items").get("properties").get("side").get("enum").toString())
+                .contains("BASE", "HEAD");
     }
 
     @Test

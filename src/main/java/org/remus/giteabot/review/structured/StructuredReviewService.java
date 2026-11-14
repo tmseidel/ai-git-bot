@@ -5,11 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 
@@ -93,11 +89,15 @@ public class StructuredReviewService {
      * Creates or updates the finding identified by {@code draft.clientKey()}. A correction
      * keeps the finding's ordinal and reference and advances its revision; any change
      * invalidates the current assessment.
+     *
+     * <p>No draft revision is required here: the finding's own {@code expectedFindingRevision}
+     * is the conflict guard, so several findings can be submitted in one batch without each
+     * submission invalidating the next.</p>
      */
     @Transactional
-    public FindingHandle upsertFinding(long reviewId, int expectedDraftRevision,
-                                       Integer expectedFindingRevision, FindingDraft draft) {
-        ReviewRecord review = requireMutableDraft(reviewId, expectedDraftRevision);
+    public FindingHandle upsertFinding(long reviewId, Integer expectedFindingRevision,
+                                       FindingDraft draft) {
+        ReviewRecord review = requireMutableDraft(reviewId);
         if (draft == null) {
             throw new InvalidReviewContentException("finding", "A finding submission is required");
         }
@@ -151,9 +151,9 @@ public class StructuredReviewService {
 
     /** Withdraws a finding without deleting it: the ordinal is never reused. */
     @Transactional
-    public ReviewDraftHandle withdrawFinding(long reviewId, int expectedDraftRevision,
-                                             int findingRevision, int ordinal, String reason) {
-        ReviewRecord review = requireMutableDraft(reviewId, expectedDraftRevision);
+    public ReviewDraftHandle withdrawFinding(long reviewId, int ordinal, int findingRevision,
+                                             String reason) {
+        ReviewRecord review = requireMutableDraft(reviewId);
         ReviewFinding finding = findByOrdinal(review, ordinal);
         if (finding.isWithdrawn()) {
             throw new ReviewDraftConflictException("Finding " + ordinal + " is already withdrawn",
@@ -182,7 +182,7 @@ public class StructuredReviewService {
     @Transactional
     public ReviewDraftHandle setAssessment(long reviewId, int expectedDraftRevision,
                                            AssessmentDraft draft) {
-        ReviewRecord review = requireMutableDraft(reviewId, expectedDraftRevision);
+        ReviewRecord review = requireDraftAtRevision(reviewId, expectedDraftRevision);
         if (draft == null || draft.conclusion() == null) {
             throw new InvalidReviewContentException("conclusion", "A conclusion is required");
         }
@@ -309,6 +309,22 @@ public class StructuredReviewService {
         return reviewRepository.findById(reviewId).map(StructuredReviewService::toSnapshot);
     }
 
+    /**
+     * Persisted scope of one review. The review-tool layer compares it with its trusted
+     * invocation before applying anything, so a tool call cannot reach another bot's,
+     * repository's or pull request's review.
+     */
+    @Transactional(readOnly = true)
+    public Optional<ReviewScope> findScope(long reviewId) {
+        return reviewRepository.findById(reviewId).map(review -> {
+            WorkflowOutput output = review.getOutput();
+            return new ReviewScope(review.getId(), output.getReference(), output.getBotId(),
+                    output.getGitIntegrationId(), output.getRepoOwner(), output.getRepoName(),
+                    output.getPrNumber(), output.getPrWorkflowRunId(), output.getInvocationId(),
+                    review.getState());
+        });
+    }
+
     private static DraftSnapshot toSnapshot(ReviewRecord review) {
         String reference = review.getOutput().getReference();
         List<DraftSnapshot.FindingSummary> findings = activeFindings(review).stream()
@@ -379,16 +395,10 @@ public class StructuredReviewService {
                         .append(location.description()).append('\n');
             }
         }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(canonical.toString()
-                    .getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required but unavailable", e);
-        }
+        return Digests.sha256Hex(canonical.toString());
     }
 
-    private ReviewRecord requireMutableDraft(long reviewId, int expectedDraftRevision) {
+    private ReviewRecord requireMutableDraft(long reviewId) {
         ReviewRecord review = reviewRepository.findById(reviewId)
                 .orElseThrow(() -> new InvalidReviewContentException("review",
                         "Unknown review " + reviewId));
@@ -396,6 +406,11 @@ public class StructuredReviewService {
             throw new ReviewDraftConflictException("Review " + reviewId + " is already "
                     + review.getState(), review.getDraftRevision());
         }
+        return review;
+    }
+
+    private ReviewRecord requireDraftAtRevision(long reviewId, int expectedDraftRevision) {
+        ReviewRecord review = requireMutableDraft(reviewId);
         if (review.getDraftRevision() != expectedDraftRevision) {
             throw new ReviewDraftConflictException("Draft revision is " + review.getDraftRevision()
                     + ", not " + expectedDraftRevision, review.getDraftRevision());

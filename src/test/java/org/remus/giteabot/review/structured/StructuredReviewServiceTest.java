@@ -12,7 +12,9 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -84,7 +86,7 @@ class StructuredReviewServiceTest {
 
     @Test
     void upsertFindingAssignsServerOrdinalAndReference() {
-        FindingHandle handle = service.upsertFinding(1L, 0, null, finding("settings-auth",
+        FindingHandle handle = service.upsertFinding(1L, null, finding("settings-auth",
                 ReviewSeverity.MEDIUM, "Settings update may bypass authorization"));
 
         assertEquals(1, handle.ordinal());
@@ -92,44 +94,43 @@ class StructuredReviewServiceTest {
         assertEquals(1, handle.revision());
         assertEquals(1, review.getDraftRevision());
         assertEquals(1, review.getFindings().size());
-        ReviewFinding stored = review.getFindings().get(0);
+        ReviewFinding stored = review.getFindings().getFirst();
         assertEquals("settings-auth", stored.getClientKey());
         assertEquals(1, stored.getLocations().size());
-        assertEquals("src/Foo.java", stored.getLocations().get(0).getPath());
-        assertEquals(ReviewSide.HEAD, stored.getLocations().get(0).getSide());
+        assertEquals("src/Foo.java", stored.getLocations().getFirst().getPath());
+        assertEquals(ReviewSide.HEAD, stored.getLocations().getFirst().getSide());
     }
 
     @Test
     void upsertFindingKeepsOrdinalOnCorrection() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
 
-        FindingHandle corrected = service.upsertFinding(1L, 1, 1,
+        FindingHandle corrected = service.upsertFinding(1L, 1,
                 finding("settings-auth", ReviewSeverity.BLOCKER, "Corrected title"));
 
         assertEquals(1, corrected.ordinal());
         assertEquals("O1234-F1", corrected.reference());
         assertEquals(2, corrected.revision());
         assertEquals(1, review.getFindings().size());
-        assertEquals("Corrected title", review.getFindings().get(0).getTitle());
-        assertEquals(ReviewSeverity.BLOCKER, review.getFindings().get(0).getSeverity());
+        assertEquals("Corrected title", review.getFindings().getFirst().getTitle());
+        assertEquals(ReviewSeverity.BLOCKER, review.getFindings().getFirst().getSeverity());
     }
 
     @Test
-    void upsertFindingRejectsStaleDraftRevision() {
+    void setAssessmentRejectsStaleDraftRevision() {
         ReviewDraftConflictException failure = assertThrows(ReviewDraftConflictException.class,
-                () -> service.upsertFinding(1L, 5, null,
-                        finding("settings-auth", ReviewSeverity.LOW, "Title")));
+                () -> service.setAssessment(1L, 5, assessment(ReviewConclusion.NO_FINDINGS)));
 
         assertEquals(0, failure.getCurrentDraftRevision());
-        assertTrue(review.getFindings().isEmpty());
+        assertNull(review.getAssessment());
     }
 
     @Test
     void upsertFindingRejectsStaleFindingRevision() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.LOW, "Title"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.LOW, "Title"));
 
         assertThrows(ReviewDraftConflictException.class,
-                () -> service.upsertFinding(1L, 1, 9,
+                () -> service.upsertFinding(1L, 9,
                         finding("settings-auth", ReviewSeverity.LOW, "Title")));
     }
 
@@ -154,15 +155,15 @@ class StructuredReviewServiceTest {
 
     @Test
     void withdrawnFindingIsNotReusedAndItsClientKeyIsRejected() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.LOW, "First"));
-        service.withdrawFinding(1L, 1, 1, 1, "Inspected the enclosing filter");
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.LOW, "First"));
+        service.withdrawFinding(1L, 1, 1, "Inspected the enclosing filter");
 
         ReviewDraftConflictException rejected = assertThrows(ReviewDraftConflictException.class,
-                () -> service.upsertFinding(1L, 2, null,
+                () -> service.upsertFinding(1L, null,
                         finding("settings-auth", ReviewSeverity.LOW, "First")));
         assertTrue(rejected.getMessage().contains("withdrawn"));
 
-        FindingHandle next = service.upsertFinding(1L, 2, null,
+        FindingHandle next = service.upsertFinding(1L, null,
                 finding("settings-other", ReviewSeverity.LOW, "Second"));
         assertEquals(2, next.ordinal());
         assertEquals("O1234-F2", next.reference());
@@ -172,10 +173,10 @@ class StructuredReviewServiceTest {
 
     @Test
     void withdrawFindingRejectsStaleFindingRevision() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.LOW, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.LOW, "First"));
 
         assertThrows(ReviewDraftConflictException.class,
-                () -> service.withdrawFinding(1L, 1, 7, 1, "reason"));
+                () -> service.withdrawFinding(1L, 1, 7, "reason"));
     }
 
     @Test
@@ -185,7 +186,7 @@ class StructuredReviewServiceTest {
                         new AssessmentDraft("Summary.", ReviewConclusion.FINDINGS_PRESENT, null, null)));
         assertEquals("conclusion", noFindings.getField());
 
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.LOW, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.LOW, "First"));
 
         assertThrows(InvalidReviewContentException.class, () -> service.setAssessment(1L, 1,
                 new AssessmentDraft("Summary.", ReviewConclusion.NO_FINDINGS, null, null)));
@@ -199,11 +200,11 @@ class StructuredReviewServiceTest {
 
     @Test
     void findingEditInvalidatesAssessment() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
         service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
         assertEquals(review.getDraftRevision(), review.getAssessment().getAssessedRevision());
 
-        service.upsertFinding(1L, 2, 1, finding("settings-auth", ReviewSeverity.MEDIUM, "Corrected"));
+        service.upsertFinding(1L, 1, finding("settings-auth", ReviewSeverity.MEDIUM, "Corrected"));
 
         assertEquals(ReviewAssessment.STALE_REVISION, review.getAssessment().getAssessedRevision());
         DraftSnapshot snapshot = service.findDraft(1L).orElseThrow();
@@ -212,8 +213,8 @@ class StructuredReviewServiceTest {
 
     @Test
     void finalizeFreezesRecordWithCountsAndHash() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
-        service.upsertFinding(1L, 1, null, finding("naming", ReviewSeverity.LOW, "Second"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("naming", ReviewSeverity.LOW, "Second"));
         service.setAssessment(1L, 2, assessment(ReviewConclusion.FINDINGS_PRESENT));
 
         FinalizedReview finalized = service.finalizeReview(1L, 3, 2);
@@ -233,7 +234,7 @@ class StructuredReviewServiceTest {
 
     @Test
     void finalizeRequiresAssessment() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
 
         InvalidReviewContentException failure = assertThrows(InvalidReviewContentException.class,
                 () -> service.finalizeReview(1L, 1, 1));
@@ -242,9 +243,9 @@ class StructuredReviewServiceTest {
 
     @Test
     void finalizeRejectsStaleAssessment() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
         service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
-        service.upsertFinding(1L, 2, 1, finding("settings-auth", ReviewSeverity.MEDIUM, "Corrected"));
+        service.upsertFinding(1L, 1, finding("settings-auth", ReviewSeverity.MEDIUM, "Corrected"));
 
         InvalidReviewContentException failure = assertThrows(InvalidReviewContentException.class,
                 () -> service.finalizeReview(1L, 3, 1));
@@ -253,7 +254,7 @@ class StructuredReviewServiceTest {
 
     @Test
     void finalizeRejectsFindingCountAndRevisionMismatch() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
         service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
 
         assertThrows(ReviewDraftConflictException.class, () -> service.finalizeReview(1L, 2, 5));
@@ -262,7 +263,7 @@ class StructuredReviewServiceTest {
 
     @Test
     void finalizeIsRejectedTwice() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
         service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
         service.finalizeReview(1L, 2, 1);
 
@@ -271,11 +272,11 @@ class StructuredReviewServiceTest {
 
     @Test
     void finalizedReviewRejectsFurtherEdits() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
         service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
         service.finalizeReview(1L, 2, 1);
 
-        assertThrows(ReviewDraftConflictException.class, () -> service.upsertFinding(1L, 2, 1,
+        assertThrows(ReviewDraftConflictException.class, () -> service.upsertFinding(1L, 1,
                 finding("settings-auth", ReviewSeverity.MEDIUM, "Corrected")));
     }
 
@@ -307,8 +308,7 @@ class StructuredReviewServiceTest {
                 List.of(finalizedFinding("O1234-F1", "Other title")), null);
 
         assertEquals(StructuredReviewService.hash(first), StructuredReviewService.hash(same));
-        assertFalse(StructuredReviewService.hash(first)
-                .equals(StructuredReviewService.hash(changed)));
+        assertNotEquals(StructuredReviewService.hash(first), StructuredReviewService.hash(changed));
     }
 
     @Test
@@ -334,7 +334,7 @@ class StructuredReviewServiceTest {
 
     @Test
     void draftSnapshotReportsCurrentAssessment() {
-        service.upsertFinding(1L, 0, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
         service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
 
         DraftSnapshot snapshot = service.findDraft(1L).orElseThrow();
@@ -343,13 +343,13 @@ class StructuredReviewServiceTest {
         assertEquals(ReviewState.DRAFT, snapshot.state());
         assertEquals(2, snapshot.draftRevision());
         assertEquals(1, snapshot.findings().size());
-        assertEquals("O1234-F1", snapshot.findings().get(0).reference());
+        assertEquals("O1234-F1", snapshot.findings().getFirst().reference());
         assertTrue(snapshot.assessmentCurrent());
     }
 
     private void assertInvalidField(String field, LocationDraft location) {
         InvalidReviewContentException failure = assertThrows(InvalidReviewContentException.class,
-                () -> service.upsertFinding(1L, review.getDraftRevision(), null,
+                () -> service.upsertFinding(1L, null,
                         new FindingDraft("key", ReviewSeverity.LOW, "category", "Title",
                                 "Explanation.", "Impact.", "Recommendation.", List.of(location))));
         assertEquals(field, failure.getField());

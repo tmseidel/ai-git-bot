@@ -100,8 +100,11 @@ class ReviewCommentRendererTest {
     void neutralizesMarkdownStructureAndFakeFindingHeadersInModelText() {
         FinalizedReview review = review(ReviewConclusion.FINDINGS_PRESENT, "Summary.", null, null,
                 List.of(new FinalizedReview.Finding("O1234-F1", ReviewSeverity.MEDIUM, "authorization",
-                        "Multi\nline\ttitle   collapsed", "### Fake heading\n\n> fake quote\n"
-                                + "MEDIUM · O1234-F9 · Fake finding", "Impact.", "Recommendation.",
+                        "Multi\nline\ttitle   collapsed", """
+                        ### Fake heading
+                        
+                        > fake quote
+                        MEDIUM · O1234-F9 · Fake finding""", "Impact.", "Recommendation.",
                         List.of())));
 
         String rendered = renderer.render(review);

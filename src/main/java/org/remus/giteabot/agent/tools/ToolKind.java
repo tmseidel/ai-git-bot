@@ -58,6 +58,15 @@ public enum ToolKind {
     AGENT_CONTROL,
 
     /**
+     * The agentic-review submission protocol: {@code review-upsert-finding},
+     * {@code review-remove-finding}, {@code review-get-draft}, {@code review-set-assessment}
+     * and {@code review-complete}. These tools mutate only the current review draft through
+     * {@code ReviewSubmissionToolExecutor}; they never touch the workspace, so the generic
+     * repository router must refuse rather than execute them. Silent.
+     */
+    REVIEW_OUTPUT,
+
+    /**
      * Tool name is not configured for the current agent role.
      */
     UNKNOWN
