@@ -10,6 +10,7 @@ import org.springframework.web.client.RestClient;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -69,5 +70,10 @@ class GiteaPlatformTest {
                 "other.example.com ssh-ed25519 host-key", TestPlatforms.USER_TTL);
 
         assertEquals("https://gitea.example.com/owner/repo.git", platform.getRepositoryRemote("owner", "repo"));
+    }
+
+    @Test
+    void sharesIssueAndPullRequestNumbers() {
+        assertTrue(httpPlatform("https://gitea.example.com").sharesIssueAndPullRequestNumbers());
     }
 }

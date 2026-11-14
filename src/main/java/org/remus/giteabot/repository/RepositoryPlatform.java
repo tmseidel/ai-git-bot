@@ -136,6 +136,16 @@ public abstract class RepositoryPlatform {
     }
 
     /**
+     * Whether issues and pull requests share one number sequence, so that a pull request's
+     * number is also its issue's number. True for Gitea and GitHub; GitLab, Bitbucket and
+     * Azure DevOps number them separately, where merge request !5 has nothing to do with
+     * issue #5.
+     */
+    public boolean sharesIssueAndPullRequestNumbers() {
+        return false;
+    }
+
+    /**
      * Returns the exception {@link #getRepositoryRemote} throws for a transport this provider
      * resolves no remote for. Without it, Git would be handed SSH credentials together with an
      * HTTP remote and fail with an unrelated authentication error.

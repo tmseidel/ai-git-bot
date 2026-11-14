@@ -7,32 +7,40 @@ import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.event.PullRequestStateTracker;
+import org.remus.giteabot.webhook.TranslatingWebhookHandler;
+import org.remus.giteabot.webhook.WebhookEventDispatcher;
+import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Covers the dispatch half of {@link AzureDevopsWebhookHandler}: routing, bot-loop
- * suppression, and the various "ignored" paths. The translation half is covered by
- * {@link AzureDevopsPayloadTranslationTest}.
+ * Covers how {@link AzureDevopsWebhookTranslator} classifies events and, through the real
+ * {@link WebhookEventDispatcher}, which {@link BotWebhookService} handler they reach:
+ * routing, bot-loop suppression, the event-to-event state, and the various "ignored"
+ * paths. The payload translation itself is covered by {@link AzureDevopsPayloadTranslationTest}.
  */
-class AzureDevopsWebhookHandlerTest {
+class AzureDevopsWebhookTranslatorTest {
 
     private BotWebhookService botWebhookService;
     private RepositoryPlatformFactory repositoryPlatformFactory;
-    private AzureDevopsWebhookHandler handler;
+    private AzureDevopsWebhookTranslator translator;
+    private TranslatingWebhookHandler handler;
     private Bot bot;
 
     @BeforeEach
     void setUp() {
         botWebhookService = mock(BotWebhookService.class);
         repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
-        handler = new AzureDevopsWebhookHandler(botWebhookService, repositoryPlatformFactory);
+        translator = new AzureDevopsWebhookTranslator(repositoryPlatformFactory, new PullRequestStateTracker());
+        handler = new TranslatingWebhookHandler(translator, null, botWebhookService);
 
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://dev.azure.com/contoso");
@@ -44,8 +52,6 @@ class AzureDevopsWebhookHandlerTest {
         bot.setRunOnPrCreation(true);
         bot.setGitIntegration(integration);
 
-        when(botWebhookService.isBotUser(any(), any())).thenReturn(false);
-        when(botWebhookService.getBotAlias(any())).thenReturn("@bot");
     }
 
     @Test
@@ -78,10 +84,10 @@ class AzureDevopsWebhookHandlerTest {
 
     @Test
     void eventFromBotItself_isIgnored() {
-        when(botWebhookService.isBotUser(any(), any())).thenReturn(true);
-
+        // Azure DevOps reports the creator of a new pull request as its createdBy.
         assertEquals("ignored",
-                handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.created"))
+                handler.handleWebhook(bot, withResource(pullRequestPayload("git.pullrequest.created"),
+                        "createdBy", Map.of("uniqueName", "bot@contoso.com")))
                         .getBody());
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
@@ -189,7 +195,9 @@ class AzureDevopsWebhookHandlerTest {
                 "git.pullrequest.updated", sha, "bot@contoso.com"));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        // Marked as a review request, so the bot acknowledges it like one elsewhere.
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot),
+                argThat(payload -> "review_requested".equals(payload.getAction())));
     }
 
     @Test
@@ -334,21 +342,21 @@ class AzureDevopsWebhookHandlerTest {
     void commentWithoutPullRequest_isIgnoredEvenWhenBodyMentionsBotAlias() {
         // Dangerous path: a malformed comment payload missing resource.pullRequest,
         // where the comment body still mentions the bot alias. Without the null
-        // guard, handlePullRequestComment would happily call handleBotCommand (or
-        // worse, reviewPullRequest/handleInlineComment) with a payload whose
-        // pull request, repository, number and issue are all null.
+        // guard, the dispatcher would happily call handlePrComment (or worse,
+        // reviewPullRequest/handleInlineComment) with a payload whose pull
+        // request, repository, number and issue are all null.
         Map<String, Object> payload = Map.of(
                 "eventType", "ms.vss-code.git-pullrequest-comment-event",
                 "resource", Map.of(
                         "comment", Map.of("id", 7,
-                                "content", "@bot please review",
+                                "content", "@bot@contoso.com please review",
                                 "author", Map.of("uniqueName", "dev@contoso.com"))));
         // Note: "pullRequest" is deliberately absent from "resource".
 
         var response = handler.handleWebhook(bot, payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleBotCommand(any(), any());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
         verify(botWebhookService, never()).handleInlineComment(any(), any());
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
@@ -366,15 +374,15 @@ class AzureDevopsWebhookHandlerTest {
     @Test
     void organizationFromResourceContainers_missingOrUnusableContainers_returnsNull() {
         // Better to ignore the event than to invent an organization that fails later.
-        assertNull(handler.organizationFromResourceContainers(null));
-        assertNull(handler.organizationFromResourceContainers(Map.of()));
-        assertNull(handler.organizationFromResourceContainers(
+        assertNull(translator.organizationFromResourceContainers(null));
+        assertNull(translator.organizationFromResourceContainers(Map.of()));
+        assertNull(translator.organizationFromResourceContainers(
                 Map.of("resourceContainers", Map.of())));
         // A collection container with no baseUrl at all.
-        assertNull(handler.organizationFromResourceContainers(
+        assertNull(translator.organizationFromResourceContainers(
                 Map.of("resourceContainers", Map.of("collection", Map.of("id", "c1d373ed")))));
         // A blank baseUrl.
-        assertNull(handler.organizationFromResourceContainers(
+        assertNull(translator.organizationFromResourceContainers(
                 Map.of("resourceContainers", Map.of("collection", Map.of("baseUrl", "")))));
     }
 
@@ -382,7 +390,7 @@ class AzureDevopsWebhookHandlerTest {
     void organizationFromResourceContainers_collectionEqualToDeploymentRoot_returnsNull() {
         // A collection base url identical to the deployment root names no collection, so
         // the last-segment rule would otherwise return the virtual directory "tfs".
-        assertNull(handler.organizationFromResourceContainers(Map.of(
+        assertNull(translator.organizationFromResourceContainers(Map.of(
                 "resourceContainers", Map.of(
                         "collection", Map.of("baseUrl", "https://tfs.example.com/tfs/"),
                         "server", Map.of("baseUrl", "https://tfs.example.com/tfs")))));
@@ -392,9 +400,9 @@ class AzureDevopsWebhookHandlerTest {
 
     @Test
     void organizationFromCollectionBaseUrl_modernForm_returnsLastPathSegment() {
-        assertEquals("fabrikam", handler.organizationFromCollectionBaseUrl(
+        assertEquals("fabrikam", translator.organizationFromCollectionBaseUrl(
                 "https://dev.azure.com/fabrikam/"));
-        assertEquals("fabrikam", handler.organizationFromCollectionBaseUrl(
+        assertEquals("fabrikam", translator.organizationFromCollectionBaseUrl(
                 "https://dev.azure.com/fabrikam"));
     }
 
@@ -402,18 +410,18 @@ class AzureDevopsWebhookHandlerTest {
     void organizationFromCollectionBaseUrl_serverFormBehindVirtualDirectories_returnsCollection() {
         // Azure DevOps Server can sit behind any number of virtual-directory segments, so
         // the collection is the last segment rather than one at a fixed depth.
-        assertEquals("DefaultCollection", handler.organizationFromCollectionBaseUrl(
+        assertEquals("DefaultCollection", translator.organizationFromCollectionBaseUrl(
                 "https://tfs.example.com/tfs/DefaultCollection/"));
-        assertEquals("DefaultCollection", handler.organizationFromCollectionBaseUrl(
+        assertEquals("DefaultCollection", translator.organizationFromCollectionBaseUrl(
                 "https://tfs.example.com/DefaultCollection/"));
-        assertEquals("ProjectCollection", handler.organizationFromCollectionBaseUrl(
+        assertEquals("ProjectCollection", translator.organizationFromCollectionBaseUrl(
                 "https://tfs.example.com/a/b/c/ProjectCollection/"));
     }
 
     @Test
     void organizationFromCollectionBaseUrl_legacyForm_returnsHostLabel() {
         // The legacy collection base url has an empty path.
-        assertEquals("fabrikam", handler.organizationFromCollectionBaseUrl(
+        assertEquals("fabrikam", translator.organizationFromCollectionBaseUrl(
                 "https://fabrikam.visualstudio.com/"));
     }
 
@@ -421,17 +429,48 @@ class AzureDevopsWebhookHandlerTest {
     void organizationFromCollectionBaseUrl_legacyHostWins_overItsCollectionSegment() {
         // A legacy base url may also carry a collection segment, but the organization is
         // the host label — resolving the collection instead would address the wrong one.
-        assertEquals("fabrikam", handler.organizationFromCollectionBaseUrl(
+        assertEquals("fabrikam", translator.organizationFromCollectionBaseUrl(
                 "https://fabrikam.visualstudio.com/DefaultCollection/"));
     }
 
     @Test
     void organizationFromCollectionBaseUrl_unusableUrl_returnsNull() {
-        assertNull(handler.organizationFromCollectionBaseUrl(null));
-        assertNull(handler.organizationFromCollectionBaseUrl(""));
-        assertNull(handler.organizationFromCollectionBaseUrl("not a url"));
+        assertNull(translator.organizationFromCollectionBaseUrl(null));
+        assertNull(translator.organizationFromCollectionBaseUrl(""));
+        assertNull(translator.organizationFromCollectionBaseUrl("not a url"));
         // Nothing to read: no path segment, and no legacy host label to fall back to.
-        assertNull(handler.organizationFromCollectionBaseUrl("https://tfs.example.com/"));
+        assertNull(translator.organizationFromCollectionBaseUrl("https://tfs.example.com/"));
+    }
+
+    // ---- Comments ----
+
+    @Test
+    void inlineCommentMentioningBot_isHydratedAndRoutesToHandleInlineComment() {
+        AzureDevopsApiClient client = mock(AzureDevopsApiClient.class);
+        when(repositoryPlatformFactory.getApiClient(bot.getGitIntegration())).thenReturn(client);
+        when(client.getInlineThreadContext(any(), any(), any(), anyLong()))
+                .thenReturn(new AzureDevopsApiClient.InlineThreadContext("src/Foo.java", 12));
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, commentPayload("@bot@contoso.com why this?"));
+
+        assertEquals("inline comment response triggered", response.getBody());
+        var captor = org.mockito.ArgumentCaptor.forClass(WebhookPayload.class);
+        verify(botWebhookService).handleInlineComment(eq(bot), captor.capture());
+        assertEquals("src/Foo.java", captor.getValue().getComment().getPath());
+        assertEquals(12, captor.getValue().getComment().getLine());
+    }
+
+    private static Map<String, Object> commentPayload(String content) {
+        return Map.of("eventType", "ms.vss-code.git-pullrequest-comment-event",
+                "resource", Map.of(
+                        "comment", Map.of("id", 7,
+                                "content", content,
+                                "author", Map.of("uniqueName", "dev@contoso.com"),
+                                "_links", Map.of("threads", Map.of("href",
+                                        "https://dev.azure.com/contoso/_apis/git/repositories/"
+                                                + "my-service/pullRequests/42/threads/5"))),
+                        "pullRequest", ((Map<?, ?>) pullRequestPayload("git.pullrequest.created").get("resource"))),
+                "resourceContainers", pullRequestPayload("git.pullrequest.created").get("resourceContainers"));
     }
 
     private static Map<String, Object> pullRequestPayloadWithHeadSha(String eventType, String sha) {

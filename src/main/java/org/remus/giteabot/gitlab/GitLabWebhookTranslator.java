@@ -2,12 +2,15 @@ package org.remus.giteabot.gitlab;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
+import org.remus.giteabot.event.BotIdentity;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
+import org.remus.giteabot.event.WebhookSignatures;
+import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.util.BotMention;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -15,291 +18,200 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Handler for GitLab webhook events.
- * <p>
- * Receives GitLab webhook payloads and translates them into the common
- * {@link WebhookPayload} model used by the rest of the application, then
- * delegates to {@link BotWebhookService} for actual processing.
+ * Translates GitLab webhooks into provider-neutral {@link WebhookEvent}s.
  * <p>
  * GitLab event types are delivered via the {@code X-Gitlab-Event} header.
  * Supported events: Merge Request Hook, Note Hook, Issue Hook.
+ * <p>
+ * A merge request {@code update} covers pushes, title/description edits, label, reviewer
+ * and assignee changes alike. GitLab marks pushes by including
+ * {@code object_attributes.oldrev}, and reviewer and assignee changes by listing them
+ * under {@code changes} with their previous and current users; those signals are what
+ * tell a push, a review request and an assignment apart from an edit.
  */
 @Slf4j
 @Component
-public class GitLabWebhookHandler {
+public class GitLabWebhookTranslator implements WebhookTranslator {
 
-    private final BotWebhookService botWebhookService;
+    static final String EVENT_HEADER = "X-Gitlab-Event";
 
-    public GitLabWebhookHandler(BotWebhookService botWebhookService) {
-        this.botWebhookService = botWebhookService;
+    @Override
+    public RepositoryType providerType() {
+        return RepositoryType.GITLAB;
     }
 
-    /**
-     * Handles a GitLab webhook event for the given bot.
-     *
-     * @param bot       the bot to process the webhook for
-     * @param eventType the GitLab event type from X-Gitlab-Event header
-     * @param payload   the raw webhook payload
-     * @return response indicating the result of webhook processing
-     */
-    public ResponseEntity<String> handleWebhook(Bot bot, String eventType, Map<String, Object> payload) {
+    /** GitLab sends the shared secret itself: {@code X-Gitlab-Token: <secret>}. */
+    @Override
+    public boolean verifySignature(String signingSecret, Map<String, String> headers, byte[] rawBody) {
+        return WebhookSignatures.matches(signingSecret, headers.get("X-Gitlab-Token"));
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public WebhookEvent translate(Bot bot, Map<String, String> headers, Map<String, Object> payload) {
+        String eventType = headers.get(EVENT_HEADER);
         if (eventType == null) {
-            log.warn("Missing X-Gitlab-Event header for GitLab webhook");
-            return ResponseEntity.ok("ignored");
+            log.warn("Missing {} header for GitLab webhook", EVENT_HEADER);
+            return WebhookEvent.ignored("missing " + EVENT_HEADER + " header");
         }
 
         log.debug("Processing GitLab event: {} for bot '{}'", eventType, bot.getName());
 
+        Map<String, Object> attrs = (Map<String, Object>) payload.get("object_attributes");
+        if (attrs == null) {
+            return WebhookEvent.ignored("GitLab " + eventType + " without object_attributes");
+        }
+
+        BotIdentity identity = BotIdentity.of(bot);
         return switch (eventType) {
-            case "Merge Request Hook" -> handleMergeRequestEvent(bot, payload);
-            case "Note Hook" -> handleNoteEvent(bot, payload);
-            case "Issue Hook" -> handleIssueEvent(bot, payload);
-            default -> {
-                log.debug("Unhandled GitLab event type: {}", eventType);
-                yield ResponseEntity.ok("ignored");
-            }
+            case "Merge Request Hook" -> classifyMergeRequest(bot, identity, payload, attrs);
+            case "Note Hook" -> classifyNote(identity, payload, attrs);
+            case "Issue Hook" -> classifyIssue(identity, payload, attrs);
+            default -> WebhookEvent.ignored("unhandled GitLab event type '" + eventType + "'");
         };
     }
 
-    // ---- Event handlers ----
+    // ---- Classification ----
 
-    /**
-     * Handles GitLab Merge Request Hook events.
-     * Maps to PR opened/synchronized/closed events.
-     */
     @SuppressWarnings("unchecked")
-    private ResponseEntity<String> handleMergeRequestEvent(Bot bot, Map<String, Object> payload) {
-        Map<String, Object> attrs = (Map<String, Object>) payload.get("object_attributes");
-        if (attrs == null) {
-            return ResponseEntity.ok("ignored");
-        }
-
+    private WebhookEvent classifyMergeRequest(Bot bot, BotIdentity identity, Map<String, Object> payload,
+                                              Map<String, Object> attrs) {
         String gitlabAction = (String) attrs.get("action");
         WebhookPayload webhookPayload = translateMergeRequestPayload(payload, attrs);
-
-        boolean botUserEvent = botWebhookService.isBotUser(bot, webhookPayload);
-        boolean botReviewerReRequestEvent = isBotReviewerReRequestEvent(bot, payload, gitlabAction);
-
-        // Ignore events from the bot itself, except GitLab reviewer re-request events.
-        if (botUserEvent && !botReviewerReRequestEvent) {
-            log.debug("Ignoring GitLab event from bot's own user '{}'", bot.getGitIntegration().getUsername());
-            return ResponseEntity.ok("ignored");
-        }
 
         return switch (gitlabAction != null ? gitlabAction : "") {
             case "open" -> {
                 webhookPayload.setAction("opened");
-                if (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload, null)) {
-                    botWebhookService.reviewPullRequest(bot, webhookPayload);
-                    yield ResponseEntity.ok("review triggered");
-                }
-                yield ResponseEntity.ok("ignored");
+                yield WebhookEvent.of(WebhookEventKind.PR_OPENED, webhookPayload, identity);
+            }
+            case "reopen" -> {
+                webhookPayload.setAction("reopened");
+                yield WebhookEvent.of(WebhookEventKind.PR_REOPENED, webhookPayload, identity);
             }
             case "update" -> {
-                webhookPayload.setAction("synchronized");
                 Map<String, Object> changes = (Map<String, Object>) payload.get("changes");
-                if (changes != null && hasBotReviewer(bot, payload, changes)) {
-                    botWebhookService.reviewPullRequest(bot, webhookPayload);
-                    yield ResponseEntity.ok("review triggered");
+                if (botWasAdded(identity, changes, "reviewers")) {
+                    webhookPayload.setAction("review_requested");
+                    yield WebhookEvent.of(WebhookEventKind.PR_REVIEWER_ADDED, webhookPayload, identity);
                 }
-                yield ResponseEntity.ok("ignored");
+                if (botWasAdded(identity, changes, "assignees")) {
+                    webhookPayload.setAction("assigned");
+                    yield WebhookEvent.of(WebhookEventKind.PR_ASSIGNED, webhookPayload, identity);
+                }
+                if (isPush(attrs)) {
+                    webhookPayload.setAction("synchronized");
+                    yield WebhookEvent.of(WebhookEventKind.PR_SYNCHRONIZED, webhookPayload, identity);
+                }
+                yield WebhookEvent.ignored(
+                        "merge request update without a push or the bot being added as reviewer or assignee");
             }
             case "close", "merge" -> {
                 webhookPayload.setAction("closed");
-                botWebhookService.handlePrClosed(bot, webhookPayload);
-                yield ResponseEntity.ok("session closed");
+                yield WebhookEvent.of(WebhookEventKind.PR_CLOSED, webhookPayload, identity);
             }
             case "approved" -> {
-                if (botUserEvent && botReviewerReRequestEvent) {
+                // An "approved" event attributed to the bot while the bot is a reviewer is
+                // treated as GitLab re-requesting a review from it — the one bot-authored
+                // event the bot acts on. When the bot's own post-review action is APPROVE,
+                // the event is just that approval echoing back.
+                if (identity.triggered(webhookPayload)
+                        && identity.isReviewer(webhookPayload)
+                        && !isApprovePostReviewActionConfigured(bot)) {
                     webhookPayload.setAction("review_requested");
-                    botWebhookService.reviewPullRequest(bot, webhookPayload);
-                    yield ResponseEntity.ok("review triggered");
+                    yield WebhookEvent.builder()
+                            .kind(WebhookEventKind.PR_REVIEWER_ADDED)
+                            .payload(webhookPayload)
+                            .fromBot(false)
+                            .botIsReviewer(true)
+                            .botAlias(identity.alias())
+                            .build();
                 }
-                yield ResponseEntity.ok("ignored");
+                yield WebhookEvent.ignored("merge request approval");
             }
-            default -> ResponseEntity.ok("ignored");
+            default -> WebhookEvent.ignored("unhandled GitLab merge request action '" + gitlabAction + "'");
         };
     }
 
     /**
-     * Handles GitLab Note Hook events (comments on MRs and issues).
-     * Maps to PR comment or issue comment events.
+     * Note Hook events are comments on merge requests, issues, commits and snippets; only the
+     * first two are handled. Notes carrying a diff {@code position} are inline comments.
      */
     @SuppressWarnings("unchecked")
-    private ResponseEntity<String> handleNoteEvent(Bot bot, Map<String, Object> payload) {
-        Map<String, Object> attrs = (Map<String, Object>) payload.get("object_attributes");
-        if (attrs == null) {
-            return ResponseEntity.ok("ignored");
-        }
-
+    private WebhookEvent classifyNote(BotIdentity identity, Map<String, Object> payload, Map<String, Object> attrs) {
         String noteableType = (String) attrs.get("noteable_type");
-        String noteBody = (String) attrs.get("note");
-        String botAlias = botWebhookService.getBotAlias(bot);
-
-        if (!BotMention.isMentioned(noteBody, botAlias)) {
-            return ResponseEntity.ok("ignored");
+        if (!"MergeRequest".equals(noteableType) && !"Issue".equals(noteableType)) {
+            return WebhookEvent.ignored("note on unsupported noteable type '" + noteableType + "'");
         }
 
-        if ("MergeRequest".equals(noteableType)) {
-            return handleMergeRequestNote(bot, payload, attrs);
-        } else if ("Issue".equals(noteableType)) {
-            return handleIssueNote(bot, payload, attrs);
-        }
-
-        return ResponseEntity.ok("ignored");
-    }
-
-    /**
-     * Handles a comment on a GitLab merge request.
-     */
-    @SuppressWarnings("unchecked")
-    private ResponseEntity<String> handleMergeRequestNote(Bot bot, Map<String, Object> payload,
-                                                           Map<String, Object> noteAttrs) {
-        WebhookPayload webhookPayload = translateNotePayload(payload, noteAttrs);
+        WebhookPayload webhookPayload = translateNotePayload(payload, attrs);
         webhookPayload.setAction("created");
 
-        // Ignore events from the bot itself
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            return ResponseEntity.ok("ignored");
+        if ("Issue".equals(noteableType)) {
+            return WebhookEvent.of(WebhookEventKind.ISSUE_COMMENT, webhookPayload, identity);
+        }
+        if (webhookPayload.getPullRequest() == null) {
+            return WebhookEvent.ignored("merge request note without merge_request object");
         }
 
-        // Check if this is an inline comment (has position info)
-        Map<String, Object> position = (Map<String, Object>) noteAttrs.get("position");
-        if (position != null) {
-            String path = (String) position.get("new_path");
-            if (path != null && !path.isBlank()) {
-                webhookPayload.getComment().setPath(path);
-                Object newLine = position.get("new_line");
-                if (newLine instanceof Number n) {
-                    webhookPayload.getComment().setLine(n.intValue());
-                }
-                botWebhookService.handleInlineComment(bot, webhookPayload);
-                return ResponseEntity.ok("inline comment response triggered");
+        Map<String, Object> position = (Map<String, Object>) attrs.get("position");
+        String path = position != null ? (String) position.get("new_path") : null;
+        if (path != null && !path.isBlank()) {
+            webhookPayload.getComment().setPath(path);
+            if (position.get("new_line") instanceof Number n) {
+                webhookPayload.getComment().setLine(n.intValue());
             }
+            return WebhookEvent.of(WebhookEventKind.PR_INLINE_COMMENT, webhookPayload, identity);
         }
 
-        // Mark as a PR comment (set a dummy pull_request on the issue)
-        if (webhookPayload.getIssue() != null) {
-            WebhookPayload.IssuePullRequest issuePr = new WebhookPayload.IssuePullRequest();
-            issuePr.setMerged(false);
-            webhookPayload.getIssue().setPullRequest(issuePr);
-        }
-
-        String botAlias = botWebhookService.getBotAlias(bot);
-        if (botWebhookService.isReviewAgainRequest(webhookPayload, botAlias)) {
-            if (!botWebhookService.isPullRequestAuthor(webhookPayload)) {
-                return ResponseEntity.ok("ignored");
-            }
-            botWebhookService.reviewPullRequest(bot, webhookPayload);
-            return ResponseEntity.ok("review triggered");
-        }
-
-        botWebhookService.handleBotCommand(bot, webhookPayload);
-        return ResponseEntity.ok("command received");
+        return WebhookEvent.of(WebhookEventKind.PR_COMMENT, webhookPayload, identity);
     }
 
-    /**
-     * Handles a comment on a GitLab issue (non-MR).
-     */
-    private ResponseEntity<String> handleIssueNote(Bot bot, Map<String, Object> payload,
-                                                    Map<String, Object> noteAttrs) {
-        WebhookPayload webhookPayload = translateNotePayload(payload, noteAttrs);
-        webhookPayload.setAction("created");
-
-        // Ignore events from the bot itself
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            return ResponseEntity.ok("ignored");
-        }
-
-        botWebhookService.handleIssueComment(bot, webhookPayload);
-        return ResponseEntity.ok("issue comment received");
-    }
-
-    /**
-     * Handles GitLab Issue Hook events.
-     * Detects when the bot is assigned to an issue and triggers the agent,
-     * and optionally triggers on issue creation when {@code runOnIssueCreation}
-     * is enabled.
-     */
     @SuppressWarnings("unchecked")
-    private ResponseEntity<String> handleIssueEvent(Bot bot, Map<String, Object> payload) {
-        Map<String, Object> attrs = (Map<String, Object>) payload.get("object_attributes");
-        if (attrs == null) {
-            return ResponseEntity.ok("ignored");
-        }
-
+    private WebhookEvent classifyIssue(BotIdentity identity, Map<String, Object> payload, Map<String, Object> attrs) {
         String gitlabAction = (String) attrs.get("action");
-
-        // Trigger on issue creation when the bot opts in.
         if ("open".equals(gitlabAction) || "reopen".equals(gitlabAction)) {
-            if (!bot.isRunOnIssueCreation()) {
-                log.debug("Ignoring GitLab issue {} — runOnIssueCreation is disabled", gitlabAction);
-                return ResponseEntity.ok("ignored");
-            }
             WebhookPayload webhookPayload = translateIssuePayload(payload, attrs);
-            webhookPayload.setAction("open".equals(gitlabAction) ? "opened" : "reopened");
-
-            if (botWebhookService.isBotUser(bot, webhookPayload)) {
-                log.debug("Ignoring GitLab issue {} event from bot's own user '{}'",
-                        gitlabAction, bot.getGitIntegration().getUsername());
-                return ResponseEntity.ok("ignored");
-            }
-
-            botWebhookService.handleIssueCreated(bot, webhookPayload);
-            return ResponseEntity.ok("agent triggered");
+            boolean opened = "open".equals(gitlabAction);
+            webhookPayload.setAction(opened ? "opened" : "reopened");
+            return WebhookEvent.of(opened ? WebhookEventKind.ISSUE_OPENED : WebhookEventKind.ISSUE_REOPENED, webhookPayload, identity);
         }
-
-        // We're interested in "update" actions where assignees changed
         if (!"update".equals(gitlabAction)) {
-            log.debug("Ignoring GitLab issue action: {}", gitlabAction);
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("unhandled GitLab issue action '" + gitlabAction + "'");
         }
 
-        // Check if assignees were changed
         Map<String, Object> changes = (Map<String, Object>) payload.get("changes");
-        if (changes == null || !changes.containsKey("assignees")) {
-            log.debug("No assignee changes in GitLab issue update, ignoring");
-            return ResponseEntity.ok("ignored");
+        if (!botWasAdded(identity, changes, "assignees")) {
+            return WebhookEvent.ignored("issue update without the bot being newly assigned");
         }
-
-        // Check if the bot was newly assigned
-        Map<String, Object> assigneeChanges = (Map<String, Object>) changes.get("assignees");
-        List<Map<String, Object>> currentAssignees = assigneeChanges != null
-                ? (List<Map<String, Object>>) assigneeChanges.get("current") : null;
-        List<Map<String, Object>> previousAssignees = assigneeChanges != null
-                ? (List<Map<String, Object>>) assigneeChanges.get("previous") : null;
-
-        if (!isBotNewlyAssigned(bot, currentAssignees, previousAssignees)) {
-            log.debug("Bot '{}' was not newly assigned to the issue, ignoring", bot.getGitIntegration().getUsername());
-            return ResponseEntity.ok("ignored");
-        }
-
         WebhookPayload webhookPayload = translateIssuePayload(payload, attrs);
         webhookPayload.setAction("assigned");
-
-        // Ignore events from the bot itself
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            log.debug("Ignoring GitLab issue event from bot's own user '{}'", bot.getGitIntegration().getUsername());
-            return ResponseEntity.ok("ignored");
-        }
-
-        botWebhookService.handleIssueAssigned(bot, webhookPayload);
-        return ResponseEntity.ok("agent triggered");
+        return WebhookEvent.of(WebhookEventKind.ISSUE_ASSIGNED, webhookPayload, identity);
     }
 
     /**
-     * Checks whether the bot's username appears in the current assignees but not in the previous ones.
+     * GitLab includes {@code object_attributes.oldrev} on a merge request update only when
+     * new commits were pushed to the source branch.
      */
-    private boolean isBotNewlyAssigned(Bot bot, List<Map<String, Object>> currentAssignees,
-                                        List<Map<String, Object>> previousAssignees) {
-        if (currentAssignees == null) {
+    private static boolean isPush(Map<String, Object> attrs) {
+        return attrs.get("oldrev") instanceof String oldrev && !oldrev.isBlank();
+    }
+
+    /**
+     * Whether the bot appears in {@code changes.<field>.current} but not in
+     * {@code changes.<field>.previous}, i.e. it was just added rather than already present.
+     */
+    @SuppressWarnings("unchecked")
+    private boolean botWasAdded(BotIdentity identity, Map<String, Object> changes, String field) {
+        if (changes == null || !(changes.get(field) instanceof Map<?, ?> change)) {
             return false;
         }
-        boolean inCurrent = currentAssignees.stream()
-                .anyMatch(a -> bot.getGitIntegration().getUsername().equalsIgnoreCase((String) a.get("username")));
-        boolean inPrevious = previousAssignees != null && previousAssignees.stream()
-                .anyMatch(a -> bot.getGitIntegration().getUsername().equalsIgnoreCase((String) a.get("username")));
-        return inCurrent && !inPrevious;
+        return containsBot(identity, (List<Map<String, Object>>) change.get("current"))
+                && !containsBot(identity, (List<Map<String, Object>>) change.get("previous"));
+    }
+
+    private boolean containsBot(BotIdentity identity, List<Map<String, Object>> users) {
+        List<WebhookPayload.Owner> owners = extractGitLabOwners(users);
+        return owners != null && owners.stream().anyMatch(identity::is);
     }
 
     // ---- GitLab → WebhookPayload translation ----
@@ -324,6 +236,7 @@ public class GitLabWebhookHandler {
             pr.setUser(extractGitLabOwner((Map<String, Object>) gitlabPayload.get("merge_request"), "author"));
         }
         pr.setRequestedReviewers(extractGitLabOwners((List<Map<String, Object>>) gitlabPayload.get("reviewers")));
+        pr.setAssignees(extractGitLabOwners((List<Map<String, Object>>) gitlabPayload.get("assignees")));
 
         // Head and base
         WebhookPayload.Head head = new WebhookPayload.Head();
@@ -449,15 +362,6 @@ public class GitLabWebhookHandler {
         if ("MergeRequest".equals(noteableType)) {
             Map<String, Object> mr = (Map<String, Object>) gitlabPayload.get("merge_request");
             if (mr != null) {
-                // Set issue with MR number (needed for bot command routing)
-                WebhookPayload.Issue issue = new WebhookPayload.Issue();
-                issue.setNumber(toLong(mr.get("iid")));
-                issue.setTitle((String) mr.get("title"));
-                issue.setBody((String) mr.get("description"));
-                issue.setUser(extractGitLabAuthor(mr, user));
-                payload.setIssue(issue);
-
-                // Also set pullRequest for context
                 WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
                 pr.setId(toLong(mr.get("id")));
                 pr.setNumber(toLong(mr.get("iid")));
@@ -538,38 +442,11 @@ public class GitLabWebhookHandler {
         return null;
     }
 
-    @SuppressWarnings("unchecked")
-    private boolean hasBotReviewer(Bot bot, Map<String, Object> payload, Map<String, Object> changes) {
-        List<Map<String, Object>> currentReviewers = (List<Map<String, Object>>) payload.get("reviewers");
-        if (changes != null) {
-            if (!(changes.get("reviewers") instanceof Map<?, ?> reviewersChange)) {
-                return false;
-            }
-            List<Map<String, Object>> previousReviewers =
-                    (List<Map<String, Object>>) reviewersChange.get("previous");
-            currentReviewers = (List<Map<String, Object>>) reviewersChange.get("current");
-            // Trigger review only if the bot was newly added (present in current but not in previous).
-            return containsGitLabUser(currentReviewers, bot.getGitIntegration().getUsername())
-                    && !containsGitLabUser(previousReviewers, bot.getGitIntegration().getUsername());
-        }
-        return containsGitLabUser(currentReviewers, bot.getGitIntegration().getUsername());
-    }
-
-    private boolean isBotReviewerReRequestEvent(Bot bot, Map<String, Object> payload, String gitlabAction) {
-        return "approved".equals(gitlabAction)
-                && hasBotReviewer(bot, payload, null)
-                && !isApprovePostReviewActionConfigured(bot);
-    }
-
     private boolean isApprovePostReviewActionConfigured(Bot bot) {
         return bot.getGitIntegration() != null
                 && bot.getGitIntegration().getPostReviewAction() == PostReviewAction.APPROVE;
     }
 
-    private boolean containsGitLabUser(List<Map<String, Object>> users, String username) {
-        return users != null && users.stream()
-                .anyMatch(user -> username.equalsIgnoreCase((String) user.get("username")));
-    }
 
     @SuppressWarnings("unchecked")
     private WebhookPayload.Owner extractGitLabOwner(Map<String, Object> source, String key) {

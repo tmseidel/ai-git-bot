@@ -8,7 +8,7 @@ import org.remus.giteabot.repository.model.SshCredentials;
 import java.time.Duration;
 import java.util.function.Supplier;
 
-/** The platform of a GitHub integration. Uses every default of {@link RepositoryPlatform}. */
+/** The platform of a GitHub integration. */
 public class GitHubPlatform extends RepositoryPlatform {
 
     public GitHubPlatform(String baseUrl, String cloneUrl,
@@ -16,5 +16,11 @@ public class GitHubPlatform extends RepositoryPlatform {
                           @Nullable Supplier<SshCredentials> sshCredentials,
                           GitHubApiClient client, Duration userTtl) {
         super(baseUrl, cloneUrl, httpCredentials, sshCredentials, client, userTtl);
+    }
+
+    /** A pull request is an issue on GitHub and takes its number. */
+    @Override
+    public boolean sharesIssueAndPullRequestNumbers() {
+        return true;
     }
 }

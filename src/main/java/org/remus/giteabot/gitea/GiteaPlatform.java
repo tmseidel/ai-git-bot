@@ -41,4 +41,10 @@ public class GiteaPlatform extends RepositoryPlatform {
             case SSH -> giteaClient.getSshRepositoryRemote(owner, repo, sshKnownHosts);
         };
     }
+
+    /** A pull request is an issue on Gitea and takes its number. */
+    @Override
+    public boolean sharesIssueAndPullRequestNumbers() {
+        return true;
+    }
 }

@@ -6,31 +6,25 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
-import org.remus.giteabot.azuredevops.AzureDevopsWebhookHandler;
-import org.remus.giteabot.bitbucket.BitbucketWebhookHandler;
-import org.remus.giteabot.gitea.GiteaWebhookHandler;
-import org.remus.giteabot.github.GitHubWebhookHandler;
-import org.remus.giteabot.gitlab.GitLabWebhookHandler;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.repository.RepositoryType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.util.LinkedCaseInsensitiveMap;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * Unified webhook controller that routes incoming webhooks to the appropriate
- * provider-specific handler based on the bot's configured Git integration type.
+ * Unified webhook controller for all Git providers.
  * <p>
  * All webhooks are received at a single endpoint: {@code /api/webhook/{webhookSecret}}.
- * The bot is looked up by the webhook secret, and based on its {@link RepositoryType},
- * the request is delegated to the appropriate handler:
- * <ul>
- *   <li>{@link RepositoryType#GITEA} → {@link GiteaWebhookHandler}</li>
- *   <li>{@link RepositoryType#GITHUB} → {@link GitHubWebhookHandler}</li>
- *   <li>{@link RepositoryType#BITBUCKET} → {@link BitbucketWebhookHandler}</li>
- *   <li>{@link RepositoryType#GITLAB} → {@link GitLabWebhookHandler}</li>
- *   <li>{@link RepositoryType#AZURE_DEVOPS} → {@link AzureDevopsWebhookHandler}</li>
- * </ul>
+ * The bot is looked up by the webhook secret and the provider signature is verified.
+ * The {@link WebhookTranslator} for the bot's {@link RepositoryType} then classifies the
+ * request into a provider-neutral {@link WebhookEvent}, and the shared
+ * {@link WebhookEventDispatcher} decides what the bot does with it — so trigger rules
+ * are the same for every provider.
  */
 @Slf4j
 @RestController
@@ -39,11 +33,8 @@ import java.util.Map;
 public class UnifiedWebhookController {
 
     private final BotService botService;
-    private final GiteaWebhookHandler giteaHandler;
-    private final GitHubWebhookHandler gitHubHandler;
-    private final BitbucketWebhookHandler bitbucketHandler;
-    private final GitLabWebhookHandler gitLabHandler;
-    private final AzureDevopsWebhookHandler azureDevopsHandler;
+    private final List<WebhookTranslator> translators;
+    private final WebhookEventDispatcher dispatcher;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -55,9 +46,6 @@ public class UnifiedWebhookController {
      * happens.</p>
      *
      * @param webhookSecret the bot's unique webhook secret (URL path)
-     * @param xGitHubEvent  GitHub event type header (optional)
-     * @param xGitLabEvent  GitLab event type header (optional)
-     * @param xEventKey     Bitbucket event key header (optional)
      * @param headers       all request headers (for signature verification)
      * @param rawBody       the raw webhook payload bytes
      * @return response indicating the result of webhook processing
@@ -65,9 +53,6 @@ public class UnifiedWebhookController {
     @PostMapping("/{webhookSecret}")
     public ResponseEntity<String> handleWebhook(
             @PathVariable String webhookSecret,
-            @RequestHeader(value = "X-GitHub-Event", required = false) String xGitHubEvent,
-            @RequestHeader(value = "X-Gitlab-Event", required = false) String xGitLabEvent,
-            @RequestHeader(value = "X-Event-Key", required = false) String xEventKey,
             @RequestHeader Map<String, String> headers,
             @RequestBody byte[] rawBody) {
 
@@ -77,12 +62,16 @@ public class UnifiedWebhookController {
                         log.debug("Bot '{}' is disabled, ignoring webhook", bot.getName());
                         return ResponseEntity.ok("bot disabled");
                     }
-                    // Optional second factor: provider signature over the raw body.
+                    WebhookTranslator translator = translatorFor(bot.getGitIntegration().getProviderType());
+                    Map<String, String> caseInsensitiveHeaders = new LinkedCaseInsensitiveMap<>();
+                    caseInsensitiveHeaders.putAll(headers);
+                    // Optional second factor: the provider's signature over the raw body. Without
+                    // a signing secret configured, the URL path secret alone authenticates.
                     String signingSecret = botService.getDecryptedWebhookSigningSecret(bot);
-                    if (!WebhookSignatureVerifier.isValid(
-                            bot.getGitIntegration().getProviderType(), signingSecret, headers, rawBody)) {
+                    if (signingSecret != null && !signingSecret.isBlank()
+                            && !translator.verifySignature(signingSecret, caseInsensitiveHeaders, rawBody)) {
                         log.warn("Invalid webhook signature for bot '{}' from {}",
-                                bot.getName(), headers.getOrDefault("x-forwarded-for", "?"));
+                                bot.getName(), caseInsensitiveHeaders.getOrDefault("x-forwarded-for", "?"));
                         return ResponseEntity.status(401).body("invalid signature");
                     }
                     Map<String, Object> payload;
@@ -92,7 +81,12 @@ public class UnifiedWebhookController {
                         return ResponseEntity.badRequest().body("invalid JSON payload");
                     }
                     botService.incrementWebhookCallCount(bot);
-                    return routeToHandler(bot, xGitHubEvent, xGitLabEvent, xEventKey, payload);
+                    log.info("Webhook received for bot '{}' (provider={}, git={})",
+                            bot.getName(),
+                            bot.getAiIntegration().getProviderType(),
+                            bot.getGitIntegration().getName());
+                    WebhookEvent event = translator.translate(bot, caseInsensitiveHeaders, payload);
+                    return dispatcher.dispatch(bot, event);
                 })
                 .orElseGet(() -> {
                     log.warn("No bot found for webhook secret: {}...",
@@ -101,26 +95,11 @@ public class UnifiedWebhookController {
                 });
     }
 
-    /**
-     * Routes the webhook to the appropriate handler based on the bot's Git integration type.
-     */
-    private ResponseEntity<String> routeToHandler(Bot bot,
-                                                   String xGitHubEvent,
-                                                   String xGitLabEvent,
-                                                   String xEventKey,
-                                                   Map<String, Object> payload) {
-        RepositoryType providerType = bot.getGitIntegration().getProviderType();
-        log.info("Webhook received for bot '{}' (provider={}, git={})",
-                bot.getName(),
-                bot.getAiIntegration().getProviderType(),
-                bot.getGitIntegration().getName());
-
-        return switch (providerType) {
-            case GITEA -> giteaHandler.handleWebhook(bot, payload);
-            case GITHUB -> gitHubHandler.handleWebhook(bot, xGitHubEvent, payload);
-            case BITBUCKET -> bitbucketHandler.handleWebhook(bot, xEventKey, payload);
-            case GITLAB -> gitLabHandler.handleWebhook(bot, xGitLabEvent, payload);
-            case AZURE_DEVOPS -> azureDevopsHandler.handleWebhook(bot, payload);
-        };
+    /** The translator for the provider; every provider has one, so a miss is a wiring bug. */
+    private WebhookTranslator translatorFor(RepositoryType providerType) {
+        return translators.stream()
+                .filter(t -> t.providerType() == providerType)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("No WebhookTranslator registered for " + providerType));
     }
 }

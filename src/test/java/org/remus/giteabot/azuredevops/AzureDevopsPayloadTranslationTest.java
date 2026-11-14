@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class AzureDevopsPayloadTranslationTest {
 
-    private final AzureDevopsWebhookHandler handler = new AzureDevopsWebhookHandler(null, null);
+    private final AzureDevopsWebhookTranslator handler = new AzureDevopsWebhookTranslator(null, null);
 
     @Test
     void translatePullRequestCreated_mapsAllFields() {
@@ -83,7 +83,7 @@ class AzureDevopsPayloadTranslationTest {
     void translatePullRequestUpdated_leavesSenderUnsetBecauseCreatedByIsTheAuthor() {
         // resource.createdBy is the pull request's author; Azure DevOps sends no actor
         // on pull request events. Carrying the author over as the sender would make
-        // BotWebhookService#isBotUser drop every update on a pull request the bot itself
+        // BotIdentity#triggered drop every update on a pull request the bot itself
         // opened, so a human pushing to the bot's own PR would never get a re-review.
         // The PR author is still available on pullRequest.user, where it belongs.
         WebhookPayload updated = handler.translatePayload(
@@ -102,9 +102,8 @@ class AzureDevopsPayloadTranslationTest {
         assertEquals(ThreadCommentId.of(5L, 7L), payload.getComment().getId());
         assertEquals("@bot please review", payload.getComment().getBody());
         assertEquals(42L, payload.getPullRequest().getNumber());
-        assertNotNull(payload.getIssue(), "comment events need a synthetic issue");
-        assertEquals(42L, payload.getIssue().getNumber());
-        assertNotNull(payload.getIssue().getPullRequest());
+        // Only what Azure DevOps sent: the issue half is added by the dispatcher.
+        assertNull(payload.getIssue());
         // The repository lives under resource.pullRequest here, but the organization
         // still comes from the envelope, so both event families agree on the address.
         assertAddress(payload, "contoso", "MyProject", "my-service");

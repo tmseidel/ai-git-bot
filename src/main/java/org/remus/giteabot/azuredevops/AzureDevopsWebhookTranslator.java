@@ -1,18 +1,22 @@
 package org.remus.giteabot.azuredevops;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
+import org.remus.giteabot.event.BotIdentity;
+import org.remus.giteabot.event.PullRequestStateTracker;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
+import org.remus.giteabot.event.WebhookSignatures;
+import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
-import org.springframework.http.ResponseEntity;
+import org.remus.giteabot.repository.RepositoryType;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -21,15 +25,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Handler for Azure DevOps Service Hook events.
- * <p>
- * Receives Azure DevOps Service Hook payloads and translates them into the common
- * {@link WebhookPayload} model used by the rest of the application, then delegates
- * to {@link BotWebhookService} for actual processing.
+ * Translates Azure DevOps Service Hook events into provider-neutral {@link WebhookEvent}s.
  * <p>
  * Unlike GitHub, GitLab and Bitbucket, Azure DevOps does not send its event type in
- * an HTTP header — it is carried in the body as {@code eventType}, so this handler
- * (like {@code GiteaWebhookHandler}) takes no header argument.
+ * an HTTP header — it is carried in the body as {@code eventType}.
  * <p>
  * Azure DevOps event names are notoriously misleading:
  * <ul>
@@ -37,13 +36,10 @@ import java.util.regex.Pattern;
  *   <li>{@code git.pullrequest.updated} — fires on status changes, reviewer
  *       additions and vote changes, and pushes to the source branch.
  *       {@code resource.status} of {@code completed} or {@code abandoned} is the
- *       <em>only</em> close signal; any other status maps to {@code synchronized},
- *       but only when the source branch actually moved — see
- *       {@link #sourceBranchMoved}. This event also stands in for two the other
- *       providers send separately, because Azure DevOps has neither: the bot being
- *       added as a reviewer ({@code review_requested}, see {@link #botReviewerAdded})
- *       and an abandoned pull request going active again ({@code reopened}, see
- *       {@link #consumeReopened}).</li>
+ *       <em>only</em> close signal. Everything else — a push, a vote, an edit, the bot
+ *       being added as a reviewer, an abandoned pull request going active again — is
+ *       told apart by comparing the event with the previous one
+ *       ({@link PullRequestStateTracker}), see {@link #classifyUpdate}.</li>
  *   <li>{@code git.pullrequest.merged} — titled "Pull request merge attempted" by
  *       Azure DevOps. It fires whenever the service builds the *preview* merge
  *       commit, including at PR creation and on every subsequent push. It carries
@@ -53,329 +49,151 @@ import java.util.regex.Pattern;
  *   <li>{@code ms.vss-code.git-pullrequest-comment-event} — comment added.</li>
  * </ul>
  * Azure DevOps sends no actor on pull request events — only the pull request's
- * author — so {@link BotWebhookService#isBotUser(Bot, WebhookPayload)} can only
- * suppress self-triggered events for comments (which do carry their author) and
+ * author — so {@link BotIdentity#triggered(WebhookPayload)} can only
+ * recognise self-triggered events for comments (which do carry their author) and
  * for {@code git.pullrequest.created}. The bot's own reviewer vote arrives as a
- * {@code git.pullrequest.updated} event and is filtered by {@link #sourceBranchMoved}
- * instead, on the grounds that a vote leaves the source branch where it was.
+ * {@code git.pullrequest.updated} event and is filtered out because it leaves the
+ * source branch where it was.
  */
 @Slf4j
 @Component
-public class AzureDevopsWebhookHandler {
+@RequiredArgsConstructor
+public class AzureDevopsWebhookTranslator implements WebhookTranslator {
 
     private static final String REFS_HEADS_PREFIX = "refs/heads/";
 
     /** Matches the thread id in a comment's {@code _links} hrefs. */
     private static final Pattern THREAD_ID = Pattern.compile("/threads/(\\d+)");
 
-    /** Upper bound on tracked pull requests; the least recently touched entry is dropped. */
-    private static final int MAX_TRACKED_PULL_REQUESTS = 5000;
-
-    private final BotWebhookService botWebhookService;
     private final RepositoryPlatformFactory repositoryPlatformFactory;
+    private final PullRequestStateTracker stateTracker;
 
-    /**
-     * What the previous event said about one pull request: the source-branch commit it
-     * carried, whether the bot was among its reviewers, and whether it left the pull
-     * request closed.
-     */
-    private record Tracked(String headSha, boolean botIsReviewer, boolean closed) {
-
-        /** The state of a pull request no event has been seen for yet. */
-        static final Tracked NOTHING = new Tracked(null, false, false);
+    @Override
+    public RepositoryType providerType() {
+        return RepositoryType.AZURE_DEVOPS;
     }
 
     /**
-     * Per-pull-request state, keyed by bot + repository + PR number.
-     * <p>
-     * Azure DevOps events carry no change set: a push, a vote, a title edit, a reviewer
-     * being added and a reactivation all arrive as {@code git.pullrequest.updated} and
-     * look alike. Every distinction this handler draws therefore comes from comparing an
-     * event against what the one before it said — {@link #sourceBranchMoved},
-     * {@link #botReviewerAdded} and {@link #consumeReopened} each own one field.
-     * <p>
-     * Access-ordered and capped, so a long-lived instance cannot grow without bound. The
-     * state is in-memory only: after a restart the first event per pull request is taken
-     * at face value, which costs at most one extra review and never drops a genuine one.
-     * The same applies per node when the bot runs more than one instance behind a load
-     * balancer — each keeps its own view, so a pull request whose events are spread
-     * across nodes can be reviewed once per node that sees a first event for it.
-     * Compound read-modify-write access synchronizes on the map, as
-     * {@link Collections#synchronizedMap} requires — and as reads must anyway, since
-     * access ordering makes {@code get} a structural change.
+     * Azure DevOps Service Hooks send no signature over the body. The subscription's "HTTP
+     * headers" field carries the shared secret instead: {@code X-AiGitBot-Token: <secret>}.
      */
-    private final Map<String, Tracked> trackedPullRequests = Collections.synchronizedMap(
-            new LinkedHashMap<>(64, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, Tracked> eldest) {
-                    return size() > MAX_TRACKED_PULL_REQUESTS;
-                }
-            });
-
-    public AzureDevopsWebhookHandler(BotWebhookService botWebhookService,
-                                     RepositoryPlatformFactory repositoryPlatformFactory) {
-        this.botWebhookService = botWebhookService;
-        this.repositoryPlatformFactory = repositoryPlatformFactory;
+    @Override
+    public boolean verifySignature(String signingSecret, Map<String, String> headers, byte[] rawBody) {
+        return WebhookSignatures.matches(signingSecret, headers.get("X-AiGitBot-Token"));
     }
 
-    /**
-     * Handles an Azure DevOps Service Hook event for the given bot.
-     *
-     * @param bot     the bot to process the webhook for
-     * @param payload the raw webhook payload, carrying the event type in {@code eventType}
-     * @return response indicating the result of webhook processing
-     */
-    public ResponseEntity<String> handleWebhook(Bot bot, Map<String, Object> payload) {
+    @Override
+    public WebhookEvent translate(Bot bot, Map<String, String> headers, Map<String, Object> payload) {
         String eventType = (String) payload.get("eventType");
         if (eventType == null) {
             log.warn("Missing eventType in Azure DevOps webhook payload");
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("missing eventType in Azure DevOps payload");
         }
 
         log.debug("Processing Azure DevOps event: {} for bot '{}'", eventType, bot.getName());
 
-        // translatePayload returns null for every event type this handler does not act
+        // translatePayload returns null for every event type this translator does not act
         // on — git.pullrequest.merged ("Pull request merge attempted") above all — so the
         // switch below only ever sees the three it handles.
         WebhookPayload webhookPayload = translatePayload(eventType, payload);
         if (webhookPayload == null) {
-            log.debug("Ignoring Azure DevOps event type: {}", eventType);
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("unhandled Azure DevOps event type '" + eventType + "'");
         }
 
-        // Ignore events triggered by the bot itself (e.g. the bot casting its own
-        // reviewer vote produces an inbound git.pullrequest.updated event).
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            String senderLogin = webhookPayload.getSender() != null ? webhookPayload.getSender().getLogin() : "null";
-            log.info("Ignoring Azure DevOps webhook event from bot's own user. Bot username='{}', sender='{}'",
-                    bot.getGitIntegration().getUsername(), senderLogin);
-            return ResponseEntity.ok("ignored");
-        }
-
-        String botAlias = botWebhookService.getBotAlias(bot);
-        log.debug("Event passed all checks, processing {} with botAlias='{}'", eventType, botAlias);
-
+        BotIdentity identity = BotIdentity.of(bot);
         return switch (eventType) {
             case "git.pullrequest.created" -> {
                 // Seed the head sha and the reviewer list so the git.pullrequest.updated
                 // event Azure DevOps fires moments after creation is mistaken neither for
                 // a push nor for a fresh review request.
-                sourceBranchMoved(bot, webhookPayload);
-                botReviewerAdded(bot, webhookPayload);
-                yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
+                stateTracker.headMoved(bot, webhookPayload);
+                botReviewerAdded(bot, identity, webhookPayload);
+                yield WebhookEvent.of(WebhookEventKind.PR_OPENED, webhookPayload, identity);
             }
-            case "git.pullrequest.updated" -> {
-                // Completion and abandonment arrive here, not on git.pullrequest.merged.
-                if ("closed".equals(webhookPayload.getAction())) {
-                    markClosed(bot, webhookPayload);
-                    yield handlePullRequestClosed(bot, webhookPayload);
-                }
-                // All three record what they saw, so none may be short-circuited away.
-                boolean reopened = consumeReopened(bot, webhookPayload);
-                boolean moved = sourceBranchMoved(bot, webhookPayload);
-                boolean reviewerAdded = botReviewerAdded(bot, webhookPayload);
-                if (reopened) {
-                    // Azure DevOps has no reopened event: reactivation is an update whose
-                    // status is active again. Relabelled so the dispatch below gives it
-                    // the treatment the other providers give "reopened" — reviewed when
-                    // the bot is a requested reviewer, not only when run-on-update is on.
-                    webhookPayload.setAction("reopened");
-                    yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
-                }
-                if (reviewerAdded) {
-                    // The Azure DevOps equivalent of the review_requested arm in the
-                    // Gitea and GitHub handlers: an explicit review request triggers a
-                    // review on its own, independently of the run-on-create and
-                    // run-on-update switches.
-                    log.debug("Bot was added as a reviewer of PR #{}, triggering a review",
-                            webhookPayload.getNumber());
-                    botWebhookService.reviewPullRequest(bot, webhookPayload);
-                    yield ResponseEntity.ok("review triggered");
-                }
-                if (!moved) {
-                    log.debug("Ignoring git.pullrequest.updated for PR #{}: source branch "
-                                    + "unchanged (vote, title or description edit)",
-                            webhookPayload.getNumber());
-                    yield ResponseEntity.ok("ignored");
-                }
-                yield handlePullRequestOpenedOrUpdated(bot, eventType, webhookPayload);
-            }
-            case "ms.vss-code.git-pullrequest-comment-event" ->
-                    handlePullRequestComment(bot, webhookPayload, botAlias);
+            case "git.pullrequest.updated" -> classifyUpdate(bot, identity, webhookPayload);
+            case "ms.vss-code.git-pullrequest-comment-event" -> classifyComment(bot, identity, webhookPayload);
             // Required for exhaustiveness only: anything else already left via the null
             // payload above.
-            default -> ResponseEntity.ok("ignored");
+            default -> WebhookEvent.ignored("unhandled Azure DevOps event type '" + eventType + "'");
         };
     }
 
-    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, String eventType, WebhookPayload payload) {
-        String action = payload.getAction();
-        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
-                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
-                || ("synchronized".equals(action) && bot.isRunOnPrUpdate())) {
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
+    // ---- Classification ----
+
+    /**
+     * {@code git.pullrequest.updated} is not a push notification: it also fires for votes,
+     * title and description edits, merge status changes, reviewer changes and
+     * reactivations. Each is recognised by comparing with the previous event, so that
+     * {@code runOnPrUpdate} reacts to pushes only, like GitHub's {@code synchronize}.
+     */
+    private WebhookEvent classifyUpdate(Bot bot, BotIdentity identity, WebhookPayload payload) {
+        // Completion and abandonment arrive here, not on git.pullrequest.merged.
+        if ("closed".equals(payload.getAction())) {
+            stateTracker.markClosed(bot, payload);
+            return WebhookEvent.of(WebhookEventKind.PR_CLOSED, payload, identity);
         }
-        return ResponseEntity.ok("ignored");
+        // All three record what they saw, so none may be short-circuited away.
+        boolean reopened = stateTracker.consumeReopened(bot, payload);
+        boolean moved = stateTracker.headMoved(bot, payload);
+        boolean reviewerAdded = botReviewerAdded(bot, identity, payload);
+        if (reopened) {
+            // Azure DevOps has no reopened event: reactivation is an update whose status
+            // is active again. Classified as a reopen so it gets the treatment the other
+            // providers give one — reviewed when the bot is a requested reviewer, not only
+            // when run-on-update is on.
+            return WebhookEvent.of(WebhookEventKind.PR_REOPENED, payload, identity);
+        }
+        if (reviewerAdded) {
+            // The Azure DevOps equivalent of a review_requested event elsewhere.
+            payload.setAction("review_requested");
+            return WebhookEvent.of(WebhookEventKind.PR_REVIEWER_ADDED, payload, identity);
+        }
+        if (!moved) {
+            return WebhookEvent.ignored("source branch of PR #" + payload.getNumber()
+                    + " unchanged (vote, title or description edit)");
+        }
+        return WebhookEvent.of(WebhookEventKind.PR_SYNCHRONIZED, payload, identity);
     }
 
-    private ResponseEntity<String> handlePullRequestClosed(Bot bot, WebhookPayload payload) {
-        botWebhookService.handlePrClosed(bot, payload);
-        return ResponseEntity.ok("session closed");
-    }
-
-    private ResponseEntity<String> handlePullRequestComment(Bot bot, WebhookPayload payload,
-                                                            String botAlias) {
-        String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (body == null || !body.contains(botAlias)) {
-            return ResponseEntity.ok("ignored");
+    private WebhookEvent classifyComment(Bot bot, BotIdentity identity, WebhookPayload payload) {
+        // Only once the comment is known to address the bot — and not to come from it —
+        // is it worth spending an API call to find out whether it is anchored to a file.
+        // Azure DevOps fires this event for every comment on every pull request.
+        if (identity.isMentionedIn(payload) && !identity.triggered(payload)) {
+            hydrateInlineThreadContext(bot, payload);
         }
-
-        // Only now — once the comment is known to address the bot — is it worth spending
-        // an API call to find out whether it is anchored to a file. Azure DevOps fires
-        // this event for every comment on every pull request.
-        hydrateInlineThreadContext(bot, payload);
-
         // Inline (per-file) comments carry a thread context path.
-        if (payload.getComment().getPath() != null) {
-            botWebhookService.handleInlineComment(bot, payload);
-            return ResponseEntity.ok("inline comment response triggered");
-        }
-
-        if (botWebhookService.isReviewAgainRequest(payload, botAlias)) {
-            if (!botWebhookService.isPullRequestAuthor(payload)) {
-                return ResponseEntity.ok("ignored");
-            }
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
-        }
-
-        // General PR comment mentioning the bot
-        botWebhookService.handleBotCommand(bot, payload);
-        return ResponseEntity.ok("command received");
+        boolean inline = payload.getComment() != null && payload.getComment().getPath() != null;
+        return WebhookEvent.of(inline ? WebhookEventKind.PR_INLINE_COMMENT : WebhookEventKind.PR_COMMENT, payload, identity);
     }
 
-    // ---- Event-to-event state tracking ----
+    // ---- Reviewer tracking ----
 
     /**
-     * Reports whether the pull request's source branch has moved since the last event,
-     * and records the new position.
+     * Reports whether the bot has just been added to the reviewer list — Azure DevOps has
+     * no {@code review_requested} event — and records the list's new state.
      * <p>
-     * {@code git.pullrequest.updated} is not a push notification: Azure DevOps also fires
-     * it when a reviewer votes, when the title or description is edited, and when the
-     * merge status changes. Treating all of those as {@code synchronized} makes a bot with
-     * {@code runOnPrUpdate} enabled re-review the whole pull request every time a human
-     * clicks Approve. GitHub's {@code synchronize} fires only on new commits, and this
-     * restores that meaning by comparing {@code lastMergeSourceCommit.commitId}.
-     * <p>
-     * Returns {@code true} when the sha is unknown — a subscription configured with a
-     * reduced "Resource details to send" omits the commit, and silently dropping those
-     * events would be far worse than an occasional redundant review.
-     */
-    private boolean sourceBranchMoved(Bot bot, WebhookPayload payload) {
-        String headSha = payload.getPullRequest() != null && payload.getPullRequest().getHead() != null
-                ? payload.getPullRequest().getHead().getSha()
-                : null;
-        if (headSha == null || headSha.isBlank()) {
-            log.debug("No source commit in Azure DevOps payload for PR #{}; "
-                    + "treating the event as a source-branch update", payload.getNumber());
-            return true;
-        }
-        String key = trackingKey(bot, payload);
-        synchronized (trackedPullRequests) {
-            Tracked previous = trackedPullRequests.getOrDefault(key, Tracked.NOTHING);
-            trackedPullRequests.put(key,
-                    new Tracked(headSha, previous.botIsReviewer(), previous.closed()));
-            return !headSha.equals(previous.headSha());
-        }
-    }
-
-    /**
-     * Records that the pull request was completed or abandoned: the head sha and the
-     * reviewer list are forgotten, so a reactivation at the same commit is not mistaken
-     * for a duplicate, while the closure itself is remembered for
-     * {@link #consumeReopened}.
-     */
-    private void markClosed(Bot bot, WebhookPayload payload) {
-        trackedPullRequests.put(trackingKey(bot, payload), new Tracked(null, false, true));
-    }
-
-    /**
-     * Reports whether this event reactivates a pull request that was seen closed, and
-     * clears the flag so only the first event after the reactivation counts.
-     * <p>
-     * Azure DevOps has no {@code reopened} event either: an abandoned pull request that
-     * is reactivated simply produces a {@code git.pullrequest.updated} whose status is
-     * {@code active} again. Recognising it matters because every other provider treats a
-     * reopened pull request like a freshly opened one — reviewed when the bot is a
-     * requested reviewer, or when {@code runOnPrCreation} is set — whereas an
-     * unrecognised reactivation would be a plain {@code synchronized} and so need
-     * {@code runOnPrUpdate} instead.
-     */
-    private boolean consumeReopened(Bot bot, WebhookPayload payload) {
-        String key = trackingKey(bot, payload);
-        synchronized (trackedPullRequests) {
-            Tracked previous = trackedPullRequests.getOrDefault(key, Tracked.NOTHING);
-            if (!previous.closed()) {
-                return false;
-            }
-            trackedPullRequests.put(key,
-                    new Tracked(previous.headSha(), previous.botIsReviewer(), false));
-            return true;
-        }
-    }
-
-    /**
-     * Reports whether the bot has just been added to the pull request's reviewer list,
-     * and records the list's new state.
-     * <p>
-     * Azure DevOps has no {@code review_requested} event — a reviewer added to an open
-     * pull request is only a {@code git.pullrequest.updated} whose payload happens to
-     * carry the bot in {@code resource.reviewers}. Without this comparison the bot would
-     * either never react to being requested after the pull request was opened (the
-     * reviewer list is otherwise consulted only on creation, while
-     * {@link #sourceBranchMoved} drops the event because the branch did not move), or,
-     * if the list were checked unconditionally, re-review on every later vote and title
-     * edit for as long as it stays a reviewer.
-     * <p>
-     * A payload without a reviewer list at all leaves the recorded state untouched: a
-     * subscription configured with reduced "Resource details to send" omits
-     * {@code reviewers} from every event, and treating the omission as a removal would
-     * make the next full payload look like a fresh request.
+     * A payload without a reviewer list leaves the recorded state untouched: subscriptions
+     * with reduced "Resource details to send" omit it, and reading the omission as a
+     * removal would make the next full payload look like a fresh request.
      * <p>
      * A bot that already carries a vote is not counted as newly requested: casting a vote
-     * adds the caller to the reviewer list, so when the bot was not an explicit reviewer
-     * its own post-review vote would otherwise arrive as a review request and trigger a
-     * second review of the commit it has just reviewed.
+     * adds the caller to the reviewer list, so the bot's own post-review vote would
+     * otherwise trigger a second review.
      */
-    private boolean botReviewerAdded(Bot bot, WebhookPayload payload) {
+    private boolean botReviewerAdded(Bot bot, BotIdentity identity, WebhookPayload payload) {
         if (payload.getPullRequest() == null
                 || payload.getPullRequest().getRequestedReviewers() == null) {
             return false;
         }
-        String key = trackingKey(bot, payload);
-        boolean isReviewer = hasBotReviewer(bot, payload);
-        boolean selfAdded = isReviewer && botHasVoted(bot, payload);
-        synchronized (trackedPullRequests) {
-            Tracked previous = trackedPullRequests.getOrDefault(key, Tracked.NOTHING);
-            trackedPullRequests.put(key,
-                    new Tracked(previous.headSha(), isReviewer, previous.closed()));
-            return isReviewer && !previous.botIsReviewer() && !selfAdded;
-        }
+        boolean added = stateTracker.reviewerAdded(bot, payload, identity.isReviewer(payload));
+        return added && !botHasVoted(identity, payload);
     }
 
-    private boolean botHasVoted(Bot bot, WebhookPayload payload) {
+    private static boolean botHasVoted(BotIdentity identity, WebhookPayload payload) {
         return payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin())
+                .anyMatch(reviewer -> identity.is(reviewer)
                         && reviewer.getVote() != null && reviewer.getVote() != 0);
-    }
-
-    private static String trackingKey(Bot bot, WebhookPayload payload) {
-        String owner = payload.getRepository() != null && payload.getRepository().getOwner() != null
-                ? payload.getRepository().getOwner().getLogin()
-                : null;
-        String repo = payload.getRepository() != null ? payload.getRepository().getName() : null;
-        return bot.getId() + ":" + owner + "/" + repo + "#" + payload.getNumber();
     }
 
     // ---- Inline comment hydration ----
@@ -492,11 +310,11 @@ public class AzureDevopsWebhookHandler {
         // The two coincide only on creation, so the sender is set only there.
         //
         // Carrying the author over to "synchronized" and "closed" would make
-        // BotWebhookService#isBotUser treat every event on a bot-created pull request
+        // BotIdentity#triggered treat every event on a bot-created pull request
         // (the offer-as-pr lifecycle, createPullRequest) as self-triggered and drop it,
         // so a human pushing to the bot's own PR would never get a re-review. Leaving it
         // unset costs nothing: self-triggered updates — notably the bot's own reviewer
-        // vote — are filtered by #sourceBranchMoved, which is what actually catches them.
+        // vote — are filtered by the head-sha comparison in #classifyUpdate.
         if ("opened".equals(action)) {
             payload.setSender(extractUser((Map<String, Object>) resource.get("createdBy")));
         }
@@ -518,9 +336,9 @@ public class AzureDevopsWebhookHandler {
         if (pr == null) {
             // A malformed comment payload without resource.pullRequest carries no
             // pull request, repository, number or issue. Ignoring it here (rather
-            // than returning a payload with those fields null) keeps
-            // handlePullRequestComment from ever being reached with a null pull
-            // request when the comment body happens to mention the bot alias.
+            // than returning a payload with those fields null) keeps the comment
+            // handlers from ever being reached with a null pull request when the
+            // comment body happens to mention the bot alias.
             return null;
         }
         Map<String, Object> comment = (Map<String, Object>) resource.get("comment");
@@ -540,13 +358,6 @@ public class AzureDevopsWebhookHandler {
         payload.setPullRequest(extractPullRequest(pr));
         if (payload.getPullRequest() != null) {
             payload.setNumber(payload.getPullRequest().getNumber());
-
-            WebhookPayload.Issue issue = new WebhookPayload.Issue();
-            issue.setNumber(payload.getPullRequest().getNumber());
-            issue.setTitle(payload.getPullRequest().getTitle());
-            WebhookPayload.IssuePullRequest ipr = new WebhookPayload.IssuePullRequest();
-            issue.setPullRequest(ipr);
-            payload.setIssue(issue);
         }
         return payload;
     }
@@ -673,7 +484,7 @@ public class AzureDevopsWebhookHandler {
      * <p>
      * {@code Stream.toList()} keeps nulls, and {@link #extractUser} returns one for an
      * entry that is absent or not an object, so an unfiltered list would hand
-     * {@link #hasBotReviewer} a null to call {@code getLogin()} on. An empty list still
+     * {@link BotIdentity#isReviewer} a null to call {@code getLogin()} on. An empty list still
      * means "no reviewers"; only a {@code null} list means "this subscription does not
      * send them", which {@link #botReviewerAdded} must keep telling apart.
      */
@@ -867,12 +678,5 @@ public class AzureDevopsWebhookHandler {
         log.error("Could not locate an Azure DevOps organization in collection base url '{}': "
                 + "no path segment and no legacy host label", collectionBaseUrl);
         return null;
-    }
-
-    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
-        return payload.getPullRequest() != null
-                && payload.getPullRequest().getRequestedReviewers() != null
-                && payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin()));
     }
 }

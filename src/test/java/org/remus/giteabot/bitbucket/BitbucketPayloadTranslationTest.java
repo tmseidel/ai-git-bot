@@ -12,11 +12,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for the Bitbucket Cloud → WebhookPayload translation logic in
- * {@link BitbucketWebhookHandler#translatePayload(String, Map)}.
+ * {@link BitbucketWebhookTranslator#translatePayload(String, Map)}.
  */
 class BitbucketPayloadTranslationTest {
 
-    private final BitbucketWebhookHandler handler = new BitbucketWebhookHandler(null, null, null);
+    private final BitbucketWebhookTranslator handler = new BitbucketWebhookTranslator(null, null, null);
 
     @Test
     void translatePullRequestCreated_mapsAllFields() {
@@ -85,8 +85,8 @@ class BitbucketPayloadTranslationTest {
         assertEquals(CommentId.NumericCommentId.of(55L), payload.getComment().getId());
         assertEquals("@ai_bot review this", payload.getComment().getBody());
         assertEquals("commenter", payload.getComment().getUser().getLogin());
-        assertNotNull(payload.getIssue());
-        assertNotNull(payload.getIssue().getPullRequest());
+        // Only what Bitbucket sent: the issue half is added by the dispatcher.
+        assertNull(payload.getIssue());
     }
 
     @Test
