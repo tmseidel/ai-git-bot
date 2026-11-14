@@ -195,7 +195,9 @@ public class AgentSessionService {
      * history.
      *
      * @param session the session to update (identified by its id)
-     * @param summary short human-readable summary (typically {@code plan.summary()}); may be {@code null}
+     * @param summary short human-readable summary (typically {@code plan.summary()}); may be {@code null}.
+     *                Capped to {@link #PLAN_SUMMARY_MAX_CHARS} and collapsed to one line, because the
+     *                native prose paths pass the model's full turn here and the column is bounded.
      * @param rawJson raw JSON representation of the plan; may be {@code null}
      * @return the managed entity with the updated plan
      */
@@ -206,7 +208,7 @@ public class AgentSessionService {
         // messages collection may reference rows deleted by a prior compaction.
         // Callers must rebind to the returned entity to observe the new values.
         AgentSession managed = repository.getReferenceById(session.getId());
-        managed.setLastPlanSummary(summary);
+        managed.setLastPlanSummary(summary == null ? null : brief(summary, PLAN_SUMMARY_MAX_CHARS));
         managed.setLastPlanJson(rawJson);
         managed.setLastPlanAt(Instant.now());
         return managed;
@@ -407,6 +409,16 @@ public class AgentSessionService {
     /** Upper bound on the earlier requests quoted in the compaction summary. */
     private static final int SUMMARY_MAX_REQUESTS = 5;
 
+    /**
+     * Characters kept when persisting a plan summary. {@code agent_sessions.last_plan_summary}
+     * is {@code VARCHAR(2048)} (V10), while the native prose paths hand the model's whole
+     * assistant message to {@link #recordPlan} — a multi-KB answer overflowed the column and
+     * failed the transaction, discarding the round's work. Matches {@code PrWorkflowRunService
+     * .MAX_SUMMARY_CHARS}, the same guard for the other bounded summary column; the only reader
+     * of this one keeps {@link #SUMMARY_PLAN_CHARS}, so the cap costs it nothing readable.
+     */
+    private static final int PLAN_SUMMARY_MAX_CHARS = 2000;
+
     /** Opening sentence of a compaction summary; a later compaction recognizes its predecessor by it. */
     private static final String SUMMARY_PREFIX =
             "[Previous agent session context was compacted to save space.";
@@ -482,7 +494,7 @@ public class AgentSessionService {
         files.addAll(changedFiles(removedMessages));
         List<String> namedFiles = capFiles(files);
         if (!namedFiles.isEmpty()) {
-            summary.append("\n").append(SUMMARY_FILES_LABELS.get(0))
+            summary.append("\n").append(SUMMARY_FILES_LABELS.getFirst())
                     .append(String.join(", ", namedFiles));
         }
 
@@ -646,11 +658,11 @@ public class AgentSessionService {
         if (path == null) {
             path = args.get("file");
         }
-        if (path != null && path.isTextual()) {
-            return path.asText();
+        if (path != null && path.isString()) {
+            return path.asString();
         }
-        if (args.isArray() && args.size() > 0 && args.get(0).isTextual()) {
-            return args.get(0).asText();
+        if (args.isArray() && !args.isEmpty() && args.get(0).isString()) {
+            return args.get(0).asString();
         }
         return null;
     }
