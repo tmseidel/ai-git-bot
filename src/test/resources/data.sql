@@ -40,3 +40,9 @@ WHERE c.default_entry = TRUE
       WHERE s.configuration_id = c.id AND s.tool_name = v.tool_name
   );
 
+-- Public-reference counters. Production seeds these through the structured-review
+-- migration; here Hibernate creates an empty table, so the rows must be provided too.
+INSERT INTO reference_sequences (name, next_value)
+SELECT 'workflow_output', 1
+WHERE NOT EXISTS (SELECT 1 FROM reference_sequences WHERE name = 'workflow_output');
+
