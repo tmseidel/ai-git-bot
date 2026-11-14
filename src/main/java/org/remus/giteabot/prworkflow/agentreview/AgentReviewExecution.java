@@ -78,7 +78,7 @@ public class AgentReviewExecution {
     }
 
     /** Operator-tunable inputs of one generation run. */
-    public record Options(int maxToolRounds, boolean enableFormalDecision, String decisionPrompt,
+    public record Options(int maxToolRounds, boolean enableFormalDecision,
                           boolean enableProgressComments, Long runId,
                           Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
                           AgentReviewLearningSettings learningSettings) {
@@ -184,7 +184,7 @@ public class AgentReviewExecution {
                 reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
                 return new Result(Outcome.FAILED, draft.reviewId(), null);
             }
-            String systemPrompt = resolveReviewPrompt(options);
+            String systemPrompt = resolveReviewPrompt();
             LoopOutcome outcome;
             try (Workspace workspace = wsResult.workspace()) {
                 AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
@@ -404,16 +404,11 @@ public class AgentReviewExecution {
 
     // ------------------------------------------------------------------ prompts
 
-    private String resolveReviewPrompt(Options options) {
-        String base = systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
+    /** The review prompt. Severity meaning lives in the tool schema; the decision is never asked. */
+    private String resolveReviewPrompt() {
+        return systemPromptAssembler.assemble(context.reviewAgentSystemPrompt(), toolCatalog,
                 toolCatalog.reviewToolNames(context.allowedBuiltinTools()), context.mcpToolCatalog(),
                 toolingMode(), SystemPromptAssembler.PromptKind.AGENT_REVIEW_AGENT);
-        if (!options.enableFormalDecision()) {
-            return base;
-        }
-        String criteria = options.decisionPrompt() == null || options.decisionPrompt().isBlank()
-                ? AgentReviewWorkflow.DEFAULT_FORMAL_REVIEW_DECISION_PROMPT : options.decisionPrompt();
-        return base + "\n\n" + criteria;
     }
 
     private String resolveClarificationPrompt() {

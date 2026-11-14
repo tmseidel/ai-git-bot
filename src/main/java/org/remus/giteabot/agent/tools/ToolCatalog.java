@@ -764,7 +764,12 @@ public class ToolCatalog {
                 .put("description", "When correcting an existing finding: its current revision. Omit when creating.");
         ObjectNode severity = props.putObject("severity");
         severity.put("type", "string");
-        severity.put("description", "How serious the problem is.");
+        severity.put("description", "How serious the problem is. BLOCKER — must be fixed before "
+                + "merging (bug, security hole, broken test, missing error handling, anything that "
+                + "could cause a production defect). MEDIUM — should be addressed, but need not block "
+                + "on its own (code quality, unclear naming, missing edge-case tests, maintainability "
+                + "risk). LOW — minor, stylistic or optional. The review decision is computed from "
+                + "these severities, so classify honestly and do not inflate them.");
         severity.putArray("enum").add("BLOCKER").add("MEDIUM").add("LOW");
         putString(props, "category", "Short classification, e.g. \"authorization\", \"correctness\", \"performance\".");
         putString(props, "title", "One-line summary of the problem.");

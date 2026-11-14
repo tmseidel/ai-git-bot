@@ -306,7 +306,7 @@ class AgentReviewCompletionTest {
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
                 .thenReturn(findingTurn("auth", "BLOCKER"), assessmentTurn(1), completionTurn(2, 1));
 
-        assertThat(service.reviewPullRequest(payload, 12, true, "Classify by severity.",
+        assertThat(service.reviewPullRequest(payload, 12, true,
                 new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
@@ -321,7 +321,7 @@ class AgentReviewCompletionTest {
         doThrow(new IllegalStateException("review API rejected the submission"))
                 .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
 
-        assertThat(service.reviewPullRequest(payload, 12, true, null,
+        assertThat(service.reviewPullRequest(payload, 12, true,
                 new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
@@ -337,7 +337,7 @@ class AgentReviewCompletionTest {
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
                 .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
 
-        assertThat(service.reviewPullRequest(payload, 12, false, null,
+        assertThat(service.reviewPullRequest(payload, 12, false,
                 new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
@@ -364,7 +364,7 @@ class AgentReviewCompletionTest {
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
                 .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
 
-        assertThat(service.reviewPullRequest(payload, 12, false, null,
+        assertThat(service.reviewPullRequest(payload, 12, false,
                 new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false,
                 new AgentReviewLearningSettings(true)))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
@@ -483,7 +483,7 @@ class AgentReviewCompletionTest {
 
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, true)
-                : service.reviewPullRequest(payload, 12, false, null,
+                : service.reviewPullRequest(payload, 12, false,
                         new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.POSTED);
@@ -511,7 +511,7 @@ class AgentReviewCompletionTest {
 
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, true)
-                : service.reviewPullRequest(payload, 12, false, null,
+                : service.reviewPullRequest(payload, 12, false,
                         new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.FAILED);
@@ -584,7 +584,7 @@ class AgentReviewCompletionTest {
 
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, false)
-                : service.reviewPullRequest(payload, 1, false, null,
+                : service.reviewPullRequest(payload, 1, false,
                         new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.FAILED);
@@ -600,7 +600,7 @@ class AgentReviewCompletionTest {
         List<AgentRunContext.ToolCallRecord> toolCalls = new ArrayList<>();
 
         AgentReviewService.ReviewResult reviewed = service.reviewPullRequest(payload, 1, true,
-                "Review criteria", new AgentReviewService.SeverityThresholds(0, 0, 0), 1L,
+                new AgentReviewService.SeverityThresholds(0, 0, 0), 1L,
                 toolCalls::add, false, AgentReviewLearningSettings.DISABLED);
 
         assertThat(reviewed).isEqualTo(AgentReviewService.ReviewResult.FAILED);
@@ -633,7 +633,7 @@ class AgentReviewCompletionTest {
                     return exploration(histories.size());
                 });
 
-        assertThat(service.reviewPullRequest(payload, 4, false, null,
+        assertThat(service.reviewPullRequest(payload, 4, false,
                 new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.FAILED);
 
@@ -650,7 +650,7 @@ class AgentReviewCompletionTest {
 
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, false)
-                : service.reviewPullRequest(payload, 1, false, null,
+                : service.reviewPullRequest(payload, 1, false,
                         new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.NO_DIFF);
@@ -718,7 +718,7 @@ class AgentReviewCompletionTest {
     // ------------------------------------------------------------------ helpers
 
     private AgentReviewService.ReviewResult review() {
-        return service.reviewPullRequest(payload, 12, false, null,
+        return service.reviewPullRequest(payload, 12, false,
                 new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED);
     }
 

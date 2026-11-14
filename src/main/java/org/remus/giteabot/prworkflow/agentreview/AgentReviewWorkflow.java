@@ -23,31 +23,6 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
     static final int DEFAULT_MAX_TOOL_ROUNDS = 12;
 
-    /**
-     * Operator-editable severity criteria. It carries criteria only: the submission format and the
-     * completion contract live in the runtime protocol, which is appended regardless of what an
-     * operator writes here, and the approve/request-changes decision is never the model's.
-     */
-    static final String DEFAULT_FORMAL_REVIEW_DECISION_PROMPT = """
-            # Formal Review Decision
-
-            Classify every finding you submit by severity:
-
-            - **BLOCKER** — Critical issues that must be fixed before merging:
-              bugs, security vulnerabilities, broken tests, missing error handling,
-              or any problem that could cause a production defect.
-
-            - **MEDIUM** — Notable issues that should be addressed but may not block
-              merging on their own: significant code-quality concerns, unclear
-              naming, missing tests for edge cases, or maintainability risks.
-
-            - **LOW** — Minor issues, style nits, optional suggestions, or small
-              observations that should not block merging.
-
-            The application decides whether to approve or request changes from the
-            configured thresholds on those severities. Do not state an approval decision
-            yourself, and do not invent findings to justify one.""";
-
     private final AgentReviewServiceFactory serviceFactory;
     private final WorkflowSelectionService selectionService;
 
@@ -83,12 +58,9 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         "Enable formal review decision",
                         WorkflowParamField.ParamType.BOOLEAN, false,
                         "false",
-                        "When enabled, the bot may post a formal PR review decision."),
-                new WorkflowParamField(AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
-                        "Approval decision prompt",
-                        WorkflowParamField.ParamType.TEXT, false,
-                        DEFAULT_FORMAL_REVIEW_DECISION_PROMPT,
-                        "Criteria the model uses to classify findings by severity."),
+                        "When enabled, the bot posts approve or request-changes, computed from the "
+                                + "stored findings and the thresholds below. The model is never asked "
+                                + "to decide."),
                 new WorkflowParamField(AgentReviewParam.BLOCKER_THRESHOLD,
                         "Blocker must be less or equal",
                         WorkflowParamField.ParamType.INTEGER, false,
@@ -127,8 +99,6 @@ public class AgentReviewWorkflow implements PrWorkflow {
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
         boolean enableProgressComments = boolParam(params, AgentReviewParam.ENABLE_PROGRESS_COMMENTS, false);
         boolean enableFormalDecision = boolParam(params, AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION, false);
-        String decisionPrompt = strParam(params, AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
-                DEFAULT_FORMAL_REVIEW_DECISION_PROMPT);
         AgentReviewService.SeverityThresholds thresholds = new AgentReviewService.SeverityThresholds(
                 integerParam(params, AgentReviewParam.BLOCKER_THRESHOLD),
                 integerParam(params, AgentReviewParam.MEDIUM_THRESHOLD),
@@ -137,7 +107,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
         context.requireActive("before running agentic review");
 
         AgentReviewService.ReviewResult reviewed = serviceFactory.create(bot)
-                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
+                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, thresholds,
                         context.runId(), context.auditToolCallConsumer(), enableProgressComments,
                         AgentReviewLearningSettingsResolver.from(params));
 

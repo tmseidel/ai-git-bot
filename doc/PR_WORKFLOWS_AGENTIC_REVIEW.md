@@ -41,8 +41,7 @@ PR Review**.
 |---|---|---|---|
 | `maxToolRounds` | integer | `12` | How much exploring the bot may do (1–30). Higher means deeper analysis at higher cost. |
 | `enableProgressComments` | boolean | `false` | Create and update one progress comment per review or clarification. Supported by GitHub, Gitea, GitLab, and Bitbucket Cloud. Activity updates are at least 15 seconds apart; the final update is immediate. |
-| `enableFormalReviewDecision` | boolean | `false` | Let the bot approve or request changes, not just comment. |
-| `formalReviewDecisionPrompt` | text | *(built-in default)* | Criteria the model uses to classify findings by severity. Only used when the decision is enabled. |
+| `enableFormalReviewDecision` | boolean | `false` | Let the bot approve or request changes, not just comment. The decision is computed from the stored findings and the thresholds below — it is never asked of the model. |
 | `blockerThreshold` | integer | *(empty)* | Maximum allowed `BLOCKER` findings for a formal `APPROVE`. Empty means ignored. |
 | `mediumThreshold` | integer | *(empty)* | Maximum allowed `MEDIUM` findings for a formal `APPROVE`. Empty means ignored. |
 | `lowThreshold` | integer | *(empty)* | Maximum allowed `LOW` findings for a formal `APPROVE`. Empty means ignored. |
@@ -97,9 +96,11 @@ anywhere else do not resolve.
 
 ### Formal review decision
 
-When `enableFormalReviewDecision` is on, every finding carries a severity
-(`BLOCKER`, `MEDIUM`, `LOW`) and the application counts the persisted findings.
-It then compares each count to the configured thresholds:
+When `enableFormalReviewDecision` is on, the decision is a pure function of the
+stored review: every finding carries a severity (`BLOCKER`, `MEDIUM`, `LOW`), the
+application counts the persisted active findings, and compares each count to the
+configured thresholds. There is no decision prompt and nothing to parse out of
+the model's text:
 
 - If **all configured thresholds** are satisfied, the bot submits `APPROVE`.
 - If **any configured threshold** is exceeded, the bot submits `REQUEST_CHANGES`.
@@ -108,10 +109,11 @@ It then compares each count to the configured thresholds:
 - An unset threshold is ignored entirely, so you can enforce only the severities
   that matter to you (for example, only `BLOCKER`).
 
-Counts come from the stored findings, so the model cannot state an approval
-decision of its own. If the formal submission is rejected by the Git provider,
-the bot falls back to posting the same review as a plain comment, so the
-findings are never lost.
+The model cannot state an approval decision of its own, and the severity meaning
+it classifies against lives in the `review-upsert-finding` tool schema, so it is
+part of the tool contract rather than a free-text prompt. If the formal
+submission is rejected by the Git provider, the bot falls back to posting the
+same review as a plain comment, so the findings are never lost.
 
 ## The review prompt
 
@@ -126,8 +128,9 @@ are not part of this prompt, so editing it can't break anything.
    relevant configuration.
 2. Tick **Agentic PR Review** and adjust its settings if you like.
 3. To let the bot approve / request changes, tick **Enable formal review
-   decision**, optionally customise the decision prompt, and set at least one
-   severity threshold (for example, **Blocker must be less or equal = 0**).
+   decision** and set at least one severity threshold (for example, **Blocker
+   must be less or equal = 0**). The decision is computed from the reported
+   findings, so no prompt is involved.
 
 It only runs for bots that have it explicitly enabled — it never replaces or
 duplicates the default **PR Review** workflow.

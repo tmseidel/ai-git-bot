@@ -182,29 +182,18 @@
                     allowMultipleOpen: true
                 });
 
-                // Make the "Approval decision prompt" textarea read-only (not
-                // disabled) while its "Enable formal review decision" checkbox is
-                // unchecked. Disabled controls are not submitted, which would drop a
-                // persisted custom prompt on save; read-only ones still round-trip.
-                // Also show/hide the severity threshold fields so they are only
-                // visible when formal review decisioning is enabled.
+                // Show the severity thresholds only while "Enable formal review decision" is
+                // checked: they are the whole policy behind the decision, which is computed from
+                // the stored findings rather than asked of the model.
                 var decisionCheckboxes = document.querySelectorAll(
                         'input[type="checkbox"][name="params.agentic-review.enableFormalReviewDecision"]');
                 decisionCheckboxes.forEach(function (decisionCheckbox) {
                     var container = decisionCheckbox.closest('form') || document;
-                    var decisionTextarea = container.querySelector(
-                            'textarea[name="params.agentic-review.formalReviewDecisionPrompt"]');
                     var thresholdInputs = container.querySelectorAll(
                             'input[name="params.agentic-review.blockerThreshold"],' +
                             'input[name="params.agentic-review.mediumThreshold"],' +
                             'input[name="params.agentic-review.lowThreshold"]');
-                    if (!decisionTextarea) {
-                        return;
-                    }
-                    function syncDecision() {
-                        decisionTextarea.readOnly = !decisionCheckbox.checked;
-                        decisionTextarea.closest('.mb-3').style.opacity =
-                                decisionCheckbox.checked ? '1' : '0.5';
+                    function syncThresholds() {
                         thresholdInputs.forEach(function (input) {
                             var mb3 = input.closest('.mb-3');
                             if (mb3) {
@@ -212,8 +201,8 @@
                             }
                         });
                     }
-                    decisionCheckbox.addEventListener('change', syncDecision);
-                    syncDecision();
+                    decisionCheckbox.addEventListener('change', syncThresholds);
+                    syncThresholds();
                 });
             });
         </script>

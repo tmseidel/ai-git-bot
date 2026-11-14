@@ -93,13 +93,11 @@ public class AgentReviewService {
      * @param enableFormalDecision  when true, the operator's criteria are added to the prompt and a
      *                              formal review action is computed from the persisted severity
      *                              totals
-     * @param decisionPrompt        operator-provided severity criteria
-     * @param severityThresholds    optional per-severity thresholds for the formal action
      * @param enableProgressComments whether to create and update a pull-request progress comment
      * @return whether a review was posted, no diff was available, or the review failed
      */
     public ReviewResult reviewPullRequest(WebhookPayload payload, int maxToolRounds,
-                                         boolean enableFormalDecision, String decisionPrompt,
+                                         boolean enableFormalDecision,
                                          SeverityThresholds severityThresholds,
                                          Long runId,
                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
@@ -111,7 +109,7 @@ public class AgentReviewService {
         try {
             AgentReviewExecution.Result result = execution.review(payload,
                     new AgentReviewExecution.Options(maxToolRounds, enableFormalDecision,
-                            decisionPrompt, enableProgressComments, runId, toolCallConsumer,
+                            enableProgressComments, runId, toolCallConsumer,
                             learningSettings == null
                                     ? AgentReviewLearningSettings.DISABLED : learningSettings));
             return switch (result.outcome()) {
