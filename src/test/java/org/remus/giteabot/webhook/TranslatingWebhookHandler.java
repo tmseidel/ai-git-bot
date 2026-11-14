@@ -6,6 +6,7 @@ import org.remus.giteabot.event.WebhookTranslator;
 import org.springframework.http.ResponseEntity;
 
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
@@ -24,6 +25,7 @@ public record TranslatingWebhookHandler(WebhookTranslator translator, String eve
     /**
      * @param botWebhookService a mock; its whitelist check is stubbed to let every caller
      *                          through, since the dispatcher asks it before an automatic review,
+     *                          its review reports that it ran, so the debounce claim holds,
      *                          and its "review again" detection runs for real, so a comment is
      *                          routed by what it says, as in production. Tests must not stub
      *                          {@code isReviewAgainRequest} again: re-stubbing a real-method
@@ -31,12 +33,16 @@ public record TranslatingWebhookHandler(WebhookTranslator translator, String eve
      */
     public TranslatingWebhookHandler(WebhookTranslator translator, String eventHeader,
                                      BotWebhookService botWebhookService) {
-        this(translator, eventHeader, new WebhookEventDispatcher(allowingEveryCaller(botWebhookService)));
+        this(translator, eventHeader, new WebhookEventDispatcher(allowingEveryCaller(botWebhookService),
+                new ReviewTriggerDebouncer()));
     }
 
     private static BotWebhookService allowingEveryCaller(BotWebhookService botWebhookService) {
         lenient().when(botWebhookService.isCallerAllowed(any(), any())).thenReturn(true);
         lenient().when(botWebhookService.isReviewAgainRequest(any(), any())).thenCallRealMethod();
+        // The dispatcher chains on the returned future; a bare mock would return null.
+        lenient().when(botWebhookService.reviewPullRequest(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(true));
         return botWebhookService;
     }
 

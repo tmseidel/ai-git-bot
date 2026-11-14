@@ -16,6 +16,8 @@ import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.springframework.http.ResponseEntity;
 
+import java.util.concurrent.CompletableFuture;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -41,10 +43,12 @@ class WebhookEventDispatcherTest {
 
     @BeforeEach
     void setUp() {
-        dispatcher = new WebhookEventDispatcher(botWebhookService);
+        dispatcher = new WebhookEventDispatcher(botWebhookService, new ReviewTriggerDebouncer());
         lenient().when(botWebhookService.isCallerAllowed(any(), any())).thenReturn(true);
         // The real keyword match, so comments are routed by what they say.
         lenient().when(botWebhookService.isReviewAgainRequest(any(), any())).thenCallRealMethod();
+        lenient().when(botWebhookService.reviewPullRequest(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(true));
         bot = new Bot();
         bot.setName("test-bot");
         payload = new WebhookPayload();
@@ -98,15 +102,69 @@ class WebhookEventDispatcherTest {
     }
 
     @Test
-    void automaticReviewFromACallerOutsideTheWhitelist_isIgnored() {
-        payload.setSender(sender("contributor"));
+    void automaticTriggersForTheSameCommit_reviewOnce() {
+        dispatcher.dispatch(bot, eventBuilder(WebhookEventKind.PR_OPENED).botIsReviewer(true).build());
+        ResponseEntity<String> reviewerAdded = dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+        ResponseEntity<String> assigned = dispatcher.dispatch(bot, event(WebhookEventKind.PR_ASSIGNED));
+
+        assertEquals("ignored", reviewerAdded.getBody());
+        assertEquals("ignored", assigned.getBody());
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any());
+    }
+
+    @Test
+    void reviewThatWasSkippedOrFailed_doesNotSuppressAReRequest() {
+        when(botWebhookService.reviewPullRequest(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(false))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("AI provider down")))
+                .thenReturn(CompletableFuture.completedFuture(true));
+
+        ResponseEntity<String> first = dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+        ResponseEntity<String> second = dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+        ResponseEntity<String> third = dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+        ResponseEntity<String> fourth = dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+
+        assertEquals("review triggered", first.getBody());
+        assertEquals("review triggered", second.getBody());
+        assertEquals("review triggered", third.getBody());
+        // The third review ran, so its claim holds.
+        assertEquals("ignored", fourth.getBody());
+        verify(botWebhookService, times(3)).reviewPullRequest(eq(bot), any());
+    }
+
+    @Test
+    void pullRequestClosedByTheBot_endsTheDebounceWindow() {
+        dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+        dispatcher.dispatch(bot, eventBuilder(WebhookEventKind.PR_CLOSED).fromBot(true).build());
+
+        ResponseEntity<String> reopened = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_REOPENED).botIsReviewer(true).build());
+
+        assertEquals("review triggered", reopened.getBody());
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any());
+        verify(botWebhookService, never()).handlePrClosed(any(), any());
+    }
+
+    @Test
+    void triggerFromACallerOutsideTheWhitelist_doesNotClaimTheCommit() {
+        // A contributor who is not allowed opens the pull request; a maintainer who is
+        // then adds the bot as reviewer within the debounce window.
+        WebhookPayload fromContributor = payload;
+        fromContributor.setSender(sender("contributor"));
+        WebhookPayload fromMaintainer = new WebhookPayload();
+        fromMaintainer.setPullRequest(payload.getPullRequest());
+        fromMaintainer.setSender(sender("maintainer"));
         bot.setRunOnPrCreation(true);
-        when(botWebhookService.isCallerAllowed(bot, payload)).thenReturn(false);
+        when(botWebhookService.isCallerAllowed(bot, fromContributor)).thenReturn(false);
 
-        ResponseEntity<String> response = dispatcher.dispatch(bot, event(WebhookEventKind.PR_OPENED));
+        ResponseEntity<String> opened = dispatcher.dispatch(bot, event(WebhookEventKind.PR_OPENED));
+        ResponseEntity<String> reviewerAdded = dispatcher.dispatch(bot, WebhookEvent.builder()
+                .kind(WebhookEventKind.PR_REVIEWER_ADDED).payload(fromMaintainer).botAlias(BOT_ALIAS).build());
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals("ignored", opened.getBody());
+        assertEquals("review triggered", reviewerAdded.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(bot, fromContributor);
+        verify(botWebhookService).reviewPullRequest(bot, fromMaintainer);
     }
 
     @ParameterizedTest
@@ -118,6 +176,17 @@ class WebhookEventDispatcherTest {
 
         assertEquals("ignored", response.getBody());
         verifyNoInteractions(botWebhookService);
+    }
+
+    @Test
+    void reviewAgainComment_isNotDebounced() {
+        dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEWER_ADDED));
+        comment(BOT_ALIAS + " please review again");
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any());
     }
 
     @Test
