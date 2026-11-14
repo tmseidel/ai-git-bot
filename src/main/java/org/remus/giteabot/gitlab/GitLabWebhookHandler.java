@@ -186,6 +186,12 @@ public class GitLabWebhookHandler {
         }
 
         String botAlias = botWebhookService.getBotAlias(bot);
+        // Feedback is consumed before the review-again heuristic: its reason is free text and may
+        // legitimately contain words like "review again", which must not re-trigger a review.
+        if (botWebhookService.tryHandleLearningCommand(bot, webhookPayload,
+                org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
+            return ResponseEntity.ok("feedback recorded");
+        }
         if (botWebhookService.isReviewAgainRequest(webhookPayload, botAlias)) {
             if (!botWebhookService.isPullRequestAuthor(webhookPayload)) {
                 return ResponseEntity.ok("ignored");

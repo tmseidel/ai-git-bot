@@ -14,6 +14,9 @@ services:
       # (optional for tokens, required for SSH private keys)
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
+      # Footers of published agentic-review and follow-up comments (Markdown). Empty disables.
+      REVIEW_COMMENT_FOOTER: ${REVIEW_COMMENT_FOOTER:-*Agentic review by [AI Git Bot](https://gitbot.eu)*}
+      REVIEW_COMMENT_CLARIFICATION_FOOTER: ${REVIEW_COMMENT_CLARIFICATION_FOOTER:-*Agentic review follow-up by [AI Git Bot](https://gitbot.eu)*}
       # Web UI login: native (default) or oauth (OAuth/OIDC discovery).
       GITEABOT_SECURITY_LOGIN_METHOD: ${GITEABOT_SECURITY_LOGIN_METHOD:-native}
       GITEABOT_SECURITY_OAUTH_CLIENT_ID: ${GITEABOT_SECURITY_OAUTH_CLIENT_ID:-}

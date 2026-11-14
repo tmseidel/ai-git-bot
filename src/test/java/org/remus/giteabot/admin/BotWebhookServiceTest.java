@@ -52,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -92,6 +93,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.readmesync.ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
+    @Mock private org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler;
     @Mock private ReviewChunkingProperties chunkingProperties;
     @Mock private org.remus.giteabot.eventhook.EventHookPublisher eventHookPublisher;
     @Mock private org.remus.giteabot.notification.WorkflowRetryNotices retryNotices;
@@ -131,7 +133,8 @@ class BotWebhookServiceTest {
                 prWorkflowOrchestrator, e2eTestPrCloseHandler,
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
                 agentReviewSlashCommandHandler, readmeSyncSlashCommandHandler,
-                i18nCoverageSlashCommandHandler, workflowSelectionService,
+                i18nCoverageSlashCommandHandler,
+                feedbackCommandHandler, workflowSelectionService,
                 issueWorkflowOrchestrator);
         codingIssueConfiguration = namedConfiguration(101L, "coding-issue-cfg");
         writerIssueConfiguration = namedConfiguration(102L, "writer-issue-cfg");
@@ -1749,6 +1752,94 @@ class BotWebhookServiceTest {
             botWebhookService.handlePrComment(bot, payload);
 
             assertNull(AiAuditContext.getSessionId(), "an early return must not leave the session behind");
+        }
+    }
+
+    // ---- learning/feedback command routing ----
+
+    @Nested
+    class LearningCommandTests {
+
+        private static final String OWNER = "Test";
+        private static final String REPO = "my-repo";
+        private static final long PR_NUMBER = 140L;
+        private static final long COMMENT_ID = 1055L;
+
+        private WebhookPayload feedbackPayload(String body) {
+            WebhookPayload payload = buildPrCommentPayload(OWNER, REPO, PR_NUMBER, COMMENT_ID, body);
+            // A permitted reviewer who is not the author must be able to judge the review.
+            payload.getComment().getUser().setLogin("reviewer");
+            payload.getSender().setLogin("reviewer");
+            return payload;
+        }
+
+        @Test
+        void handlePrComment_consumesFeedbackBeforeAnyWorkflowRouting() {
+            WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234-F2 incorrect nope");
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(true);
+
+            botWebhookService.handlePrComment(createBot("bot", "claude_bot"), payload);
+
+            verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
+                    eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
+                            .COMMENT_KIND_PR_COMMENT));
+            verify(agentSessionService, never()).getSessionByIssue(any(), any(), any());
+            verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
+            verify(prWorkflowOrchestrator, never()).runAll(any(), any());
+        }
+
+        @Test
+        void handleBotCommand_consumesFeedbackBeforeTheAuthorGate() {
+            WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234 useful");
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(true);
+
+            botWebhookService.handleBotCommand(createBot("bot", "claude_bot"), payload);
+
+            verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
+                    eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
+                            .COMMENT_KIND_PR_COMMENT));
+            verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
+        }
+
+        @Test
+        void handleInlineComment_consumesFeedbackBeforeTheAuthorGate() {
+            WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234-A needs-improvement");
+            payload.getComment().setPath("src/Foo.java");
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(true);
+
+            botWebhookService.handleInlineComment(createBot("bot", "claude_bot"), payload);
+
+            verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
+                    eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
+                            .COMMENT_KIND_INLINE));
+            verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
+        }
+
+        @Test
+        void aFailingLearningCommandIsStillConsumed() {
+            WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234 useful");
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString()))
+                    .thenThrow(new IllegalStateException("feedback store unavailable"));
+
+            botWebhookService.handleBotCommand(createBot("bot", "claude_bot"), payload);
+
+            // Falling through would forward feedback text into an AI conversation.
+            verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
+        }
+
+        @Test
+        void anOrdinaryMentionKeepsItsExistingRouting() {
+            WebhookPayload payload = feedbackPayload("@claude_bot please review this again");
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(false);
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+
+            botWebhookService.handlePrComment(createBotWithWorkflows("bot", "claude_bot",
+                    java.util.List.of("agentic-review")), payload);
+
+            verify(agentSessionService).getSessionByIssue(OWNER, REPO, PR_NUMBER);
         }
     }
 

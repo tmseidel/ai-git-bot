@@ -12,11 +12,15 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.mcp.McpOrchestrationService;
+import org.remus.giteabot.config.ReviewCommentProperties;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.review.structured.ReviewLinkStyle;
 import org.remus.giteabot.review.structured.ReviewLinkStyles;
+import org.remus.giteabot.review.structured.ReviewLookupToolExecutor;
+import org.remus.giteabot.review.structured.ReviewSnapshotService;
 import org.remus.giteabot.review.structured.ReviewSubmissionToolExecutor;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 
@@ -51,6 +55,7 @@ public class AgentReviewService {
     private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
     private final ReviewPublisher publisher;
+    private final ReviewCommentProperties commentProperties;
     private final AgentReviewExecution execution;
 
     public AgentReviewService(AgentReviewContext context,
@@ -65,14 +70,19 @@ public class AgentReviewService {
                               PythonExecutionService pythonExecution,
                               StructuredReviewService reviewService,
                               ReviewSubmissionToolExecutor submissionExecutor,
+                              ReviewSnapshotService snapshotService,
+                              ReviewLookupToolExecutor reviewLookup,
+                              ReviewCommentProperties commentProperties,
                               ReviewPublisher publisher) {
         this.bot = bot;
         this.repositoryPlatform = context.repositoryPlatform();
         this.repositoryClient = repositoryPlatform.getClient();
         this.publisher = publisher;
+        this.commentProperties = commentProperties;
         this.execution = new AgentReviewExecution(context, sessionService, toolExecutionService,
                 toolCatalog, workspaceService, agentConfig, mcpOrchestrationService, bot,
-                reviewService, submissionExecutor, pythonExecution);
+                reviewService, submissionExecutor, snapshotService, reviewLookup,
+                pythonExecution);
     }
 
     /**
@@ -93,19 +103,22 @@ public class AgentReviewService {
                                          SeverityThresholds severityThresholds,
                                          Long runId,
                                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
-                                         boolean enableProgressComments) {
+                                         boolean enableProgressComments,
+                                         AgentReviewLearningSettings learningSettings) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
         try {
             AgentReviewExecution.Result result = execution.review(payload,
                     new AgentReviewExecution.Options(maxToolRounds, enableFormalDecision,
-                            decisionPrompt, enableProgressComments, runId, toolCallConsumer));
+                            decisionPrompt, enableProgressComments, runId, toolCallConsumer,
+                            learningSettings == null
+                                    ? AgentReviewLearningSettings.DISABLED : learningSettings));
             return switch (result.outcome()) {
                 case NO_DIFF -> ReviewResult.NO_DIFF;
                 case FAILED -> ReviewResult.FAILED;
                 case FINALIZED -> publish(payload, owner, repo, prNumber, result,
-                        enableFormalDecision, severityThresholds);
+                        enableFormalDecision, severityThresholds, learningSettings);
             };
         } catch (WorkflowCancelledException e) {
             throw e;
@@ -122,11 +135,19 @@ public class AgentReviewService {
 
     private ReviewResult publish(WebhookPayload payload, String owner, String repo, Long prNumber,
                                  AgentReviewExecution.Result result, boolean enableFormalDecision,
-                                 SeverityThresholds thresholds) {
+                                 SeverityThresholds thresholds,
+                                 AgentReviewLearningSettings learningSettings) {
         try {
-            boolean posted = publisher.publish(repositoryClient, bot, owner, repo, prNumber,
-                    result.reference(), enableFormalDecision, thresholds,
-                    linkStyle(payload, owner, repo));
+            boolean posted = publisher.publish(new ReviewPublisher.PublicationRequest(
+                    repositoryClient, bot, owner, repo, prNumber, result.reference(),
+                    enableFormalDecision, thresholds, linkStyle(payload, owner, repo),
+                    providerName(), "pull_request_review", expectedHeadSha(payload),
+                    () -> currentHeadSha(owner, repo, prNumber),
+                    () -> Thread.currentThread().isInterrupted(),
+                    learningSettings.feedbackEnabled()
+                            ? org.remus.giteabot.learning.feedback.FeedbackHint.forReview(
+                                    mention(), result.reference())
+                            : null));
             return posted ? ReviewResult.POSTED : ReviewResult.FAILED;
         } catch (Exception e) {
             log.error("Publishing agentic review {} failed for PR #{} in {}/{}: {}",
@@ -143,11 +164,36 @@ public class AgentReviewService {
      * head sha or an unsupported provider degrades to plain paths, never to a guessed URL.
      */
     private ReviewLinkStyle linkStyle(WebhookPayload payload, String owner, String repo) {
-        String revision = payload.getPullRequest().getHead() != null
-                ? payload.getPullRequest().getHead().getSha() : null;
         return ReviewLinkStyles.forProvider(
                 bot.getGitIntegration() != null ? bot.getGitIntegration().getProviderType() : null,
-                repositoryPlatform.getCloneUrl(), owner, repo, revision);
+                repositoryPlatform.getCloneUrl(), owner, repo, expectedHeadSha(payload));
+    }
+
+    /** The bot's provider mention, or {@code null} when the integration has no username. */
+    private String mention() {
+        return bot.getGitIntegration() == null || bot.getGitIntegration().getUsername() == null
+                ? null : "@" + bot.getGitIntegration().getUsername();
+    }
+
+    private String providerName() {
+        return bot.getGitIntegration() != null
+                ? bot.getGitIntegration().getProviderType().name() : "UNKNOWN";
+    }
+
+    /** The revision the review describes, as the webhook reported it. */
+    private static String expectedHeadSha(WebhookPayload payload) {
+        return payload.getPullRequest().getHead() != null
+                ? payload.getPullRequest().getHead().getSha() : null;
+    }
+
+    /**
+     * The pull request's current head, asked of the provider right before publication. An
+     * unreadable answer means "cannot verify", not "changed": the publication then proceeds, because
+     * refusing every review on a flaky API call would be worse.
+     */
+    private String currentHeadSha(String owner, String repo, Long prNumber) {
+        return PrPayloadHydrator.resolveHeadSha(repositoryClient, owner, repo,
+                prNumber == null ? 0 : prNumber);
     }
 
     /**
@@ -190,8 +236,11 @@ public class AgentReviewService {
     }
 
     private String formatClarification(String answer) {
-        return "## 🤖 Follow-up\n\n" + answer
-                + "\n\n---\n*Read-only agentic review follow-up by AI Git Bot*";
+        String footer = commentProperties.getClarificationFooter();
+        if (footer == null || footer.isBlank()) {
+            return "## 🤖 Follow-up\n\n" + answer;
+        }
+        return "## 🤖 Follow-up\n\n" + answer + "\n\n---\n\n" + footer.strip();
     }
 
     private void postErrorComment(String owner, String repo, Long prNumber,

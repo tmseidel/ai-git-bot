@@ -19,6 +19,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -156,6 +157,23 @@ class GitLabWebhookHandlerTest {
 
         assertEquals("review triggered", response.getBody());
         verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, never()).handleBotCommand(any(), any());
+    }
+
+    @Test
+    void feedbackNote_isConsumedBeforeTheReviewAgainHeuristic() {
+        // The reason is free text and may contain "review again"; it must not re-trigger a review.
+        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class), eq("@ai_bot")))
+                .thenReturn(true);
+        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
+                any(WebhookPayload.class), anyString())).thenReturn(true);
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "Note Hook",
+                notePayload("@ai_bot feedback O1234-F1 incorrect please review this again"));
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).isReviewAgainRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
         verify(botWebhookService, never()).handleBotCommand(any(), any());
     }
 

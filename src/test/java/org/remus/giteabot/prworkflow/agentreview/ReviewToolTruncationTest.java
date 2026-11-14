@@ -52,7 +52,7 @@ class ReviewToolTruncationTest {
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, allowed, null);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("system", router, catalog, McpToolCatalog.empty(),
-                allowed, new AiResponseParser(), null, null, 5, 2, 2, null);
+                allowed, new AiResponseParser(), null, null, 5, 2, 2, null, null);
         AgentRunContext context = AgentRunContext.forPullRequest(null, "owner", "repo", 1L, Workspace.unmanaged(workspace), "main");
 
         String rendered;

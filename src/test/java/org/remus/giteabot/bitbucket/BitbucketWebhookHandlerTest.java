@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -190,6 +191,22 @@ class BitbucketWebhookHandlerTest {
 
         assertEquals("review triggered", response.getBody());
         verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, never()).handleBotCommand(any(), any());
+    }
+
+    @Test
+    void feedbackComment_isConsumedBeforeTheReviewAgainHeuristic() {
+        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class),
+                eq(READABLE_MENTION))).thenReturn(true);
+        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
+                any(WebhookPayload.class), anyString())).thenReturn(true);
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
+                commentPayload("@{acc-ai_bot} feedback O1234 useful review again later", null));
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).isReviewAgainRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
         verify(botWebhookService, never()).handleBotCommand(any(), any());
     }
 

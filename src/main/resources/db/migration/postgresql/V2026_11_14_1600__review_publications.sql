@@ -1,0 +1,28 @@
+-- Publication bookkeeping for finalized agentic reviews (implementation plan step 1d).
+--
+-- One row per delivery attempt. The intent is written before the Git call, so a crash leaves a
+-- visible PENDING row instead of a silently missing review; UNCERTAIN records an outcome we cannot
+-- claim either way. Rendered Markdown is a delivery snapshot, never the review's source.
+--
+-- Idempotent: every statement can be re-applied.
+
+CREATE TABLE IF NOT EXISTS review_publications (
+    id                BIGSERIAL PRIMARY KEY,
+    review_id         BIGINT       NOT NULL,
+    output_id         BIGINT       NOT NULL,
+    provider          VARCHAR(32)  NOT NULL,
+    channel           VARCHAR(64)  NOT NULL,
+    renderer_version  INTEGER      NOT NULL DEFAULT 1,
+    render_revision   INTEGER      NOT NULL DEFAULT 1,
+    render_hash       VARCHAR(64)  NOT NULL,
+    state             VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+    provider_receipt  VARCHAR(255),
+    rendered_markdown TEXT,
+    created_at        TIMESTAMP    NOT NULL,
+    updated_at        TIMESTAMP    NOT NULL,
+    CONSTRAINT uk_review_publications_review_revision UNIQUE (review_id, render_revision),
+    CONSTRAINT fk_review_publications_review
+        FOREIGN KEY (review_id) REFERENCES review_records(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_review_publications_state ON review_publications (state);

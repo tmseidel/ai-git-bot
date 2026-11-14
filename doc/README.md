@@ -54,6 +54,7 @@ Cloud providers (Anthropic, OpenAI, Google AI / Gemini) only need an API key —
 | [PR Workflows](PR_WORKFLOWS.md) | **Start here.** What each workflow solves and the shared setup: workflow configurations, triggers, running workflows |
 | [PR Review](PR_WORKFLOWS_REVIEW.md) | The default, always-on AI code review |
 | [Agentic PR Review](PR_WORKFLOWS_AGENTIC_REVIEW.md) | A deeper review where the bot explores the codebase first; optional approve / request-changes |
+| [Feedback on agentic reviews](WORKFLOW_FEEDBACK.md) | Reviewers judge findings and assessments through Git comments; no AI call, no re-run |
 | [Unit Tests](PR_WORKFLOWS_UNIT_TEST.md) | Auto-generated unit tests for the PR diff, run with your project's own toolchain |
 | [Full-Stack QA](PR_WORKFLOWS_E2E.md) | Generated Playwright tests run against a per-PR preview |
 | [README Sync](PR_WORKFLOWS_README_SYNC.md) | Keeps README and Markdown docs in sync with code changes |

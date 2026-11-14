@@ -42,6 +42,7 @@ ai code review, code review bot, pull request automation, AI unit tests, unit te
 - [PR Workflows](doc/PR_WORKFLOWS.md): what each PR workflow solves and how to set up and run them.
 - [PR Review](doc/PR_WORKFLOWS_REVIEW.md): the default always-on AI code review.
 - [Agentic PR Review](doc/PR_WORKFLOWS_AGENTIC_REVIEW.md): deeper review after the bot explores the codebase; optional approve/request-changes.
+- [Feedback on agentic reviews](doc/WORKFLOW_FEEDBACK.md): reviewers judge findings and assessments through Git comments; recorded without an AI call.
 - [Unit Tests](doc/PR_WORKFLOWS_UNIT_TEST.md): AI unit-test generation for the PR diff, run with the project's own toolchain.
 - [Full-Stack QA](doc/PR_WORKFLOWS_E2E.md): generated Playwright tests run against a per-PR preview.
 - [README Sync](doc/PR_WORKFLOWS_README_SYNC.md): keeps README and Markdown docs in sync with code changes.

@@ -21,9 +21,12 @@ import org.remus.giteabot.review.structured.ReferenceSequence;
 import org.remus.giteabot.review.structured.ReviewAssessment;
 import org.remus.giteabot.review.structured.ReviewFinding;
 import org.remus.giteabot.review.structured.ReviewFindingLocation;
+import org.remus.giteabot.learning.feedback.WorkflowFeedback;
+import org.remus.giteabot.review.structured.ReviewPublication;
 import org.remus.giteabot.review.structured.ReviewRecord;
 import org.remus.giteabot.review.structured.ReviewToolOperation;
 import org.remus.giteabot.review.structured.WorkflowOutput;
+import org.remus.giteabot.review.structured.WorkflowOutputSnapshot;
 import org.remus.giteabot.session.ConversationMessage;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.systemsettings.BotToolSelection;
@@ -86,6 +89,9 @@ class ConfigCoverageTest {
         NOT_A_TABLE.put(ReviewFindingLocation.class, "structured review finding location");
         NOT_A_TABLE.put(ReviewAssessment.class, "structured review assessment");
         NOT_A_TABLE.put(ReviewToolOperation.class, "review tool receipts");
+        NOT_A_TABLE.put(ReviewPublication.class, "review publication log");
+        NOT_A_TABLE.put(WorkflowOutputSnapshot.class, "supplemental learning evidence");
+        NOT_A_TABLE.put(WorkflowFeedback.class, "runtime feedback records");
         NOT_A_TABLE.put(ReferenceSequence.class, "runtime reference counters");
     }
 

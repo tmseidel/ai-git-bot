@@ -123,6 +123,40 @@ class ReviewToolPersistenceContractTest {
                 .filter(operation -> operation.getReviewId() == reviewId).count());
     }
 
+    @Test
+    void updatingAnExistingFindingsLocationsFailedOnceWithItsOwnPositions() {
+        long reviewId = createDraft();
+        FindingHandle created = reviewService.upsertFinding(reviewId, null, finding("evidence-1"));
+
+        // Hibernate flushes inserts before deletes. Re-submitting the same finding used to insert a
+        // new location at position 0 while the previous row still held it, violating
+        // uk_review_finding_locations_position by the time the transaction committed.
+        FindingHandle corrected = reviewService.upsertFinding(reviewId, created.revision(),
+                finding("evidence-1", 3, 9));
+
+        DraftSnapshot draft = reviewService.findDraft(reviewId).orElseThrow();
+        assertEquals(1, draft.findings().size());
+        assertEquals(corrected.revision(), draft.findings().get(0).revision());
+        assertEquals(created.revision() + 1, corrected.revision(),
+                "the correction advances the finding revision exactly once");
+    }
+
+    @Test
+    void shrinkingAndGrowingTheEvidenceListStaysConsistent() {
+        long reviewId = createDraft();
+        FindingHandle created = reviewService.upsertFinding(reviewId, null,
+                finding("evidence-2", new LocationDraft("a.java", ReviewSide.HEAD, 1, 2, "First."),
+                        new LocationDraft("b.java", ReviewSide.HEAD, 3, 4, "Second.")));
+
+        FindingHandle shrunk = reviewService.upsertFinding(reviewId, created.revision(),
+                finding("evidence-2", 1, 2));
+        FindingHandle grown = reviewService.upsertFinding(reviewId, shrunk.revision(),
+                finding("evidence-2", 5, 6));
+
+        assertEquals(1, reviewService.findDraft(reviewId).orElseThrow().findings().size());
+        assertEquals(grown.revision(), shrunk.revision() + 1);
+    }
+
     private long createDraft() {
         return reviewService.createDraft(new ReviewDraftRequest(1L, 2L, "acme",
                 "web-" + UUID.randomUUID(), null, 1L, null, UUID.randomUUID().toString(),
@@ -140,8 +174,17 @@ class ReviewToolPersistenceContractTest {
     }
 
     private static FindingDraft finding(String clientKey) {
+        return finding(clientKey,
+                new LocationDraft("src/Foo.java", ReviewSide.HEAD, 1, 2, "Evidence."));
+    }
+
+    private static FindingDraft finding(String clientKey, int startLine, int endLine) {
+        return finding(clientKey,
+                new LocationDraft("src/Foo.java", ReviewSide.HEAD, startLine, endLine, "Evidence."));
+    }
+
+    private static FindingDraft finding(String clientKey, LocationDraft... locations) {
         return new FindingDraft(clientKey, ReviewSeverity.MEDIUM, "authorization", "Title",
-                "Explanation.", "Impact.", "Recommendation.",
-                List.of(new LocationDraft("src/Foo.java", ReviewSide.HEAD, 1, 2, "Evidence.")));
+                "Explanation.", "Impact.", "Recommendation.", List.of(locations));
     }
 }

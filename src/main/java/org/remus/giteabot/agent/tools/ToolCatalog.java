@@ -59,7 +59,7 @@ public class ToolCatalog {
      * part of the bot tool configuration: a protocol tool is not a repository
      * capability an operator can grant or revoke.</p>
      */
-    public enum Role { CODING, WRITER, REVIEW, PR_WORKFLOW, REVIEW_OUTPUT }
+    public enum Role { CODING, WRITER, REVIEW, PR_WORKFLOW, REVIEW_OUTPUT, REVIEW_CONTEXT }
 
 
     /** Intersects the bot configuration with explicit REVIEW-role entries; null denies all built-ins. */
@@ -395,7 +395,20 @@ public class ToolCatalog {
                             prop("operationId", "string", "Unique ID for this call; reuse it only when retrying the identical call."),
                             prop("expectedDraftRevision", "integer", "The draftRevision being completed."),
                             prop("expectedFindingCount", "integer", "Number of findings still active in the draft."),
-                            required("operationId", "expectedDraftRevision", "expectedFindingCount")))
+                            required("operationId", "expectedDraftRevision", "expectedFindingCount"))),
+
+            // ---- agentic-review lookup (READ-ONLY; advertised to reviews and follow-ups) ----
+            // A follow-up runs without conversation history, so this is how an agent resolves a
+            // reference a user cites. It reads stored records only, inside the run's own scope.
+            entry("review-lookup", ToolKind.REVIEW_CONTEXT, EnumSet.of(Role.REVIEW_CONTEXT),
+                    "Read the reviews this bot already published on this pull request. Call it with "
+                            + "no arguments to list them with their references, with `reference` "
+                            + "(`O1234`, `O1234-F1` or `O1234-A`) to read one target in full, or with "
+                            + "`query` to search the findings' text. Use it whenever the user cites a "
+                            + "reference or asks about something you reported before.",
+                    objectSchema(
+                            prop("reference", "string", "Optional: O1234 (review), O1234-F1 (finding) or O1234-A (assessment)."),
+                            prop("query", "string", "Optional: text to search in published findings.")))
     );
 
     /**
@@ -516,6 +529,10 @@ public class ToolCatalog {
      * operator-selected read-only surface by the review strategy; MCP is deliberately not
      * part of it, because a submission tool is never an MCP tool.
      */
+    public List<ToolDescriptor> reviewContextDescriptors() {
+        return nativeDescriptors(Role.REVIEW_CONTEXT, null, null);
+    }
+
     public List<ToolDescriptor> reviewOutputDescriptors() {
         return nativeDescriptors(Role.REVIEW_OUTPUT, null, null);
     }
@@ -643,7 +660,8 @@ public class ToolCatalog {
         }
         return switch (kind) {
             // AGENT_CONTROL and REVIEW_OUTPUT are silent, so their bucket only keeps this switch exhaustive.
-            case CONTEXT, REPOSITORY, MCP, AGENT_CONTROL, REVIEW_OUTPUT -> DisplayBucket.CONTEXT;
+            case CONTEXT, REPOSITORY, MCP, AGENT_CONTROL, REVIEW_OUTPUT,
+                    REVIEW_CONTEXT -> DisplayBucket.CONTEXT;
             case FILE -> DisplayBucket.MUTATION;
             case VALIDATION, UNKNOWN -> DisplayBucket.VALIDATION;
             default -> throw new IllegalStateException("Unexpected value: " + kind);

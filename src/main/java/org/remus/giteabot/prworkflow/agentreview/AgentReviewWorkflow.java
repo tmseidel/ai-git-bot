@@ -103,7 +103,14 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         "Low must be less or equal",
                         WorkflowParamField.ParamType.INTEGER, false,
                         null,
-                        "Maximum allowed LOW findings for a formal APPROVE. Leave empty to ignore."));
+                        "Maximum allowed LOW findings for a formal APPROVE. Leave empty to ignore."),
+                new WorkflowParamField(AgentReviewParam.FEEDBACK_ENABLED,
+                        "Keep review evidence",
+                        WorkflowParamField.ParamType.BOOLEAN, false,
+                        "false",
+                        "Store the task, diff, prompt and revisions a review was produced from, so "
+                                + "later feedback can be analysed against what the bot actually saw. "
+                                + "Reviews are created identically when this is off."));
     }
 
     @Override
@@ -131,7 +138,8 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         AgentReviewService.ReviewResult reviewed = serviceFactory.create(bot)
                 .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
-                        context.runId(), context.auditToolCallConsumer(), enableProgressComments);
+                        context.runId(), context.auditToolCallConsumer(), enableProgressComments,
+                        AgentReviewLearningSettingsResolver.from(params));
 
         WorkflowResult result = switch (reviewed) {
             case POSTED -> WorkflowResult.success("Agentic review posted");

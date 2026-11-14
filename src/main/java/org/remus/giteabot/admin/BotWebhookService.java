@@ -57,6 +57,7 @@ public class BotWebhookService {
     private final AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
     private final ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
     private final I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
+    private final org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
@@ -70,6 +71,7 @@ public class BotWebhookService {
                              AgentReviewSlashCommandHandler agentReviewSlashCommandHandler,
                              ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler,
                              I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
+                             org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
         this.repositoryPlatformFactory = repositoryPlatformFactory;
@@ -82,6 +84,7 @@ public class BotWebhookService {
         this.agentReviewSlashCommandHandler = agentReviewSlashCommandHandler;
         this.readmeSyncSlashCommandHandler = readmeSyncSlashCommandHandler;
         this.i18nCoverageSlashCommandHandler = i18nCoverageSlashCommandHandler;
+        this.feedbackCommandHandler = feedbackCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
         this.issueWorkflowOrchestrator = issueWorkflowOrchestrator;
     }
@@ -225,9 +228,34 @@ public class BotWebhookService {
      * </ol>
      */
     @Async
+    /**
+     * Learning/feedback commands are classified and consumed before every other routing decision:
+     * before the pull-request-author gate (a permitted reviewer who is not the author may judge a
+     * review), before review-again heuristics, before coding-session forwarding, and before the
+     * "no PR workflow enabled" short circuit. A recognized command never reaches an AI conversation,
+     * so a malformed one cannot start code review, change code, or generate tests.
+     *
+     * @return {@code true} when the comment was a learning command and has been handled
+     */
+    public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind) {
+        try {
+            return feedbackCommandHandler.tryHandle(bot, payload, commentKind);
+        } catch (RuntimeException e) {
+            // The comment looks like a command but could not be processed. It stays consumed: falling
+            // through would forward feedback text into an AI conversation.
+            log.error("[Bot '{}'] Learning command handling failed: {}", bot.getName(),
+                    e.getMessage(), e);
+            return true;
+        }
+    }
+
     public void handleBotCommand(Bot bot, WebhookPayload payload) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
+            if (tryHandleLearningCommand(bot, payload,
+                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
+                return;
+            }
             if (!isPullRequestAuthor(payload)) {
                 log.debug("[Bot '{}'] Ignoring pull request command from non-author", bot.getName());
                 return;
@@ -290,6 +318,10 @@ public class BotWebhookService {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
             if (!isPrCommenterAllowed(bot, payload)) {
+                return;
+            }
+            if (tryHandleLearningCommand(bot, payload,
+                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
                 return;
             }
             String owner = payload.getRepository().getOwner().getLogin();
@@ -363,6 +395,10 @@ public class BotWebhookService {
     public void handleInlineComment(Bot bot, WebhookPayload payload) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
+            if (tryHandleLearningCommand(bot, payload,
+                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_INLINE)) {
+                return;
+            }
             if (!isPullRequestAuthor(payload)) {
                 log.debug("[Bot '{}'] Ignoring inline review comment from non-author", bot.getName());
                 return;

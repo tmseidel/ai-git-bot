@@ -74,7 +74,7 @@ class ReviewToolRoundLimitTest {
         AgentToolRouter router = new AgentToolRouter(null, catalog, null, null,
                 McpToolCatalog.empty(), repositoryClient, allowed, mock(PythonExecutionService.class));
         return new ReviewAgentStrategy("sys", router, catalog, McpToolCatalog.empty(),
-                allowed, null, null, null, 5, maxToolRounds, maxToolRounds, null);
+                allowed, null, null, null, 5, maxToolRounds, maxToolRounds, null, null);
     }
 
     private static ChatTurn toolBatch(String prefix) {

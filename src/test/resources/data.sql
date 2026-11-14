@@ -46,3 +46,7 @@ INSERT INTO reference_sequences (name, next_value)
 SELECT 'workflow_output', 1
 WHERE NOT EXISTS (SELECT 1 FROM reference_sequences WHERE name = 'workflow_output');
 
+INSERT INTO reference_sequences (name, next_value)
+SELECT 'workflow_feedback', 1
+WHERE NOT EXISTS (SELECT 1 FROM reference_sequences WHERE name = 'workflow_feedback');
+

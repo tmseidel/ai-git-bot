@@ -30,12 +30,17 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.review.structured.ReviewDraftHandle;
 import org.remus.giteabot.review.structured.ReviewDraftRequest;
+import org.remus.giteabot.review.structured.ReviewLookupInvocation;
+import org.remus.giteabot.review.structured.ReviewLookupToolExecutor;
 import org.remus.giteabot.review.structured.ReviewInvocation;
+import org.remus.giteabot.review.structured.ReviewSnapshotRequest;
+import org.remus.giteabot.review.structured.ReviewSnapshotService;
 import org.remus.giteabot.review.structured.ReviewState;
 import org.remus.giteabot.review.structured.ReviewSubmissionToolExecutor;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -75,7 +80,8 @@ public class AgentReviewExecution {
     /** Operator-tunable inputs of one generation run. */
     public record Options(int maxToolRounds, boolean enableFormalDecision, String decisionPrompt,
                           boolean enableProgressComments, Long runId,
-                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer) {
+                          Consumer<AgentRunContext.ToolCallRecord> toolCallConsumer,
+                          AgentReviewLearningSettings learningSettings) {
     }
 
     private final AgentReviewContext context;
@@ -86,6 +92,8 @@ public class AgentReviewExecution {
     private final Bot bot;
     private final StructuredReviewService reviewService;
     private final ReviewSubmissionToolExecutor submissionExecutor;
+    private final ReviewSnapshotService snapshotService;
+    private final ReviewLookupToolExecutor reviewLookup;
 
     private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
@@ -105,6 +113,8 @@ public class AgentReviewExecution {
                                 Bot bot,
                                 StructuredReviewService reviewService,
                                 ReviewSubmissionToolExecutor submissionExecutor,
+                                ReviewSnapshotService snapshotService,
+                                ReviewLookupToolExecutor reviewLookup,
                                 PythonExecutionService pythonExecution) {
         this.context = context;
         this.sessionService = sessionService;
@@ -114,6 +124,8 @@ public class AgentReviewExecution {
         this.bot = bot;
         this.reviewService = reviewService;
         this.submissionExecutor = submissionExecutor;
+        this.snapshotService = snapshotService;
+        this.reviewLookup = reviewLookup;
         this.repositoryPlatform = context.repositoryPlatform();
         this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = context.aiClient();
@@ -172,11 +184,12 @@ public class AgentReviewExecution {
                 reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
                 return new Result(Outcome.FAILED, draft.reviewId(), null);
             }
+            String systemPrompt = resolveReviewPrompt(options);
             LoopOutcome outcome;
             try (Workspace workspace = wsResult.workspace()) {
                 AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
                 outcome = runReviewLoop(session, workspace, owner, repo, prNumber, headBranch,
-                        diffSummary, prTitle, prBody, draft, options, progress);
+                        diffSummary, prTitle, prBody, systemPrompt, draft, options, progress);
             }
             if (!outcome.success() || !(outcome.payload() instanceof String reference)
                     || !reference.equals(draft.outputReference())) {
@@ -186,6 +199,7 @@ public class AgentReviewExecution {
                 return new Result(Outcome.FAILED, draft.reviewId(), null);
             }
             finalized = true;
+            captureSnapshot(payload, owner, repo, prNumber, reference, systemPrompt, diff, options);
             return new Result(Outcome.FINALIZED, draft.reviewId(), reference);
         } catch (WorkflowCancelledException e) {
             reviewService.closeDraft(draft.reviewId(), ReviewState.CANCELLED);
@@ -249,13 +263,14 @@ public class AgentReviewExecution {
             LoopOutcome outcome;
             try (Workspace workspace = wsResult.workspace()) {
                 String systemPrompt = resolveClarificationPrompt();
-                String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary, userQuestion);
+                String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary,
+                        userQuestion);
                 AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
                 ReviewAgentStrategy strategy = new ReviewAgentStrategy(systemPrompt, toolRouter,
                         toolCatalog, context.mcpToolCatalog(), context.allowedBuiltinTools(),
                         responseParser, branchSwitcher, this::fetchFiles,
                         agentConfig.getBudget().getMaxContextRounds(), Math.max(1, maxToolRounds),
-                        Math.max(1, maxToolRounds), null);
+                        Math.max(1, maxToolRounds), lookup(owner, repo, prNumber), null);
                 AgentBudget budget = budget(maxToolRounds, maxToolRounds);
                 AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
                 AgentRunContext ctx = AgentRunContext.forPullRequest(session, owner, repo, prNumber,
@@ -279,23 +294,78 @@ public class AgentReviewExecution {
         }
     }
 
+    /**
+     * Supplemental evidence for later feedback analysis. Captured only when the configuration
+     * enables collection, and never allowed to affect the review that was already finalized: a
+     * failure here leaves the review usable and the evidence explicitly incomplete.
+     */
+    private void captureSnapshot(WebhookPayload payload, String owner, String repo, Long prNumber,
+                                 String reference, String systemPrompt, String diff, Options options) {
+        if (!options.learningSettings().feedbackEnabled()) {
+            return;
+        }
+        String pinnedHead = payload.getPullRequest().getHead() != null
+                ? payload.getPullRequest().getHead().getSha() : null;
+        String pinnedBase = payload.getPullRequest().getBase() != null
+                ? payload.getPullRequest().getBase().getSha() : null;
+        List<String> reasons = new ArrayList<>();
+        String currentHead = PrPayloadHydrator.resolveHeadSha(repositoryClient, owner, repo,
+                prNumber == null ? 0 : prNumber);
+        if (pinnedHead != null && currentHead != null && !pinnedHead.equals(currentHead)) {
+            reasons.add("the pull request head moved from " + pinnedHead + " to " + currentHead
+                    + " while the review ran, so the diff and the checkout may describe different revisions");
+        }
+        Long providerRepositoryId = payload.getRepository().getId();
+        try {
+            snapshotService.capture(new ReviewSnapshotRequest(reference,
+                    payload.getPullRequest().getTitle(), payload.getPullRequest().getBody(), diff,
+                    systemPrompt, providerName(), modelName(),
+                    bot.getWorkflowConfiguration() != null
+                            ? bot.getWorkflowConfiguration().getId() : null,
+                    options.learningSettings().fingerprint(),
+                    pinnedBase, pinnedHead,
+                    refOf(payload.getPullRequest().getBase()), refOf(payload.getPullRequest().getHead()),
+                    providerRepositoryId == null ? null : String.valueOf(providerRepositoryId),
+                    reasons));
+        } catch (RuntimeException e) {
+            log.warn("Could not capture the learning snapshot for review {}: {}", reference,
+                    e.getMessage());
+        }
+    }
+
+    private String providerName() {
+        return bot.getGitIntegration() != null
+                ? bot.getGitIntegration().getProviderType().name() : null;
+    }
+
+    private String modelName() {
+        return bot.getAiIntegration() != null ? bot.getAiIntegration().getModel() : null;
+    }
+
+    private static String refOf(WebhookPayload.Head head) {
+        return head != null ? head.getRef() : null;
+    }
+
     // ------------------------------------------------------------------ loop wiring
 
     private LoopOutcome runReviewLoop(AgentSession session, Workspace workspace, String owner,
                                       String repo, Long prNumber, String headBranch,
                                       DiffSummary diffSummary, String prTitle, String prBody,
-                                      ReviewDraftHandle draft, Options options,
+                                      String systemPrompt, ReviewDraftHandle draft, Options options,
                                       ReviewProgress progress) {
-        String systemPrompt = resolveReviewPrompt(options);
         String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
 
         int explorationRounds = Math.max(1, options.maxToolRounds());
-        int submissionRounds = Math.max(4, explorationRounds / 2);
+        // Submissions are one AI round each (finding, correction, assessment), so the budget has to
+        // fit a full review: half the exploration budget could not hold five findings plus the
+        // assessment, and completion is charged separately (never) on top.
+        int submissionRounds = Math.max(8, explorationRounds);
         ReviewInvocation invocation = invocation(draft, owner, repo, prNumber, options.runId());
         ReviewAgentStrategy strategy = new ReviewAgentStrategy(systemPrompt, toolRouter, toolCatalog,
                 context.mcpToolCatalog(), context.allowedBuiltinTools(), responseParser,
                 branchSwitcher, this::fetchFiles, agentConfig.getBudget().getMaxContextRounds(),
                 explorationRounds, submissionRounds,
+                lookup(owner, repo, prNumber),
                 new ReviewAgentStrategy.Submission(submissionExecutor, invocation, reviewService));
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
@@ -316,6 +386,12 @@ public class AgentReviewExecution {
                 budgetCfg.getMaxValidationRetries(), budgetCfg.getMaxTokensPerCall(),
                 budgetCfg.getMaxToolResultChars(), budgetCfg.getMaxHistoryChars(),
                 context.contextWindowTokens(), budgetCfg.getProactiveCompactionThreshold());
+    }
+
+    private ReviewAgentStrategy.Lookup lookup(String owner, String repo, Long prNumber) {
+        return new ReviewAgentStrategy.Lookup(reviewLookup, new ReviewLookupInvocation(
+                bot.getGitIntegration() == null ? null : bot.getGitIntegration().getId(),
+                bot.getId(), owner, repo, prNumber, () -> Thread.currentThread().isInterrupted()));
     }
 
     private ReviewInvocation invocation(ReviewDraftHandle draft, String owner, String repo,
@@ -382,6 +458,13 @@ public class AgentReviewExecution {
                 PR Title: %s
                 PR Description:
                 %s
+
+                You already reviewed this pull request, but this follow-up starts without that
+                conversation. Call the `review-lookup` tool to read what you published: with no
+                arguments it lists the reviews and their finding references, with `reference`
+                (for example `O12-F1`) it reads that target, and with `query` it searches the
+                findings. Resolve any reference the user cites before answering; do not guess what
+                it said.
 
                 The question is:
 

@@ -328,6 +328,48 @@ class AzureDevopsWebhookHandlerTest {
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
 
+    @Test
+    void feedbackComment_isConsumedBeforeTheReviewAgainHeuristic() {
+        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class),
+                anyString())).thenReturn(true);
+        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
+                any(WebhookPayload.class), anyString())).thenReturn(true);
+
+        var response = handler.handleWebhook(bot, feedbackCommentPayload());
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).isReviewAgainRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).handleBotCommand(any(), any());
+    }
+
+    private static Map<String, Object> feedbackCommentPayload() {
+        Map<String, Object> repository = Map.of("name", "my-service",
+                "project", Map.of("name", "MyProject"),
+                "url", "https://dev.azure.com/contoso/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/_apis/"
+                        + "git/repositories/my-service");
+        Map<String, Object> pullRequest = Map.of(
+                "pullRequestId", 42,
+                "title", "Add feature",
+                "sourceRefName", "refs/heads/feature-branch",
+                "targetRefName", "refs/heads/main",
+                "createdBy", Map.of("uniqueName", "dev@contoso.com"),
+                "repository", repository);
+        return Map.of("eventType", "ms.vss-code.git-pullrequest-comment-event",
+                "resource", Map.of(
+                        "comment", Map.of("id", 7,
+                                "content", "@bot feedback O1234 useful review again later",
+                                "commentType", "text",
+                                "author", Map.of("uniqueName", "dev@contoso.com")),
+                        "pullRequest", pullRequest),
+                // The organization is resolved from the resource containers, not from the URL.
+                "resourceContainers", Map.of(
+                        "collection", Map.of("id", "c12d0eb8-e382-443b-9f9c-c52cba5014c2",
+                                "baseUrl", "https://dev.azure.com/contoso/"),
+                        "project", Map.of("id", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                                "baseUrl", "https://dev.azure.com/contoso/")));
+    }
+
     // ---- (a) null-guard on translateCommentEvent: pr == null ----
 
     @Test

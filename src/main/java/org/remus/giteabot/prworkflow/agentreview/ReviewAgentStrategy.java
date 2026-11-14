@@ -23,10 +23,13 @@ import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.review.structured.DraftSnapshot;
 import org.remus.giteabot.review.structured.ReviewInvocation;
+import org.remus.giteabot.review.structured.ReviewLookupInvocation;
+import org.remus.giteabot.review.structured.ReviewLookupToolExecutor;
 import org.remus.giteabot.review.structured.ReviewSubmissionToolExecutor;
 import org.remus.giteabot.review.structured.ReviewToolCall;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
@@ -83,9 +86,11 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             "review-complete must be the only call in its batch. Nothing in this batch was applied. "
                     + "Submit findings and the assessment in earlier batches, then complete alone.";
 
+    /** Sent when the mutation budget is spent: the draft survives and only finalization is left. */
     static final String SUBMISSION_BUDGET_MESSAGE =
-            "⚠️ *The review reached its submission-round limit before the draft was completed, "
-                    + "so no review was published.*";
+            "Submission-round limit reached: further findings, corrections and assessment changes "
+                    + "are no longer executed. Everything already submitted is kept. Call "
+                    + "`review-complete` on its own to publish the review.";
 
     /** Fetches repository file contents for the legacy {@code requestFiles} protocol. */
     @FunctionalInterface
@@ -100,6 +105,14 @@ public final class ReviewAgentStrategy implements AgentStrategy {
      */
     public record Submission(ReviewSubmissionToolExecutor executor, ReviewInvocation invocation,
                              StructuredReviewService reviewService) {
+    }
+
+    /**
+     * Read-only access to the reviews this bot already published on the pull request. Present for
+     * reviews and follow-ups alike: a follow-up has no history of what was published, and a rerun may
+     * want to know what it said before.
+     */
+    public record Lookup(ReviewLookupToolExecutor executor, ReviewLookupInvocation invocation) {
     }
 
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -126,6 +139,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private int completionReminders;
 
     private final Submission submission;
+    private final Lookup lookup;
 
     public ReviewAgentStrategy(String systemPrompt,
                                AgentToolRouter toolRouter,
@@ -138,6 +152,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
                                int maxContextRounds,
                                int maxToolRounds,
                                int maxSubmissionRounds,
+                               Lookup lookup,
                                Submission submission) {
         this.systemPrompt = systemPrompt;
         this.toolRouter = toolRouter;
@@ -151,6 +166,7 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         this.maxToolRounds = Math.max(1, maxToolRounds);
         this.maxSubmissionRounds = Math.max(1, maxSubmissionRounds);
         this.submission = submission;
+        this.lookup = lookup;
     }
 
     @Override
@@ -196,11 +212,13 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     public List<ToolDescriptor> toolDescriptors() {
         List<ToolDescriptor> exploration =
                 catalog.nativeDescriptors(ToolCatalog.Role.REVIEW, mcpToolCatalog, allowedBuiltinTools);
-        if (!structured()) {
-            return exploration;
-        }
         List<ToolDescriptor> combined = new ArrayList<>(exploration);
-        combined.addAll(catalog.reviewOutputDescriptors());
+        if (lookup != null) {
+            combined.addAll(catalog.reviewContextDescriptors());
+        }
+        if (structured()) {
+            combined.addAll(catalog.reviewOutputDescriptors());
+        }
         return List.copyOf(combined);
     }
 
@@ -246,19 +264,23 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             return new StepDecision.ContinueWithToolResults(refused, null);
         }
 
-        boolean hasExploration = calls.stream().anyMatch(call -> !isSubmission(call.name()));
+        // A lookup reads stored records, not the workspace: it must not spend the exploration budget
+        // (nor end an unstructured follow-up when that budget is gone).
+        boolean hasExploration = calls.stream()
+                .anyMatch(call -> !isSubmission(call.name()) && !isLookup(call.name()));
         boolean hasSubmission = calls.stream().anyMatch(call -> isSubmission(call.name()));
         boolean explorationExhausted = hasExploration && toolRounds >= maxToolRounds;
 
         if (hasExploration && !explorationExhausted) {
             toolRounds++;
         }
-        if (hasSubmission) {
+        if (hasSubmission && !finalizesOnly(calls.stream().map(ToolCall::name).toList())) {
             submissionRounds++;
             if (structured() && submissionRounds > maxSubmissionRounds) {
-                log.warn("Agentic review for PR #{} exhausted its {}-round submission budget",
+                log.warn("Agentic review for PR #{} exhausted its {}-round submission budget; "
+                        + "refusing further mutations and asking for completion",
                         ctx.issueNumber(), maxSubmissionRounds);
-                return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(), SUBMISSION_BUDGET_MESSAGE));
+                return refuseOverBudget(calls);
             }
         }
         if (explorationExhausted && !structured()) {
@@ -274,6 +296,8 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         for (ToolCall call : calls) {
             if (isSubmission(call.name())) {
                 results.add(executeSubmissionCall(call));
+            } else if (isLookup(call.name())) {
+                results.add(executeLookupCall(call));
             } else if (explorationExhausted) {
                 results.add(new StepDecision.ToolCallResult(call.id(), EXPLORATION_EXHAUSTED_MESSAGE));
             } else {
@@ -329,6 +353,16 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         return null;
     }
 
+    private boolean isLookup(String tool) {
+        return lookup != null && lookup.executor().isLookupTool(tool);
+    }
+
+    private StepDecision.ToolCallResult executeLookupCall(ToolCall call) {
+        ToolResult result = lookup.executor().execute(lookup.invocation(),
+                new ReviewToolCall(call.name(), call.id(), call.args()));
+        return new StepDecision.ToolCallResult(call.id(), result.formatForAi());
+    }
+
     private StepDecision.ToolCallResult executeSubmissionCall(ToolCall call) {
         ToolResult result = submission.executor().execute(submission.invocation(),
                 new ReviewToolCall(call.name(), call.id(), call.args()));
@@ -344,6 +378,46 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     private boolean isSubmission(String tool) {
         return structured() && submission.executor().isSubmissionTool(tool);
+    }
+
+    /**
+     * Whether every call in this batch belongs to finalization (assessment and completion), which
+     * never counts against the mutation budget.
+     *
+     * <p>Both are required to publish and neither can loop: there is one assessment per review and
+     * one completion. If they were charged, a review that used its rounds on findings could never be
+     * finalized — the failure this budget is not meant to cause.</p>
+     */
+    private static boolean finalizesOnly(List<String> toolNames) {
+        List<String> submissions = toolNames.stream().filter(ReviewAgentStrategy::isStaticSubmission)
+                .toList();
+        return !submissions.isEmpty() && submissions.stream()
+                .allMatch(tool -> isCompletion(tool)
+                        || ReviewSubmissionToolExecutor.SET_ASSESSMENT.equals(normalize(tool)));
+    }
+
+    private static boolean isStaticSubmission(String tool) {
+        return ReviewSubmissionToolExecutor.UPSERT_FINDING.equals(normalize(tool))
+                || ReviewSubmissionToolExecutor.REMOVE_FINDING.equals(normalize(tool))
+                || ReviewSubmissionToolExecutor.GET_DRAFT.equals(normalize(tool))
+                || ReviewSubmissionToolExecutor.SET_ASSESSMENT.equals(normalize(tool))
+                || ReviewSubmissionToolExecutor.COMPLETE.equals(normalize(tool));
+    }
+
+    /**
+     * Refuses an over-budget batch without executing any of it. The draft keeps everything already
+     * submitted, and the model is told to finalize: a spent submission budget must never discard a
+     * review that is merely missing its completion call.
+     */
+    private static StepDecision refuseOverBudget(List<ToolCall> calls) {
+        List<StepDecision.ToolCallResult> refused = new ArrayList<>(calls.size());
+        for (ToolCall call : calls) {
+            refused.add(new StepDecision.ToolCallResult(call.id(), "Not executed: "
+                    + SUBMISSION_BUDGET_MESSAGE));
+        }
+        return new StepDecision.ContinueWithToolResults(refused, SUBMISSION_BUDGET_MESSAGE
+                + " Nothing in this batch was applied. Call `review-complete` on its own to publish "
+                + "what you already submitted.");
     }
 
     private static boolean isCompletion(String tool) {
@@ -438,9 +512,16 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         if (submissions.size() > 1 && submissions.stream().anyMatch(entry -> isCompletion(entry.tool()))) {
             return new StepDecision.Continue("Not applied: " + COMPLETION_ALONE_MESSAGE);
         }
-        submissionRounds++;
-        if (submissionRounds > maxSubmissionRounds) {
-            return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(), SUBMISSION_BUDGET_MESSAGE));
+        if (!finalizesOnly(submissions.stream().map(ReviewLegacyProtocol.Entry::tool).toList())) {
+            submissionRounds++;
+            if (submissionRounds > maxSubmissionRounds) {
+                log.warn("Agentic review for PR #{} exhausted its {}-round submission budget in the "
+                        + "legacy transport; refusing further mutations and asking for completion",
+                        ctx.issueNumber(), maxSubmissionRounds);
+                return new StepDecision.Continue(SUBMISSION_BUDGET_MESSAGE + " Nothing in this batch "
+                        + "was applied. Call `review-complete` on its own to publish what you already "
+                        + "submitted.");
+            }
         }
 
         List<StepDecision.ToolCallResult> receipts = new ArrayList<>(submissions.size());
@@ -610,11 +691,29 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private List<ToolResult> executeAll(AgentRunContext ctx, List<ImplementationPlan.ToolRequest> requests) {
         List<ToolResult> results = new ArrayList<>(requests.size());
         for (ImplementationPlan.ToolRequest req : requests) {
+            if (isLookup(req.getTool())) {
+                results.add(executeLegacyLookup(req));
+                continue;
+            }
             results.add(toolRouter.execute(AgentToolRouter.Mode.REVIEW,
                     new ToolCallContext(ctx.owner(), ctx.repo(), ctx.issueNumber(),
                             ctx.workspace(), req, ctx.diffSummary())));
         }
         return results;
+    }
+
+    /** The legacy transport passes positions, so `reference` is argument 0 and `query` argument 1. */
+    private ToolResult executeLegacyLookup(ImplementationPlan.ToolRequest request) {
+        ObjectNode arguments = JSON.createObjectNode();
+        List<String> args = request.getArgs() == null ? List.of() : request.getArgs();
+        if (!args.isEmpty() && args.get(0) != null && !args.get(0).isBlank()) {
+            arguments.put("reference", args.get(0));
+        }
+        if (args.size() > 1 && args.get(1) != null && !args.get(1).isBlank()) {
+            arguments.put("query", args.get(1));
+        }
+        return lookup.executor().execute(lookup.invocation(),
+                new ReviewToolCall(request.getTool(), request.getId(), arguments));
     }
 
     /** See {@link ToolArguments}: the mapping is shared, never copied per agent. */

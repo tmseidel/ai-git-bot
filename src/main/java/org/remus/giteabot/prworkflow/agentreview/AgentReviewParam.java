@@ -26,7 +26,13 @@ public enum AgentReviewParam implements WorkflowParamName {
     MEDIUM_THRESHOLD("mediumThreshold"),
 
     /** Maximum allowed number of LOW findings for a formal APPROVE decision. */
-    LOW_THRESHOLD("lowThreshold");
+    LOW_THRESHOLD("lowThreshold"),
+
+    /**
+     * Accept agentic-review feedback and retain supplemental learning evidence. Structured review
+     * generation and rendering do not depend on it.
+     */
+    FEEDBACK_ENABLED("feedbackEnabled");
 
     private final String key;
 

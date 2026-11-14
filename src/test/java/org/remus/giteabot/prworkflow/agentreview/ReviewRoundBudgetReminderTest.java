@@ -201,7 +201,7 @@ class ReviewRoundBudgetReminderTest {
         var strategy = new ReviewAgentStrategy("system", router, new ToolCatalog(new AgentConfigProperties()),
                 null, Set.of("cat"), new AiResponseParser(), new BranchSwitcher(mock(ToolExecutionService.class)),
                 (owner, repo, ref, files) -> fileContent, scenario.maxContextRounds(), scenario.maxToolRounds(),
-                scenario.maxToolRounds(), null);
+                scenario.maxToolRounds(), null, null);
         var session = new AgentSession("owner", "repo", 76L, "Review example");
         var context = AgentRunContext.forPullRequest(session, "owner", "repo", 76L,
                 Workspace.unmanaged(Path.of("/tmp/ws")), "main");

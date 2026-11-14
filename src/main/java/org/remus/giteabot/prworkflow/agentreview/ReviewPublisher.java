@@ -11,21 +11,29 @@ import org.remus.giteabot.review.structured.FinalizedReview;
 import org.remus.giteabot.review.structured.ReviewCommentRenderer;
 import org.remus.giteabot.review.structured.ReviewConclusion;
 import org.remus.giteabot.review.structured.ReviewLinkStyle;
+import org.remus.giteabot.review.structured.ReviewPublication;
+import org.remus.giteabot.review.structured.ReviewPublicationService;
+import org.remus.giteabot.review.structured.ReviewPublicationState;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 /**
- * Publishes one finalized agentic review: loads the stored record, renders it, posts it with the
- * formal decision the server computes from the persisted findings, and emits the finding events.
+ * Publishes one finalized agentic review: loads the stored record, renders it, records the delivery
+ * intent, posts it with the formal decision the server computes from the persisted findings, and
+ * reports the outcome.
  *
- * <p>Publication is a pure function of the stored review. Nothing here re-reads model text, so a
- * renderer change, a retry after a failed delivery or an outgoing webhook all describe the same
- * review. A formal-review submission that fails is retried as a plain comment; that never
- * changes the structured source.</p>
+ * <p>Publication is a pure function of the stored review, so a renderer change, a retry after a
+ * failed delivery or an outgoing webhook all describe the same review — republishing never calls
+ * the model. The intent is committed before the Git call: a crash leaves a visible {@code PENDING}
+ * row rather than a silently missing review, and an unknown outcome is recorded as
+ * {@code UNCERTAIN} instead of being retried into a duplicate.</p>
  */
 @Slf4j
 @Component
@@ -33,49 +41,166 @@ import java.util.Map;
 public class ReviewPublisher {
 
     private final StructuredReviewService reviewService;
+    private final ReviewPublicationService publicationService;
     private final ReviewCommentRenderer renderer;
     private final EventHookPublisher eventHookPublisher;
 
     /**
-     * @return {@code true} when the review reached the pull request
-     * @throws RuntimeException when neither the formal submission nor the plain fallback worked
+     * Everything one delivery needs. {@code expectedHeadSha} pins the revision the review describes;
+     * a moved head suppresses the publication instead of posting a stale review.
      */
-    public boolean publish(RepositoryApiClient client, Bot bot, String owner, String repo,
-                           Long prNumber, String outputReference, boolean enableFormalDecision,
-                           AgentReviewService.SeverityThresholds thresholds,
-                           ReviewLinkStyle linkStyle) {
-        FinalizedReview review = reviewService.findFinalizedByReference(outputReference).orElse(null);
+    public record PublicationRequest(
+            RepositoryApiClient client,
+            Bot bot,
+            String owner,
+            String repo,
+            Long prNumber,
+            String outputReference,
+            boolean enableFormalDecision,
+            AgentReviewService.SeverityThresholds thresholds,
+            ReviewLinkStyle linkStyle,
+            String provider,
+            String channel,
+            String expectedHeadSha,
+            Supplier<String> currentHeadSha,
+            BooleanSupplier cancelled,
+            String feedbackHint) {
+    }
+
+    /** Publishes a finalized review that has no successful publication yet. */
+    public boolean publish(PublicationRequest request) {
+        return deliver(request, false);
+    }
+
+    /**
+     * Retries a delivery that failed or whose outcome is unknown, by rerendering the same stored
+     * review. A review that is already published is not reposted: updating a bot-owned comment (or
+     * an explicit replacement) is a separate, deliberate action.
+     */
+    public boolean republish(PublicationRequest request) {
+        return deliver(request, true);
+    }
+
+    private boolean deliver(PublicationRequest request, boolean retry) {
+        FinalizedReview review = reviewService.findFinalizedByReference(request.outputReference())
+                .orElse(null);
         if (review == null) {
             // Never publish what could not be persistently finalized: the comment would be the only
             // witness of a review the application cannot reproduce.
-            log.error("Finalized agentic review {} is missing; nothing will be published", outputReference);
+            log.error("Finalized agentic review {} is missing; nothing will be published",
+                    request.outputReference());
+            return false;
+        }
+        if (retry && alreadyPublished(request.outputReference())) {
+            log.info("Agentic review {} is already published; refusing to post a duplicate. "
+                    + "Update the existing comment instead.", review.reference());
             return false;
         }
 
-        String body = renderer.render(review, linkStyle);
-        PostReviewAction action = enableFormalDecision
-                ? decision(review, thresholds) : PostReviewAction.NONE;
+        String body = request.feedbackHint() == null
+                ? renderer.render(review, request.linkStyle())
+                : renderer.render(review, request.linkStyle()) + "\n\n" + request.feedbackHint();
+        ReviewPublication publication = publicationService.start(review.reference(),
+                request.provider(), request.channel(), body);
+
+        String suppression = suppressionReason(request);
+        if (suppression != null) {
+            publicationService.finish(publication.getId(), ReviewPublicationState.SUPPRESSED, null);
+            log.info("Agentic review {} suppressed: {}", review.reference(), suppression);
+            return false;
+        }
+
+        PostReviewAction action = request.enableFormalDecision()
+                ? decision(review, request.thresholds()) : PostReviewAction.NONE;
         try {
-            client.postReview(owner, repo, prNumber, body, action);
+            request.client().postReview(request.owner(), request.repo(), request.prNumber(), body, action);
+            publicationService.finish(publication.getId(), ReviewPublicationState.PUBLISHED, null);
             if (action != PostReviewAction.NONE) {
                 log.info("Agentic review {} posted formal decision {} for PR #{} in {}/{}",
-                        review.reference(), action, prNumber, owner, repo);
+                        review.reference(), action, request.prNumber(), request.owner(), request.repo());
             }
         } catch (RuntimeException e) {
             if (action == PostReviewAction.NONE) {
+                ReviewPublicationState state = classify(e);
+                publicationService.finish(publication.getId(), state, null);
+                if (state == ReviewPublicationState.UNCERTAIN) {
+                    log.warn("Delivery of agentic review {} is uncertain ({}); the review stays stored "
+                            + "and can be republished explicitly", review.reference(), e.getMessage());
+                }
                 throw e;
             }
             // The findings survive a failed formal submission; the stored review is unchanged.
             log.warn("Failed to post formal review {} for {} on PR #{} in {}/{}: {} — "
                             + "falling back to a plain review comment",
-                    action, review.reference(), prNumber, owner, repo, e.getMessage());
-            client.postReviewComment(owner, repo, prNumber, body);
+                    action, review.reference(), request.prNumber(), request.owner(), request.repo(),
+                    e.getMessage());
+            try {
+                request.client().postReviewComment(request.owner(), request.repo(), request.prNumber(),
+                        body);
+                publicationService.finish(publication.getId(), ReviewPublicationState.PUBLISHED, null);
+            } catch (RuntimeException fallback) {
+                publicationService.finish(publication.getId(), classify(fallback), null);
+                throw fallback;
+            }
         }
 
-        publishFindingEvents(bot, review, owner, repo, prNumber);
+        publishFindingEvents(request.bot(), review, request.owner(), request.repo(), request.prNumber());
         log.info("Agentic review {} published for PR #{} in {}/{} ({} finding(s))",
-                review.reference(), prNumber, owner, repo, review.findings().size());
+                review.reference(), request.prNumber(), request.owner(), request.repo(),
+                review.findings().size());
         return true;
+    }
+
+    /**
+     * Whether this review already reached the pull request in any revision. Checking only the newest
+     * revision would repost a review that was published and then failed to rerender.
+     */
+    private boolean alreadyPublished(String outputReference) {
+        return reviewService.findReviewIdByReference(outputReference)
+                .map(publicationService::delivered)
+                .orElse(false);
+    }
+
+    /**
+     * Why this publication must not happen, or {@code null} when it may. A cancelled run and a
+     * moved head both mean the review no longer describes the pull request it would be posted on:
+     * the record stays stored, the delivery is suppressed.
+     */
+    private static String suppressionReason(PublicationRequest request) {
+        if (request.cancelled() != null && request.cancelled().getAsBoolean()) {
+            return "the run was cancelled before publication";
+        }
+        if (request.expectedHeadSha() == null || request.expectedHeadSha().isBlank()
+                || request.currentHeadSha() == null) {
+            return null;
+        }
+        String current = request.currentHeadSha().get();
+        if (current != null && !current.isBlank() && !current.equals(request.expectedHeadSha())) {
+            return "the pull request head moved from " + request.expectedHeadSha() + " to " + current;
+        }
+        return null;
+    }
+
+    /**
+     * A definite refusal is retryable as {@code FAILED}; a timeout or a dropped connection leaves
+     * the outcome unknown, and claiming {@code FAILED} there would invite a duplicate comment.
+     */
+    static ReviewPublicationState classify(RuntimeException failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof IOException) {
+                return ReviewPublicationState.UNCERTAIN;
+            }
+            String type = current.getClass().getSimpleName().toLowerCase(Locale.ROOT);
+            String message = current.getMessage() == null
+                    ? "" : current.getMessage().toLowerCase(Locale.ROOT);
+            if (type.contains("timeout") || message.contains("timed out")
+                    || message.contains("timeout") || message.contains("connection reset")) {
+                return ReviewPublicationState.UNCERTAIN;
+            }
+            current = current.getCause();
+        }
+        return ReviewPublicationState.FAILED;
     }
 
     /**

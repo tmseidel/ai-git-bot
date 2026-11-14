@@ -67,6 +67,15 @@ public enum ToolKind {
     REVIEW_OUTPUT,
 
     /**
+     * Read-only access to the reviews this bot already published on the pull request:
+     * {@code review-lookup}. A follow-up runs in a fresh session, so without this an agent cannot
+     * resolve a reference the user cites ({@code O3-F1}) or find the finding they describe. It reads
+     * only stored records inside the run's own scope and never touches the workspace, so the generic
+     * repository router must refuse it. Silent.
+     */
+    REVIEW_CONTEXT,
+
+    /**
      * Tool name is not configured for the current agent role.
      */
     UNKNOWN

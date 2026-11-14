@@ -242,6 +242,11 @@ public class AzureDevopsWebhookHandler {
             return ResponseEntity.ok("inline comment response triggered");
         }
 
+        if (botWebhookService.tryHandleLearningCommand(bot, payload,
+                org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
+            return ResponseEntity.ok("feedback recorded");
+        }
+
         if (botWebhookService.isReviewAgainRequest(payload, botAlias)) {
             if (!botWebhookService.isPullRequestAuthor(payload)) {
                 return ResponseEntity.ok("ignored");

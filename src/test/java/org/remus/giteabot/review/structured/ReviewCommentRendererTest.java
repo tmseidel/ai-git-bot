@@ -1,6 +1,7 @@
 package org.remus.giteabot.review.structured;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.config.ReviewCommentProperties;
 
 import java.util.List;
 
@@ -10,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ReviewCommentRendererTest {
 
-    private final ReviewCommentRenderer renderer = new ReviewCommentRenderer();
+    private final ReviewCommentProperties properties = new ReviewCommentProperties();
+    private final ReviewCommentRenderer renderer = new ReviewCommentRenderer(properties);
 
     @Test
     void rendersFixedLayoutForOneFinding() {
@@ -24,25 +26,77 @@ class ReviewCommentRendererTest {
                                 "Settings update entry point."))));
 
         String expected = """
-                AI Review · O1234
+                # 🤖 AI Review · O1234
 
-                Assessment · O1234-A
+                ⚠️ **Findings present** — 🔴 **0** blocker · 🟠 **1** medium · 🟡 **0** low
+
+                ## 📝 Assessment · O1234-A
+
                 One authorization concern needs attention.
 
-                Findings: 0 blocker · 1 medium · 0 low
+                ---
 
-                MEDIUM · O1234-F1 · Settings update may bypass authorization
-                Explanation: The observed update path does not show the required permission check.
-                Location: src/example/SettingsController.java:42–49 (HEAD)
-                Evidence: Settings update entry point.
-                Impact: An unauthorized caller could change settings.
-                Recommendation: Verify the enclosing filter and enforce the permission on uncovered paths.
+                ## 🔎 Findings · 1
 
-                Coverage and limitations
-                Reviewed: settings controller and security configuration.
-                Not verified: deployment-specific filter registration.""";
+                ### 🟠 MEDIUM · `O1234-F1` · Settings update may bypass authorization
+
+                **Explanation**
+
+                The observed update path does not show the required permission check.
+
+                **Where**
+
+                - 📍 `src/example/SettingsController.java:42–49` · HEAD
+                  > Settings update entry point.
+
+                **Impact**
+
+                An unauthorized caller could change settings.
+
+                **Recommendation**
+
+                Verify the enclosing filter and enforce the permission on uncovered paths.
+
+                ---
+
+                ## 🧭 Coverage and limitations
+
+                **Reviewed**
+
+                settings controller and security configuration.
+
+                **Not verified**
+
+                deployment-specific filter registration.
+
+                ---
+
+                *Agentic review by [AI Git Bot](https://gitbot.eu)*""";
 
         assertEquals(expected, renderer.render(review));
+    }
+
+    @Test
+    void rendersTheConfiguredFooterAsMarkdown() {
+        properties.setFooter("*Reviewed by [Acme Engineering](https://acme.example/review)*");
+
+        String rendered = renderer.render(review(ReviewConclusion.NO_FINDINGS, "Fine.", null, null,
+                List.of()));
+
+        assertTrue(rendered.endsWith("---\n\n*Reviewed by [Acme Engineering]"
+                + "(https://acme.example/review)*"));
+    }
+
+    @Test
+    void anEmptyFooterPublishesTheReviewWithoutBrandingOrATrailingRule() {
+        properties.setFooter("");
+
+        String rendered = renderer.render(review(ReviewConclusion.NO_FINDINGS, "Fine.", null, null,
+                List.of()));
+
+        assertFalse(rendered.contains("Agentic Review by"));
+        assertFalse(rendered.stripTrailing().endsWith("---"));
+        assertTrue(rendered.stripTrailing().endsWith("**Not verified**\n\nnot specified"));
     }
 
     @Test
@@ -62,11 +116,14 @@ class ReviewCommentRendererTest {
         String rendered = renderer.render(review);
 
         List<String> order = rendered.lines()
-                .filter(line -> line.matches("^(BLOCKER|MEDIUM|LOW) · O1234-F\\d+ · .*"))
-                .map(line -> line.split(" · ")[1])
+                .filter(line -> line.startsWith("### "))
+                .map(line -> line.split(" · ")[1].replace("`", ""))
                 .toList();
 
         assertEquals(List.of("O1234-F3", "O1234-F2", "O1234-F5", "O1234-F4", "O1234-F1"), order);
+        assertFalse(rendered.contains("\n\n\n"), "sections are separated by exactly one blank line");
+        assertTrue(rendered.contains("### 🔴 BLOCKER · `O1234-F3` · blocker"));
+        assertTrue(rendered.contains("### 🟡 LOW · `O1234-F4` · low a"));
     }
 
     @Test
@@ -76,8 +133,9 @@ class ReviewCommentRendererTest {
 
         String rendered = renderer.render(review);
 
-        assertTrue(rendered.contains("Findings: 0 blocker · 0 medium · 0 low"));
-        assertTrue(rendered.contains("No findings were reported."));
+        assertTrue(rendered.contains("✅ **No findings** — 🔴 **0** blocker · 🟠 **0** medium"
+                + " · 🟡 **0** low"));
+        assertTrue(rendered.contains("## ✅ Findings\n\nNo findings were reported in this change."));
         assertFalse(rendered.contains("Inconclusive review"));
     }
 
@@ -90,8 +148,9 @@ class ReviewCommentRendererTest {
 
         String rendered = renderer.render(review);
 
-        assertTrue(rendered.contains(ReviewCommentRenderer.INCONCLUSIVE_NOTICE));
-        assertTrue(rendered.contains("Not verified: deployment-specific filter registration."));
+        assertTrue(rendered.contains("❓ **Inconclusive**"));
+        assertTrue(rendered.contains("> " + ReviewCommentRenderer.INCONCLUSIVE_NOTICE));
+        assertTrue(rendered.contains("**Not verified**\n\ndeployment-specific filter registration."));
         assertTrue(rendered.indexOf(ReviewCommentRenderer.INCONCLUSIVE_NOTICE)
                 < rendered.indexOf("Coverage and limitations"));
     }
@@ -102,17 +161,27 @@ class ReviewCommentRendererTest {
                 List.of(new FinalizedReview.Finding("O1234-F1", ReviewSeverity.MEDIUM, "authorization",
                         "Multi\nline\ttitle   collapsed", """
                         ### Fake heading
-                        
+
                         > fake quote
-                        MEDIUM · O1234-F9 · Fake finding""", "Impact.", "Recommendation.",
+                        MEDIUM · O1234-F9 · Fake finding
+                        🔴 BLOCKER · O1234-F8 · Fake with icon
+                        | a | b |
+                        ---
+                        ```
+                        fenced""", "Impact.", "Recommendation.",
                         List.of())));
 
         String rendered = renderer.render(review);
 
-        assertTrue(rendered.contains("MEDIUM · O1234-F1 · Multi line title collapsed"));
+        assertTrue(rendered.contains("### 🟠 MEDIUM · `O1234-F1` · Multi line title collapsed"));
         assertTrue(rendered.contains("\\### Fake heading"));
         assertTrue(rendered.contains("\\> fake quote"));
         assertTrue(rendered.contains("\\MEDIUM · O1234-F9 · Fake finding"));
+        assertTrue(rendered.contains("\\🔴 BLOCKER · O1234-F8 · Fake with icon"));
+        assertTrue(rendered.contains("\\| a | b |"));
+        assertTrue(rendered.contains("\\---"));
+        assertTrue(rendered.contains("\\```"));
+        assertEquals(1, rendered.lines().filter(line -> line.startsWith("### ")).count());
     }
 
     @Test
@@ -125,8 +194,8 @@ class ReviewCommentRendererTest {
 
         String rendered = renderer.render(review, links);
 
-        assertTrue(rendered.contains("Location: [src/Foo.java:42–49 (HEAD)]"
-                + "(https://git.example/acme/web/src/branch/main/src/Foo.java#L42)"));
+        assertTrue(rendered.contains("- 📍 [`src/Foo.java:42–49`]"
+                + "(https://git.example/acme/web/src/branch/main/src/Foo.java#L42) · HEAD"));
     }
 
     @Test
@@ -137,7 +206,7 @@ class ReviewCommentRendererTest {
 
         String rendered = renderer.render(review);
 
-        assertTrue(rendered.contains("Location: src/Gone.java:12 (BASE)"));
+        assertTrue(rendered.contains("- 📍 `src/Gone.java:12` · BASE"));
     }
 
     @Test
@@ -149,8 +218,28 @@ class ReviewCommentRendererTest {
 
         String rendered = renderer.render(review);
 
-        assertTrue(rendered.contains("Location: src/A.java:1–2 (HEAD)\nEvidence: first evidence"));
-        assertTrue(rendered.contains("Location: src/B.java (HEAD)\nEvidence: second evidence"));
+        assertTrue(rendered.contains("- 📍 `src/A.java:1–2` · HEAD\n  > first evidence"));
+        assertTrue(rendered.contains("- 📍 `src/B.java` · HEAD\n  > second evidence"));
+    }
+
+    @Test
+    void saysSoWhenAFindingHasNoLocation() {
+        FinalizedReview review = review(ReviewConclusion.FINDINGS_PRESENT, "Summary.", null, null,
+                List.of(finding("O1234-F1", ReviewSeverity.LOW, "Nowhere")));
+
+        String rendered = renderer.render(review);
+
+        assertTrue(rendered.contains("**Where**\n\n_No source location was recorded for this finding._"));
+    }
+
+    @Test
+    void missingAssessmentFieldsAreNamedInsteadOfLeftBlank() {
+        FinalizedReview review = review(ReviewConclusion.NO_FINDINGS, null, null, null, List.of());
+
+        String rendered = renderer.render(review);
+
+        assertTrue(rendered.contains("## 📝 Assessment · O1234-A\n\nnot specified"));
+        assertTrue(rendered.contains("**Reviewed**\n\nnot specified"));
     }
 
     private static FinalizedReview review(ReviewConclusion conclusion, String summary,

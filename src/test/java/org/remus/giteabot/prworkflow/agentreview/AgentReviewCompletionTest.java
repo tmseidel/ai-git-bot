@@ -77,6 +77,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -114,10 +115,16 @@ class AgentReviewCompletionTest {
     @Mock private ReviewRecordRepository reviewRepository;
     @Mock private ReferenceAllocator referenceAllocator;
     @Mock private ReviewToolOperationRepository operationRepository;
+    private final org.remus.giteabot.config.ReviewCommentProperties commentProperties =
+            new org.remus.giteabot.config.ReviewCommentProperties();
+    @Mock private org.remus.giteabot.review.structured.ReviewPublicationRepository publicationRepository;
+    @Mock private org.remus.giteabot.review.structured.WorkflowOutputSnapshotRepository snapshotRepository;
 
     private final Map<Long, ReviewRecord> storedReviews = new HashMap<>();
     private final Map<String, org.remus.giteabot.review.structured.WorkflowOutput> storedOutputs = new HashMap<>();
     private final Map<String, ReviewToolOperation> receipts = new HashMap<>();
+    private final Map<Long, org.remus.giteabot.review.structured.ReviewPublication> publications =
+            new HashMap<>();
 
     private AgentReviewService service;
     private StructuredReviewService reviewService;
@@ -183,9 +190,36 @@ class AgentReviewCompletionTest {
             return receipt;
         });
 
+        lenient().when(publicationRepository.save(any())).thenAnswer(invocation -> {
+            org.remus.giteabot.review.structured.ReviewPublication publication = invocation.getArgument(0);
+            if (publication.getId() == null) {
+                publication.setId((long) publications.size() + 1);
+            }
+            publications.put(publication.getId(), publication);
+            return publication;
+        });
+        lenient().when(publicationRepository.findById(anyLong()))
+                .thenAnswer(invocation -> Optional.ofNullable(publications.get(invocation.getArgument(0))));
+        lenient().when(publicationRepository.findTopByReviewIdOrderByRenderRevisionDesc(anyLong()))
+                .thenAnswer(invocation -> publications.values().stream()
+                        .filter(publication -> publication.getReviewId().equals(invocation.getArgument(0)))
+                        .max(java.util.Comparator.comparingInt(
+                                org.remus.giteabot.review.structured.ReviewPublication::getRenderRevision)));
+        lenient().when(snapshotRepository.findByReviewId(anyLong())).thenReturn(Optional.empty());
+        lenient().when(outputRepository.findByScope(anyLong(), anyLong(), anyString(), anyString(),
+                anyLong(), anyString(), any())).thenReturn(java.util.List.of());
+        lenient().when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
         ReviewSubmissionToolExecutor submissionExecutor = new ReviewSubmissionToolExecutor(
                 reviewService, new ReviewToolOperationService(operationRepository));
-        ReviewPublisher publisher = new ReviewPublisher(reviewService, new ReviewCommentRenderer(), eventHooks);
+        org.remus.giteabot.review.structured.ReviewPublicationService publicationService =
+                new org.remus.giteabot.review.structured.ReviewPublicationService(publicationRepository,
+                        outputRepository, reviewRepository);
+        org.remus.giteabot.review.structured.ReviewSnapshotService snapshotService =
+                new org.remus.giteabot.review.structured.ReviewSnapshotService(snapshotRepository,
+                        outputRepository, reviewRepository, new org.remus.giteabot.config.LearningProperties());
+        ReviewPublisher publisher = new ReviewPublisher(reviewService, publicationService,
+                new ReviewCommentRenderer(new org.remus.giteabot.config.ReviewCommentProperties()), eventHooks);
 
         Bot bot = new Bot();
         bot.setId(3L);
@@ -200,7 +234,12 @@ class AgentReviewCompletionTest {
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, new PackageManagerDetector(),
                         new YarnCommandBuilder(config)), catalog, workspaceService,
-                config, null, bot, eventHooks, null, reviewService, submissionExecutor, publisher);
+                config, null, bot, eventHooks, null, reviewService, submissionExecutor, snapshotService,
+                new org.remus.giteabot.review.structured.ReviewLookupToolExecutor(
+                        new org.remus.giteabot.review.structured.PublishedReviewLookup(
+                                outputRepository, reviewRepository)),
+                commentProperties,
+                publisher);
 
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
         lenient().when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
@@ -220,9 +259,12 @@ class AgentReviewCompletionTest {
         assertThat(review()).isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
-                argThat(body -> body.contains("AI Review · O1234")
-                        && body.contains("MEDIUM · O1234-F1 · Settings update may bypass authorization")
-                        && body.contains("Findings: 0 blocker · 1 medium · 0 low")),
+                argThat(body -> body.contains("# 🤖 AI Review · O1234")
+                        && body.contains("⚠️ **Findings present**")
+                        && body.contains("🟠 **1** medium")
+                        && body.contains("### 🟠 MEDIUM · `O1234-F1` · "
+                                + "Settings update may bypass authorization")
+                        && body.contains("*Agentic review by [AI Git Bot](https://gitbot.eu)*")),
                 eq(PostReviewAction.NONE));
         verify(eventHooks).publish(eq(EventHookEventType.AGENT_REVIEW_FINDING_DETECTED), any(),
                 eq("owner"), eq("repo"), eq(1L), isNull(),
@@ -265,7 +307,7 @@ class AgentReviewCompletionTest {
                 .thenReturn(findingTurn("auth", "BLOCKER"), assessmentTurn(1), completionTurn(2, 1));
 
         assertThat(service.reviewPullRequest(payload, 12, true, "Classify by severity.",
-                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false))
+                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L), anyString(),
@@ -280,7 +322,7 @@ class AgentReviewCompletionTest {
                 .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
 
         assertThat(service.reviewPullRequest(payload, 12, true, null,
-                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false))
+                new AgentReviewService.SeverityThresholds(0, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
         verify(repositoryClient).postReviewComment(eq("owner"), eq("repo"), eq(1L),
@@ -296,7 +338,7 @@ class AgentReviewCompletionTest {
                 .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
 
         assertThat(service.reviewPullRequest(payload, 12, false, null,
-                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true))
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.POSTED);
 
         verify(repositoryClient).postPullRequestComment(eq("owner"), eq("repo"), eq(1L),
@@ -315,6 +357,36 @@ class AgentReviewCompletionTest {
 
         assertThat(draft().state()).isEqualTo(ReviewState.FAILED);
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    void feedbackCollectionCapturesTheEvidenceTheReviewUsed() {
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThat(service.reviewPullRequest(payload, 12, false, null,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false,
+                new AgentReviewLearningSettings(true)))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(snapshotRepository).save(argThat(snapshot ->
+                "head-sha".equals(snapshot.getHeadSha())
+                        && "feature".equals(snapshot.getHeadRef())
+                        && snapshot.getDiffText() != null
+                        && snapshot.getSystemPrompt() != null
+                        && snapshot.getSystemPromptHash() != null
+                        && !snapshot.isComplete()));
+    }
+
+    @Test
+    void theReviewIsUnaffectedWhenFeedbackCollectionIsOff() {
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThat(review()).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(snapshotRepository, never()).save(any());
+        assertThat(draft().state()).isEqualTo(ReviewState.FINALIZED);
     }
 
     // ------------------------------------------------------------------ shared paths
@@ -339,8 +411,46 @@ class AgentReviewCompletionTest {
 
         verify(repositoryClient).postPullRequestComment(eq("owner"), eq("repo"), eq(1L),
                 argThat(body -> body.contains("## 🤖 Follow-up")
-                        && body.contains("It changes the greeting.")));
+                        && body.contains("It changes the greeting.")
+                        && body.endsWith("*Agentic review follow-up by [AI Git Bot]"
+                                        + "(https://gitbot.eu)*")));
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    void aFollowUpWithoutAConfiguredFooterEndsWithTheAnswer() {
+        commentProperties.setClarificationFooter("   ");
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("It changes the greeting."));
+
+        assertThat(service.answerClarification(payload, "Why?", 5, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(repositoryClient).postPullRequestComment(eq("owner"), eq("repo"), eq(1L),
+                argThat(body -> body.equals("## 🤖 Follow-up\n\nIt changes the greeting.")));
+    }
+
+    @Test
+    void aFollowUpPointsAtTheReviewLookupTool() {
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1),
+                        ChatTurn.text("O1234-F1 flags a permissions gap."));
+        assertThat(review()).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        org.mockito.ArgumentCaptor<String> prompts =
+                org.mockito.ArgumentCaptor.forClass(String.class);
+        assertThat(service.answerClarification(payload, "What does O1234-F1 mean?", 5, false))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        // The follow-up starts empty and is told how to read what was published, instead of being
+        // handed a digest that costs tokens on every run and still misses older reviews.
+        // Signature: (history, userMessage, tools, systemPrompt, jsonSchema, maxTokens).
+        verify(aiClient, atLeastOnce()).chatWithTools(anyList(), prompts.capture(), anyList(),
+                anyString(), isNull(), anyInt());
+        assertThat(prompts.getAllValues()).anySatisfy(prompt -> assertThat(prompt)
+                .contains("review-lookup")
+                .contains("Resolve any reference the user cites")
+                .doesNotContain("Settings update may bypass authorization"));
     }
 
     @ParameterizedTest
@@ -374,7 +484,7 @@ class AgentReviewCompletionTest {
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, true)
                 : service.reviewPullRequest(payload, 12, false, null,
-                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true);
+                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.POSTED);
         if (clarification) {
@@ -402,7 +512,7 @@ class AgentReviewCompletionTest {
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, true)
                 : service.reviewPullRequest(payload, 12, false, null,
-                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true);
+                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, true, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.FAILED);
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
@@ -475,7 +585,7 @@ class AgentReviewCompletionTest {
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, false)
                 : service.reviewPullRequest(payload, 1, false, null,
-                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false);
+                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.FAILED);
         assertNothingPublished();
@@ -491,7 +601,7 @@ class AgentReviewCompletionTest {
 
         AgentReviewService.ReviewResult reviewed = service.reviewPullRequest(payload, 1, true,
                 "Review criteria", new AgentReviewService.SeverityThresholds(0, 0, 0), 1L,
-                toolCalls::add, false);
+                toolCalls::add, false, AgentReviewLearningSettings.DISABLED);
 
         assertThat(reviewed).isEqualTo(AgentReviewService.ReviewResult.FAILED);
         assertThat(toolCalls).isEmpty();
@@ -524,7 +634,7 @@ class AgentReviewCompletionTest {
                 });
 
         assertThat(service.reviewPullRequest(payload, 4, false, null,
-                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false))
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED))
                 .isEqualTo(AgentReviewService.ReviewResult.FAILED);
 
         assertThat(histories.getLast())
@@ -541,7 +651,7 @@ class AgentReviewCompletionTest {
         AgentReviewService.ReviewResult result = clarification
                 ? service.answerClarification(payload, "Why was this changed?", 1, false)
                 : service.reviewPullRequest(payload, 1, false, null,
-                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false);
+                        new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED);
 
         assertThat(result).isEqualTo(AgentReviewService.ReviewResult.NO_DIFF);
         verifyNoInteractions(aiClient, workspaceService, eventHooks);
@@ -565,7 +675,7 @@ class AgentReviewCompletionTest {
 
         verify(repositoryClient).postReview(eq("owner"), eq("repo"), eq(1L),
                 argThat(body -> body.contains("AI Review · O1234")
-                        && body.contains("MEDIUM · O1234-F1")),
+                        && body.contains("`O1234-F1`")),
                 eq(PostReviewAction.NONE));
         assertThat(draft().state()).isEqualTo(ReviewState.FINALIZED);
     }
@@ -609,7 +719,7 @@ class AgentReviewCompletionTest {
 
     private AgentReviewService.ReviewResult review() {
         return service.reviewPullRequest(payload, 12, false, null,
-                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false);
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, AgentReviewLearningSettings.DISABLED);
     }
 
     private DraftSnapshot draft() {

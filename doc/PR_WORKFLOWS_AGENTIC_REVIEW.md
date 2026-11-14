@@ -46,6 +46,7 @@ PR Review**.
 | `blockerThreshold` | integer | *(empty)* | Maximum allowed `BLOCKER` findings for a formal `APPROVE`. Empty means ignored. |
 | `mediumThreshold` | integer | *(empty)* | Maximum allowed `MEDIUM` findings for a formal `APPROVE`. Empty means ignored. |
 | `lowThreshold` | integer | *(empty)* | Maximum allowed `LOW` findings for a formal `APPROVE`. Empty means ignored. |
+| `feedbackEnabled` | boolean | `false` | Keep the evidence a review was produced from (task, diff, prompt, revisions) so later feedback can be analysed against what the bot actually saw. Reviews are created identically when this is off; only the extra capture is skipped. |
 
 Progress comments show timestamps in UTC without fractional seconds. Review
 decisions and findings remain in the separate final review.
@@ -60,17 +61,39 @@ apart, even after a failed update; terminal updates are attempted once immediate
 ### The review comment
 
 Every completed agentic review is rendered from the stored review, so the layout
-is identical for every provider: the overall assessment with its reference
-(`O1234-A`), the severity totals, one block per finding (`O1234-F1`, …) with
-title, source locations, evidence, impact and recommendation, and a
-"Coverage and limitations" section. A finding's reference is stable: correcting,
-withdrawing or re-sorting findings never renumbers it. An inconclusive review
-says so prominently, and a review without findings renders an explicit
-zero-findings section.
+is identical for every provider: a heading with the review reference (`O1234`),
+a verdict line with the severity totals, the overall assessment (`O1234-A`),
+one section per finding (`O1234-F1`, …) with title, source locations, evidence,
+impact and recommendation, and a "Coverage and limitations" section. Headings
+start at `#` so the comment keeps a usable outline on every provider.
+A finding's reference is stable: correcting, withdrawing or re-sorting findings
+never renumbers it. An inconclusive review says so prominently, and a review
+without findings renders an explicit zero-findings section.
+
+The comment ends with a configurable footer (Markdown), by default
+`*Agentic review by [AI Git Bot](https://gitbot.eu)*`. Set
+`REVIEW_COMMENT_FOOTER` (property `review.comment.footer`) to your own text, or
+to an empty value to publish reviews without a footer.
+
+The answer to a follow-up carries its own footer, by default
+`*Agentic review follow-up by [AI Git Bot](https://gitbot.eu)*`, configured with
+`REVIEW_COMMENT_CLARIFICATION_FOOTER` (property
+`review.comment.clarification-footer`). It is separate because a follow-up is a
+read-only answer rather than a review.
 
 The model submits findings individually and sets the assessment once; the
 comment is built from those records, not from a prose reply. A reply written as
 text is not published.
+
+## Asking about a finding
+
+A follow-up (`@bot clarify …`, or a plain mention) answers questions about a
+review that was already published. It starts without the earlier conversation,
+so when you cite a reference such as `O1234-F1` the bot looks it up instead of
+guessing: it reads the stored reviews of this pull request — list them, read one
+target (`O1234`, `O1234-F1`, `O1234-A`), or search their findings by text. The
+lookup only ever sees this bot's reviews on this pull request; references from
+anywhere else do not resolve.
 
 ### Formal review decision
 
@@ -111,5 +134,6 @@ duplicates the default **PR Review** workflow.
 
 ## See also
 
+- [Feedback on agentic reviews](WORKFLOW_FEEDBACK.md) — how reviewers judge findings, and what the bot stores
 - [PR Workflows overview](PR_WORKFLOWS.md)
 - [PR Review](PR_WORKFLOWS_REVIEW.md) — the simpler, always-on review.

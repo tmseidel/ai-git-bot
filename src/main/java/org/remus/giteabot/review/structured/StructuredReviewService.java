@@ -320,6 +320,20 @@ public class StructuredReviewService {
                 .map(StructuredReviewService::toFinalized);
     }
 
+    /**
+     * Numeric review id behind an {@code O<n>} reference, when it exists. Publication and snapshot
+     * bookkeeping address a review by its public reference; this is the one place that maps it back.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Long> findReviewIdByReference(String outputReference) {
+        if (outputReference == null || outputReference.isBlank()) {
+            return Optional.empty();
+        }
+        return outputRepository.findByReference(outputReference.trim())
+                .flatMap(output -> reviewRepository.findByOutputId(output.getId()))
+                .map(ReviewRecord::getId);
+    }
+
     /** Draft snapshot for a later re-read, e.g. after a conflict or a context compaction. */
     @Transactional(readOnly = true)
     public Optional<DraftSnapshot> findDraft(long reviewId) {
@@ -472,20 +486,38 @@ public class StructuredReviewService {
         return review.getFindings().stream().mapToInt(ReviewFinding::getOrdinal).max().orElse(0) + 1;
     }
 
+    /**
+     * Brings the finding's evidence rows in line with {@code locations}, reusing the row that already
+     * holds a position instead of deleting it and inserting its replacement.
+     *
+     * <p>Delete-then-insert is wrong here: Hibernate executes inserts before deletes within one
+     * flush, so re-writing position 0 of an existing finding inserted a new row while the old one
+     * was still there and hit {@code uk_review_finding_locations_position}. Reconciling in place also
+     * keeps a location's identity stable across corrections, which is what the review record promises.
+     * Surplus positions are removed last and never overlap the positions being written.</p>
+     */
     private static void replaceLocations(ReviewFinding finding, List<LocationDraft> locations) {
-        finding.getLocations().clear();
+        List<ReviewFindingLocation> existing = finding.getLocations();
         int position = 0;
         for (LocationDraft draft : locations) {
-            ReviewFindingLocation location = new ReviewFindingLocation();
-            location.setFinding(finding);
-            location.setPosition(position++);
+            ReviewFindingLocation location = position < existing.size()
+                    ? existing.get(position) : null;
+            if (location == null) {
+                location = new ReviewFindingLocation();
+                location.setFinding(finding);
+                location.setPosition(position);
+                existing.add(location);
+            }
             location.setPath(draft.path().trim());
             location.setSide(draft.side());
             location.setStartLine(draft.startLine());
             location.setEndLine(draft.endLine());
             location.setDescription(requireText(draft.description(), MAX_LOCATION_DESCRIPTION_CHARS,
                     "evidence"));
-            finding.getLocations().add(location);
+            position++;
+        }
+        if (existing.size() > locations.size()) {
+            existing.subList(locations.size(), existing.size()).clear();
         }
     }
 
