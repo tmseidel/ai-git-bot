@@ -32,6 +32,9 @@ Use the normal reviewer controls in your Git platform:
 3. Wait for the bot to post its review.
 4. If you push more commits and want another pass, re-request the bot's review.
 
+On Gitea, GitHub and GitLab, assigning the bot to an existing pull request
+starts a review as well.
+
 The review bot reads the PR diff and posts feedback in the PR. Depending on
 your provider and bot configuration, comments may appear inline on changed
 lines and/or as a summary review comment.

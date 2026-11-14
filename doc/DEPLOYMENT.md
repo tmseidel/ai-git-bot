@@ -373,6 +373,7 @@ All AI provider and Git configuration is managed through the web interface:
    - Select a system prompt entry per bot
    - Enable/disable coding-agent issue implementation per coding bot
    - Choose **Writer bot** when you want issue drafting instead of code changes
+   - Set a **User Whitelist** on every bot that serves public repositories. With the whitelist left blank, anyone who can open a pull request or comment can make the bot spend AI tokens (PR reviews, `@`-mentions, "review again" requests, inline comments, slash commands) and direct the coding agent on the pull requests it opened — see [Per-Bot User Whitelist](USER_GUIDE.md#per-bot-user-whitelist-token-spend-guard)
 
 ## System Prompts
 

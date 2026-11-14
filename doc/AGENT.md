@@ -32,7 +32,7 @@ flowchart LR
 
 Both agents post visible progress, error, and completion comments on the issue. Repository context gathering is not posted publicly. For the coding agent, build/test output may be posted when validation fails so users can understand why the bot is retrying.
 
-Treat the model's text in those comments as unreviewed output: an answer is published verbatim, so a model that read a file (a `.env`, a config with credentials) can quote it, and any `@name` it writes lands in a public comment. The bot ignores webhook events from its own user (`BotWebhookService#isBotUser`, checked in every platform handler), so a self-mention cannot make it respond to its own comment.
+Treat the model's text in those comments as unreviewed output: an answer is published verbatim, so a model that read a file (a `.env`, a config with credentials) can quote it, and any `@name` it writes lands in a public comment. The bot ignores webhook events from its own user (`BotIdentity#triggered`, set by every provider's webhook translator and enforced once in `WebhookEventDispatcher`), so a self-mention cannot make it respond to its own comment.
 
 ## How a coding run ends
 
@@ -122,6 +122,8 @@ GitHub issue webhooks normally do not include a branch ref. Coding-agent work st
 | Writer agent | Repository read/clone access for context; issue write access to ask questions and create the improved issue |
 
 For public repositories, use the bot form's **User Whitelist** to restrict who can trigger AI-spending interactions.
+
+Without a whitelist, anyone who can comment can steer the coding agent. A comment that mentions the bot, on the issue or on the pull request the agent opened, starts a follow-up run that changes the code and pushes it to the agent's branch, whoever wrote the comment. Review the agent's pull requests before merging them, and set a whitelist wherever untrusted users can comment. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions).
 
 ## Configuration reference
 
