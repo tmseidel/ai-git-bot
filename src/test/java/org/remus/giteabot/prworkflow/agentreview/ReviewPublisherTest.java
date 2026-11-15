@@ -179,6 +179,38 @@ class ReviewPublisherTest {
     }
 
     @Test
+    void anUncertainFormalSubmissionIsNotRetriedAsAPlainComment() {
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.FINDINGS_PRESENT,
+                        finding("O1234-F1", ReviewSeverity.BLOCKER))));
+        // A timeout after the provider may already have accepted the review: the fallback comment
+        // would put the same findings on the pull request twice.
+        doThrow(new UncheckedIOException(new IOException("Read timed out")))
+                .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+
+        assertThrows(UncheckedIOException.class, () -> publisher.publish(formalRequest()));
+
+        verify(repositoryClient, never()).postReviewComment(anyString(), anyString(), anyLong(), anyString());
+        verify(publicationService).finish(1L, ReviewPublicationState.UNCERTAIN, null);
+    }
+
+    @Test
+    void aDefiniteRefusalOfTheFormalActionStillFallsBack() {
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.FINDINGS_PRESENT,
+                        finding("O1234-F1", ReviewSeverity.BLOCKER))));
+        // 403 self-approval refused / 422 invalid review: the provider definitely did not take it.
+        doThrow(new IllegalStateException("422 Unprocessable Entity"))
+                .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+
+        assertThat(publisher.publish(formalRequest())).isTrue();
+
+        verify(repositoryClient).postReviewComment(eq("acme"), eq("web"), eq(9L),
+                argThat(body -> body.contains("AI Review · O1234")));
+        verify(publicationService).finish(1L, ReviewPublicationState.PUBLISHED, null);
+    }
+
+    @Test
     void aDefiniteRefusalIsFailedAndAnUnknownOutcomeIsUncertain() {
         when(reviewService.findFinalizedByReference("O1234"))
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));

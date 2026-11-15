@@ -195,11 +195,47 @@ class BitbucketWebhookHandlerTest {
     }
 
     @Test
+    void theReadableAliasIsPassedToTheLearningCheckBecauseItIsNotTheUsername() {
+        // The body carries @AI_Bot after the @{account_id} rewrite, while the configured username is
+        // bot@example.com: parsing with the username alone could never match, and a reason ending in
+        // "review again" would then start a review.
+        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
+                any(WebhookPayload.class), anyString(), eq(READABLE_MENTION))).thenReturn(true);
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
+                commentPayload("@{acc-ai_bot} feedback O12-F1 incorrect, please review again", null));
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService).tryHandleLearningCommand(eq(bot), any(WebhookPayload.class),
+                eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
+                        .COMMENT_KIND_PR_COMMENT), eq(READABLE_MENTION));
+        verify(botWebhookService, never()).isReviewAgainRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).handleBotCommand(any(), any());
+    }
+
+    @Test
+    void anInlineFeedbackCommentIsCheckedWithTheInlineKindBeforeRouting() {
+        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
+                any(WebhookPayload.class), anyString(), eq(READABLE_MENTION))).thenReturn(true);
+
+        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
+                commentPayload("@{acc-ai_bot} feedback O12-F1 incorrect",
+                        Map.of("path", "src/App.java")));
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService).tryHandleLearningCommand(eq(bot), any(WebhookPayload.class),
+                eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
+                        .COMMENT_KIND_INLINE), eq(READABLE_MENTION));
+        verify(botWebhookService, never()).handleInlineComment(any(), any());
+    }
+
+    @Test
     void feedbackComment_isConsumedBeforeTheReviewAgainHeuristic() {
         lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class),
                 eq(READABLE_MENTION))).thenReturn(true);
         lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
-                any(WebhookPayload.class), anyString())).thenReturn(true);
+                any(WebhookPayload.class), anyString(), anyString())).thenReturn(true);
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
                 commentPayload("@{acc-ai_bot} feedback O1234 useful review again later", null));

@@ -130,6 +130,16 @@ class FeedbackCommandParserTest {
                         submit -> assertThat(submit.target().reference()).isEqualTo("O1234-F3"));
     }
 
+    @Test
+    void theEffectiveAliasIsAcceptedAlongsideTheConfiguredOne() {
+        // A provider that rewrites its mention (Bitbucket: @{account_id} -> @AI_Bot) leaves something
+        // the configured username never matches, so both have to be accepted.
+        assertThat(FeedbackCommandParser.parse("@AI_Bot feedback O1234 useful",
+                "@AI_Bot", "@bitbucket-agent")).isPresent();
+        assertThat(FeedbackCommandParser.parse("@AI_Bot feedback O1234 useful",
+                "@bitbucket-agent")).isEmpty();
+    }
+
     private static FeedbackCommand parse(String body) {
         Optional<FeedbackCommand> command = FeedbackCommandParser.parse(body, ALIAS);
         assertThat(command).as("command in: %s", body).isPresent();

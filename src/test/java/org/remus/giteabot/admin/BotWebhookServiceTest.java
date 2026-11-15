@@ -1776,13 +1776,13 @@ class BotWebhookServiceTest {
         @Test
         void handlePrComment_consumesFeedbackBeforeAnyWorkflowRouting() {
             WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234-F2 incorrect nope");
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(true);
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(true);
 
             botWebhookService.handlePrComment(createBot("bot", "claude_bot"), payload);
 
             verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
                     eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
-                            .COMMENT_KIND_PR_COMMENT));
+                            .COMMENT_KIND_PR_COMMENT), isNull());
             verify(agentSessionService, never()).getSessionByIssue(any(), any(), any());
             verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
             verify(prWorkflowOrchestrator, never()).runAll(any(), any());
@@ -1791,13 +1791,13 @@ class BotWebhookServiceTest {
         @Test
         void handleBotCommand_consumesFeedbackBeforeTheAuthorGate() {
             WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234 useful");
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(true);
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(true);
 
             botWebhookService.handleBotCommand(createBot("bot", "claude_bot"), payload);
 
             verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
                     eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
-                            .COMMENT_KIND_PR_COMMENT));
+                            .COMMENT_KIND_PR_COMMENT), isNull());
             verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
         }
 
@@ -1805,20 +1805,20 @@ class BotWebhookServiceTest {
         void handleInlineComment_consumesFeedbackBeforeTheAuthorGate() {
             WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234-A needs-improvement");
             payload.getComment().setPath("src/Foo.java");
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(true);
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(true);
 
             botWebhookService.handleInlineComment(createBot("bot", "claude_bot"), payload);
 
             verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
                     eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
-                            .COMMENT_KIND_INLINE));
+                            .COMMENT_KIND_INLINE), isNull());
             verify(prWorkflowOrchestrator, never()).run(any(), any(), anyString(), any());
         }
 
         @Test
         void aFailingLearningCommandIsStillConsumed() {
             WebhookPayload payload = feedbackPayload("@claude_bot feedback O1234 useful");
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString()))
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any()))
                     .thenThrow(new IllegalStateException("feedback store unavailable"));
 
             botWebhookService.handleBotCommand(createBot("bot", "claude_bot"), payload);
@@ -1830,7 +1830,7 @@ class BotWebhookServiceTest {
         @Test
         void anOrdinaryMentionKeepsItsExistingRouting() {
             WebhookPayload payload = feedbackPayload("@claude_bot please review this again");
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString())).thenReturn(false);
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(false);
             when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
                     .thenReturn(Optional.empty());
             when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))

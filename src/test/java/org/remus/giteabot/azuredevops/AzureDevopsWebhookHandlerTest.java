@@ -333,7 +333,7 @@ class AzureDevopsWebhookHandlerTest {
         lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class),
                 anyString())).thenReturn(true);
         lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
-                any(WebhookPayload.class), anyString())).thenReturn(true);
+                any(WebhookPayload.class), anyString(), anyString())).thenReturn(true);
 
         var response = handler.handleWebhook(bot, feedbackCommentPayload());
 

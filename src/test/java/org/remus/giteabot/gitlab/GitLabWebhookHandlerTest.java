@@ -166,7 +166,7 @@ class GitLabWebhookHandlerTest {
         lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class), eq("@ai_bot")))
                 .thenReturn(true);
         lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
-                any(WebhookPayload.class), anyString())).thenReturn(true);
+                any(WebhookPayload.class), anyString(), anyString())).thenReturn(true);
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "Note Hook",
                 notePayload("@ai_bot feedback O1234-F1 incorrect please review this again"));

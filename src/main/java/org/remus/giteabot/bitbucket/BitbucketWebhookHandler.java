@@ -143,15 +143,23 @@ public class BitbucketWebhookHandler {
         String botAlias = botAccount.readableMention();
         payload.getComment().setBody(body.replace(rawMention, botAlias));
 
-        // Bitbucket inline comments have a path set via the "inline" field
-        if (payload.getComment().getPath() != null) {
-            botWebhookService.handleInlineComment(bot, payload);
-            return ResponseEntity.ok("inline comment response triggered");
+        // Feedback is consumed before every other routing decision, and with the alias the comment
+        // now carries: the readable mention is not the configured username, so parsing with the
+        // username alone would let "@AI_Bot feedback O12-F1 incorrect, please review again" through
+        // to the review-again heuristic.
+        boolean inline = payload.getComment().getPath() != null;
+        if (botWebhookService.tryHandleLearningCommand(bot, payload,
+                inline
+                        ? org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_INLINE
+                        : org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT,
+                botAlias)) {
+            return ResponseEntity.ok("feedback recorded");
         }
 
-        if (botWebhookService.tryHandleLearningCommand(bot, payload,
-                org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
-            return ResponseEntity.ok("feedback recorded");
+        // Bitbucket inline comments have a path set via the "inline" field
+        if (inline) {
+            botWebhookService.handleInlineComment(bot, payload);
+            return ResponseEntity.ok("inline comment response triggered");
         }
 
         if (botWebhookService.isReviewAgainRequest(payload, botAlias)) {

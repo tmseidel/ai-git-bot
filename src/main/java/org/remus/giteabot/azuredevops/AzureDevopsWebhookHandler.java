@@ -243,7 +243,8 @@ public class AzureDevopsWebhookHandler {
         }
 
         if (botWebhookService.tryHandleLearningCommand(bot, payload,
-                org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
+                org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT,
+                botAlias)) {
             return ResponseEntity.ok("feedback recorded");
         }
 

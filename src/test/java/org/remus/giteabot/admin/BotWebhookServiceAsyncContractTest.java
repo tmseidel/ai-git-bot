@@ -47,7 +47,7 @@ class BotWebhookServiceAsyncContractTest {
     @Test
     void theLearningCommandCheckIsSynchronousSoItsResultCanBeUsed() {
         Method check = method("tryHandleLearningCommand", Bot.class, WebhookPayload.class,
-                String.class);
+                String.class, String.class);
 
         assertThat(check.isAnnotationPresent(Async.class)).isFalse();
         assertThat(check.getReturnType()).isEqualTo(boolean.class);

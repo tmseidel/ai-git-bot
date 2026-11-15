@@ -40,16 +40,21 @@ public class FeedbackCommandHandler {
     private final RepositoryPlatformFactory repositoryPlatformFactory;
 
     /**
-     * @param commentKind which kind of provider comment carried the command, part of the dedupe key
+     * @param commentKind   which kind of provider comment carried the command, part of the dedupe key
+     * @param effectiveAlias the mention the provider left in the comment body, or {@code null} when it
+     *                       did not rewrite it. Bitbucket replaces {@code @{account_id}} with a
+     *                       readable name, so the configured username alone would never match
      * @return {@code true} when the comment was a feedback command and has been consumed
      */
-    public boolean tryHandle(Bot bot, WebhookPayload payload, String commentKind) {
+    public boolean tryHandle(Bot bot, WebhookPayload payload, String commentKind,
+                             String effectiveAlias) {
         if (bot == null || payload == null || payload.getComment() == null) {
             return false;
         }
         String body = payload.getComment().getBody();
-        String alias = aliasOf(bot);
-        Optional<FeedbackCommand> parsed = FeedbackCommandParser.parse(body, alias);
+        String configured = aliasOf(bot);
+        String alias = effectiveAlias == null || effectiveAlias.isBlank() ? configured : effectiveAlias;
+        Optional<FeedbackCommand> parsed = FeedbackCommandParser.parse(body, alias, configured);
         if (parsed.isEmpty()) {
             return false;
         }
@@ -62,11 +67,15 @@ public class FeedbackCommandHandler {
         String mention = alias;
         try {
             respond(bot, payload, execute(bot, payload, commentKind, parsed.get(), actor, mention));
+        } catch (FeedbackRejectedException rejected) {
+            // Written for the commenter: the suggestion to show it is the whole point of the type.
+            respond(bot, payload, FeedbackReplyRenderer.rejected(rejected));
         } catch (RuntimeException e) {
+            // Details stay in the log. An exception message can carry SQL, entity names or a provider
+            // error body, and this reply is published on the pull request (CWE-209).
             log.error("[Bot '{}'] Feedback command failed: {}", bot.getName(), e.getMessage(), e);
-            respond(bot, payload, "The feedback command could not be completed: "
-                    + abbreviate(e.getMessage() == null ? e.getClass().getSimpleName()
-                            : e.getMessage(), 300));
+            respond(bot, payload, "The feedback command could not be completed. "
+                    + "The details were written to the bot log.");
         }
         return true;
     }
@@ -173,9 +182,5 @@ public class FeedbackCommandHandler {
             log.warn("[Bot '{}'] Feedback was handled but the reply could not be posted: {}",
                     bot.getName(), e.getMessage());
         }
-    }
-
-    private static String abbreviate(String value, int max) {
-        return value.length() <= max ? value : value.substring(0, max) + "…";
     }
 }

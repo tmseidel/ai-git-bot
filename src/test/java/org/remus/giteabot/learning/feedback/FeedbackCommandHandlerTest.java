@@ -68,7 +68,7 @@ class FeedbackCommandHandlerTest {
     @Test
     void aCommentWithoutAFeedbackCommandKeepsItsOrdinaryRouting() {
         assertThat(handler.tryHandle(bot, payload("@ai_bot please look at this again"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isFalse();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isFalse();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
@@ -83,7 +83,7 @@ class FeedbackCommandHandlerTest {
 
         assertThat(handler.tryHandle(bot,
                 payload("@ai_bot feedback O1234-F2 incorrect Authorization is in the filter"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isTrue();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
         ArgumentCaptor<FeedbackSource> source = ArgumentCaptor.forClass(FeedbackSource.class);
         verify(feedbackService).submit(eq(new FeedbackScope(1L, 2L, "acme", "web", 9L)),
@@ -109,7 +109,7 @@ class FeedbackCommandHandlerTest {
                 .thenReturn(AgentReviewLearningSettings.DISABLED);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isTrue();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
@@ -121,7 +121,7 @@ class FeedbackCommandHandlerTest {
         when(authorizationService.canContribute(bot, "alice")).thenReturn(false);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isTrue();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
@@ -131,7 +131,7 @@ class FeedbackCommandHandlerTest {
     @Test
     void aMalformedCommandIsConsumedWithHelp() {
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 nonsense"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isTrue();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
@@ -145,7 +145,7 @@ class FeedbackCommandHandlerTest {
                         "No review O9999 is available here."));
 
         handler.tryHandle(bot, payload("@ai_bot feedback O9999 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT);
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
 
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
                 org.mockito.ArgumentMatchers.contains("No review O9999 is available here."));
@@ -158,7 +158,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", true));
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isTrue();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
         // One comment, one confirmation: a redelivered webhook resolves to the stored record and
         // posts nothing, so a retry cannot litter the pull request.
@@ -173,7 +173,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", true));
 
         handler.tryHandle(bot, payload("@ai_bot feedback retract FB7"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT);
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
 
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
                 anyString());
@@ -188,7 +188,73 @@ class FeedbackCommandHandlerTest {
                 .postPullRequestComment(anyString(), anyString(), anyLong(), anyString());
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)).isTrue();
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+    }
+
+    @Test
+    void theProvidersReadableAliasIsAcceptedEvenWhenItIsNotTheUsername() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB8", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "alice", false));
+
+        // Bitbucket leaves its readable mention in the body after rewriting @{account_id}; the
+        // configured username is unrelated (a Bitbucket account is addressed by id, and the display
+        // name is what users actually type).
+        Bot bitbucketBot = new Bot();
+        bitbucketBot.setId(2L);
+        bitbucketBot.setName("review-bot");
+        GitIntegration integration = new GitIntegration();
+        integration.setId(1L);
+        integration.setUsername("bitbucket-agent");
+        bitbucketBot.setGitIntegration(integration);
+
+        assertThat(handler.tryHandle(bitbucketBot, payload("@AI_Bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, "@AI_Bot")).isTrue();
+
+        verify(feedbackService).submit(any(), any(), eq(FeedbackTarget.output("O1234")),
+                eq(FeedbackVerdict.USEFUL), any(), eq("alice"));
+    }
+
+    @Test
+    void theConfiguredAliasStillWorksWhenAProviderDidNotRewriteTheMention() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB9", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "alice", false));
+
+        assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, "@AI_Bot")).isTrue();
+    }
+
+    @Test
+    void anInternalFailureIsNotEchoedIntoThePublicComment() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("could not execute statement; SQL: insert into "
+                        + "workflow_feedback (reference, verdict) values ($1, $2)"));
+
+        assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());
+        assertThat(reply.getValue())
+                .contains("could not be completed")
+                .doesNotContain("workflow_feedback")
+                .doesNotContain("SQL")
+                .doesNotContain("values");
+    }
+
+    @Test
+    void aRejectionShowsTheMessageWrittenForTheCommenter() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenThrow(new FeedbackRejectedException("not-finalized",
+                        "`O1234` is not a finalized review, so there is nothing to judge."));
+
+        assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());
+        assertThat(reply.getValue()).contains("not a finalized review");
     }
 
     @Test
@@ -201,9 +267,9 @@ class FeedbackCommandHandlerTest {
                         java.time.Instant.parse("2026-11-14T10:00:00Z"))));
 
         handler.tryHandle(bot, payload("@ai_bot feedback list"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT);
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
         handler.tryHandle(bot, payload("@ai_bot feedback show FB31"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT);
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
 
         verify(feedbackService, never()).submit(any(), any(), any(), any(), any(), any());
         ArgumentCaptor<String> replies = ArgumentCaptor.forClass(String.class);

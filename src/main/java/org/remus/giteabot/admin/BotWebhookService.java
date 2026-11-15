@@ -30,6 +30,8 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 import java.util.Set;
 
+import static org.remus.giteabot.learning.feedback.FeedbackCommandHandler.*;
+
 /**
  * Handles webhook events for persisted {@link Bot} entities using their
  * specific {@link AiIntegration} and {@link GitIntegration} configurations.
@@ -222,11 +224,14 @@ public class BotWebhookService {
      * continue routing, and the async proxy returns {@code null} for a primitive result — which
      * becomes an {@code AopInvocationException} in the caller.
      *
+     * @param effectiveAlias the mention the provider left in the comment, when it rewrote one;
+     *                       {@code null} keeps the configured username
      * @return {@code true} when the comment was a learning command and has been handled
      */
-    public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind) {
+    public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind,
+                                           String effectiveAlias) {
         try {
-            return feedbackCommandHandler.tryHandle(bot, payload, commentKind);
+            return feedbackCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias);
         } catch (RuntimeException e) {
             // The comment looks like a command but could not be processed. It stays consumed: falling
             // through would forward feedback text into an AI conversation.
@@ -259,7 +264,7 @@ public class BotWebhookService {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
             if (tryHandleLearningCommand(bot, payload,
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
+                    COMMENT_KIND_PR_COMMENT, null)) {
                 return;
             }
             if (!isPullRequestAuthor(payload)) {
@@ -327,7 +332,7 @@ public class BotWebhookService {
                 return;
             }
             if (tryHandleLearningCommand(bot, payload,
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT)) {
+                    COMMENT_KIND_PR_COMMENT, null)) {
                 return;
             }
             String owner = payload.getRepository().getOwner().getLogin();
@@ -402,7 +407,7 @@ public class BotWebhookService {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
             if (tryHandleLearningCommand(bot, payload,
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_INLINE)) {
+                    COMMENT_KIND_INLINE, null)) {
                 return;
             }
             if (!isPullRequestAuthor(payload)) {

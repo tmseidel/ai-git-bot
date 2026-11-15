@@ -120,16 +120,20 @@ public class ReviewPublisher {
                         review.reference(), action, request.prNumber(), request.owner(), request.repo());
             }
         } catch (RuntimeException e) {
-            if (action == PostReviewAction.NONE) {
-                ReviewPublicationState state = classify(e);
+            ReviewPublicationState state = classify(e);
+            // An uncertain outcome means the provider may already have taken the review. Posting the
+            // fallback comment then puts the same findings on the pull request twice, which is the
+            // duplicate this class exists to prevent — so only a definite refusal falls back.
+            if (action == PostReviewAction.NONE || state == ReviewPublicationState.UNCERTAIN) {
                 publicationService.finish(publication.getId(), state, null);
                 if (state == ReviewPublicationState.UNCERTAIN) {
-                    log.warn("Delivery of agentic review {} is uncertain ({}); the review stays stored "
-                            + "and can be republished explicitly", review.reference(), e.getMessage());
+                    log.warn("Delivery of agentic review {} is uncertain ({}); no fallback is attempted "
+                                    + "and the review stays stored for an explicit republish",
+                            review.reference(), e.getMessage());
                 }
                 throw e;
             }
-            // The findings survive a failed formal submission; the stored review is unchanged.
+            // The findings survive a refused formal submission; the stored review is unchanged.
             log.warn("Failed to post formal review {} for {} on PR #{} in {}/{}: {} — "
                             + "falling back to a plain review comment",
                     action, review.reference(), request.prNumber(), request.owner(), request.repo(),

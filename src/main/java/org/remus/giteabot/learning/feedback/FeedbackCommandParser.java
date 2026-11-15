@@ -1,5 +1,7 @@
 package org.remus.giteabot.learning.feedback;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.regex.Matcher;
@@ -28,19 +30,31 @@ public final class FeedbackCommandParser {
     }
 
     /**
-     * @return the command, or empty when the comment carries no {@code feedback} command for this
-     *         mention — in that case the comment must keep its ordinary routing.
+     * @param mentionAliases every mention the command may use — a provider can rewrite the mention it
+     *                       received (Bitbucket turns {@code @{account_id}} into a readable name), so
+     *                       the effective alias and the configured username are both acceptable
+     * @return the command, or empty when the comment carries no {@code feedback} command for one of
+     *         these mentions — in that case the comment must keep its ordinary routing.
      */
-    public static Optional<FeedbackCommand> parse(String body, String mentionAlias) {
-        if (body == null || body.isBlank() || mentionAlias == null || mentionAlias.isBlank()) {
+    public static Optional<FeedbackCommand> parse(String body, String... mentionAliases) {
+        if (body == null || body.isBlank() || mentionAliases == null || mentionAliases.length == 0) {
             return Optional.empty();
         }
-        String mention = mentionAlias.startsWith("@") ? mentionAlias.substring(1) : mentionAlias;
+        List<String> mentions = new ArrayList<>();
+        for (String alias : mentionAliases) {
+            if (alias != null && !alias.isBlank()) {
+                mentions.add(alias.startsWith("@") ? alias.substring(1) : alias);
+            }
+        }
+        if (mentions.isEmpty()) {
+            return Optional.empty();
+        }
         String[] lines = stripQuotedAndFenced(body).split("\\R", -1);
 
         for (int i = 0; i < lines.length; i++) {
             Matcher matcher = MENTION.matcher(lines[i]);
-            if (!matcher.matches() || !matcher.group(1).equalsIgnoreCase(mention)) {
+            if (!matcher.matches() || mentions.stream()
+                    .noneMatch(mention -> mention.equalsIgnoreCase(matcher.group(1)))) {
                 continue;
             }
             String rest = matcher.group(2) == null ? "" : matcher.group(2).trim();
