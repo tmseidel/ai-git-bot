@@ -212,28 +212,15 @@ public class BotWebhookService {
     }
 
     /**
-     * Handles a bot-mention command in a PR comment.
-     * <p>
-     * Routing order:
-     * <ol>
-     *   <li>{@link E2eTestSlashCommandHandler} — recognised E2E slash commands.</li>
-     *   <li>{@link UnitTestSlashCommandHandler} — recognised unit-test slash
-     *       commands ({@code @bot generate-tests} / {@code @bot rerun-unit-tests}).</li>
-     *   <li>{@link CodeReviewService#handleBotCommand(WebhookPayload, String)} —
-     *       general-purpose review fallback, <em>only</em> when the
-     *       {@link ReviewWorkflow review workflow} is enabled on the bot's
-     *       configuration. A bot that is not configured to run code reviews
-     *       must never silently fall into the reviewer prompt; instead we
-     *       post a short "command not understood" reply.</li>
-     * </ol>
-     */
-    @Async
-    /**
      * Learning/feedback commands are classified and consumed before every other routing decision:
      * before the pull-request-author gate (a permitted reviewer who is not the author may judge a
      * review), before review-again heuristics, before coding-session forwarding, and before the
      * "no PR workflow enabled" short circuit. A recognized command never reaches an AI conversation,
      * so a malformed one cannot start code review, change code, or generate tests.
+     * <p>
+     * Deliberately <em>not</em> {@code @Async}: callers use the return value to decide whether to
+     * continue routing, and the async proxy returns {@code null} for a primitive result — which
+     * becomes an {@code AopInvocationException} in the caller.
      *
      * @return {@code true} when the comment was a learning command and has been handled
      */
@@ -249,6 +236,25 @@ public class BotWebhookService {
         }
     }
 
+    /**
+     * Handles a bot-mention command in a PR comment.
+     * <p>
+     * Routing order:
+     * <ol>
+     *   <li>{@link #tryHandleLearningCommand} — learning/feedback commands, consumed first so they
+     *       never reach an AI conversation.</li>
+     *   <li>{@link E2eTestSlashCommandHandler} — recognised E2E slash commands.</li>
+     *   <li>{@link UnitTestSlashCommandHandler} — recognised unit-test slash
+     *       commands ({@code @bot generate-tests} / {@code @bot rerun-unit-tests}).</li>
+     *   <li>{@link CodeReviewService#handleBotCommand(WebhookPayload, String)} —
+     *       general-purpose review fallback, <em>only</em> when the
+     *       {@link ReviewWorkflow review workflow} is enabled on the bot's
+     *       configuration. A bot that is not configured to run code reviews
+     *       must never silently fall into the reviewer prompt; instead we
+     *       post a short "command not understood" reply.</li>
+     * </ol>
+     */
+    @Async
     public void handleBotCommand(Bot bot, WebhookPayload payload) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
