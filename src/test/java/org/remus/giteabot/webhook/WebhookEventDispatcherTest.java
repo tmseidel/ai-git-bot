@@ -48,7 +48,7 @@ class WebhookEventDispatcherTest {
         lenient().when(botWebhookService.isCallerAllowed(any(), any())).thenReturn(true);
         // The real keyword match, so comments are routed by what they say.
         lenient().when(botWebhookService.isReviewAgainRequest(any(), any())).thenCallRealMethod();
-        lenient().when(botWebhookService.reviewPullRequest(any(), any()))
+        lenient().when(botWebhookService.reviewPullRequest(any(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(true));
         bot = new Bot();
         bot.setName("test-bot");
@@ -110,12 +110,12 @@ class WebhookEventDispatcherTest {
 
         assertEquals("ignored", reviewerAdded.getBody());
         assertEquals("ignored", assigned.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any());
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(), any());
     }
 
     @Test
     void reviewThatWasSkippedOrFailed_doesNotSuppressAReRequest() {
-        when(botWebhookService.reviewPullRequest(any(), any()))
+        when(botWebhookService.reviewPullRequest(any(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(false))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("AI provider down")))
                 .thenReturn(CompletableFuture.completedFuture(true));
@@ -130,7 +130,7 @@ class WebhookEventDispatcherTest {
         assertEquals("review triggered", third.getBody());
         // The third review ran, so its claim holds.
         assertEquals("ignored", fourth.getBody());
-        verify(botWebhookService, times(3)).reviewPullRequest(eq(bot), any());
+        verify(botWebhookService, times(3)).reviewPullRequest(eq(bot), any(), any());
     }
 
     @Test
@@ -142,7 +142,7 @@ class WebhookEventDispatcherTest {
                 eventBuilder(WebhookEventKind.PR_REOPENED).botIsReviewer(true).build());
 
         assertEquals("review triggered", reopened.getBody());
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any());
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(), any());
         verify(botWebhookService, never()).handlePrClosed(any(), any());
     }
 
@@ -164,8 +164,8 @@ class WebhookEventDispatcherTest {
 
         assertEquals("ignored", opened.getBody());
         assertEquals("review triggered", reviewerAdded.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(bot, fromContributor);
-        verify(botWebhookService).reviewPullRequest(bot, fromMaintainer);
+        verify(botWebhookService, never()).reviewPullRequest(eq(bot), eq(fromContributor), any());
+        verify(botWebhookService).reviewPullRequest(eq(bot), eq(fromMaintainer), any());
     }
 
     @ParameterizedTest
@@ -187,7 +187,7 @@ class WebhookEventDispatcherTest {
                 eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any());
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(), any());
     }
 
     @Test
@@ -202,7 +202,7 @@ class WebhookEventDispatcherTest {
 
         assertEquals("pr comment received", response.getBody());
         verify(botWebhookService).handlePrComment(bot, payload);
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -214,7 +214,7 @@ class WebhookEventDispatcherTest {
                 eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(bot, payload);
+        verify(botWebhookService).reviewPullRequest(bot, payload, WebhookEventKind.PR_COMMENT);
         verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 
@@ -230,7 +230,7 @@ class WebhookEventDispatcherTest {
                 eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
 
         assertEquals("pr comment received", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -242,7 +242,7 @@ class WebhookEventDispatcherTest {
                 eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
         verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 
@@ -255,7 +255,7 @@ class WebhookEventDispatcherTest {
 
         assertEquals("pr comment received", response.getBody());
         verify(botWebhookService).handlePrComment(bot, payload);
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -282,7 +282,7 @@ class WebhookEventDispatcherTest {
                 eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
 
         assertEquals("feedback recorded", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
         verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 

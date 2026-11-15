@@ -76,7 +76,6 @@ class GitHubWebhookTranslatorTest {
 
         WebhookPayload translated = translator.translatePayload("issues", payload);
 
-        assertEquals("assigned", translated.getAction());
         assertNull(translated.getIssue().getRef());
     }
 
@@ -196,7 +195,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -206,7 +205,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -217,7 +216,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -228,7 +227,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -238,7 +237,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -249,7 +248,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -260,7 +259,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     // ---- reopened ----
@@ -272,7 +271,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -283,7 +282,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -293,7 +292,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -304,7 +303,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     // ---- assigned ----
@@ -317,7 +316,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -329,7 +328,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -341,7 +340,7 @@ class GitHubWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     // ---- Comments ----

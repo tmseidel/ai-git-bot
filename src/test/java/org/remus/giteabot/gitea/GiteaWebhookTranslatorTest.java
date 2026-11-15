@@ -150,7 +150,7 @@ class GiteaWebhookTranslatorTest {
 
         assertEquals("review triggered", response.getBody());
         ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture());
+        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture(), any());
         verify(botWebhookService, never()).handlePrComment(any(), any());
         assertEquals(140L, captor.getValue().getPullRequest().getNumber());
     }
@@ -201,7 +201,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -212,7 +212,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -223,7 +223,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -234,7 +234,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -246,7 +246,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     // ---- PR reopened routing ----
@@ -259,7 +259,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -270,7 +270,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -282,7 +282,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -293,7 +293,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -313,7 +313,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -323,7 +323,7 @@ class GiteaWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     // ---- Issue assignment routing ----

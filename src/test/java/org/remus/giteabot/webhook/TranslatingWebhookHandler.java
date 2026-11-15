@@ -41,7 +41,7 @@ public record TranslatingWebhookHandler(WebhookTranslator translator, String eve
         lenient().when(botWebhookService.isCallerAllowed(any(), any())).thenReturn(true);
         lenient().when(botWebhookService.isReviewAgainRequest(any(), any())).thenCallRealMethod();
         // The dispatcher chains on the returned future; a bare mock would return null.
-        lenient().when(botWebhookService.reviewPullRequest(any(), any()))
+        lenient().when(botWebhookService.reviewPullRequest(any(), any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(true));
         return botWebhookService;
     }

@@ -6,6 +6,7 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.BotIdentity;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
 import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
@@ -33,6 +34,7 @@ import org.remus.giteabot.util.BranchFilter;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -55,6 +57,13 @@ import java.util.regex.Pattern;
 @Slf4j
 @Service
 public class BotWebhookService {
+
+    /**
+     * The triggers a review is acknowledged for with a 👀 reaction on the pull request:
+     * those where nobody has asked the bot anything yet.
+     */
+    private static final Set<WebhookEventKind> ACKNOWLEDGED_TRIGGERS =
+            EnumSet.of(WebhookEventKind.PR_OPENED, WebhookEventKind.PR_REVIEWER_ADDED);
 
     /**
      * Phrasings that ask for the review to be run again: "re-review", "review (this / the
@@ -130,9 +139,10 @@ public class BotWebhookService {
      *         skipped (caller not allowed, branch filtered, no workflow enabled) or every
      *         workflow failed. The dispatcher uses it to release its debounce claim, so a
      *         re-request is not swallowed.
+     * @param trigger what started the review; decides whether it is acknowledged with a reaction
      */
     @Async
-    public CompletableFuture<Boolean> reviewPullRequest(Bot bot, WebhookPayload payload) {
+    public CompletableFuture<Boolean> reviewPullRequest(Bot bot, WebhookPayload payload, WebhookEventKind trigger) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
             if (!isCallerAllowed(bot, payload)) {
@@ -146,7 +156,7 @@ public class BotWebhookService {
             if (!prWorkflowAllowedForBranch(bot, payload)) {
                 return CompletableFuture.completedFuture(false);
             }
-            acknowledgePullRequest(bot, payload);
+            acknowledgePullRequest(bot, payload, trigger);
             try {
                 boolean reviewed = prWorkflowOrchestrator.runAll(bot, payload).stream()
                         .map(PrWorkflowRun::getStatus)
@@ -188,9 +198,8 @@ public class BotWebhookService {
         }
     }
 
-    private void acknowledgePullRequest(Bot bot, WebhookPayload payload) {
-        if (!"opened".equals(payload.getAction())
-                && !"review_requested".equals(payload.getAction())) {
+    private void acknowledgePullRequest(Bot bot, WebhookPayload payload, WebhookEventKind trigger) {
+        if (!ACKNOWLEDGED_TRIGGERS.contains(trigger)) {
             return;
         }
         if (payload.getRepository() == null

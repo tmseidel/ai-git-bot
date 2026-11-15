@@ -108,7 +108,6 @@ public class BitbucketWebhookTranslator implements WebhookTranslator {
         boolean headMoved = stateTracker.headMoved(bot, payload);
         boolean reviewerAdded = botReviewerAdded(bot, payload, botAccount, raw);
         if (reviewerAdded) {
-            payload.setAction("review_requested");
             return event(WebhookEventKind.PR_REVIEWER_ADDED, payload, botAccount, raw);
         }
         if (headMoved) {
@@ -175,18 +174,17 @@ public class BitbucketWebhookTranslator implements WebhookTranslator {
 
     WebhookPayload translatePayload(String eventKey, Map<String, Object> raw) {
         return switch (eventKey) {
-            case "pullrequest:created", "pullrequest:open" -> translatePullRequestEvent(raw, "opened");
-            case "pullrequest:updated" -> translatePullRequestEvent(raw, "synchronized");
-            case "pullrequest:fulfilled", "pullrequest:merged", "pullrequest:rejected", "pullrequest:declined" -> translatePullRequestEvent(raw, "closed");
+            case "pullrequest:created", "pullrequest:open", "pullrequest:updated",
+                 "pullrequest:fulfilled", "pullrequest:merged", "pullrequest:rejected", "pullrequest:declined" ->
+                    translatePullRequestEvent(raw);
             case "pullrequest:comment_created" -> translatePullRequestCommentEvent(raw);
             default -> null;
         };
     }
 
     @SuppressWarnings("unchecked")
-    private WebhookPayload translatePullRequestEvent(Map<String, Object> raw, String action) {
+    private WebhookPayload translatePullRequestEvent(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction(action);
         payload.setSender(extractBitbucketOwner((Map<String, Object>) raw.get("actor")));
         payload.setRepository(extractRepository(raw));
         payload.setPullRequest(extractPullRequest(
@@ -199,7 +197,7 @@ public class BitbucketWebhookTranslator implements WebhookTranslator {
 
     @SuppressWarnings("unchecked")
     private WebhookPayload translatePullRequestCommentEvent(Map<String, Object> raw) {
-        WebhookPayload payload = translatePullRequestEvent(raw, "created");
+        WebhookPayload payload = translatePullRequestEvent(raw);
         payload.setComment(extractComment((Map<String, Object>) raw.get("comment")));
         return payload;
     }

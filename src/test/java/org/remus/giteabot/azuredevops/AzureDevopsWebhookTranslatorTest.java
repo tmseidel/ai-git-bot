@@ -7,6 +7,7 @@ import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.PullRequestStateTracker;
 import org.remus.giteabot.webhook.TranslatingWebhookHandler;
 import org.remus.giteabot.webhook.WebhookEventDispatcher;
@@ -58,7 +59,7 @@ class AzureDevopsWebhookTranslatorTest {
     void pullRequestCreated_triggersReview() {
         handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.created"));
 
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -79,7 +80,7 @@ class AzureDevopsWebhookTranslatorTest {
 
         assertEquals("ignored", response.getBody());
         verify(botWebhookService, never()).handlePrClosed(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -89,7 +90,7 @@ class AzureDevopsWebhookTranslatorTest {
                 handler.handleWebhook(bot, withResource(pullRequestPayload("git.pullrequest.created"),
                         "createdBy", Map.of("uniqueName", "bot@contoso.com")))
                         .getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -118,7 +119,7 @@ class AzureDevopsWebhookTranslatorTest {
         handler.handleWebhook(bot, pullRequestPayloadWithHeadSha(
                 "git.pullrequest.updated", "aaaa1111bbbb2222cccc3333dddd4444eeee5555"));
 
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -134,7 +135,7 @@ class AzureDevopsWebhookTranslatorTest {
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
 
         assertEquals("ignored", second.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -147,7 +148,7 @@ class AzureDevopsWebhookTranslatorTest {
         handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
         handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
 
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -159,7 +160,7 @@ class AzureDevopsWebhookTranslatorTest {
         handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.updated"));
         handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.updated"));
 
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -174,7 +175,7 @@ class AzureDevopsWebhookTranslatorTest {
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "status", "abandoned"));
         handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
 
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     // ---- Reviewer added after the pull request was opened ----
@@ -189,15 +190,15 @@ class AzureDevopsWebhookTranslatorTest {
         bot.setRunOnPrUpdate(false);
         String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
         handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
 
         var response = handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
                 "git.pullrequest.updated", sha, "bot@contoso.com"));
 
         assertEquals("review triggered", response.getBody());
         // Marked as a review request, so the bot acknowledges it like one elsewhere.
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot),
-                argThat(payload -> "review_requested".equals(payload.getAction())));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class),
+                eq(WebhookEventKind.PR_REVIEWER_ADDED));
     }
 
     @Test
@@ -214,7 +215,7 @@ class AzureDevopsWebhookTranslatorTest {
                 "git.pullrequest.updated", sha, "bot@contoso.com"));
 
         assertEquals("ignored", second.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -230,7 +231,7 @@ class AzureDevopsWebhookTranslatorTest {
         handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
                 "git.pullrequest.updated", sha, "bot@contoso.com"));
 
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -248,7 +249,7 @@ class AzureDevopsWebhookTranslatorTest {
                 pullRequestPayloadWithoutReviewers("git.pullrequest.updated", sha));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -260,14 +261,14 @@ class AzureDevopsWebhookTranslatorTest {
         bot.setRunOnPrUpdate(false);
         String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
         handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
-        verify(botWebhookService, times(1)).reviewPullRequest(any(), any());
+        verify(botWebhookService, times(1)).reviewPullRequest(any(), any(), any());
 
         var response = handler.handleWebhook(bot, withResource(
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "reviewers",
                 List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 10))));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(any(), any());
+        verify(botWebhookService, times(1)).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -295,7 +296,7 @@ class AzureDevopsWebhookTranslatorTest {
                 "git.pullrequest.updated", sha, "someone-else@contoso.com"));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -309,7 +310,7 @@ class AzureDevopsWebhookTranslatorTest {
         String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
         handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
                 "git.pullrequest.created", sha, "bot@contoso.com"));
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
 
         handler.handleWebhook(bot, withResource(pullRequestPayloadWithReviewers(
                 "git.pullrequest.updated", sha, "bot@contoso.com"), "status", "abandoned"));
@@ -318,7 +319,7 @@ class AzureDevopsWebhookTranslatorTest {
                 "git.pullrequest.updated", sha, "bot@contoso.com"));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -333,7 +334,7 @@ class AzureDevopsWebhookTranslatorTest {
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     // ---- (a) null-guard on translateCommentEvent: pr == null ----
@@ -358,7 +359,7 @@ class AzureDevopsWebhookTranslatorTest {
         assertEquals("ignored", response.getBody());
         verify(botWebhookService, never()).handlePrComment(any(), any());
         verify(botWebhookService, never()).handleInlineComment(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     // ---- (b) organizationFromResourceContainers(Map) — envelope-based resolution ----

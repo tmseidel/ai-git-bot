@@ -4,11 +4,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
-import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.webhook.TranslatingWebhookHandler;
@@ -58,7 +59,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("open", List.of(user("ai_bot")), null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -67,7 +68,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("open", List.of(user("human")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -77,7 +78,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("open", List.of(user("human")), null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -87,7 +88,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("update", List.of(user("human")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -96,7 +97,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("update", List.of(user("ai_bot")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -109,7 +110,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("update", List.of(user("human"), user("ai_bot")), changes));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -123,7 +124,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("update", List.of(user("ai_bot"), user("human1"), user("human2")), changes));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -134,7 +135,7 @@ class GitLabWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -149,7 +150,7 @@ class GitLabWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -159,7 +160,7 @@ class GitLabWebhookTranslatorTest {
                 notePayload("@ai_bot please review this again"));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -193,7 +194,7 @@ class GitLabWebhookTranslatorTest {
 
         assertEquals("pr comment received", response.getBody());
         verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -241,25 +242,19 @@ class GitLabWebhookTranslatorTest {
     }
 
     @Test
-    void issueOpenedTranslatesActionToOpened() {
-        bot.setRunOnIssueCreation(true);
+    void issueOpenIsClassifiedAsIssueOpened() {
+        WebhookEvent event = translator.translate(bot,
+                Map.of(GitLabWebhookTranslator.EVENT_HEADER, "Issue Hook"), issuePayload("open"));
 
-        handler.handleWebhook(bot, "Issue Hook", issuePayload("open"));
-
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handleIssueCreated(eq(bot), captor.capture());
-        assertEquals("opened", captor.getValue().getAction());
+        assertEquals(WebhookEventKind.ISSUE_OPENED, event.kind());
     }
 
     @Test
-    void issueReopenedTranslatesActionToReopened() {
-        bot.setRunOnIssueCreation(true);
+    void issueReopenIsClassifiedAsIssueReopened() {
+        WebhookEvent event = translator.translate(bot,
+                Map.of(GitLabWebhookTranslator.EVENT_HEADER, "Issue Hook"), issuePayload("reopen"));
 
-        handler.handleWebhook(bot, "Issue Hook", issuePayload("reopen"));
-
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handleIssueCreated(eq(bot), captor.capture());
-        assertEquals("reopened", captor.getValue().getAction());
+        assertEquals(WebhookEventKind.ISSUE_REOPENED, event.kind());
     }
 
     @Test
@@ -271,7 +266,7 @@ class GitLabWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -284,9 +279,8 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("update", List.of(user("human")), changes));
 
         assertEquals("review triggered", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture());
-        assertEquals("assigned", captor.getValue().getAction());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class),
+                eq(WebhookEventKind.PR_ASSIGNED));
     }
 
     @Test
@@ -299,7 +293,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("update", List.of(user("human")), changes));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -311,9 +305,8 @@ class GitLabWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
 
         assertEquals("review triggered", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture());
-        assertEquals("synchronized", captor.getValue().getAction());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class),
+                eq(WebhookEventKind.PR_SYNCHRONIZED));
     }
 
     @Test
@@ -326,7 +319,7 @@ class GitLabWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -335,7 +328,7 @@ class GitLabWebhookTranslatorTest {
                 mergeRequestPayload("reopen", List.of(user("ai_bot")), null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test

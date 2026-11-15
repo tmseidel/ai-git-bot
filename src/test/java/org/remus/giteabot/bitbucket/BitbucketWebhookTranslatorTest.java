@@ -25,7 +25,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -79,7 +78,7 @@ class BitbucketWebhookTranslatorTest {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:created", raw);
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -117,7 +116,7 @@ class BitbucketWebhookTranslatorTest {
                 pullRequestPayload(List.of(user("ai_bot")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
         verify(botService).recordError(eq(bot), contains("401"));
     }
 
@@ -139,7 +138,7 @@ class BitbucketWebhookTranslatorTest {
                 pullRequestPayload(List.of(user("ai_bot")), null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -148,7 +147,7 @@ class BitbucketWebhookTranslatorTest {
                 pullRequestPayload(List.of(user("human")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -158,7 +157,7 @@ class BitbucketWebhookTranslatorTest {
                 pullRequestPayload(List.of(user("human")), null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test
@@ -168,7 +167,7 @@ class BitbucketWebhookTranslatorTest {
                 pullRequestPayload(List.of(user("human")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -183,7 +182,7 @@ class BitbucketWebhookTranslatorTest {
                 pullRequestPayload(List.of(user("ai_bot")), null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -195,8 +194,8 @@ class BitbucketWebhookTranslatorTest {
 
         assertEquals("review triggered", response.getBody());
         // Marked as a review request, so the bot acknowledges it like one elsewhere.
-        verify(botWebhookService).reviewPullRequest(eq(bot),
-                argThat(payload -> "review_requested".equals(payload.getAction())));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class),
+                eq(WebhookEventKind.PR_REVIEWER_ADDED));
     }
 
     @Test
@@ -206,7 +205,7 @@ class BitbucketWebhookTranslatorTest {
                 commentPayload("@{acc-ai_bot} - Review the Pull-Request again", null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
         verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 
@@ -219,7 +218,7 @@ class BitbucketWebhookTranslatorTest {
 
         assertEquals("pr comment received", response.getBody());
         verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -229,7 +228,7 @@ class BitbucketWebhookTranslatorTest {
 
         assertEquals("pr comment received", response.getBody());
         verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -240,7 +239,7 @@ class BitbucketWebhookTranslatorTest {
         assertEquals("ignored", response.getBody());
         verify(botWebhookService, never()).handlePrComment(any(), any());
         verify(botWebhookService, never()).handleInlineComment(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
     }
 
     @Test
@@ -287,7 +286,7 @@ class BitbucketWebhookTranslatorTest {
 
         assertEquals("review triggered", push.getBody());
         assertEquals("ignored", titleEdit.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
     }
 
     @Test

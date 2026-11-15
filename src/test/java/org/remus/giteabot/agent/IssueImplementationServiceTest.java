@@ -1181,7 +1181,6 @@ class IssueImplementationServiceTest {
      */
     private WebhookPayload createCommentPayload(String commentBody, long number) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction("created");
 
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
         comment.setId(CommentId.NumericCommentId.of(100L));
@@ -1208,7 +1207,6 @@ class IssueImplementationServiceTest {
 
     private WebhookPayload createIssuePayload() {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction("assigned");
 
         WebhookPayload.Owner assignee = new WebhookPayload.Owner();
         assignee.setLogin("ai_bot");

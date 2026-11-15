@@ -14,8 +14,6 @@ import java.util.List;
 @Builder(toBuilder = true)
 public class WebhookPayload {
 
-    private String action;
-
     private Long number;
 
     private PullRequest pullRequest;

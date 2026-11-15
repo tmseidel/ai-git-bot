@@ -138,7 +138,7 @@ public class WebhookEventDispatcher {
             if (!botWebhookService.isCallerAllowed(bot, payload)) {
                 return ignored(bot, event, "caller is not on the bot's user whitelist");
             }
-            botWebhookService.reviewPullRequest(bot, payload);
+            botWebhookService.reviewPullRequest(bot, payload, event.kind());
             return ResponseEntity.ok("review triggered");
         }
         botWebhookService.handlePrComment(bot, payload);
@@ -165,7 +165,7 @@ public class WebhookEventDispatcher {
         }
         CompletableFuture<Boolean> reviewed;
         try {
-            reviewed = botWebhookService.reviewPullRequest(bot, payload);
+            reviewed = botWebhookService.reviewPullRequest(bot, payload, event.kind());
         } catch (RuntimeException e) {
             debouncer.release(bot, payload);
             throw e;
