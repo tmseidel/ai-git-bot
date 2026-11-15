@@ -40,15 +40,38 @@ public final class FeedbackCommandParser {
         if (body == null || body.isBlank() || mentionAliases == null || mentionAliases.length == 0) {
             return Optional.empty();
         }
-        List<String> mentions = new ArrayList<>();
-        for (String alias : mentionAliases) {
-            if (alias != null && !alias.isBlank()) {
-                mentions.add(alias.startsWith("@") ? alias.substring(1) : alias);
-            }
-        }
+        List<String> mentions = mentions(mentionAliases);
         if (mentions.isEmpty()) {
             return Optional.empty();
         }
+        Matched matched = findCommand(body, mentions);
+        return matched == null ? Optional.empty()
+                : Optional.of(interpret(matched.tokens(), matched.reason()));
+    }
+
+    /**
+     * Whether the comment is unmistakably addressed to feedback — a target ({@code O1234-F2}) or a
+     * subcommand ({@code retract}, {@code list}, {@code show}) follows the word. Prose such as
+     * "{@code @bot feedback please, is this approach OK?}" is not: on a bot that collects no
+     * feedback it must keep whatever routing it had before feedback commands existed.
+     */
+    public static boolean addressesFeedback(String body, String... mentionAliases) {
+        List<String> mentions = mentions(mentionAliases);
+        if (mentions.isEmpty()) {
+            return false;
+        }
+        Matched matched = findCommand(body, mentions);
+        if (matched == null || matched.tokens().isEmpty()) {
+            return false;
+        }
+        String first = matched.tokens().split("\\s+")[0];
+        String verb = first.toLowerCase(Locale.ROOT);
+        return verb.equals("retract") || verb.equals("list") || verb.equals("show")
+                || FeedbackTarget.parse(first).isPresent();
+    }
+
+    /** The command text and its reason, or {@code null} when the body carries no feedback command. */
+    private static Matched findCommand(String body, List<String> mentions) {
         String[] lines = stripQuotedAndFenced(body).split("\\R", -1);
 
         for (int i = 0; i < lines.length; i++) {
@@ -58,10 +81,25 @@ public final class FeedbackCommandParser {
                 continue;
             }
             String rest = matcher.group(2) == null ? "" : matcher.group(2).trim();
-            String reason = collectReason(lines, i + 1);
-            return Optional.of(interpret(rest, reason));
+            return new Matched(rest, collectReason(lines, i + 1));
         }
-        return Optional.empty();
+        return null;
+    }
+
+    private static List<String> mentions(String... mentionAliases) {
+        List<String> mentions = new ArrayList<>();
+        if (mentionAliases == null) {
+            return mentions;
+        }
+        for (String alias : mentionAliases) {
+            if (alias != null && !alias.isBlank()) {
+                mentions.add(alias.startsWith("@") ? alias.substring(1) : alias);
+            }
+        }
+        return mentions;
+    }
+
+    private record Matched(String tokens, String reason) {
     }
 
     private static FeedbackCommand interpret(String tokens, String following) {

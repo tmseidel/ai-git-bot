@@ -67,6 +67,40 @@ class AgentReviewWorkflowTest {
         org.assertj.core.api.Assertions.assertThat(progress.description()).contains("review or clarification");
     }
 
+    @Test
+    void theFeedbackParameterSaysItGatesFeedbackCommands() {
+        var feedback = workflow().paramsSchema().fields().stream()
+                .filter(field -> field.name().equals("feedbackEnabled")).findFirst().orElseThrow();
+
+        // The switch does two things — accept @bot feedback commands and keep the evidence snapshot
+        // — so its label has to name the one an operator will search for.
+        org.assertj.core.api.Assertions.assertThat(feedback.label()).containsIgnoringCase("feedback");
+        org.assertj.core.api.Assertions.assertThat(feedback.description())
+                .contains("@bot feedback")
+                .contains("diff");
+    }
+
+    @Test
+    void aSuppressedPublicationIsASkippedRunNotAFailure() {
+        Bot bot = new Bot();
+        var cfg = new org.remus.giteabot.prworkflow.config.WorkflowConfiguration();
+        cfg.setId(7L);
+        bot.setWorkflowConfiguration(cfg);
+        GitIntegration git = new GitIntegration();
+        git.setProviderType(RepositoryType.GITHUB);
+        bot.setGitIntegration(git);
+        when(selectionService.resolveParams(7L, "agentic-review")).thenReturn(Map.of());
+        AgentReviewService service = mock(AgentReviewService.class);
+        when(serviceFactory.create(bot)).thenReturn(service);
+        when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), any(),
+                anyLong(), any(), anyBoolean(), any()))
+                .thenReturn(AgentReviewService.ReviewResult.SUPPRESSED);
+
+        // A head that moved while the review ran is normal; calling it a failure hides that the
+        // review was correctly held back.
+        assertEquals(WorkflowResultStatus.SKIPPED, workflow().run(context(bot)).status());
+    }
+
     @ParameterizedTest
     @EnumSource(RepositoryType.class)
     void progressIsEnabledForEveryProviderWhenSelected(RepositoryType provider) {

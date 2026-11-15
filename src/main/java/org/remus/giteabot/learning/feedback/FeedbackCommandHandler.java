@@ -63,8 +63,29 @@ public class FeedbackCommandHandler {
             return false;
         }
 
+        boolean collecting = collectionEnabled(bot);
+        // A bot that collects no feedback only consumes text that is unmistakably addressed to it: a
+        // target (O1234-F2) or a subcommand (retract/list/show). Prose like "@bot feedback please, is
+        // this approach OK?" keeps the routing it had before feedback commands existed — a coding
+        // session, a clarification, an ordinary command.
+        if (!collecting && !FeedbackCommandParser.addressesFeedback(body, alias, configured)) {
+            return false;
+        }
+
         String actor = actorOf(payload);
         String mention = alias;
+        if (!authorizationService.canContribute(bot, actor)) {
+            // A public "not permitted" answer is an invitation: with a whitelist configured, anyone
+            // could make the bot comment on demand. The command is consumed, the refusal is logged.
+            log.info("[Bot '{}'] Feedback command from '{}' refused: not permitted to give feedback",
+                    bot.getName(), actor);
+            return true;
+        }
+        if (!collecting) {
+            log.info("[Bot '{}'] Feedback command from '{}' ignored: feedback collection is disabled",
+                    bot.getName(), actor);
+            return true;
+        }
         try {
             respond(bot, payload, execute(bot, payload, commentKind, parsed.get(), actor, mention));
         } catch (FeedbackRejectedException rejected) {
@@ -84,14 +105,6 @@ public class FeedbackCommandHandler {
                            FeedbackCommand command, String actor, String mention) {
         if (command instanceof FeedbackCommand.Help help) {
             return FeedbackReplyRenderer.help(help.message());
-        }
-        if (!collectionEnabled(bot)) {
-            return "Feedback is not enabled for this bot, so the command was not recorded. "
-                    + "An administrator can enable `feedbackEnabled` on the agentic PR review "
-                    + "workflow configuration.";
-        }
-        if (!authorizationService.canContribute(bot, actor)) {
-            return "You are not permitted to give feedback to this bot.";
         }
         FeedbackScope scope = scopeOf(bot, payload);
         return switch (command) {

@@ -30,10 +30,12 @@ Feedback is collected per bot, through its workflow configuration:
 
 **System settings → Workflow configurations → Workflows → Agentic PR Review → `feedbackEnabled`**.
 
-It is off by default. With it off, reviews are produced exactly as before and feedback
-commands are answered with a short explanation instead of being recorded. The setting is
-part of the shared workflow configuration: editing it affects every bot assigned to that
-configuration.
+It is off by default. With it off, reviews are produced exactly as before: a comment that
+unmistakably names a target (`@bot feedback O1234-F1 incorrect`) is consumed and logged but
+not recorded and not answered, while prose such as `@bot feedback please, is this approach
+OK?` keeps whatever routing it had before feedback existed — a coding session, a
+clarification, an ordinary command. The setting is part of the shared workflow
+configuration: editing it affects every bot assigned to that configuration.
 
 ## Giving feedback
 
@@ -71,6 +73,9 @@ configured, anyone who may comment on the repository may give feedback; that per
 for collecting opinions only and never grants policy rights.
 
 The actor is always the author of the authenticated comment — never the pull-request author.
+A commenter who is not permitted gets no answer at all: the command is consumed and the
+refusal is logged. A public "not permitted" reply would tell anyone excluded by the
+whitelist exactly how to make the bot comment on demand.
 
 ## Correcting and retracting
 

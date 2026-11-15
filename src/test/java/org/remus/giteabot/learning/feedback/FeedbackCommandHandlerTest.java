@@ -104,28 +104,58 @@ class FeedbackCommandHandlerTest {
     }
 
     @Test
-    void disabledCollectionIsExplainedAndNothingIsRecorded() {
+    void disabledCollectionConsumesATargetSilently() {
         when(learningSettingsResolver.resolve(any(Bot.class)))
                 .thenReturn(AgentReviewLearningSettings.DISABLED);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
                 FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
+        // Consumed, so a target is never forwarded to an AI conversation — but no comment: an
+        // explanation per attempt is free amplification for anyone who reads the help text.
         verifyNoInteractions(feedbackService);
-        verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
-                org.mockito.ArgumentMatchers.contains("Feedback is not enabled for this bot"));
+        verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
+                anyString());
     }
 
     @Test
-    void aCommenterWithoutPermissionGetsAnAnswerInsteadOfSilence() {
+    void proseOnABotThatCollectsNoFeedbackKeepsItsOrdinaryRouting() {
+        when(learningSettingsResolver.resolve(any(Bot.class)))
+                .thenReturn(AgentReviewLearningSettings.DISABLED);
+
+        // Not a target and not a subcommand: a bot without feedback must not swallow it.
+        assertThat(handler.tryHandle(bot,
+                payload("@ai_bot feedback please, is this approach OK?"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isFalse();
+
+        verifyNoInteractions(feedbackService);
+        verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
+                anyString());
+    }
+
+    @Test
+    void aSubcommandOnABotThatCollectsNoFeedbackIsStillConsumed() {
+        when(learningSettingsResolver.resolve(any(Bot.class)))
+                .thenReturn(AgentReviewLearningSettings.DISABLED);
+
+        assertThat(handler.tryHandle(bot, payload("@ai_bot feedback list"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+
+        verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
+                anyString());
+    }
+
+    @Test
+    void aCommenterWithoutPermissionIsRefusedWithoutAPublicReply() {
         when(authorizationService.canContribute(bot, "alice")).thenReturn(false);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
                 FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
 
+        // "not permitted" in public tells an excluded commenter exactly how to make the bot talk.
         verifyNoInteractions(feedbackService);
-        verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
-                org.mockito.ArgumentMatchers.contains("not permitted to give feedback"));
+        verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
+                anyString());
     }
 
     @Test

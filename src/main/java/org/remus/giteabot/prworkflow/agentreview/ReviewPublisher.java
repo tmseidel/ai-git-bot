@@ -67,8 +67,35 @@ public class ReviewPublisher {
             String feedbackHint) {
     }
 
+    /** What a delivery attempt did. Nothing posted is not the same as something failed. */
+    public enum PublicationOutcome {
+        PUBLISHED,
+        /** Deliberately not posted: the review no longer describes the pull request. */
+        SUPPRESSED,
+        /** Already on the pull request; a second copy would duplicate it. */
+        ALREADY_PUBLISHED
+    }
+
+    /**
+     * @param reason why nothing was posted, for the run log; {@code null} when it was published
+     */
+    public record Publication(PublicationOutcome outcome, String reason) {
+
+        static Publication published() {
+            return new Publication(PublicationOutcome.PUBLISHED, null);
+        }
+
+        static Publication suppressed(String reason) {
+            return new Publication(PublicationOutcome.SUPPRESSED, reason);
+        }
+
+        public boolean isPublished() {
+            return outcome == PublicationOutcome.PUBLISHED;
+        }
+    }
+
     /** Publishes a finalized review that has no successful publication yet. */
-    public boolean publish(PublicationRequest request) {
+    public Publication publish(PublicationRequest request) {
         return deliver(request, false);
     }
 
@@ -77,11 +104,11 @@ public class ReviewPublisher {
      * review. A review that is already published is not reposted: updating a bot-owned comment (or
      * an explicit replacement) is a separate, deliberate action.
      */
-    public boolean republish(PublicationRequest request) {
+    public Publication republish(PublicationRequest request) {
         return deliver(request, true);
     }
 
-    private boolean deliver(PublicationRequest request, boolean retry) {
+    private Publication deliver(PublicationRequest request, boolean retry) {
         FinalizedReview review = reviewService.findFinalizedByReference(request.outputReference())
                 .orElse(null);
         if (review == null) {
@@ -89,12 +116,13 @@ public class ReviewPublisher {
             // witness of a review the application cannot reproduce.
             log.error("Finalized agentic review {} is missing; nothing will be published",
                     request.outputReference());
-            return false;
+            return Publication.suppressed("the finalized review record is missing");
         }
         if (retry && alreadyPublished(request.outputReference())) {
             log.info("Agentic review {} is already published; refusing to post a duplicate. "
                     + "Update the existing comment instead.", review.reference());
-            return false;
+            return new Publication(PublicationOutcome.ALREADY_PUBLISHED,
+                    "the review is already published on this pull request");
         }
 
         String body = request.feedbackHint() == null
@@ -107,7 +135,7 @@ public class ReviewPublisher {
         if (suppression != null) {
             publicationService.finish(publication.getId(), ReviewPublicationState.SUPPRESSED, null);
             log.info("Agentic review {} suppressed: {}", review.reference(), suppression);
-            return false;
+            return Publication.suppressed(suppression);
         }
 
         PostReviewAction action = request.enableFormalDecision()
@@ -152,7 +180,7 @@ public class ReviewPublisher {
         log.info("Agentic review {} published for PR #{} in {}/{} ({} finding(s))",
                 review.reference(), request.prNumber(), request.owner(), request.repo(),
                 review.findings().size());
-        return true;
+        return Publication.published();
     }
 
     /**

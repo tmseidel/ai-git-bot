@@ -45,7 +45,7 @@ PR Review**.
 | `blockerThreshold` | integer | *(empty)* | Maximum allowed `BLOCKER` findings for a formal `APPROVE`. Empty means ignored. |
 | `mediumThreshold` | integer | *(empty)* | Maximum allowed `MEDIUM` findings for a formal `APPROVE`. Empty means ignored. |
 | `lowThreshold` | integer | *(empty)* | Maximum allowed `LOW` findings for a formal `APPROVE`. Empty means ignored. |
-| `feedbackEnabled` | boolean | `false` | Keep the evidence a review was produced from (task, diff, prompt, revisions) so later feedback can be analysed against what the bot actually saw. Reviews are created identically when this is off; only the extra capture is skipped. |
+| `feedbackEnabled` | boolean | `false` | Accept `@bot feedback …` commands on this bot's reviews, and keep the evidence a review was produced from (task, diff, prompt, revisions) so that feedback can later be analysed against what the bot actually saw. With this off, feedback commands are consumed silently when they name a target and left to their ordinary routing otherwise, and no snapshot is kept; reviews are created identically. |
 
 Progress comments show timestamps in UTC without fractional seconds. Review
 decisions and findings remain in the separate final review.

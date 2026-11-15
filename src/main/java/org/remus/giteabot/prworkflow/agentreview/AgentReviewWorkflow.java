@@ -77,12 +77,14 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         null,
                         "Maximum allowed LOW findings for a formal APPROVE. Leave empty to ignore."),
                 new WorkflowParamField(AgentReviewParam.FEEDBACK_ENABLED,
-                        "Keep review evidence",
+                        "Collect review feedback",
                         WorkflowParamField.ParamType.BOOLEAN, false,
                         "false",
-                        "Store the task, diff, prompt and revisions a review was produced from, so "
-                                + "later feedback can be analysed against what the bot actually saw. "
-                                + "Reviews are created identically when this is off."));
+                        "Accept `@bot feedback …` commands on this bot's reviews, and store the task, "
+                                + "diff, prompt and revisions a review was produced from so that "
+                                + "feedback can later be analysed against what the bot actually saw. "
+                                + "With this off, feedback commands are not recorded and no snapshot "
+                                + "is kept; reviews are created identically."));
     }
 
     @Override
@@ -114,6 +116,11 @@ public class AgentReviewWorkflow implements PrWorkflow {
         WorkflowResult result = switch (reviewed) {
             case POSTED -> WorkflowResult.success("Agentic review posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to review");
+            // Generated and stored, but deliberately not posted. Not a failure: a head that moved
+            // during the review is the normal reason, and the stored review stays available.
+            case SUPPRESSED -> WorkflowResult.skipped(
+                    "Agentic review stored but not posted (suppressed or already published; "
+                            + "see the review log for the reason)");
             case FAILED -> WorkflowResult.failed("Agentic review failed; no complete review was produced");
         };
         context.appendStep("agentic-review", result.summary());
@@ -133,6 +140,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         WorkflowResult result = switch (answered) {
             case POSTED -> WorkflowResult.success("Clarification posted");
+            case SUPPRESSED -> WorkflowResult.skipped("Clarification was not posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to answer clarification");
             case FAILED -> WorkflowResult.failed("No clarification produced");
         };

@@ -110,7 +110,8 @@ class ReviewPublisherTest {
                 .thenReturn(Optional.of(review(ReviewConclusion.FINDINGS_PRESENT,
                         finding("O1234-F1", ReviewSeverity.BLOCKER))));
 
-        assertThat(publisher.publish(formalRequest())).isTrue();
+        assertThat(publisher.publish(formalRequest()).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
 
         verify(publicationService).start(eq("O1234"), eq("GITEA"), eq("pull_request_review"),
                 argThat(body -> body.contains("AI Review · O1234")
@@ -124,7 +125,8 @@ class ReviewPublisherTest {
     void aMissingStoredReviewIsNeverPosted() {
         when(reviewService.findFinalizedByReference("O1234")).thenReturn(Optional.empty());
 
-        assertThat(publisher.publish(plainRequest("head", "head", () -> false))).isFalse();
+        assertThat(publisher.publish(plainRequest("head", "head", () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.SUPPRESSED);
 
         verifyNoInteractions(repositoryClient, eventHooks, publicationService);
     }
@@ -134,9 +136,11 @@ class ReviewPublisherTest {
         when(reviewService.findFinalizedByReference("O1234"))
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
 
-        boolean published = publisher.publish(plainRequest("head", "head", () -> true));
+        var published = publisher.publish(plainRequest("head", "head", () -> true));
 
-        assertThat(published).isFalse();
+        assertThat(published.outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.SUPPRESSED);
+        assertThat(published.reason()).contains("cancelled");
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
         verify(publicationService).finish(1L, ReviewPublicationState.SUPPRESSED, null);
         verifyNoInteractions(eventHooks);
@@ -147,9 +151,11 @@ class ReviewPublisherTest {
         when(reviewService.findFinalizedByReference("O1234"))
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
 
-        boolean published = publisher.publish(plainRequest("head-a", "head-b", () -> false));
+        var published = publisher.publish(plainRequest("head-a", "head-b", () -> false));
 
-        assertThat(published).isFalse();
+        assertThat(published.outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.SUPPRESSED);
+        assertThat(published.reason()).contains("head");
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
         verify(publicationService).finish(1L, ReviewPublicationState.SUPPRESSED, null);
     }
@@ -159,7 +165,8 @@ class ReviewPublisherTest {
         when(reviewService.findFinalizedByReference("O1234"))
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
 
-        assertThat(publisher.publish(plainRequest("head-a", null, () -> false))).isTrue();
+        assertThat(publisher.publish(plainRequest("head-a", null, () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
         verify(publicationService).finish(1L, ReviewPublicationState.PUBLISHED, null);
     }
 
@@ -171,7 +178,8 @@ class ReviewPublisherTest {
         doThrow(new IllegalStateException("formal submission rejected"))
                 .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
 
-        assertThat(publisher.publish(formalRequest())).isTrue();
+        assertThat(publisher.publish(formalRequest()).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
 
         verify(repositoryClient).postReviewComment(eq("acme"), eq("web"), eq(9L),
                 argThat(body -> body.contains("AI Review · O1234")));
@@ -203,7 +211,8 @@ class ReviewPublisherTest {
         doThrow(new IllegalStateException("422 Unprocessable Entity"))
                 .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
 
-        assertThat(publisher.publish(formalRequest())).isTrue();
+        assertThat(publisher.publish(formalRequest()).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
 
         verify(repositoryClient).postReviewComment(eq("acme"), eq("web"), eq(9L),
                 argThat(body -> body.contains("AI Review · O1234")));
@@ -234,7 +243,8 @@ class ReviewPublisherTest {
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
         when(publicationService.delivered(1L)).thenReturn(true);
 
-        assertThat(publisher.republish(plainRequest("head", "head", () -> false))).isFalse();
+        assertThat(publisher.republish(plainRequest("head", "head", () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.ALREADY_PUBLISHED);
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
     }
 
@@ -244,7 +254,8 @@ class ReviewPublisherTest {
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
         when(publicationService.delivered(1L)).thenReturn(false);
 
-        assertThat(publisher.republish(plainRequest("head", "head", () -> false))).isTrue();
+        assertThat(publisher.republish(plainRequest("head", "head", () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
 
         verify(publicationService).start(eq("O1234"), anyString(), anyString(), anyString());
         verify(repositoryClient).postReview(eq("acme"), eq("web"), eq(9L), anyString(),

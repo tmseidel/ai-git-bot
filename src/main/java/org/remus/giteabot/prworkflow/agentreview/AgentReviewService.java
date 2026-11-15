@@ -48,7 +48,15 @@ public class AgentReviewService {
 
     /** Distinguishes a posted review or clarification from a no-op and a failed attempt. */
     public enum ReviewResult {
-        POSTED, NO_DIFF, FAILED
+        POSTED,
+        NO_DIFF,
+        /**
+         * The review was generated and stored but deliberately not posted — the run was cancelled, the
+         * head moved, or the review had already been published. Distinguishing this from {@link #FAILED}
+         * keeps a correct suppression from looking like a broken workflow run.
+         */
+        SUPPRESSED,
+        FAILED
     }
 
     private final Bot bot;
@@ -136,17 +144,30 @@ public class AgentReviewService {
                                  SeverityThresholds thresholds,
                                  AgentReviewLearningSettings learningSettings) {
         try {
-            boolean posted = publisher.publish(new ReviewPublisher.PublicationRequest(
-                    repositoryClient, bot, owner, repo, prNumber, result.reference(),
-                    enableFormalDecision, thresholds, linkStyle(payload, owner, repo),
-                    providerName(), "pull_request_review", expectedHeadSha(payload),
-                    () -> currentHeadSha(owner, repo, prNumber),
-                    () -> Thread.currentThread().isInterrupted(),
-                    learningSettings.feedbackEnabled()
-                            ? org.remus.giteabot.learning.feedback.FeedbackHint.forReview(
-                                    mention(), result.reference())
-                            : null));
-            return posted ? ReviewResult.POSTED : ReviewResult.FAILED;
+            ReviewPublisher.Publication publication = publisher.publish(
+                    new ReviewPublisher.PublicationRequest(
+                            repositoryClient, bot, owner, repo, prNumber, result.reference(),
+                            enableFormalDecision, thresholds, linkStyle(payload, owner, repo),
+                            providerName(), "pull_request_review", expectedHeadSha(payload),
+                            () -> currentHeadSha(owner, repo, prNumber),
+                            () -> Thread.currentThread().isInterrupted(),
+                            learningSettings.feedbackEnabled()
+                                    ? org.remus.giteabot.learning.feedback.FeedbackHint.forReview(
+                                            mention(), result.reference())
+                                    : null));
+            return switch (publication.outcome()) {
+                case PUBLISHED -> ReviewResult.POSTED;
+                case SUPPRESSED -> {
+                    log.warn("Agentic review {} was not published: {}", result.reference(),
+                            publication.reason());
+                    yield ReviewResult.SUPPRESSED;
+                }
+                case ALREADY_PUBLISHED -> {
+                    log.info("Agentic review {} was not published again: {}", result.reference(),
+                            publication.reason());
+                    yield ReviewResult.SUPPRESSED;
+                }
+            };
         } catch (Exception e) {
             log.error("Publishing agentic review {} failed for PR #{} in {}/{}: {}",
                     result.reference(), prNumber, owner, repo, e.getMessage(), e);
