@@ -25,10 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests the rules of {@link WebhookEventDispatcher} that no single provider exercises. The
- * trigger rules themselves (run-on-create, run-on-update, mention gating, review-again) are
- * covered per provider by the {@code *WebhookTranslatorTest}s, which run through the real
- * dispatcher.
+ * Tests the trigger rules of {@link WebhookEventDispatcher}: which {@link BotWebhookService}
+ * handler each {@link WebhookEventKind} reaches, and under which bot settings. How a provider's
+ * webhook becomes a {@link WebhookEvent} is covered by the {@code *WebhookTranslatorTest}s.
  */
 @ExtendWith(MockitoExtension.class)
 class WebhookEventDispatcherTest {
@@ -94,6 +93,154 @@ class WebhookEventDispatcherTest {
 
         assertEquals("ignored", response.getBody());
         verifyNoInteractions(botWebhookService);
+    }
+
+    @Test
+    void ignoredEvent_reachesNoHandler() {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, WebhookEvent.ignored("not relevant"));
+
+        assertEquals("ignored", response.getBody());
+        verifyNoInteractions(botWebhookService);
+    }
+
+    // ---- Pull request lifecycle ----
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"PR_OPENED", "PR_REOPENED"})
+    void pullRequestCreation_withoutRunOnPrCreationOrBotReviewer_isIgnored(WebhookEventKind kind) {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(kind));
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"PR_OPENED", "PR_REOPENED"})
+    void pullRequestCreation_withRunOnPrCreation_triggersTheReview(WebhookEventKind kind) {
+        bot.setRunOnPrCreation(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(kind));
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(bot, payload, kind);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"PR_OPENED", "PR_REOPENED"})
+    void pullRequestCreation_withTheBotAsReviewer_triggersTheReview(WebhookEventKind kind) {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, eventBuilder(kind).botIsReviewer(true).build());
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(bot, payload, kind);
+    }
+
+    @Test
+    void push_withoutRunOnPrUpdate_isIgnoredEvenWhenTheBotIsReviewer() {
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_SYNCHRONIZED).botIsReviewer(true).build());
+
+        assertEquals("ignored", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
+    }
+
+    @Test
+    void push_withRunOnPrUpdate_triggersTheReview() {
+        bot.setRunOnPrUpdate(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(WebhookEventKind.PR_SYNCHRONIZED));
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(bot, payload, WebhookEventKind.PR_SYNCHRONIZED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"PR_REVIEWER_ADDED", "PR_ASSIGNED"})
+    void botAddedToAPullRequest_triggersTheReviewWhateverTheSettings(WebhookEventKind kind) {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(kind));
+
+        assertEquals("review triggered", response.getBody());
+        verify(botWebhookService).reviewPullRequest(bot, payload, kind);
+    }
+
+    @Test
+    void closedPullRequest_reachesTheCloseHandler() {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(WebhookEventKind.PR_CLOSED));
+
+        assertEquals("session closed", response.getBody());
+        verify(botWebhookService).handlePrClosed(bot, payload);
+    }
+
+    @Test
+    void submittedReview_reachesTheReviewHandler() {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEW_SUBMITTED));
+
+        assertEquals("review comments processing triggered", response.getBody());
+        verify(botWebhookService).handleReviewSubmitted(bot, payload);
+    }
+
+    // ---- Issues ----
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"ISSUE_OPENED", "ISSUE_REOPENED"})
+    void issueCreation_withoutRunOnIssueCreation_isIgnored(WebhookEventKind kind) {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(kind));
+
+        assertEquals("ignored", response.getBody());
+        verifyNoInteractions(botWebhookService);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"ISSUE_OPENED", "ISSUE_REOPENED"})
+    void issueCreation_withRunOnIssueCreation_startsTheAgent(WebhookEventKind kind) {
+        bot.setRunOnIssueCreation(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(kind));
+
+        assertEquals("agent triggered", response.getBody());
+        verify(botWebhookService).handleIssueCreated(bot, payload);
+    }
+
+    @Test
+    void issueAssignedToTheBot_startsTheAgentWhateverTheSettings() {
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(WebhookEventKind.ISSUE_ASSIGNED));
+
+        assertEquals("agent triggered", response.getBody());
+        verify(botWebhookService).handleIssueAssigned(bot, payload);
+    }
+
+    // ---- Comments ----
+
+    @ParameterizedTest
+    @EnumSource(value = WebhookEventKind.class, names = {"PR_COMMENT", "PR_INLINE_COMMENT", "ISSUE_COMMENT"})
+    void commentThatDoesNotMentionTheBot_isIgnored(WebhookEventKind kind) {
+        comment("looks good to me");
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot, event(kind));
+
+        assertEquals("ignored", response.getBody());
+        verifyNoInteractions(botWebhookService);
+    }
+
+    @Test
+    void issueCommentThatMentionsTheBot_reachesTheIssueCommentHandler() {
+        comment(BOT_ALIAS + " please take a look");
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.ISSUE_COMMENT).botMentioned(true).build());
+
+        assertEquals("issue comment received", response.getBody());
+        verify(botWebhookService).handleIssueComment(bot, payload);
+    }
+
+    @Test
+    void inlineCommentThatMentionsTheBot_reachesTheInlineCommentHandler() {
+        comment(BOT_ALIAS + " why this?");
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_INLINE_COMMENT).botMentioned(true).build());
+
+        assertEquals("inline comment response triggered", response.getBody());
+        verify(botWebhookService).handleInlineComment(bot, payload);
     }
 
     @Test
@@ -297,5 +444,27 @@ class WebhookEventDispatcherTest {
 
         assertEquals("feedback recorded", response.getBody());
         verify(botWebhookService, never()).handleInlineComment(any(), any());
+    }
+
+    @Test
+    void pullRequestComment_reachesTheHandlerWithThePullRequestAdded() {
+        // Gitea and GitHub send only the pull request's issue.
+        WebhookPayload.Issue issue = new WebhookPayload.Issue();
+        issue.setNumber(42L);
+        issue.setTitle("Some PR");
+        issue.setUser(sender("author"));
+        payload.setPullRequest(null);
+        payload.setIssue(issue);
+        comment(BOT_ALIAS + " please explain this change");
+
+        dispatcher.dispatch(bot, eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
+
+        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
+        verify(botWebhookService).handlePrComment(eq(bot), captor.capture());
+        WebhookPayload.PullRequest derived = captor.getValue().getPullRequest();
+        assertEquals(42L, derived.getNumber());
+        assertEquals("Some PR", derived.getTitle());
+        assertEquals("author", derived.getUser().getLogin());
+        assertNotNull(captor.getValue().getIssue().getPullRequest());
     }
 }

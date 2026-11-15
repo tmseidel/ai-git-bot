@@ -2,41 +2,27 @@ package org.remus.giteabot.gitea;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
-import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.event.WebhookEvent;
-import org.remus.giteabot.webhook.TranslatingWebhookHandler;
-import org.remus.giteabot.webhook.WebhookEventDispatcher;
 import org.remus.giteabot.event.WebhookEventKind;
-import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests how Gitea webhooks are classified by {@link GiteaWebhookTranslator} and, through
- * the real {@link WebhookEventDispatcher}, which {@link BotWebhookService} handler they reach:
- * PR comments → handlePrComment, issue comments → handleIssueComment, etc.
+ * Tests how {@link GiteaWebhookTranslator} turns Gitea webhooks into {@link WebhookEvent}s.
+ * What the bot then does with each kind is covered by {@code WebhookEventDispatcherTest}.
  */
-@ExtendWith(MockitoExtension.class)
 class GiteaWebhookTranslatorTest {
 
-    @Mock
-    private BotWebhookService botWebhookService;
-
     private GiteaWebhookTranslator translator;
-    private TranslatingWebhookHandler handler;
     private Bot bot;
 
     private static final String BOT_USERNAME = "claude_bot";
@@ -45,7 +31,6 @@ class GiteaWebhookTranslatorTest {
     @BeforeEach
     void setUp() {
         translator = new GiteaWebhookTranslator();
-        handler = new TranslatingWebhookHandler(translator, GiteaWebhookTranslator.EVENT_HEADER, botWebhookService);
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
@@ -53,68 +38,50 @@ class GiteaWebhookTranslatorTest {
         bot.setGitIntegration(gitIntegration);
     }
 
-    // ---- PR comment routing ----
+    private WebhookEvent translate(String eventType, Map<String, Object> payload) {
+        return translator.translate(bot, headers(eventType), payload);
+    }
+
+    // ---- Comments ----
 
     @Test
-    void prCommentWithBotMention_routesToHandlePrComment() {
-        Map<String, Object> payload = buildPrCommentPayload(BOT_ALIAS + " please fix this");
+    void prCommentWithBotMention_isPrCommentMentioningTheBot() {
+        WebhookEvent event = translate("issue_comment", buildPrCommentPayload(BOT_ALIAS + " please fix this"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("pr comment received", response.getBody());
-        verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handleIssueComment(any(), any());
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+        assertFalse(event.fromBot());
     }
 
     @Test
-    void prCommentWithoutBotMention_isIgnored() {
-        Map<String, Object> payload = buildPrCommentPayload("just a regular comment");
+    void prCommentWithoutBotMention_isPrCommentNotMentioningTheBot() {
+        WebhookEvent event = translate("issue_comment", buildPrCommentPayload("just a regular comment"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handlePrComment(any(), any());
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertFalse(event.botMentioned());
     }
 
     @Test
-    void prCommentWithBotMention_nonCreatedAction_isIgnored() {
+    void editedComment_isIgnored() {
         Map<String, Object> payload = buildPrCommentPayload(BOT_ALIAS + " do something");
-        payload.put("action", "edited");  // not "created"
+        payload.put("action", "edited");
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handlePrComment(any(), any());
-    }
-
-    // ---- Issue comment routing ----
-
-    @Test
-    void issueCommentWithBotMention_routesToHandleIssueComment() {
-        Map<String, Object> payload = buildIssueCommentPayload(BOT_ALIAS + " implement this feature");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("issue comment received", response.getBody());
-        verify(botWebhookService).handleIssueComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handlePrComment(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, translate("issue_comment", payload).kind());
     }
 
     @Test
-    void issueCommentWithoutBotMention_isIgnored() {
-        Map<String, Object> payload = buildIssueCommentPayload("just a note");
+    void issueComment_isIssueComment() {
+        WebhookEvent event = translate("issue_comment", buildIssueCommentPayload(BOT_ALIAS + " implement this feature"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueComment(any(), any());
+        assertEquals(WebhookEventKind.ISSUE_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
     }
 
     @Test
-    void prConversationComment_withoutTopLevelPullRequest_routesToHandlePrComment() {
+    void prConversationComment_withoutTopLevelPullRequest_isPrComment() {
         // Real Gitea delivers a PR-conversation comment as an issue_comment event with
-        // issue.pull_request set but NO top-level pull_request. It must route to
-        // handlePrComment (review/slash commands), not the agent-gated handleIssueComment.
+        // issue.pull_request set but NO top-level pull_request. It is a pull request comment,
+        // not an issue comment; the dispatcher adds the pull request half.
         Map<String, Object> payload = new HashMap<>();
         payload.put("action", "created");
         payload.put("sender", ownerMap("tom"));
@@ -123,278 +90,132 @@ class GiteaWebhookTranslatorTest {
         // deliberately no top-level "pull_request" key
         payload.put("comment", commentMap(1055L, BOT_ALIAS + " please explain this change", null));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
+        WebhookEvent event = translate("issue_comment", payload);
 
-        assertEquals("pr comment received", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handlePrComment(eq(bot), captor.capture());
-        verify(botWebhookService, never()).handleIssueComment(any(), any());
-        // Downstream handlePrComment dereferences payload.getPullRequest().getNumber();
-        // the handler must promote a top-level PR so it does not NPE.
-        WebhookPayload routed = captor.getValue();
-        assertNotNull(routed.getPullRequest(),
-                "PR conversation comment must carry a promoted top-level pull_request");
-        assertEquals(140L, routed.getPullRequest().getNumber());
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertEquals(140L, event.payload().getIssue().getNumber());
+        assertNull(event.payload().getPullRequest());
     }
 
     @Test
-    void reviewAgainComment_withoutTopLevelPullRequest_triggersTheReview() {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "created");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMap(140L, true));
-        payload.put("comment", commentMap(1055L, BOT_ALIAS + " please re-review", null));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("review triggered", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture(), any());
-        verify(botWebhookService, never()).handlePrComment(any(), any());
-        assertEquals(140L, captor.getValue().getPullRequest().getNumber());
-    }
-
-    // ---- Bot's own events are ignored ----
-
-    @Test
-    void ownBotComment_isIgnored() {
+    void ownBotComment_isFromTheBot() {
         Map<String, Object> payload = buildPrCommentPayload(BOT_ALIAS + " something");
         payload.put("sender", ownerMap(BOT_USERNAME));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handlePrComment(any(), any());
-        verify(botWebhookService, never()).handleIssueComment(any(), any());
-    }
-
-    // ---- Inline review comment routing ----
-
-    @Test
-    void inlineCommentWithBotMention_routesToHandleInlineComment() {
-        Map<String, Object> payload = buildInlineCommentPayload(BOT_ALIAS + " explain this");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("inline comment response triggered", response.getBody());
-        verify(botWebhookService).handleInlineComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handlePrComment(any(), any());
+        assertTrue(translate("issue_comment", payload).fromBot());
     }
 
     @Test
-    void inlineCommentWithoutBotMention_isIgnored() {
-        Map<String, Object> payload = buildInlineCommentPayload("just a note on the code");
+    void inlineComment_isPrInlineCommentWithItsPath() {
+        WebhookEvent event = translate("issue_comment", buildInlineCommentPayload(BOT_ALIAS + " explain this"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleInlineComment(any(), any());
+        assertEquals(WebhookEventKind.PR_INLINE_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+        assertEquals("src/main/Foo.java", event.payload().getComment().getPath());
     }
 
-    // ---- PR open/sync routing ----
+    // ---- Pull request lifecycle ----
 
     @Test
-    void prOpenedEvent_routesToReviewPullRequest() {
-        Map<String, Object> payload = buildPrEventPayload("opened");
+    void prOpened_isPrOpenedWithTheBotAsReviewer() {
+        WebhookEvent event = translate("pull_request", buildPrEventPayload("opened"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void prSynchronizedEvent_withoutRunOnPrUpdate_isIgnored() {
-        // runOnPrUpdate defaults to false — synchronized is ignored without the opt-in.
-        Map<String, Object> payload = buildPrEventPayload("synchronized");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
-    }
-
-    @Test
-    void prSynchronizedEvent_withRunOnPrUpdate_triggersReview() {
-        bot.setRunOnPrUpdate(true);
-        Map<String, Object> payload = buildPrEventPayload("synchronized");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void prOpenedEvent_withoutBotReviewer_isIgnored() {
-        Map<String, Object> payload = buildPrEventPayload("opened");
-        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
-    }
-
-    @Test
-    void prOpenedEvent_withRunOnPrCreation_triggersReviewWithoutBotReviewer() {
-        bot.setRunOnPrCreation(true);
-        Map<String, Object> payload = buildPrEventPayload("opened");
-        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    // ---- PR reopened routing ----
-
-    @Test
-    void prReopenedEvent_routesToReviewPullRequest() {
-        // Bot is reviewer by default in buildPrEventPayload — reopened triggers review.
-        Map<String, Object> payload = buildPrEventPayload("reopened");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void prReopenedEvent_withoutBotReviewer_isIgnored() {
-        Map<String, Object> payload = buildPrEventPayload("reopened");
-        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
-    }
-
-    @Test
-    void prReopenedEvent_withRunOnPrCreation_triggersReviewWithoutBotReviewer() {
-        bot.setRunOnPrCreation(true);
-        Map<String, Object> payload = buildPrEventPayload("reopened");
-        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", java.util.List.of());
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void prReviewRequestedForBot_routesToReviewPullRequest() {
-        Map<String, Object> payload = buildPrEventPayload("review_requested");
-        payload.put("requested_reviewer", ownerMap(BOT_USERNAME));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void prClosedEvent_routesToHandlePrClosed() {
-        Map<String, Object> payload = buildPrEventPayload("closed");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("session closed", response.getBody());
-        verify(botWebhookService).handlePrClosed(eq(bot), any(WebhookPayload.class));
-    }
-
-    @Test
-    void prAssignedToBot_triggersReview() {
-        Map<String, Object> payload = buildPrAssignedPayload(BOT_USERNAME);
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void prAssignedToSomeoneElse_isIgnored() {
-        Map<String, Object> payload = buildPrAssignedPayload("someone_else");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
-    }
-
-    // ---- Issue assignment routing ----
-
-    @Test
-    void issueAssignedToBotEvent_routesToHandleIssueAssigned() {
-        Map<String, Object> payload = buildIssueAssignedPayload(BOT_USERNAME);
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueAssigned(eq(bot), any(WebhookPayload.class));
-    }
-
-    @Test
-    void issueAssignedToDifferentUser_isIgnored() {
-        Map<String, Object> payload = buildIssueAssignedPayload("someone_else");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueAssigned(any(), any());
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertTrue(event.botIsReviewer());
     }
 
     @Test
     @SuppressWarnings("unchecked")
-    void issueAssignedToBotAsSecondAssignee_routesToHandleIssueAssigned() {
+    void prOpenedWithoutBotReviewer_isPrOpenedWithoutTheBotAsReviewer() {
+        Map<String, Object> payload = buildPrEventPayload("opened");
+        ((Map<String, Object>) payload.get("pull_request")).put("requested_reviewers", List.of());
+
+        WebhookEvent event = translate("pull_request", payload);
+
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertFalse(event.botIsReviewer());
+    }
+
+    @Test
+    void prSynchronized_isPrSynchronized() {
+        assertEquals(WebhookEventKind.PR_SYNCHRONIZED,
+                translate("pull_request", buildPrEventPayload("synchronized")).kind());
+    }
+
+    @Test
+    void prReopened_isPrReopenedWithTheBotAsReviewer() {
+        WebhookEvent event = translate("pull_request", buildPrEventPayload("reopened"));
+
+        assertEquals(WebhookEventKind.PR_REOPENED, event.kind());
+        assertTrue(event.botIsReviewer());
+    }
+
+    @Test
+    void prReviewRequestedForBot_isPrReviewerAdded() {
+        Map<String, Object> payload = buildPrEventPayload("review_requested");
+        payload.put("requested_reviewer", ownerMap(BOT_USERNAME));
+
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, translate("pull_request", payload).kind());
+    }
+
+    @Test
+    void prReviewRequestedFromSomeoneElse_isIgnored() {
+        Map<String, Object> payload = buildPrEventPayload("review_requested");
+        payload.put("requested_reviewer", ownerMap("someone_else"));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("pull_request", payload).kind());
+    }
+
+    @Test
+    void prClosed_isPrClosed() {
+        assertEquals(WebhookEventKind.PR_CLOSED, translate("pull_request", buildPrEventPayload("closed")).kind());
+    }
+
+    @Test
+    void prAssignedToBot_isPrAssigned() {
+        assertEquals(WebhookEventKind.PR_ASSIGNED,
+                translate("pull_request", buildPrAssignedPayload(BOT_USERNAME)).kind());
+    }
+
+    @Test
+    void prAssignedToSomeoneElse_isIgnored() {
+        assertEquals(WebhookEventKind.IGNORED,
+                translate("pull_request", buildPrAssignedPayload("someone_else")).kind());
+    }
+
+    // ---- Issues ----
+
+    @Test
+    void issueAssignedToBot_isIssueAssigned() {
+        assertEquals(WebhookEventKind.ISSUE_ASSIGNED,
+                translate("issues", buildIssueAssignedPayload(BOT_USERNAME)).kind());
+    }
+
+    @Test
+    void issueAssignedToDifferentUser_isIgnored() {
+        assertEquals(WebhookEventKind.IGNORED,
+                translate("issues", buildIssueAssignedPayload("someone_else")).kind());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void issueAssignedToBotAsSecondAssignee_isIssueAssigned() {
         // issue.assignee is only the first of issue.assignees.
         Map<String, Object> payload = buildIssueAssignedPayload("someone_else");
         ((Map<String, Object>) payload.get("issue"))
                 .put("assignees", List.of(ownerMap("someone_else"), ownerMap(BOT_USERNAME)));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueAssigned(eq(bot), any(WebhookPayload.class));
-    }
-
-    // ---- Issue creation routing ----
-
-    @Test
-    void issueOpenedWithRunOnIssueCreation_routesToHandleIssueCreated() {
-        bot.setRunOnIssueCreation(true);
-        Map<String, Object> payload = buildIssueCreatedPayload("opened");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueCreated(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handleIssueAssigned(any(), any());
+        assertEquals(WebhookEventKind.ISSUE_ASSIGNED, translate("issues", payload).kind());
     }
 
     @Test
-    void issueReopenedWithRunOnIssueCreation_routesToHandleIssueCreated() {
-        bot.setRunOnIssueCreation(true);
-        Map<String, Object> payload = buildIssueCreatedPayload("reopened");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueCreated(eq(bot), any(WebhookPayload.class));
+    void issueOpened_isIssueOpened() {
+        assertEquals(WebhookEventKind.ISSUE_OPENED, translate("issues", buildIssueCreatedPayload("opened")).kind());
     }
 
     @Test
-    void issueOpenedWithoutRunOnIssueCreation_isIgnored() {
-        Map<String, Object> payload = buildIssueCreatedPayload("opened");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueCreated(any(), any());
+    void issueReopened_isIssueReopened() {
+        assertEquals(WebhookEventKind.ISSUE_REOPENED, translate("issues", buildIssueCreatedPayload("reopened")).kind());
     }
 
     // ---- Classification ----
@@ -414,25 +235,22 @@ class GiteaWebhookTranslatorTest {
     }
 
     @Test
-    void reviewedWithReview_routesToHandleReviewSubmitted() {
+    void reviewedWithReview_isPrReviewSubmitted() {
         Map<String, Object> payload = buildPrEventPayload("reviewed");
         payload.put("review", new HashMap<>(Map.of("id", 7, "type", "comment", "content", "looks good")));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request_comment", payload);
+        WebhookEvent event = translate("pull_request_comment", payload);
 
-        assertEquals("review comments processing triggered", response.getBody());
-        verify(botWebhookService).handleReviewSubmitted(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_REVIEW_SUBMITTED, event.kind());
+        assertEquals("looks good", event.payload().getReview().getContent());
     }
 
     @Test
-    void approvedReview_routesToHandleReviewSubmitted() {
+    void approvedReview_isPrReviewSubmitted() {
         Map<String, Object> payload = buildPrEventPayload("reviewed");
         payload.put("review", new HashMap<>(Map.of("type", "pull_request_review_approved", "content", "LGTM")));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request_approved", payload);
-
-        assertEquals("review comments processing triggered", response.getBody());
-        verify(botWebhookService).handleReviewSubmitted(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_REVIEW_SUBMITTED, translate("pull_request_approved", payload).kind());
     }
 
     // ---- Event header ----

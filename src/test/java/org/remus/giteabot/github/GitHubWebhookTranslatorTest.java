@@ -2,47 +2,33 @@ package org.remus.giteabot.github;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
-import org.remus.giteabot.webhook.TranslatingWebhookHandler;
-import org.remus.giteabot.webhook.WebhookEventDispatcher;
-import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests how GitHub webhooks are classified by {@link GitHubWebhookTranslator} and, through
- * the real {@link WebhookEventDispatcher}, which {@link BotWebhookService} handler they reach.
+ * Tests how {@link GitHubWebhookTranslator} turns GitHub webhooks into {@link WebhookEvent}s.
+ * What the bot then does with each kind is covered by {@code WebhookEventDispatcherTest}.
  */
-@ExtendWith(MockitoExtension.class)
 class GitHubWebhookTranslatorTest {
 
-    @Mock
-    private BotWebhookService botWebhookService;
-
     private GitHubWebhookTranslator translator;
-    private TranslatingWebhookHandler handler;
     private Bot bot;
 
     @BeforeEach
     void setUp() {
         translator = new GitHubWebhookTranslator();
-        handler = new TranslatingWebhookHandler(translator, GitHubWebhookTranslator.EVENT_HEADER, botWebhookService);
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
@@ -50,29 +36,25 @@ class GitHubWebhookTranslatorTest {
         bot.setGitIntegration(gitIntegration);
     }
 
+    private WebhookEvent translate(String eventType, Map<String, Object> payload) {
+        return translator.translate(bot, Map.of(GitHubWebhookTranslator.EVENT_HEADER, eventType), payload);
+    }
+
+    // ---- Issues ----
+
     @Test
-    void issueAssignedPayload_withCustomIssueRef_propagatesCompatibilityRefToWebhookPayload() {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "assigned");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, "ai_bot", "release/1.2"));
+    void issueAssignedToBot_withCustomIssueRef_carriesTheRef() {
+        Map<String, Object> payload = issuePayload("assigned", issueMapWithAssigneeAndRef(42L, "ai_bot", "release/1.2"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
+        WebhookEvent event = translate("issues", payload);
 
-        assertEquals("agent triggered", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handleIssueAssigned(eq(bot), captor.capture());
-        assertEquals("release/1.2", captor.getValue().getIssue().getRef());
+        assertEquals(WebhookEventKind.ISSUE_ASSIGNED, event.kind());
+        assertEquals("release/1.2", event.payload().getIssue().getRef());
     }
 
     @Test
     void translatePayload_issueWithoutRef_keepsRefNull() {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "assigned");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, "ai_bot", null));
+        Map<String, Object> payload = issuePayload("assigned", issueMapWithAssigneeAndRef(42L, "ai_bot", null));
 
         WebhookPayload translated = translator.translatePayload("issues", payload);
 
@@ -80,243 +62,133 @@ class GitHubWebhookTranslatorTest {
     }
 
     @Test
-    void issueAssignedPayload_toDifferentAssignee_isIgnored() {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "assigned");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, "someone_else", null));
+    void issueAssignedToSomeoneElse_isIgnored() {
+        Map<String, Object> payload = issuePayload("assigned", issueMapWithAssigneeAndRef(42L, "someone_else", null));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueAssigned(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, translate("issues", payload).kind());
     }
 
     @Test
-    void issueAssignedToBotAsSecondAssignee_triggersAgent() {
+    void issueAssignedToBotAsSecondAssignee_isIssueAssigned() {
         // issue.assignee stays the first assignee; the top-level assignee names the new one.
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "assigned");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, "someone_else", null));
+        Map<String, Object> payload = issuePayload("assigned", issueMapWithAssigneeAndRef(42L, "someone_else", null));
         payload.put("assignee", ownerMap("ai_bot"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueAssigned(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.ISSUE_ASSIGNED, translate("issues", payload).kind());
     }
 
     @Test
     void issueAssignedToSomeoneElseWhileBotIsFirstAssignee_isIgnored() {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "assigned");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, "ai_bot", null));
+        Map<String, Object> payload = issuePayload("assigned", issueMapWithAssigneeAndRef(42L, "ai_bot", null));
         payload.put("assignee", ownerMap("someone_else"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueAssigned(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, translate("issues", payload).kind());
     }
 
     @Test
-    void reviewCommentWithoutPullRequest_isIgnored() {
-        Map<String, Object> comment = new HashMap<>();
-        comment.put("id", 7L);
-        comment.put("body", "@ai_bot why?");
-        comment.put("path", "src/Foo.java");
-        comment.put("user", ownerMap("tom"));
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "created");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("comment", comment);
+    void issueOpened_isIssueOpened() {
+        Map<String, Object> payload = issuePayload("opened", issueMapWithAssigneeAndRef(42L, null, null));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request_review_comment", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleInlineComment(any(), any());
+        assertEquals(WebhookEventKind.ISSUE_OPENED, translate("issues", payload).kind());
     }
 
     @Test
-    void issueOpenedWithRunOnIssueCreation_triggersAgent() {
-        bot.setRunOnIssueCreation(true);
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "opened");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, null, null));
+    void issueReopened_isIssueReopened() {
+        Map<String, Object> payload = issuePayload("reopened", issueMapWithAssigneeAndRef(42L, null, null));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
+        assertEquals(WebhookEventKind.ISSUE_REOPENED, translate("issues", payload).kind());
+    }
 
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueCreated(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handleIssueAssigned(any(), any());
+    // ---- Pull request lifecycle ----
+
+    @Test
+    void pullRequestOpenedWithBotReviewer_isPrOpenedWithTheBotAsReviewer() {
+        WebhookEvent event = translate("pull_request", prPayload("opened", List.of(ownerMap("ai_bot"))));
+
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertTrue(event.botIsReviewer());
+        assertFalse(event.fromBot());
     }
 
     @Test
-    void issueReopenedWithRunOnIssueCreation_triggersAgent() {
-        bot.setRunOnIssueCreation(true);
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "reopened");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, null, null));
+    void pullRequestOpenedWithoutBotReviewer_isPrOpenedWithoutTheBotAsReviewer() {
+        WebhookEvent event = translate("pull_request", prPayload("opened", List.of(ownerMap("human"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueCreated(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertFalse(event.botIsReviewer());
     }
 
     @Test
-    void issueOpenedWithoutRunOnIssueCreation_isIgnored() {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("action", "opened");
-        payload.put("sender", ownerMap("tom"));
-        payload.put("repository", repositoryMap());
-        payload.put("issue", issueMapWithAssigneeAndRef(42L, null, null));
+    void pullRequestOpenedWithBotAssignee_isNotAnAssignment() {
+        // Only assigning the bot to an existing pull request counts.
+        Map<String, Object> payload = prPayload("opened", List.of());
+        pullRequest(payload).put("assignees", List.of(ownerMap("ai_bot")));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issues", payload);
+        WebhookEvent event = translate("pull_request", payload);
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueCreated(any(), any());
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertFalse(event.botIsReviewer());
     }
 
     @Test
-    void pullRequestOpenedWithBotReviewer_triggersReview() {
-        Map<String, Object> payload = prPayload("opened", List.of(ownerMap("ai_bot")));
+    void pullRequestOpenedByTheBot_isFromTheBot() {
+        Map<String, Object> payload = prPayload("opened", List.of());
+        payload.put("sender", ownerMap("ai_bot"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
+        assertTrue(translate("pull_request", payload).fromBot());
     }
 
     @Test
-    void pullRequestOpenedWithoutBotReviewer_isIgnored() {
-        Map<String, Object> payload = prPayload("opened", List.of(ownerMap("human")));
+    void pullRequestSynchronize_isPrSynchronized() {
+        WebhookEvent event = translate("pull_request", prPayload("synchronize", List.of(ownerMap("ai_bot"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
+        assertEquals(WebhookEventKind.PR_SYNCHRONIZED, event.kind());
     }
 
     @Test
-    void pullRequestOpenedWithRunOnPrCreation_triggersReviewWithoutBotReviewer() {
-        bot.setRunOnPrCreation(true);
-        Map<String, Object> payload = prPayload("opened", List.of(ownerMap("human")));
+    void pullRequestReopenedWithBotReviewer_isPrReopenedWithTheBotAsReviewer() {
+        WebhookEvent event = translate("pull_request", prPayload("reopened", List.of(ownerMap("ai_bot"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
+        assertEquals(WebhookEventKind.PR_REOPENED, event.kind());
+        assertTrue(event.botIsReviewer());
     }
 
     @Test
-    void pullRequestSynchronizedWithRunOnPrUpdate_triggersReview() {
-        bot.setRunOnPrUpdate(true);
-        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("human")));
+    void pullRequestReopenedWithoutBotReviewer_isPrReopenedWithoutTheBotAsReviewer() {
+        WebhookEvent event = translate("pull_request", prPayload("reopened", List.of(ownerMap("human"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
+        assertEquals(WebhookEventKind.PR_REOPENED, event.kind());
+        assertFalse(event.botIsReviewer());
     }
 
     @Test
-    void pullRequestSynchronizedWithoutRunOnPrUpdate_isIgnored() {
-        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("human")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
+    void pullRequestClosed_isPrClosed() {
+        assertEquals(WebhookEventKind.PR_CLOSED,
+                translate("pull_request", prPayload("closed", List.of())).kind());
     }
 
     @Test
-    void pullRequestSynchronize_isIgnoredEvenWhenBotReviewer() {
-        // Reviewer membership does NOT bypass the update gate — only runOnPrUpdate controls sync.
-        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("ai_bot")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
-    }
-
-    @Test
-    void pullRequestSynchronizedWithRunOnPrUpdate_triggersReviewEvenWithoutBotReviewer() {
-        bot.setRunOnPrUpdate(true);
-        Map<String, Object> payload = prPayload("synchronize", List.of(ownerMap("human")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    // ---- reopened ----
-
-    @Test
-    void pullRequestReopenedWithBotReviewer_triggersReview() {
-        Map<String, Object> payload = prPayload("reopened", List.of(ownerMap("ai_bot")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void pullRequestReopenedWithRunOnPrCreation_triggersReviewWithoutBotReviewer() {
-        bot.setRunOnPrCreation(true);
-        Map<String, Object> payload = prPayload("reopened", List.of(ownerMap("human")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
-    }
-
-    @Test
-    void pullRequestReopenedWithoutBotReviewerOrRunOnPrCreation_isIgnored() {
-        Map<String, Object> payload = prPayload("reopened", List.of(ownerMap("human")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
-    }
-
-    @Test
-    void pullRequestReviewRequestedForBot_triggersReview() {
+    void pullRequestReviewRequestedForBot_isPrReviewerAdded() {
         Map<String, Object> payload = prPayload("review_requested", List.of(ownerMap("ai_bot")));
         payload.put("requested_reviewer", ownerMap("ai_bot"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, translate("pull_request", payload).kind());
     }
 
-    // ---- assigned ----
+    @Test
+    void pullRequestReviewRequestedFromSomeoneElse_isIgnored() {
+        Map<String, Object> payload = prPayload("review_requested", List.of(ownerMap("human")));
+        payload.put("requested_reviewer", ownerMap("human"));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("pull_request", payload).kind());
+    }
 
     @Test
-    void pullRequestAssignedToBot_triggersReview() {
+    void pullRequestAssignedToBot_isPrAssigned() {
         Map<String, Object> payload = prPayload("assigned", List.of());
         payload.put("assignee", ownerMap("ai_bot"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class), any());
+        assertEquals(WebhookEventKind.PR_ASSIGNED, translate("pull_request", payload).kind());
     }
 
     @Test
@@ -325,48 +197,105 @@ class GitHubWebhookTranslatorTest {
         pullRequest(payload).put("assignees", List.of(ownerMap("ai_bot"), ownerMap("human")));
         payload.put("assignee", ownerMap("human"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
+        assertEquals(WebhookEventKind.IGNORED, translate("pull_request", payload).kind());
+    }
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
+    // ---- Reviews ----
+
+    @Test
+    void submittedReview_isPrReviewSubmitted() {
+        Map<String, Object> payload = prPayload("submitted", List.of());
+        payload.put("review", new HashMap<>(Map.of("id", 9, "state", "approved", "body", "LGTM")));
+
+        WebhookEvent event = translate("pull_request_review", payload);
+
+        assertEquals(WebhookEventKind.PR_REVIEW_SUBMITTED, event.kind());
+        assertEquals("approved", event.payload().getReview().getType());
     }
 
     @Test
-    void pullRequestOpenedWithBotAssignee_doesNotTriggerAReview() {
-        // Only assigning the bot to an existing pull request counts, as on develop.
-        Map<String, Object> payload = prPayload("opened", List.of());
-        pullRequest(payload).put("assignees", List.of(ownerMap("ai_bot")));
+    void editedReview_isIgnored() {
+        Map<String, Object> payload = prPayload("edited", List.of());
+        payload.put("review", new HashMap<>(Map.of("id", 9, "state", "approved", "body", "LGTM")));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pull_request", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any(), any());
+        assertEquals(WebhookEventKind.IGNORED, translate("pull_request_review", payload).kind());
     }
 
     // ---- Comments ----
 
     @Test
-    void prConversationComment_routesToHandlePrComment() {
-        Map<String, Object> issue = new HashMap<>();
-        issue.put("number", 140);
-        issue.put("title", "Some PR");
-        issue.put("user", ownerMap("tom"));
-        issue.put("pull_request", new HashMap<>(Map.of("url", "https://api.github.com/repos/Test/my-repo/pulls/140")));
-        Map<String, Object> comment = new HashMap<>();
-        comment.put("id", 1055);
-        comment.put("body", "@ai_bot please fix");
-        comment.put("user", ownerMap("tom"));
+    void reviewCommentWithoutPullRequest_isIgnored() {
+        Map<String, Object> comment = commentMap("@ai_bot why?");
+        comment.put("path", "src/Foo.java");
         Map<String, Object> payload = new HashMap<>();
         payload.put("action", "created");
         payload.put("sender", ownerMap("tom"));
         payload.put("repository", repositoryMap());
-        payload.put("issue", issue);
         payload.put("comment", comment);
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "issue_comment", payload);
+        assertEquals(WebhookEventKind.IGNORED, translate("pull_request_review_comment", payload).kind());
+    }
 
-        assertEquals("pr comment received", response.getBody());
-        verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
+    @Test
+    void reviewComment_isPrInlineCommentWithItsAnchor() {
+        Map<String, Object> comment = commentMap("@ai_bot why?");
+        comment.put("path", "src/Foo.java");
+        comment.put("line", 12);
+        Map<String, Object> payload = prPayload("created", List.of());
+        payload.put("comment", comment);
+
+        WebhookEvent event = translate("pull_request_review_comment", payload);
+
+        assertEquals(WebhookEventKind.PR_INLINE_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+        assertEquals("src/Foo.java", event.payload().getComment().getPath());
+        assertEquals(12, event.payload().getComment().getLine());
+    }
+
+    @Test
+    void prConversationComment_isPrCommentMentioningTheBot() {
+        Map<String, Object> issue = issueMapWithAssigneeAndRef(140L, null, null);
+        issue.put("pull_request", new HashMap<>(Map.of("url", "https://api.github.com/repos/Test/my-repo/pulls/140")));
+        Map<String, Object> payload = issuePayload("created", issue);
+        payload.put("comment", commentMap("@ai_bot please fix"));
+
+        WebhookEvent event = translate("issue_comment", payload);
+
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+    }
+
+    @Test
+    void plainIssueComment_isIssueComment() {
+        Map<String, Object> payload = issuePayload("created", issueMapWithAssigneeAndRef(42L, null, null));
+        payload.put("comment", commentMap("@ai_bot any idea?"));
+
+        assertEquals(WebhookEventKind.ISSUE_COMMENT, translate("issue_comment", payload).kind());
+    }
+
+    @Test
+    void editedComment_isIgnored() {
+        Map<String, Object> payload = issuePayload("edited", issueMapWithAssigneeAndRef(42L, null, null));
+        payload.put("comment", commentMap("@ai_bot any idea?"));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("issue_comment", payload).kind());
+    }
+
+    private Map<String, Object> issuePayload(String action, Map<String, Object> issue) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("action", action);
+        payload.put("sender", ownerMap("tom"));
+        payload.put("repository", repositoryMap());
+        payload.put("issue", issue);
+        return payload;
+    }
+
+    private Map<String, Object> commentMap(String body) {
+        Map<String, Object> comment = new HashMap<>();
+        comment.put("id", 1055);
+        comment.put("body", body);
+        comment.put("user", ownerMap("tom"));
+        return comment;
     }
 
     private Map<String, Object> ownerMap(String login) {
