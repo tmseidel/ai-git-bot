@@ -83,7 +83,7 @@ class IssueImplementationServiceTest {
         // TES is mocked only for execution methods.
         toolCatalog = new org.remus.giteabot.agent.tools.ToolCatalog(agentConfig);
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryPlatform, aiClient, null, null, null, null, McpToolCatalog.empty(), null, 200_000);
+                repositoryPlatform, aiClient, null, null, null, McpToolCatalog.empty(), null, 200_000);
         service = new IssueImplementationService(context, collaborators(agentConfig));
 
         lenient().when(workspace.hasUncommittedChanges()).thenReturn(true);
@@ -175,18 +175,60 @@ class IssueImplementationServiceTest {
 
     @Test
     void handleIssueAssigned_excludesBotAuthoredIssueCommentsFromPromptContext() {
-        IssueImplementationService serviceWithBotUsername = createServiceWithBotUsername("ai_bot");
+        // The bot's comments are recognised by the id of the account the platform reports.
+        when(repositoryClient.getAuthenticatedUser(any()))
+                .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser("7", "ai_bot", null, null));
+
+        String prompt = implementationPromptFor(List.of(
+                Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
+                        "user", Map.of("id", 7, "login", "ai_bot")),
+                Map.of("body", "Human clarification that must be implemented",
+                        "user", Map.of("id", 8, "login", "alice"))));
+
+        assertThat(prompt).contains("Human clarification that must be implemented");
+        assertThat(prompt).doesNotContain("I've been assigned to this issue");
+    }
+
+    @Test
+    void handleIssueAssigned_excludesBotAuthoredIssueCommentsByBitbucketAccountId() {
+        // Bitbucket's user objects carry the account_id (the account's RepositoryUser id) next to a uuid.
+        when(repositoryClient.getAuthenticatedUser(any()))
+                .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser(
+                        "557058:bot", "bot@example.com", null, null));
+
+        String prompt = implementationPromptFor(List.of(
+                Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
+                        "user", Map.of("uuid", "{bot-uuid}", "account_id", "557058:bot")),
+                Map.of("body", "Human clarification that must be implemented",
+                        "user", Map.of("uuid", "{alice-uuid}", "account_id", "557058:alice"))));
+
+        assertThat(prompt).contains("Human clarification that must be implemented");
+        assertThat(prompt).doesNotContain("I've been assigned to this issue");
+    }
+
+    @Test
+    void handleIssueAssigned_unresolvableBotAccount_keepsAllIssueComments() {
+        when(repositoryClient.getAuthenticatedUser(any())).thenThrow(new IllegalStateException("provider down"));
+
+        String prompt = implementationPromptFor(List.of(
+                Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
+                        "user", Map.of("id", 7, "login", "ai_bot")),
+                Map.of("body", "Human clarification that must be implemented",
+                        "user", Map.of("id", 8, "login", "alice"))));
+
+        // Without the bot's id nothing can be told apart, so the issue's context stays complete.
+        assertThat(prompt).contains("Human clarification that must be implemented");
+        assertThat(prompt).contains("I've been assigned to this issue");
+    }
+
+    /** Runs a successful implementation of issue #42 with {@code issueComments} and returns the first prompt. */
+    private String implementationPromptFor(List<Map<String, Object>> issueComments) {
         WebhookPayload payload = createIssuePayload();
 
         when(repositoryClient.getDefaultBranch("testowner", "testrepo")).thenReturn("main");
         when(repositoryClient.getRepositoryTree("testowner", "testrepo", "main"))
                 .thenReturn(List.of(new RepositoryTreeEntry("README.md", RepositoryTreeEntry.Type.FILE)));
-        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L))
-                .thenReturn(List.of(
-                        Map.of("body", "🤖 **AI Agent**: I've been assigned to this issue.",
-                                "user", Map.of("login", "ai_bot")),
-                        Map.of("body", "Human clarification that must be implemented",
-                                "user", Map.of("login", "alice"))));
+        when(repositoryClient.getIssueComments("testowner", "testrepo", 42L)).thenReturn(issueComments);
         when(promptService.getSystemPrompt("agent")).thenReturn("You are an agent");
         when(workspaceService.prepareWorkspace(eq(repositoryPlatform), eq("testowner"), eq("testrepo"),
                 eq("main"), isNull()))
@@ -215,12 +257,11 @@ class IssueImplementationServiceTest {
         when(repositoryClient.createPullRequest(eq("testowner"), eq("testrepo"), anyString(), anyString(),
                 eq("ai-agent/issue-42"), eq("main"))).thenReturn(1L);
 
-        serviceWithBotUsername.handleIssueAssigned(payload);
+        service.handleIssueAssigned(payload);
 
         ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
         verify(aiClient, times(1)).chat(anyList(), promptCaptor.capture(), anyString(), isNull(), anyInt());
-        assertThat(promptCaptor.getAllValues().getFirst()).contains("Human clarification that must be implemented");
-        assertThat(promptCaptor.getAllValues().getFirst()).doesNotContain("I've been assigned to this issue");
+        return promptCaptor.getAllValues().getFirst();
     }
 
     @Test
@@ -1244,17 +1285,7 @@ class IssueImplementationServiceTest {
                 "mcp:github:list_issues"
         )));
         IssueImplementationContext context = new IssueImplementationContext(
-                repositoryPlatform, aiClient, null, null, mcpOrchestrationService, null, catalog, null, 200_000);
-        return new IssueImplementationService(context, collaborators(agentConfig));
-    }
-
-    private IssueImplementationService createServiceWithBotUsername(String botUsername) {
-        AgentConfigProperties agentConfig = new AgentConfigProperties();
-        agentConfig.setEnabled(true);
-        agentConfig.setMaxFiles(10);
-        agentConfig.setBranchPrefix("ai-agent/");
-        IssueImplementationContext context = new IssueImplementationContext(
-                repositoryPlatform, aiClient, null, botUsername, null, null, McpToolCatalog.empty(), null, 200_000);
+                repositoryPlatform, aiClient, null, mcpOrchestrationService, null, catalog, null, 200_000);
         return new IssueImplementationService(context, collaborators(agentConfig));
     }
 

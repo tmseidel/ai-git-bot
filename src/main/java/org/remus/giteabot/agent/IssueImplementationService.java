@@ -68,7 +68,6 @@ public class IssueImplementationService {
     private final ToolCatalog toolCatalog;
     private final WorkspaceService workspaceService;
     private final String issueAgentSystemPrompt;
-    private final String botUsername;
     private final McpOrchestrationService mcpOrchestrationService;
     private final McpConfiguration mcpConfiguration;
     private final McpToolCatalog mcpToolCatalog;
@@ -100,7 +99,6 @@ public class IssueImplementationService {
         this.toolCatalog = toolCatalog;
         this.workspaceService = collaborators.workspaceService();
         this.issueAgentSystemPrompt = context.issueAgentSystemPrompt();
-        this.botUsername = context.botUsername();
         this.mcpOrchestrationService = context.mcpOrchestrationService();
         this.mcpConfiguration = context.mcpConfiguration();
         this.mcpToolCatalog = context.mcpToolCatalog();
@@ -532,7 +530,7 @@ public class IssueImplementationService {
     private String fetchIssueCommentsContext(String owner, String repo, Long issueNumber) {
         try {
             List<Map<String, Object>> issueComments = repositoryClient.getIssueComments(owner, repo, issueNumber);
-            List<Map<String, Object>> humanIssueComments = filterBotAuthoredComments(issueComments);
+            List<Map<String, Object>> humanIssueComments = filterBotAuthoredComments(owner, issueComments);
             log.info("Fetched {} issue comments for issue #{} in {}/{}",
                     issueComments != null ? issueComments.size() : 0, issueNumber, owner, repo);
             if (issueComments != null && humanIssueComments.size() != issueComments.size()) {
@@ -547,42 +545,45 @@ public class IssueImplementationService {
         }
     }
 
-    private List<Map<String, Object>> filterBotAuthoredComments(List<Map<String, Object>> issueComments) {
+    /**
+     * Drops the comments the bot itself wrote, recognised by the author's id: {@code id} on
+     * Gitea, GitHub and GitLab, {@code account_id} on Bitbucket. When the bot's account cannot be
+     * resolved, nothing is dropped.
+     */
+    private List<Map<String, Object>> filterBotAuthoredComments(String owner, List<Map<String, Object>> issueComments) {
         if (issueComments == null || issueComments.isEmpty()) {
             return List.of();
         }
-        if (botUsername == null || botUsername.isBlank()) {
+        String botId;
+        try {
+            botId = repositoryPlatform.getUser(owner).id();
+        } catch (RuntimeException e) {
+            log.warn("Could not resolve the bot account, keeping all issue comments in context: {}", e.getMessage());
             return issueComments;
         }
         return issueComments.stream()
-                .filter(comment -> !botUsername.equalsIgnoreCase(extractCommentAuthor(comment)))
+                .filter(comment -> !botId.equals(extractCommentAuthorId(comment)))
                 .toList();
     }
 
-    private String extractCommentAuthor(Map<String, Object> comment) {
+    private String extractCommentAuthorId(Map<String, Object> comment) {
         if (comment == null) {
-            return "";
+            return null;
         }
-        String user = extractActorName(comment.get("user"));
-        if (!user.isBlank()) {
-            return user;
-        }
-        return extractActorName(comment.get("author"));
+        String user = extractActorId(comment.get("user"));
+        return user != null ? user : extractActorId(comment.get("author"));
     }
 
-    private String extractActorName(Object actor) {
-        if (actor instanceof String text) {
-            return text;
-        }
+    private String extractActorId(Object actor) {
         if (actor instanceof Map<?, ?> actorMap) {
-            for (String key : List.of("login", "username", "name", "display_name", "nickname")) {
+            for (String key : List.of("account_id", "id")) {
                 Object value = actorMap.get(key);
-                if (value instanceof String text && !text.isBlank()) {
-                    return text;
+                if (value instanceof Number || value instanceof String text && !text.isBlank()) {
+                    return value.toString();
                 }
             }
         }
-        return "";
+        return null;
     }
 
     private String resolveAgentSystemPrompt() {

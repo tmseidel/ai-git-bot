@@ -113,6 +113,9 @@ class IssueTriageServiceTest {
                 anyString(), any()))
                 .thenReturn(WorkspaceResult.success(Workspace.unmanaged(Path.of("/tmp/triage-ws"))));
         lenient().when(repoClient.getDefaultBranch("owner", "repo")).thenReturn("main");
+        // The account the bot's integration authenticates as; triage refuses to assign it.
+        lenient().when(repoClient.getAuthenticatedUser(any()))
+                .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser("7", "triage-bot", null, null));
         lenient().when(repoClient.getRepositoryTree("owner", "repo", "main"))
                 .thenReturn(List.of(new RepositoryTreeEntry("src/App.java", RepositoryTreeEntry.Type.FILE)));
         lenient().when(sessionService.toAiMessages(any())).thenReturn(List.of());
@@ -127,7 +130,6 @@ class IssueTriageServiceTest {
         bot = new Bot();
         bot.setName("Triage Bot");
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername("triage-bot");
         bot.setGitIntegration(gitIntegration);
 
         WebhookPayload.Owner owner = new WebhookPayload.Owner();

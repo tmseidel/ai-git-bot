@@ -408,8 +408,6 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         if (vote instanceof Number n) {
             review.setVote(n.intValue());
         }
-        review.setUniqueName((String) reviewer.get("uniqueName"));
-        review.setDisplayName((String) reviewer.get("displayName"));
         return review;
     }
 
@@ -471,10 +469,10 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         reviewComment.setBody(comment.getContent());
         reviewComment.setPath(path);
         reviewComment.setLine(line);
-        // Only uniqueName identifies the author: displayName is user-editable, so falling
-        // back to it would let anyone pass for the bot by renaming themselves.
+        // The identity GUID identifies the author: unlike displayName, nobody can change it to
+        // pass for the bot.
         IdentityRef author = comment.getAuthor();
-        reviewComment.setUserLogin(author != null ? author.getUniqueName() : null);
+        reviewComment.setUserId(author != null ? author.getId() : null);
         return reviewComment;
     }
 

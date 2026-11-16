@@ -395,7 +395,7 @@ class AzureDevopsApiClientTest {
                           {"threadContext":{"filePath":"/src/Foo.java",
                                             "rightFileStart":{"line":12}},
                            "comments":[{"id":1,"content":"first",
-                                        "author":{"uniqueName":"dev@contoso.com"}},
+                                        "author":{"id":"guid-dev","uniqueName":"dev@contoso.com"}},
                                        {"id":2,"content":"second","author":{"displayName":"Dev"}}]},
                           {"comments":[{"id":3,"content":"top level"}]}
                         ]}""", MediaType.APPLICATION_JSON));
@@ -406,11 +406,11 @@ class AzureDevopsApiClientTest {
         assertEquals(3, comments.size());
         assertEquals("src/Foo.java", comments.get(0).getPath());
         assertEquals(12, comments.get(0).getLine());
-        assertEquals("dev@contoso.com", comments.get(0).getUserLogin());
+        assertEquals("guid-dev", comments.get(0).getUserId());
         // Every comment of a thread inherits the thread's anchor.
         assertEquals("src/Foo.java", comments.get(1).getPath());
         // displayName is user-editable and never stands in for the author's identity.
-        assertNull(comments.get(1).getUserLogin());
+        assertNull(comments.get(1).getUserId());
         // A thread without a threadContext is a top-level conversation comment.
         assertNull(comments.get(2).getPath());
         assertNull(comments.get(2).getLine());
@@ -496,7 +496,6 @@ class AzureDevopsApiClientTest {
 
         assertEquals(2, reviews.size());
         assertEquals("APPROVED", reviews.get(0).getState());
-        assertEquals("a@contoso.com", reviews.get(0).getUserLogin());
         assertEquals("REJECTED", reviews.get(1).getState());
         server.verify();
     }

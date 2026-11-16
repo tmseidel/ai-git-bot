@@ -61,7 +61,6 @@ public class AgentServiceFactory {
                 platform,
                 aiClient,
                 bot.getSystemPrompt().getIssueAgentSystemPrompt(),
-                bot.getGitIntegration().getUsername(),
                 mcpOrchestrationService,
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,

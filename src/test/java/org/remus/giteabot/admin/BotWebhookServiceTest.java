@@ -187,7 +187,7 @@ class BotWebhookServiceTest {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
                             repositoryApiClient, aiClient, sessionService,
-                            b.getGitIntegration().getUsername(), new ReviewConfigProperties(),
+                            repositoryPlatform::getUser, new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
                             120000, 8, 60000, "");

@@ -169,7 +169,8 @@ public class IssueTriageService {
         }
         try (Workspace workspace = wsResult.workspace()) {
             RoutingDecision decision = runTriageLoop(bot, issue, owner, repo, baseBranch,
-                    workspace, aiClient, repoClient, configuredPrompt, allowed);
+                    workspace, aiClient, repoClient, configuredPrompt, allowed,
+                    platform.getUser(owner).username());
 
             log.info("[Bot '{}'] Triage routed issue #{} to '{}': {}", bot.getName(), issue.getNumber(),
                     decision.assignee(), decision.reason());
@@ -185,7 +186,8 @@ public class IssueTriageService {
     private RoutingDecision runTriageLoop(Bot bot, WebhookPayload.Issue issue, String owner, String repo,
                                           String baseBranch, Workspace workspace,
                                           AiClient aiClient, RepositoryApiClient repoClient,
-                                          String configuredPrompt, Set<String> allowed) {
+                                          String configuredPrompt, Set<String> allowed,
+                                          String botUsername) {
         Set<String> allowedBuiltinTools = botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration());
         McpToolCatalog mcpToolCatalog = mcpToolSelectionService.filterCatalogForPrompt(
                 bot.getMcpConfiguration(),
@@ -204,7 +206,7 @@ public class IssueTriageService {
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 repoClient, allowedBuiltinTools, pythonExecution);
         TriageAgentStrategy strategy = new TriageAgentStrategy(systemPrompt, toolRouter, toolCatalog,
-                mcpToolCatalog, allowedBuiltinTools, allowed, bot.getGitIntegration().getUsername(),
+                mcpToolCatalog, allowedBuiltinTools, allowed, botUsername,
                 new AiResponseParser(), new BranchSwitcher(toolExecutionService), maxToolRounds());
 
         // Mirror the writer: one extra iteration beyond the context-round limit so the model

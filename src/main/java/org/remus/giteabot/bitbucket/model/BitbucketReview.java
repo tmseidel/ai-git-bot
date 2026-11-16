@@ -23,15 +23,8 @@ public class BitbucketReview implements Review {
 
     private String state;
 
-    private BitbucketUser user;
-
     @JsonProperty("submitted_at")
     private String submittedAt;
-
-    @Override
-    public String getUserLogin() {
-        return user != null ? user.getDisplayName() : null;
-    }
 
     /**
      * Bitbucket Cloud does not include a comments count in approval responses.
@@ -45,11 +38,7 @@ public class BitbucketReview implements Review {
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BitbucketUser {
-        @JsonProperty("display_name")
-        private String displayName;
-
-        private String nickname;
-
-        private String uuid;
+        @JsonProperty("account_id")
+        private String accountId;
     }
 }
