@@ -101,7 +101,7 @@ class ConfigExchangeServiceTest {
         assertFalse(ai.isUseLegacyToolCalling(), "native tool calling stays the default");
 
         GitIntegration git = gitIntegrationRepository.findByName("Trial Git").orElseThrow();
-        assertEquals("ai_bot", git.getUsername());
+        // The document still carries the former username, which is ignored.
         assertEquals("gitea-token", encryptionService.decrypt(git.getToken()));
 
         WorkflowConfiguration pr = workflowConfigurationRepository

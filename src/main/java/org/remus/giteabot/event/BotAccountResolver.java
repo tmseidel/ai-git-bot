@@ -7,8 +7,9 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.repository.RepositoryPlatform;
-import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.stereotype.Component;
+
+import java.util.Optional;
 
 /**
  * Resolves the account the bot's Git integration authenticates as, i.e. who the bot is in a
@@ -23,24 +24,27 @@ public class BotAccountResolver {
     private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final BotService botService;
 
+    /** The reason translators give for ignoring an event whose bot could not be resolved. */
+    public static final String UNRESOLVED = "bot account could not be resolved";
+
     /**
-     * Returns the bot's account, or {@code null} when it cannot be determined. Translators then
-     * ignore the event, because without the bot's identity its own comments could re-trigger
+     * Returns the bot's identity, or empty when its account cannot be determined. Translators then
+     * ignore the event with {@link #UNRESOLVED}, because without the bot's identity its own comments could re-trigger
      * it. The failure is recorded as the bot's last error so a misconfigured integration is
      * visible in the admin UI.
      *
      * @param owner where to ask for the account, see {@link RepositoryPlatform#getUser(String)}:
      *              the organization for Azure DevOps, {@code null} for every other provider
      */
-    public @Nullable RepositoryUser resolve(Bot bot, @Nullable String owner) {
+    public Optional<BotIdentity> resolve(Bot bot, @Nullable String owner) {
         try {
-            return repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getUser(owner);
+            return Optional.of(new BotIdentity(repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getUser(owner)));
         } catch (RuntimeException e) {
             String error = "Could not resolve the account of the Git integration '"
                     + bot.getGitIntegration().getName() + "': " + e.getMessage();
             log.error("[Bot '{}'] {}", bot.getName(), error);
             botService.recordError(bot, error);
-            return null;
+            return Optional.empty();
         }
     }
 }

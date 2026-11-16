@@ -24,7 +24,12 @@ public record BotIdentity(RepositoryUser account) {
 
     /** Whether {@code user} is the bot, going by its id. */
     public boolean is(WebhookPayload.Owner user) {
-        return user != null && account.id().equals(user.getId());
+        return user != null && hasId(user.getId());
+    }
+
+    /** Whether {@code userId} is the bot's id. */
+    public boolean hasId(String userId) {
+        return account.id().equals(userId);
     }
 
     /**

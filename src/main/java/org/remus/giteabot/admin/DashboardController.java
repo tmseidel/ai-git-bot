@@ -16,10 +16,13 @@ public class DashboardController {
 
     private final BotService botService;
     private final AiUsageService aiUsageService;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
 
-    public DashboardController(BotService botService, AiUsageService aiUsageService) {
+    public DashboardController(BotService botService, AiUsageService aiUsageService,
+                               RepositoryPlatformFactory repositoryPlatformFactory) {
         this.botService = botService;
         this.aiUsageService = aiUsageService;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
     }
 
     @GetMapping("/")
@@ -31,6 +34,8 @@ public class DashboardController {
     public String dashboard(Model model) {
         List<Bot> bots = botService.findAll();
         model.addAttribute("bots", bots);
+        model.addAttribute("gitUsernames",
+                repositoryPlatformFactory.findCachedUsernames(bots.stream().map(Bot::getGitIntegration).toList()));
         model.addAttribute("totalBots", bots.size());
         model.addAttribute("activeBots", bots.stream().filter(Bot::isEnabled).count());
         model.addAttribute("totalWebhookCalls", bots.stream().mapToLong(Bot::getWebhookCallCount).sum());

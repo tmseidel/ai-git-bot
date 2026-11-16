@@ -5,6 +5,7 @@ import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.ReviewConfigProperties;
+import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
@@ -425,11 +426,10 @@ public class CodeReviewService {
                     owner, repo, prNumber, latestReview.getId());
 
             // Filter for comments that mention the bot, excluding the bot's own comments
-            RepositoryUser bot = botAccount.apply(owner);
-            String botAlias = "@" + bot.username();
+            BotIdentity bot = new BotIdentity(botAccount.apply(owner));
             List<ReviewComment> botMentionComments = comments.stream()
-                    .filter(c -> BotMention.isMentioned(c.getBody(), botAlias))
-                    .filter(c -> !bot.id().equals(c.getUserId()))
+                    .filter(c -> BotMention.isMentioned(c.getBody(), bot.alias()))
+                    .filter(c -> !bot.hasId(c.getUserId()))
                     .toList();
 
             if (botMentionComments.isEmpty()) {

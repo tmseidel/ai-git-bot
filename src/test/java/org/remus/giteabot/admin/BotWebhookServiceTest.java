@@ -1960,7 +1960,6 @@ class BotWebhookServiceTest {
         Bot bot = new Bot();
         bot.setName(name);
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername(username);
         bot.setGitIntegration(gitIntegration);
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);

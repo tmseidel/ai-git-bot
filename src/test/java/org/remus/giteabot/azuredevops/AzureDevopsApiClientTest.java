@@ -713,6 +713,34 @@ class AzureDevopsApiClientTest {
     }
 
     @Test
+    void getAuthenticatedUser_withoutOwner_asksTheOrganizationNamedInTheUrl() {
+        // At startup and on save there is no event, so the integration URL names the organization.
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://vssps.dev.azure.com/contoso/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser(null);
+
+        assertEquals("guid-1", user.id());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_withoutOwnerOnBareDevAzureCom_failsWithoutAsking() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
+
+        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(null));
+        server.verify();
+    }
+
+    @Test
     void getAuthenticatedUser_fallsBackWhenTheTokenMayNotReadTheEmail() {
         String base = "https://dev.azure.com/contoso";
         RestClient.Builder builder = RestClient.builder().baseUrl(base);

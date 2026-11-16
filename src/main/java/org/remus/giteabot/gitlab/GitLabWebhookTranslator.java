@@ -13,7 +13,6 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -77,11 +76,10 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
             return WebhookEvent.ignored("GitLab " + eventType + " without object_attributes");
         }
 
-        RepositoryUser botAccount = botAccountResolver.resolve(bot, null);
-        if (botAccount == null) {
-            return WebhookEvent.ignored("bot account could not be resolved");
+        BotIdentity identity = botAccountResolver.resolve(bot, null).orElse(null);
+        if (identity == null) {
+            return WebhookEvent.ignored(BotAccountResolver.UNRESOLVED);
         }
-        BotIdentity identity = new BotIdentity(botAccount);
         return switch (eventType) {
             case "Merge Request Hook" -> classifyMergeRequest(bot, identity, payload, attrs);
             case "Note Hook" -> classifyNote(identity, payload, attrs);

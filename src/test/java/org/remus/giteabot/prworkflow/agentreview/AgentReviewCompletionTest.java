@@ -134,6 +134,7 @@ class AgentReviewCompletionTest {
     @BeforeEach
     void setUp() {
         platform = TestPlatforms.of(repositoryClient);
+        lenient().when(repositoryClient.getAuthenticatedUser(any())).thenReturn(TestPlatforms.USER);
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("owner");
         WebhookPayload.Repository repository = new WebhookPayload.Repository();

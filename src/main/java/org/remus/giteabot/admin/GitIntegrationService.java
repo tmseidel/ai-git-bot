@@ -83,7 +83,6 @@ public class GitIntegrationService {
         current.setName(integration.getName());
         current.setProviderType(integration.getProviderType());
         current.setUrl(integration.getUrl());
-        current.setUsername(integration.getUsername());
         current.setTransport(integration.getTransport());
         current.setPostReviewAction(integration.getPostReviewAction());
 
@@ -164,8 +163,7 @@ public class GitIntegrationService {
         // Check persistence constraints before revoking a working remote key.
         if (isBlank(integration.getName()) || integration.getName().length() > 255
                 || integration.getProviderType() == null || isBlank(integration.getUrl())
-                || integration.getUrl().length() > 255 || integration.getPostReviewAction() == null
-                || integration.getUsername() != null && integration.getUsername().length() > 255) {
+                || integration.getUrl().length() > 255 || integration.getPostReviewAction() == null) {
             throw new IllegalArgumentException("Invalid Git integration fields");
         }
         if (!isBlank(integration.getToken()) && encryptionService.encrypt(integration.getToken()).length() > 1000) {
@@ -317,9 +315,6 @@ public class GitIntegrationService {
 
     private void validate(GitIntegration integration, GitIntegration existing,
                           boolean clearToken, boolean clearSshCredentials) {
-        if (isBlank(integration.getUsername())) {
-            throw new IllegalArgumentException("A username is required");
-        }
         boolean duplicate = integration.getId() == null
                 ? gitIntegrationRepository.existsByName(integration.getName())
                 : gitIntegrationRepository.existsByNameAndIdNot(integration.getName(), integration.getId());
@@ -376,10 +371,6 @@ public class GitIntegrationService {
     }
 
     private void applyProviderDefaults(GitIntegration integration) {
-        // The username identifies the bot in webhook payloads, so surrounding whitespace would break matching.
-        if (integration.getUsername() != null) {
-            integration.setUsername(integration.getUsername().trim());
-        }
         if (integration.getProviderType() == RepositoryType.GITHUB) {
             integration.setUrl("https://github.com");
         } else if (integration.getProviderType() == RepositoryType.BITBUCKET) {

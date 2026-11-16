@@ -773,13 +773,21 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      * event's organization, rather than at account level, is what lets an integration on bare
      * {@code https://dev.azure.com} work with a token scoped to the organizations it serves
      * instead of to all accessible organizations.
+     * <p>
+     * Without an {@code owner}, as at startup or when an integration is saved, the organization or
+     * collection the integration URL names is asked; bare {@code https://dev.azure.com} names none.
      *
-     * @throws IllegalStateException when {@code owner} names no organization or the token has no identity there
+     * @throws IllegalStateException when neither {@code owner} nor the integration URL names an
+     *                               organization, or the token has no identity there
      */
     @Override
     public RepositoryUser getAuthenticatedUser(String owner) {
         if (owner == null || owner.isBlank()) {
-            throw new IllegalStateException("Azure DevOps is asked for the token's identity inside an organization, but none was given");
+            owner = AzureDevopsAddress.organizationOf(baseUrl);
+        }
+        if (owner == null) {
+            throw new IllegalStateException("Azure DevOps is asked for the token's identity inside an organization, "
+                    + "but neither the event nor the integration URL names one");
         }
         Scope scope = organizationScope(owner);
         ConnectionData data = restClient.get()

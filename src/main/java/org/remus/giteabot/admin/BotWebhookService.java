@@ -277,7 +277,7 @@ public class BotWebhookService {
      * becomes an {@code AopInvocationException} in the caller.
      *
      * @param effectiveAlias the mention the provider left in the comment, when it rewrote one;
-     *                       {@code null} keeps the configured username
+     *                       {@code null} keeps the account's username
      * @return {@code true} when the comment was a learning command and has been handled
      */
     public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind,
@@ -752,8 +752,7 @@ public class BotWebhookService {
      * @throws IllegalStateException when the provider cannot be asked and nothing is cached
      */
     private BotIdentity botIdentity(Bot bot, WebhookPayload payload) {
-        String owner = payload.getRepository() != null && payload.getRepository().getOwner() != null
-                ? payload.getRepository().getOwner().getLogin() : null;
+        String owner = payload.ownerLogin();
         return new BotIdentity(repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getUser(owner));
     }
 

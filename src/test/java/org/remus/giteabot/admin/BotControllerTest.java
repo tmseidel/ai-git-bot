@@ -38,7 +38,8 @@ class BotControllerTest {
                 botToolConfigurationService,
                 botToolSelectionService,
                 mock(WorkflowConfigurationService.class),
-                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class), messageSource());
+                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class),
+                mock(RepositoryPlatformFactory.class), messageSource());
     }
 
     private static org.springframework.context.MessageSource messageSource() {
@@ -69,7 +70,11 @@ class BotControllerTest {
         AiIntegrationService aiIntegrationService = mock(AiIntegrationService.class);
         GitIntegrationService gitIntegrationService = mock(GitIntegrationService.class);
         when(aiIntegrationService.findAll()).thenReturn(List.of(new AiIntegration()));
-        when(gitIntegrationService.findAll()).thenReturn(List.of(new GitIntegration()));
+        GitIntegration git = new GitIntegration();
+        git.setId(3L);
+        when(gitIntegrationService.findAll()).thenReturn(List.of(git));
+        RepositoryPlatformFactory platformFactory = mock(RepositoryPlatformFactory.class);
+        when(platformFactory.findCachedUsernames(List.of(git))).thenReturn(java.util.Map.of(3L, "ai_bot"));
         BotController controller = new BotController(
                 mock(BotService.class),
                 aiIntegrationService,
@@ -80,7 +85,8 @@ class BotControllerTest {
                 mock(BotToolConfigurationService.class),
                 mock(BotToolSelectionService.class),
                 mock(WorkflowConfigurationService.class),
-                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class), messageSource());
+                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class),
+                platformFactory, messageSource());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = controller.newForm(model);
@@ -88,6 +94,8 @@ class BotControllerTest {
         assertEquals("bots/form", view);
         assertEquals(Boolean.FALSE, model.getAttribute("missingAiIntegration"));
         assertEquals(Boolean.FALSE, model.getAttribute("missingGitIntegration"));
+        // The dropdown names each integration's account as far as it has been resolved.
+        assertEquals(java.util.Map.of(3L, "ai_bot"), model.getAttribute("gitUsernames"));
     }
 
     @Test
@@ -111,7 +119,8 @@ class BotControllerTest {
                 mock(BotToolConfigurationService.class),
                 mock(BotToolSelectionService.class),
                 workflowConfigurationService,
-                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class), messageSource());
+                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class),
+                mock(RepositoryPlatformFactory.class), messageSource());
 
         org.springframework.ui.Model model = new org.springframework.ui.ExtendedModelMap();
         String view = controller.newForm(model);
@@ -151,7 +160,8 @@ class BotControllerTest {
                 mock(McpConfigurationService.class), mock(McpToolSelectionService.class),
                 botToolConfigurationService, mock(BotToolSelectionService.class),
                 workflowConfigurationService,
-                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class), messageSource());
+                mock(org.remus.giteabot.prworkflow.config.DeploymentTargetService.class),
+                mock(RepositoryPlatformFactory.class), messageSource());
 
         Bot bot = new Bot();
         String view = controller.save(bot, 1L, 2L, 3L, null, 4L, null, 9L, null, false,

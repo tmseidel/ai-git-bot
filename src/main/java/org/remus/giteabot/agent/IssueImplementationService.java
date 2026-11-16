@@ -577,9 +577,9 @@ public class IssueImplementationService {
     private String extractActorId(Object actor) {
         if (actor instanceof Map<?, ?> actorMap) {
             for (String key : List.of("account_id", "id")) {
-                Object value = actorMap.get(key);
-                if (value instanceof Number || value instanceof String text && !text.isBlank()) {
-                    return value.toString();
+                String id = WebhookPayload.Owner.of(actorMap.get(key), null).getId();
+                if (id != null) {
+                    return id;
                 }
             }
         }

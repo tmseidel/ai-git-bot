@@ -15,7 +15,6 @@ import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryType;
-import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -105,12 +104,11 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
 
         // Azure DevOps answers the identity lookup only inside an organization the token may
         // access, so it is asked in the repository's owner, the event's organization.
-        RepositoryUser botAccount = botAccountResolver.resolve(bot,
-                webhookPayload.getRepository().getOwner().getLogin());
-        if (botAccount == null) {
-            return WebhookEvent.ignored("bot account could not be resolved");
+        BotIdentity identity = botAccountResolver.resolve(bot,
+                webhookPayload.getRepository().getOwner().getLogin()).orElse(null);
+        if (identity == null) {
+            return WebhookEvent.ignored(BotAccountResolver.UNRESOLVED);
         }
-        BotIdentity identity = new BotIdentity(botAccount);
         return switch (eventType) {
             case "git.pullrequest.created" -> {
                 // Seed the head sha and the reviewer list so the git.pullrequest.updated

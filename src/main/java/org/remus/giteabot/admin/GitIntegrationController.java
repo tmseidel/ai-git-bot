@@ -23,12 +23,16 @@ public class GitIntegrationController {
 
     private final GitIntegrationService gitIntegrationService;
     private final GiteaSshSetupService giteaSshSetupService;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final MessageSource messageSource;
 
     public GitIntegrationController(GitIntegrationService gitIntegrationService,
-                                    GiteaSshSetupService giteaSshSetupService, MessageSource messageSource) {
+                                    GiteaSshSetupService giteaSshSetupService,
+                                    RepositoryPlatformFactory repositoryPlatformFactory,
+                                    MessageSource messageSource) {
         this.gitIntegrationService = gitIntegrationService;
         this.giteaSshSetupService = giteaSshSetupService;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
         this.messageSource = messageSource;
     }
 
@@ -36,6 +40,7 @@ public class GitIntegrationController {
     public String list(Model model) {
         List<GitIntegration> integrations = gitIntegrationService.findAll();
         model.addAttribute("integrations", integrations);
+        model.addAttribute("gitUsernames", repositoryPlatformFactory.findCachedUsernames(integrations));
         model.addAttribute("activeNav", "git-integrations");
         return "git-integrations/list";
     }
@@ -165,7 +170,8 @@ public class GitIntegrationController {
                     clearSshCredentials = true;
                 }
             }
-            gitIntegrationService.save(integration, clearToken, clearSshCredentials);
+            GitIntegration saved = gitIntegrationService.save(integration, clearToken, clearSshCredentials);
+            resolveAccount(saved);
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.gitSaved", null, LocaleContextHolder.getLocale()));
         } catch (OptimisticLockException | OptimisticLockingFailureException e) {
             log.warn("Rejected stale save for Git Integration {}: {}", integration.getId(), e.getMessage());
@@ -176,6 +182,22 @@ public class GitIntegrationController {
                     new Object[]{"Git integration could not be saved; check the submitted fields and credentials"}, LocaleContextHolder.getLocale()));
         }
         return "redirect:/git-integrations";
+    }
+
+    /**
+     * Resolves the account the saved integration's token authenticates as, so the list the save
+     * redirects to shows it: saving changes the integration, which hides the account resolved
+     * before. The integration is saved either way.
+     */
+    private void resolveAccount(GitIntegration saved) {
+        try {
+            repositoryPlatformFactory.getPlatform(saved).getUser(null);
+        } catch (RuntimeException e) {
+            // Like the other failures here, the provider's message stays out of the log, since it
+            // may quote the response body.
+            log.warn("Saved the Git Integration, but could not resolve the account its token authenticates as ({})",
+                    e.getClass().getSimpleName());
+        }
     }
 
     @PostMapping("/{id}/delete")

@@ -8,7 +8,9 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -67,6 +69,9 @@ class GitIntegrationControllerTest {
 
     @MockitoBean
     private AdminUserRepository adminUserRepository;
+
+    @MockitoBean
+    private RepositoryPlatformFactory repositoryPlatformFactory;
 
     @Test
     void newForm_showsProviderTypes() throws Exception {
@@ -153,6 +158,78 @@ class GitIntegrationControllerTest {
     }
 
     @Test
+    void save_resolvesTheAccountSoTheListShowsIt() throws Exception {
+        GitIntegration saved = new GitIntegration();
+        saved.setId(7L);
+        when(gitIntegrationService.save(any(), anyBoolean(), anyBoolean())).thenReturn(saved);
+        RepositoryPlatform platform = mock(RepositoryPlatform.class);
+        when(repositoryPlatformFactory.getPlatform(saved)).thenReturn(platform);
+        when(platform.getUser(null)).thenReturn(new RepositoryUser("1", "ai_bot", null, null));
+
+        mockMvc.perform(post("/git-integrations/save")
+                        .with(user("admin").roles("ADMIN"))
+                        .with(csrf())
+                        .param("name", "My Gitea")
+                        .param("providerType", "GITEA")
+                        .param("url", "https://gitea.example.com")
+                        .param("token", "gitea-token")
+                        .param("postReviewAction", "NONE"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(flash().attributeExists("success"))
+                .andExpect(flash().attributeCount(1));
+
+        verify(platform).getUser(null);
+    }
+
+    @Test
+    void save_succeedsWithoutTheProviderMessageWhenTheTokenIdentifiesNoAccount(CapturedOutput output) throws Exception {
+        String sentinel = "test-only-response-token-sentinel";
+        GitIntegration saved = new GitIntegration();
+        saved.setId(7L);
+        when(gitIntegrationService.save(any(), anyBoolean(), anyBoolean())).thenReturn(saved);
+        RepositoryPlatform platform = mock(RepositoryPlatform.class);
+        when(repositoryPlatformFactory.getPlatform(saved)).thenReturn(platform);
+        when(platform.getUser(null)).thenThrow(new IllegalStateException("401 Unauthorized: " + sentinel));
+
+        var result = mockMvc.perform(post("/git-integrations/save")
+                        .with(user("admin").roles("ADMIN"))
+                        .with(csrf())
+                        .param("name", "My Gitea")
+                        .param("providerType", "GITEA")
+                        .param("url", "https://gitea.example.com")
+                        .param("token", "gitea-token")
+                        .param("postReviewAction", "NONE"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(flash().attributeExists("success"))
+                .andExpect(flash().attributeCount(1))
+                .andReturn();
+
+        // The integration is saved either way; the provider's message may quote the response body.
+        org.junit.jupiter.api.Assertions.assertFalse(result.getFlashMap().toString().contains(sentinel));
+        org.junit.jupiter.api.Assertions.assertFalse(output.getAll().contains(sentinel));
+    }
+
+    @Test
+    void list_showsTheCachedUsernameAndADashOtherwise() throws Exception {
+        GitIntegration resolved = new GitIntegration();
+        resolved.setId(1L);
+        resolved.setName("Resolved");
+        resolved.setProviderType(RepositoryType.GITEA);
+        GitIntegration unresolved = new GitIntegration();
+        unresolved.setId(2L);
+        unresolved.setName("Unresolved");
+        unresolved.setProviderType(RepositoryType.GITHUB);
+        when(gitIntegrationService.findAll()).thenReturn(List.of(resolved, unresolved));
+        when(repositoryPlatformFactory.findCachedUsernames(List.of(resolved, unresolved)))
+                .thenReturn(java.util.Map.of(1L, "ai_bot"));
+
+        mockMvc.perform(get("/git-integrations").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("ai_bot")))
+                .andExpect(content().string(containsString("&mdash;")));
+    }
+
+    @Test
     void save_blankTokenForwardsClearFlag() throws Exception {
         mockMvc.perform(post("/git-integrations/save")
                         .with(user("admin").roles("ADMIN"))
@@ -227,7 +304,6 @@ class GitIntegrationControllerTest {
                         .param("name", "My Gitea")
                         .param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com")
-                        .param("username", "ai_bot")
                         .param("transport", "SSH")
                         .param("token", "")
                         .param("sshPrivateKey", "replacement-private-key")

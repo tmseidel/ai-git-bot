@@ -35,7 +35,6 @@ class AzureDevopsProviderMetadataTest {
     @Test
     void httpCredentials_carryTheTokenWithoutUsername() {
         GitIntegration integration = new GitIntegration();
-        integration.setUsername("bot@contoso.com");
 
         HttpCredentials credentials = metadata.createHttpCredentials(integration, "pat");
 

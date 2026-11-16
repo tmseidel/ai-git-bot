@@ -12,8 +12,10 @@ import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.RepositoryUser;
 
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -47,25 +49,25 @@ class BotAccountResolverTest {
         when(platformFactory.getPlatform(bot.getGitIntegration())).thenReturn(platform);
         when(platform.getUser("contoso")).thenReturn(account);
 
-        assertSame(account, resolver.resolve(bot, "contoso"));
+        assertEquals(Optional.of(new BotIdentity(account)), resolver.resolve(bot, "contoso"));
         verifyNoInteractions(botService);
     }
 
     @Test
-    void resolve_accountLookupFails_returnsNullAndRecordsTheBotsError() {
+    void resolve_accountLookupFails_returnsEmptyAndRecordsTheBotsError() {
         when(platformFactory.getPlatform(bot.getGitIntegration())).thenReturn(platform);
         when(platform.getUser(any())).thenThrow(new IllegalStateException("401 Unauthorized"));
 
-        assertNull(resolver.resolve(bot, null));
+        assertTrue(resolver.resolve(bot, null).isEmpty());
         verify(botService).recordError(eq(bot), contains("'contoso-devops': 401 Unauthorized"));
     }
 
     @Test
-    void resolve_platformCannotBeBuilt_returnsNullAndRecordsTheBotsError() {
+    void resolve_platformCannotBeBuilt_returnsEmptyAndRecordsTheBotsError() {
         when(platformFactory.getPlatform(bot.getGitIntegration()))
                 .thenThrow(new IllegalArgumentException("unsupported provider"));
 
-        assertNull(resolver.resolve(bot, null));
+        assertTrue(resolver.resolve(bot, null).isEmpty());
         verify(botService).recordError(eq(bot), contains("unsupported provider"));
     }
 }

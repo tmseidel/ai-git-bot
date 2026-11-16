@@ -30,6 +30,11 @@ public class WebhookPayload {
 
     private Owner requestedReviewer;
 
+    /** The login of the repository's owner, or {@code null} when the payload names none. */
+    public String ownerLogin() {
+        return repository != null && repository.getOwner() != null ? repository.getOwner().getLogin() : null;
+    }
+
     @Data
     public static class PullRequest {
         private Long id;

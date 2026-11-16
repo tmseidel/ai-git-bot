@@ -12,7 +12,6 @@ import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -89,11 +88,10 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
                 webhookPayload.getIssue() != null ? "present" : "null",
                 webhookPayload.getSender() != null ? webhookPayload.getSender().getLogin() : "null");
 
-        RepositoryUser botAccount = botAccountResolver.resolve(bot, null);
-        if (botAccount == null) {
-            return WebhookEvent.ignored("bot account could not be resolved");
+        BotIdentity identity = botAccountResolver.resolve(bot, null).orElse(null);
+        if (identity == null) {
+            return WebhookEvent.ignored(BotAccountResolver.UNRESOLVED);
         }
-        BotIdentity identity = new BotIdentity(botAccount);
         String action = (String) payload.get("action");
         return switch (eventType) {
             case "issue_comment" -> classifyComment(identity, action, webhookPayload);
