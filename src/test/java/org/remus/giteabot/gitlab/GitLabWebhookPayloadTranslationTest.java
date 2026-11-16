@@ -4,7 +4,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.model.CommentId;
 
@@ -13,15 +12,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.mock;
 
 class GitLabWebhookPayloadTranslationTest {
 
-    private GitLabWebhookHandler handler;
+    private GitLabWebhookTranslator handler;
 
     @BeforeEach
     void setUp() {
-        handler = new GitLabWebhookHandler(mock(BotWebhookService.class));
+        handler = new GitLabWebhookTranslator();
     }
 
     @ParameterizedTest
@@ -170,9 +168,8 @@ class GitLabWebhookPayloadTranslationTest {
         assertEquals("@bot please review", result.getComment().getBody());
         assertEquals("testuser", result.getComment().getUser().getLogin());
 
-        assertNotNull(result.getIssue());
-        assertEquals(1L, result.getIssue().getNumber());
-        assertEquals("Test MR", result.getIssue().getTitle());
+        // Only what GitLab sent: the issue half is added by the dispatcher.
+        assertNull(result.getIssue());
 
         assertNotNull(result.getPullRequest());
         assertEquals(1L, result.getPullRequest().getNumber());

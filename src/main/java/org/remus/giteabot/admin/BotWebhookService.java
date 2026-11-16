@@ -1,11 +1,15 @@
 package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
+import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler;
@@ -28,9 +32,9 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-
-import static org.remus.giteabot.learning.feedback.FeedbackCommandHandler.*;
+import java.util.regex.Pattern;
 
 /**
  * Handles webhook events for persisted {@link Bot} entities using their
@@ -49,6 +53,22 @@ import static org.remus.giteabot.learning.feedback.FeedbackCommandHandler.*;
 @Service
 public class BotWebhookService {
 
+    /**
+     * Phrasings that ask for the review to be run again: "re-review", "review (this / the
+     * pull request / the diff ...) again", "repeat the (code) review". Deliberately narrow:
+     * a comment merely containing "review" and "again" — "can you explain that review
+     * comment again?" — is a question for the bot, not a request to rerun every workflow.
+     */
+    private static final Pattern REVIEW_AGAIN = Pattern.compile(String.join("|",
+            // re-review, re review, rereview
+            "\\bre-?\\s?review\\b",
+            // review again, review (this / the PR / the diff ...) again
+            "\\breview\\s+(?:(?:this|it|the|that|my|our)\\s+)?"
+                    + "(?:(?:pull[\\s-]?request|pr|merge[\\s-]?request|mr|changes|code|diff)\\s+)?again\\b",
+            // repeat the (code) review
+            "\\brepeat\\s+(?:(?:the|your|a)\\s+)?(?:code[\\s-]?)?review\\b"),
+            Pattern.CASE_INSENSITIVE);
+
     private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final AgentSessionService agentSessionService;
     private final BotService botService;
@@ -59,7 +79,7 @@ public class BotWebhookService {
     private final AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
     private final ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
     private final I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
-    private final org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler;
+    private final FeedbackCommandHandler feedbackCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
@@ -73,7 +93,7 @@ public class BotWebhookService {
                              AgentReviewSlashCommandHandler agentReviewSlashCommandHandler,
                              ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler,
                              I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
-                             org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler,
+                             FeedbackCommandHandler feedbackCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
         this.repositoryPlatformFactory = repositoryPlatformFactory;
@@ -95,16 +115,25 @@ public class BotWebhookService {
      * Reviews a pull request via the {@link PrWorkflowOrchestrator}, which
      * dispatches to the {@link ReviewWorkflow} (and, in M2+, any other
      * workflows enabled for the bot via its {@code WorkflowConfiguration}).
+     * <p>
+     * Checks the user whitelist ({@link #isCallerAllowed}) before anything else, so that no
+     * caller can start a review for someone who is not allowed. The
+     * {@link org.remus.giteabot.webhook.WebhookEventDispatcher} checks it before every review
+     * it starts as well.
      */
     @Async
     public void reviewPullRequest(Bot bot, WebhookPayload payload) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
-
-            if (!prWorkflowAllowedForBranch(bot, payload)) {
+            if (!isCallerAllowed(bot, payload)) {
                 return;
             }
-            if (!isCallerAllowed(bot, payload)) {
+
+            // A review asked for in a conversation comment ("review again") arrives without
+            // the pull request's head and base on providers that deliver such comments as
+            // issue comments (GitHub, Gitea). The branch filter and the workflows need both.
+            PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
+            if (!prWorkflowAllowedForBranch(bot, payload)) {
                 return;
             }
             acknowledgePullRequest(bot, payload);
@@ -215,8 +244,7 @@ public class BotWebhookService {
 
     /**
      * Learning/feedback commands are classified and consumed before every other routing decision:
-     * before the pull-request-author gate (a permitted reviewer who is not the author may judge a
-     * review), before review-again heuristics, before coding-session forwarding, and before the
+     * before review-again heuristics, before coding-session forwarding, and before the
      * "no PR workflow enabled" short circuit. A recognized command never reaches an AI conversation,
      * so a malformed one cannot start code review, change code, or generate tests.
      * <p>
@@ -233,8 +261,7 @@ public class BotWebhookService {
         try {
             return feedbackCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias);
         } catch (RuntimeException e) {
-            // The comment looks like a command but could not be processed. It stays consumed: falling
-            // through would forward feedback text into an AI conversation.
+            // Falling through would forward feedback text into an AI conversation.
             log.error("[Bot '{}'] Learning command handling failed: {}", bot.getName(),
                     e.getMessage(), e);
             return true;
@@ -242,116 +269,46 @@ public class BotWebhookService {
     }
 
     /**
-     * Handles a bot-mention command in a PR comment.
-     * <p>
-     * Routing order:
-     * <ol>
-     *   <li>{@link #tryHandleLearningCommand} — learning/feedback commands, consumed first so they
-     *       never reach an AI conversation.</li>
-     *   <li>{@link E2eTestSlashCommandHandler} — recognised E2E slash commands.</li>
-     *   <li>{@link UnitTestSlashCommandHandler} — recognised unit-test slash
-     *       commands ({@code @bot generate-tests} / {@code @bot rerun-unit-tests}).</li>
-     *   <li>{@link CodeReviewService#handleBotCommand(WebhookPayload, String)} —
-     *       general-purpose review fallback, <em>only</em> when the
-     *       {@link ReviewWorkflow review workflow} is enabled on the bot's
-     *       configuration. A bot that is not configured to run code reviews
-     *       must never silently fall into the reviewer prompt; instead we
-     *       post a short "command not understood" reply.</li>
-     * </ol>
-     */
-    @Async
-    public void handleBotCommand(Bot bot, WebhookPayload payload) {
-        try {
-            AiAuditContext.setSessionId(auditSessionId(payload));
-            if (tryHandleLearningCommand(bot, payload,
-                    COMMENT_KIND_PR_COMMENT, null)) {
-                return;
-            }
-            if (!isPullRequestAuthor(payload)) {
-                log.debug("[Bot '{}'] Ignoring pull request command from non-author", bot.getName());
-                return;
-            }
-            if (!isCallerAllowed(bot, payload)) {
-                return;
-            }
-            if (hasNoEnabledPrWorkflows(bot)) {
-                log.debug("[Bot '{}'] No PR workflows enabled, ignoring pull request command", bot.getName());
-                return;
-            }
-            try {
-                if (e2eTestSlashCommandHandler.tryHandle(bot, payload)) {
-                    return;
-                }
-                if (unitTestSlashCommandHandler.tryHandle(bot, payload)) {
-                    return;
-                }
-                if (agentReviewSlashCommandHandler.tryHandle(bot, payload)) {
-                    return;
-                }
-                if (readmeSyncSlashCommandHandler.tryHandle(bot, payload)) {
-                    return;
-                }
-                if (i18nCoverageSlashCommandHandler.tryHandle(bot, payload)) {
-                    return;
-                }
-                if (isWorkflowEnabled(bot, ReviewWorkflow.KEY)) {
-                    // Route through the PrWorkflow orchestrator for uniform lifecycle management.
-                    var hints = Map.of(ReviewWorkflow.HINT_REVIEW_ACTION, ReviewWorkflow.ACTION_BOT_COMMAND);
-                    prWorkflowOrchestrator.run(bot, payload, ReviewWorkflow.KEY, hints);
-                    return;
-                }
-                log.info("[Bot '{}'] Comment mentions bot but no slash command matched and review workflow is not enabled — replying with unrecognised-command notice",
-                        bot.getName());
-                postUnrecognisedCommandComment(bot, payload);
-            } catch (Exception e) {
-                log.error("[Bot '{}'] Failed to handle command: {}", bot.getName(), e.getMessage(), e);
-                botService.recordError(bot, e.getMessage());
-            }
-        } finally {
-            AiAuditContext.clear();
-        }
-    }
-
-    /**
      * Handles a comment on a PR discussion thread.
      * <p>
      * Access control: if the bot has no {@code userWhitelist}, any user mentioning the bot
-     * may interact.  If a whitelist is configured, only the PR author <em>or</em> users listed
-     * in the whitelist may interact — all other commenters are ignored.
+     * may interact.  If a whitelist is configured, only the users listed in it may interact —
+     * all other commenters are ignored, the pull request's author included
+     * ({@link #isCallerAllowed}).
      * <p>
      * Routes to the configured issue-assigned workflow(s) when an agent session exists for the
      * PR (i.e. the PR was created by the issue workflow and can be continued — the comment is a
      * follow-up in the same flow lifecycle).  For manually created PRs (no active session), the
-     * comment is routed to the code-review handler.
+     * comment is routed to the code-review handler:
+     * <ol>
+     *   <li>the slash-command handlers ({@link E2eTestSlashCommandHandler},
+     *       {@link UnitTestSlashCommandHandler}, ...) — recognised slash commands;</li>
+     *   <li>{@link CodeReviewService#handleBotCommand(WebhookPayload, String)} —
+     *       general-purpose review fallback, <em>only</em> when the
+     *       {@link ReviewWorkflow review workflow} is enabled on the bot's
+     *       configuration. A bot that is not configured to run code reviews
+     *       must never silently fall into the reviewer prompt; instead it
+     *       posts a short "command not understood" reply.</li>
+     * </ol>
      */
     @Async
     public void handlePrComment(Bot bot, WebhookPayload payload) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
-            if (!isPrCommenterAllowed(bot, payload)) {
+            if (!isCallerAllowed(bot, payload)) {
                 return;
             }
-            if (tryHandleLearningCommand(bot, payload,
-                    COMMENT_KIND_PR_COMMENT, null)) {
-                return;
-            }
-            String owner = payload.getRepository().getOwner().getLogin();
-            String repo = payload.getRepository().getName();
             Long prNumber = payload.getPullRequest().getNumber();
-            Long issueNumber = payload.getIssue().getNumber(); // equals prNumber for PRs in Gitea
 
-            boolean hasAgentSession =
-                    agentSessionService.getSessionByIssue(owner, repo, issueNumber).isPresent()
-                    || agentSessionService.getSessionByPr(owner, repo, prNumber).isPresent();
-
-            if (hasAgentSession) {
+            Optional<AgentSession> agentSession = findAgentSession(bot, payload);
+            if (agentSession.isPresent()) {
                 // The PR was created by the bot's issue workflow (an agent session
                 // exists): the comment continues that same flow, so it routes
                 // through the configured issue-workflow resolution exactly like a
                 // comment on the original issue would.
                 log.debug("[Bot '{}'] Agent session found for PR #{}, routing to issue workflow", bot.getName(), prNumber);
                 try {
-                    issueWorkflowOrchestrator.runComment(bot, payload);
+                    issueWorkflowOrchestrator.runComment(bot, payloadFromSession(bot, payload, agentSession.get()));
                 } catch (Exception e) {
                     log.error("[Bot '{}'] Failed to handle PR comment via issue workflow: {}", bot.getName(), e.getMessage(), e);
                     botService.recordError(bot, e.getMessage());
@@ -399,21 +356,70 @@ public class BotWebhookService {
     }
 
     /**
-     * Handles an inline review comment mentioning the bot.
+     * Whether the pull request of a pull request comment belongs to an agent session, i.e.
+     * was created by the bot's issue workflow, so that comments on it continue that flow.
+     * The payload must carry both the pull request and its issue, as the dispatcher's
+     * completed comment payloads do.
+     * <p>
+     * The pull request's number is also looked up as an issue number only where issues and
+     * pull requests share one number sequence
+     * ({@link RepositoryPlatform#sharesIssueAndPullRequestNumbers}); elsewhere only the
+     * session's pull request number identifies it.
+     */
+    public boolean hasAgentSession(Bot bot, WebhookPayload payload) {
+        return findAgentSession(bot, payload).isPresent();
+    }
+
+    private Optional<AgentSession> findAgentSession(Bot bot, WebhookPayload payload) {
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long prNumber = payload.getPullRequest().getNumber();
+        if (sharesIssueAndPullRequestNumbers(bot)) {
+            Long issueNumber = payload.getIssue().getNumber();
+            Optional<AgentSession> byIssue = agentSessionService.getSessionByIssue(owner, repo, issueNumber);
+            if (byIssue.isPresent()) {
+                return byIssue;
+            }
+        }
+        return agentSessionService.getSessionByPr(owner, repo, prNumber);
+    }
+
+    /**
+     * The payload the issue workflows get for a comment on an agent session's pull request.
+     * They find their session by the payload's issue number. Where issues and pull requests
+     * share one number sequence, the pull request's number finds it, so the payload stays as
+     * it is and replies go to the pull request. Elsewhere the pull request's number belongs
+     * to an unrelated issue, if to any: merge request !5 must not continue the session of
+     * issue #5. There the issue becomes the session's own issue, which the pull request
+     * closes, and the agent's replies go to that issue.
+     */
+    WebhookPayload payloadFromSession(Bot bot, WebhookPayload payload, AgentSession session) {
+        if (sharesIssueAndPullRequestNumbers(bot) || session.getIssueNumber() == null) {
+            return payload;
+        }
+        WebhookPayload.Issue prIssue = payload.getIssue();
+        WebhookPayload.Issue sessionIssue = new WebhookPayload.Issue();
+        sessionIssue.setNumber(session.getIssueNumber());
+        sessionIssue.setTitle(session.getIssueTitle());
+        sessionIssue.setUser(prIssue.getUser());
+        sessionIssue.setPullRequest(prIssue.getPullRequest());
+        // toBuilder() carries every other field over, including ones added to WebhookPayload later
+        return payload.toBuilder().issue(sessionIssue).build();
+    }
+
+    private boolean sharesIssueAndPullRequestNumbers(Bot bot) {
+        return repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).sharesIssueAndPullRequestNumbers();
+    }
+
+    /**
+     * Handles an inline review comment mentioning the bot. Like a conversation comment, it is
+     * answered for anyone the user whitelist allows ({@link #isCallerAllowed}).
      * Delegates to {@link CodeReviewService#handleInlineComment(WebhookPayload, String)}.
      */
     @Async
     public void handleInlineComment(Bot bot, WebhookPayload payload) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
-            if (tryHandleLearningCommand(bot, payload,
-                    COMMENT_KIND_INLINE, null)) {
-                return;
-            }
-            if (!isPullRequestAuthor(payload)) {
-                log.debug("[Bot '{}'] Ignoring inline review comment from non-author", bot.getName());
-                return;
-            }
             if (!isCallerAllowed(bot, payload)) {
                 return;
             }
@@ -462,7 +468,7 @@ public class BotWebhookService {
             try {
                 if (agenticEnabled) {
                     String question = extractReviewBody(payload);
-                    if (!BotMention.isMentioned(question, getBotAlias(bot))) {
+                    if (!BotMention.isMentioned(question, BotIdentity.of(bot).alias())) {
                         log.debug("[Bot '{}'] Submitted review does not mention the bot — ignoring (agentic-review only responds when addressed)",
                                 bot.getName());
                         return;
@@ -764,47 +770,7 @@ public class BotWebhookService {
     }
 
     private Long resolvePrOrIssueNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
-            return payload.getPullRequest().getNumber();
-        }
-        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
-            return payload.getIssue().getNumber();
-        }
-        return payload.getNumber();
-    }
-
-    /**
-     * Access-control check specific to {@link #handlePrComment(Bot, WebhookPayload)}.
-     *
-     * <p>Semantics:</p>
-     * <ul>
-     *   <li>If the bot has <strong>no</strong> {@code userWhitelist} → every commenter is allowed.</li>
-     *   <li>If a whitelist <strong>is</strong> configured → only the PR author <em>or</em> users
-     *       present in the whitelist may interact; everyone else is rejected.</li>
-     * </ul>
-     */
-    boolean isPrCommenterAllowed(Bot bot, WebhookPayload payload) {
-        if (bot == null) {
-            return true;
-        }
-        Set<String> allowed = botService.getAllowedUsernames(bot);
-        if (allowed.isEmpty()) {
-            // No whitelist → everyone may interact with the bot on PRs.
-            return true;
-        }
-        // Whitelist exists → allow PR author or whitelisted users.
-        if (isPullRequestAuthor(payload)) {
-            return true;
-        }
-        String caller = resolveCallerUsername(payload);
-        if (botService.isUsernameInSet(allowed, caller)) {
-            return true;
-        }
-        log.info("[Bot '{}'] Ignoring PR comment from '{}' — not PR author and not in whitelist ({} entries)",
-                bot.getName(),
-                caller == null ? "<unknown>" : caller,
-                allowed.size());
-        return false;
+        return PrPayloadHydrator.resolvePrNumber(payload);
     }
 
     /**
@@ -821,7 +787,7 @@ public class BotWebhookService {
      * {@link java.util.Locale#ROOT} for locale-independent identifier
      * comparison.</p>
      */
-    boolean isCallerAllowed(Bot bot, WebhookPayload payload) {
+    public boolean isCallerAllowed(Bot bot, WebhookPayload payload) {
         if (bot == null) {
             return true;
         }
@@ -864,56 +830,14 @@ public class BotWebhookService {
         return null;
     }
 
-    /**
-     * Checks whether the webhook event was triggered by this bot's own user.
-     */
-    public boolean isBotUser(Bot bot, WebhookPayload payload) {
-        String botUsername = bot.getGitIntegration().getUsername();
-
-        if (payload.getSender() != null && botUsername.equalsIgnoreCase(payload.getSender().getLogin())) {
-            return true;
-        }
-
-        return payload.getComment() != null
-                && payload.getComment().getUser() != null
-                && botUsername.equalsIgnoreCase(payload.getComment().getUser().getLogin());
-    }
-
-    /**
-     * Returns the bot alias used for @-mention detection, i.e. {@code @} followed by
-     * the username configured on the bot's Git integration.
-     */
-    public String getBotAlias(Bot bot) {
-        return "@" + bot.getGitIntegration().getUsername();
-    }
-
-    public boolean isPullRequestAuthor(WebhookPayload payload) {
-        String author = null;
-        if (payload.getPullRequest() != null && payload.getPullRequest().getUser() != null) {
-            author = payload.getPullRequest().getUser().getLogin();
-        } else if (payload.getIssue() != null && payload.getIssue().getUser() != null) {
-            author = payload.getIssue().getUser().getLogin();
-        }
-
-        String commenter = null;
-        if (payload.getComment() != null && payload.getComment().getUser() != null) {
-            commenter = payload.getComment().getUser().getLogin();
-        } else if (payload.getSender() != null) {
-            commenter = payload.getSender().getLogin();
-        }
-
-        return author != null && author.equalsIgnoreCase(commenter);
-    }
-
     public boolean isReviewAgainRequest(WebhookPayload payload, String botAlias) {
         String body = payload.getComment() != null ? payload.getComment().getBody() : null;
         if (!BotMention.isMentioned(body, botAlias)) {
             return false;
         }
         // Ignore the alias itself, so a bot named e.g. @reviewbot does not count as asking for a review
-        String normalized = BotMention.replaceMention(body, botAlias, " ").toLowerCase();
-        return normalized.contains("review")
-                && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
+        String normalized = BotMention.replaceMention(body, botAlias, " ");
+        return REVIEW_AGAIN.matcher(normalized).find();
     }
 
     /**

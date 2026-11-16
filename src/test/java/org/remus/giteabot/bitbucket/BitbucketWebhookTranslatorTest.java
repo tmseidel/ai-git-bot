@@ -12,6 +12,11 @@ import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.event.PullRequestStateTracker;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.webhook.TranslatingWebhookHandler;
+import org.remus.giteabot.webhook.WebhookEventDispatcher;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
@@ -20,16 +25,21 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * Tests how Bitbucket Cloud webhooks are classified by {@link BitbucketWebhookTranslator} and,
+ * through the real {@link WebhookEventDispatcher}, which {@link BotWebhookService} handler they reach.
+ */
 @ExtendWith(MockitoExtension.class)
-class BitbucketWebhookHandlerTest {
+class BitbucketWebhookTranslatorTest {
 
     private static final String READABLE_MENTION = "@AI_Bot";
 
@@ -42,12 +52,14 @@ class BitbucketWebhookHandlerTest {
     @Mock
     private BotService botService;
 
-    private BitbucketWebhookHandler handler;
+    private BitbucketWebhookTranslator translator;
+    private TranslatingWebhookHandler handler;
     private Bot bot;
 
     @BeforeEach
     void setUp() {
-        handler = new BitbucketWebhookHandler(botWebhookService, repositoryPlatformFactory, botService);
+        translator = new BitbucketWebhookTranslator(repositoryPlatformFactory, botService, new PullRequestStateTracker());
+        handler = new TranslatingWebhookHandler(translator, BitbucketWebhookTranslator.EVENT_HEADER, botWebhookService);
         GitIntegration integration = new GitIntegration();
         integration.setUsername("bot@example.com");
         bot = new Bot();
@@ -57,7 +69,6 @@ class BitbucketWebhookHandlerTest {
         lenient().when(repositoryPlatformFactory.getApiClient(integration)).thenReturn(bitbucketClient);
         lenient().when(bitbucketClient.getAuthenticatedAccount())
                 .thenReturn(new BitbucketAccount("{uuid-ai_bot}", "acc-ai_bot", "ai_bot", "AI Bot"));
-        lenient().when(botWebhookService.isPullRequestAuthor(any(WebhookPayload.class))).thenReturn(true);
     }
 
     @Test
@@ -95,7 +106,7 @@ class BitbucketWebhookHandlerTest {
                 commentPayload("@unrelated-bot-name please explain this", null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleBotCommand(any(), any());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 
     @Test
@@ -162,6 +173,12 @@ class BitbucketWebhookHandlerTest {
 
     @Test
     void pullRequestUpdatedWithoutReviewerChange_isIgnored() {
+        // The bot was already a reviewer, and the commit unchanged, when the pull request was
+        // opened: creation records both, so the update is neither a review request nor a push.
+        bot.setRunOnPrUpdate(true);
+        handler.handleWebhook(bot, "pullrequest:created", pullRequestPayload(List.of(user("ai_bot")), null));
+        reset(botWebhookService);
+
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:updated",
                 pullRequestPayload(List.of(user("ai_bot")), null));
 
@@ -171,102 +188,47 @@ class BitbucketWebhookHandlerTest {
 
     @Test
     void pullRequestUpdatedWhenBotReviewerAdded_triggersReview() {
-        Map<String, Object> changes = Map.of("reviewers", Map.of(
-                "old", List.of(user("human")),
-                "new", List.of(user("human"), user("ai_bot"))));
+        handler.handleWebhook(bot, "pullrequest:created", pullRequestPayload(List.of(user("human")), null));
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:updated",
-                pullRequestPayload(List.of(user("human"), user("ai_bot")), changes));
+                pullRequestPayload(List.of(user("human"), user("ai_bot")), null));
 
         assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        // Marked as a review request, so the bot acknowledges it like one elsewhere.
+        verify(botWebhookService).reviewPullRequest(eq(bot),
+                argThat(payload -> "review_requested".equals(payload.getAction())));
     }
 
     @Test
-    void ownerReviewAgainComment_triggersReview() {
-        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class), eq(READABLE_MENTION))).thenReturn(true);
+    void reviewAgainComment_triggersReview() {
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
                 commentPayload("@{acc-ai_bot} - Review the Pull-Request again", null));
 
         assertEquals("review triggered", response.getBody());
         verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handleBotCommand(any(), any());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 
     @Test
-    void theReadableAliasIsPassedToTheLearningCheckBecauseItIsNotTheUsername() {
-        // The body carries @AI_Bot after the @{account_id} rewrite, while the configured username is
-        // bot@example.com: parsing with the username alone could never match, and a reason ending in
-        // "review again" would then start a review.
-        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
-                any(WebhookPayload.class), anyString(), eq(READABLE_MENTION))).thenReturn(true);
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
-                commentPayload("@{acc-ai_bot} feedback O12-F1 incorrect, please review again", null));
-
-        assertEquals("feedback recorded", response.getBody());
-        verify(botWebhookService).tryHandleLearningCommand(eq(bot), any(WebhookPayload.class),
-                eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
-                        .COMMENT_KIND_PR_COMMENT), eq(READABLE_MENTION));
-        verify(botWebhookService, never()).isReviewAgainRequest(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
-        verify(botWebhookService, never()).handleBotCommand(any(), any());
-    }
-
-    @Test
-    void anInlineFeedbackCommentIsCheckedWithTheInlineKindBeforeRouting() {
-        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
-                any(WebhookPayload.class), anyString(), eq(READABLE_MENTION))).thenReturn(true);
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
-                commentPayload("@{acc-ai_bot} feedback O12-F1 incorrect",
-                        Map.of("path", "src/App.java")));
-
-        assertEquals("feedback recorded", response.getBody());
-        verify(botWebhookService).tryHandleLearningCommand(eq(bot), any(WebhookPayload.class),
-                eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler
-                        .COMMENT_KIND_INLINE), eq(READABLE_MENTION));
-        verify(botWebhookService, never()).handleInlineComment(any(), any());
-    }
-
-    @Test
-    void feedbackComment_isConsumedBeforeTheReviewAgainHeuristic() {
-        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class),
-                eq(READABLE_MENTION))).thenReturn(true);
-        lenient().when(botWebhookService.tryHandleLearningCommand(eq(bot),
-                any(WebhookPayload.class), anyString(), anyString())).thenReturn(true);
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
-                commentPayload("@{acc-ai_bot} feedback O1234 useful review again later", null));
-
-        assertEquals("feedback recorded", response.getBody());
-        verify(botWebhookService, never()).isReviewAgainRequest(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
-        verify(botWebhookService, never()).handleBotCommand(any(), any());
-    }
-
-    @Test
-    void nonOwnerReviewAgainComment_isIgnored() {
-        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class), eq(READABLE_MENTION))).thenReturn(true);
-        when(botWebhookService.isPullRequestAuthor(any(WebhookPayload.class))).thenReturn(false);
+    void reviewAgainComment_onAPullRequestWithAnAgentSession_continuesTheSession() {
+        when(botWebhookService.hasAgentSession(any(), any(WebhookPayload.class))).thenReturn(true);
 
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
                 commentPayload("@{acc-ai_bot} - Review the Pull-Request again", null));
 
-        assertEquals("ignored", response.getBody());
+        assertEquals("pr comment received", response.getBody());
+        verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
 
     @Test
-    void regularOwnerMention_routesToBotCommand() {
-        lenient().when(botWebhookService.isReviewAgainRequest(any(WebhookPayload.class), eq(READABLE_MENTION))).thenReturn(false);
-
+    void regularOwnerMention_routesToHandlePrComment() {
         ResponseEntity<String> response = handler.handleWebhook(bot, "pullrequest:comment_created",
                 commentPayload("@{acc-ai_bot} please explain this", null));
 
-        assertEquals("command received", response.getBody());
-        verify(botWebhookService).handleBotCommand(eq(bot), any(WebhookPayload.class));
+        assertEquals("pr comment received", response.getBody());
+        verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
 
@@ -276,7 +238,7 @@ class BitbucketWebhookHandlerTest {
                 commentPayload("@ai_bot-test please explain this", null));
 
         assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleBotCommand(any(), any());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
         verify(botWebhookService, never()).handleInlineComment(any(), any());
         verify(botWebhookService, never()).reviewPullRequest(any(), any());
     }
@@ -298,7 +260,7 @@ class BitbucketWebhookHandlerTest {
         handler.handleWebhook(bot, "pullrequest:comment_created",
                 commentPayload("@{acc-ai_bot} generate-tests and ping @{acc-ai_bot} again", null));
 
-        verify(botWebhookService).handleBotCommand(eq(bot), payload.capture());
+        verify(botWebhookService).handlePrComment(eq(bot), payload.capture());
         assertEquals("@AI_Bot generate-tests and ping @AI_Bot again", payload.getValue().getComment().getBody());
     }
 
@@ -306,6 +268,49 @@ class BitbucketWebhookHandlerTest {
     void readableMention_fallsBackToRawMentionWithoutName() {
         assertEquals("@{acc}", new BitbucketAccount("{u}", "acc", null, null).readableMention());
         assertEquals("@ai-bot", new BitbucketAccount("{u}", "acc", "ai-bot", null).readableMention());
+    }
+
+    // ---- Pushes (runOnPrUpdate) ----
+
+    @Test
+    void pushAfterCreation_withRunOnPrUpdate_triggersReviewOnce() {
+        bot.setRunOnPrUpdate(true);
+        handler.handleWebhook(bot, "pullrequest:created", pullRequestPayload(List.of(user("human")), null));
+
+        Map<String, Object> pushed = pullRequestPayload(List.of(user("human")), null);
+        withHeadSha(pushed, "new-commit");
+        ResponseEntity<String> push = handler.handleWebhook(bot, "pullrequest:updated", pushed);
+
+        Map<String, Object> edited = pullRequestPayload(List.of(user("human")), null);
+        withHeadSha(edited, "new-commit");
+        ResponseEntity<String> titleEdit = handler.handleWebhook(bot, "pullrequest:updated", edited);
+
+        assertEquals("review triggered", push.getBody());
+        assertEquals("ignored", titleEdit.getBody());
+        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    }
+
+    @Test
+    void payloadWithoutReviewerList_isNotReadAsARemoval() {
+        translator.translate(bot, headers("pullrequest:created"), pullRequestPayload(List.of(user("ai_bot")), null));
+        Map<String, Object> withoutReviewers = pullRequestPayload(List.of(user("ai_bot")), null);
+        ((Map<?, ?>) withoutReviewers.get("pullrequest")).remove("reviewers");
+        translator.translate(bot, headers("pullrequest:updated"), withoutReviewers);
+
+        WebhookEvent next = translator.translate(bot, headers("pullrequest:updated"),
+                pullRequestPayload(List.of(user("ai_bot")), null));
+
+        assertEquals(WebhookEventKind.IGNORED, next.kind());
+    }
+
+    private static Map<String, String> headers(String eventKey) {
+        return Map.of(BitbucketWebhookTranslator.EVENT_HEADER, eventKey);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void withHeadSha(Map<String, Object> raw, String sha) {
+        ((Map<String, Object>) raw.get("pullrequest")).put("source",
+                Map.of("branch", Map.of("name", "feature"), "commit", Map.of("hash", sha)));
     }
 
     private Map<String, Object> pullRequestPayload(List<Map<String, Object>> reviewers, Map<String, Object> changes) {

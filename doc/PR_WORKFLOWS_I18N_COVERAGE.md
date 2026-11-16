@@ -67,7 +67,7 @@ segment), and `?`. Examples: `messages_*.properties`, `i18n/*.json`.
 ## Running it
 
 - **Automatically** on PR open / update, when enabled on the bot — following the
-  same assigned-bot triggering mechanism as the default review workflows.
+  same reviewer-request and assignment triggering as the default review workflows.
 - **On command** in a PR comment:
   - `@bot regenerate-i18n [instruction]` — re-run the workflow now. Any text
     after the command is passed to the bot as extra guidance for the generated

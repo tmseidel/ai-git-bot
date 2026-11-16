@@ -6,6 +6,7 @@ import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GitLabPlatformTest {
@@ -17,6 +18,11 @@ class GitLabPlatformTest {
     @Test
     void formatPullRequestReference_usesMergeRequestPrefix() {
         assertEquals("!42", platform.formatPullRequestReference(42L));
+    }
+
+    @Test
+    void numbersIssuesAndMergeRequestsSeparately() {
+        assertFalse(platform.sharesIssueAndPullRequestNumbers());
     }
 
     @Test

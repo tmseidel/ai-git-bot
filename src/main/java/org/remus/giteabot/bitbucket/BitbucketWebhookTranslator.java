@@ -1,25 +1,26 @@
 package org.remus.giteabot.bitbucket;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
+import org.remus.giteabot.event.PullRequestStateTracker;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
+import org.remus.giteabot.event.WebhookSignatures;
+import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.util.BotMention;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 
 /**
- * Handler for Bitbucket Cloud webhook events.
- * <p>
- * Receives Bitbucket Cloud webhook payloads and translates them into the common
- * {@link WebhookPayload} model used by the rest of the application, then
- * delegates to {@link BotWebhookService} for actual processing.
+ * Translates Bitbucket Cloud webhooks into provider-neutral {@link WebhookEvent}s.
  * <p>
  * Bitbucket Cloud event types are delivered via the {@code X-Event-Key} header.
  * Supported events: pullrequest:created, pullrequest:open, pullrequest:updated,
@@ -30,70 +31,125 @@ import java.util.Map;
  * the Git integration (the bot username is not used). Since webhook payloads carry no
  * e-mail addresses, that account is resolved via {@code GET /user} and matched against
  * payload users by {@code account_id}/{@code uuid}; mentions are detected via
- * Bitbucket's raw {@code @{account_id}} markup.
+ * Bitbucket's raw {@code @{account_id}} markup, which is rewritten to a readable name
+ * before the payload is handed on.
+ * <p>
+ * {@code pullrequest:updated} fires for pushes, edits and reviewer changes alike and says
+ * nothing about what changed, so a push is recognised by the source commit having moved
+ * since the last event, and a review request by the bot having joined the reviewers
+ * since then ({@link PullRequestStateTracker}).
  */
 @Slf4j
 @Component
-public class BitbucketWebhookHandler {
+@RequiredArgsConstructor
+public class BitbucketWebhookTranslator implements WebhookTranslator {
 
-    private final BotWebhookService botWebhookService;
+    static final String EVENT_HEADER = "X-Event-Key";
+
     private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final BotService botService;
+    private final PullRequestStateTracker stateTracker;
 
-    public BitbucketWebhookHandler(BotWebhookService botWebhookService, RepositoryPlatformFactory repositoryPlatformFactory,
-                                   BotService botService) {
-        this.botWebhookService = botWebhookService;
-        this.repositoryPlatformFactory = repositoryPlatformFactory;
-        this.botService = botService;
+    @Override
+    public RepositoryType providerType() {
+        return RepositoryType.BITBUCKET;
     }
 
-    /**
-     * Handles a Bitbucket webhook event for the given bot.
-     *
-     * @param bot      the bot to process the webhook for
-     * @param eventKey the Bitbucket event key from X-Event-Key header
-     * @param payload  the raw webhook payload
-     * @return response indicating the result of webhook processing
-     */
-    public ResponseEntity<String> handleWebhook(Bot bot, String eventKey, Map<String, Object> payload) {
+    /** Bitbucket Cloud signs the body: {@code X-Hub-Signature: sha256=<hex hmac>}. */
+    @Override
+    public boolean verifySignature(String signingSecret, Map<String, String> headers, byte[] rawBody) {
+        return WebhookSignatures.matches("sha256=" + WebhookSignatures.hmacSha256Hex(signingSecret, rawBody),
+                headers.get("X-Hub-Signature"));
+    }
+
+    @Override
+    public WebhookEvent translate(Bot bot, Map<String, String> headers, Map<String, Object> payload) {
+        String eventKey = headers.get(EVENT_HEADER);
         if (eventKey == null) {
-            log.warn("Missing X-Event-Key header for Bitbucket webhook");
-            return ResponseEntity.ok("ignored");
+            log.warn("Missing {} header for Bitbucket webhook", EVENT_HEADER);
+            return WebhookEvent.ignored("missing " + EVENT_HEADER + " header");
         }
 
         log.debug("Processing Bitbucket event: {} for bot '{}'", eventKey, bot.getName());
 
         WebhookPayload webhookPayload = translatePayload(eventKey, payload);
         if (webhookPayload == null) {
-            log.warn("Could not translate Bitbucket payload for event key: {}", eventKey);
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("unhandled Bitbucket event key '" + eventKey + "'");
         }
 
         BitbucketAccount botAccount = resolveBotAccount(bot);
         if (botAccount == null) {
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("Bitbucket bot account could not be resolved");
         }
-
-        // Ignore events triggered by the bot itself
-        if (isBotEvent(botAccount, payload)) {
-            log.info("Ignoring Bitbucket webhook event from bot's own account '{}'", botAccount.accountId());
-            return ResponseEntity.ok("ignored");
-        }
-
-        log.debug("Event passed all checks, processing {} with botAlias='{}'", eventKey, botAccount.mention());
 
         return switch (eventKey) {
-            case "pullrequest:created", "pullrequest:updated", "pullrequest:open" ->
-                    handlePullRequestOpenedOrUpdated(bot, botAccount, eventKey, webhookPayload, payload);
-            case "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:merged", "pullrequest:declined" ->
-                    handlePullRequestClosed(bot, webhookPayload);
-            case "pullrequest:comment_created" ->
-                    handlePullRequestComment(bot, webhookPayload, botAccount);
-            default -> {
-                log.warn("Unhandled Bitbucket event key: {}", eventKey);
-                yield ResponseEntity.ok("ignored");
+            case "pullrequest:created", "pullrequest:open" -> {
+                // Seed the head and the reviewer list, so a pullrequest:updated for the same
+                // commit and reviewers is taken neither for a push nor for a review request.
+                stateTracker.headMoved(bot, webhookPayload);
+                botReviewerAdded(bot, webhookPayload, botAccount, payload);
+                yield event(WebhookEventKind.PR_OPENED, webhookPayload, botAccount, payload);
             }
+            case "pullrequest:updated" -> classifyUpdate(bot, webhookPayload, botAccount, payload);
+            case "pullrequest:fulfilled", "pullrequest:rejected", "pullrequest:merged", "pullrequest:declined" -> {
+                stateTracker.markClosed(bot, webhookPayload);
+                yield event(WebhookEventKind.PR_CLOSED, webhookPayload, botAccount, payload);
+            }
+            case "pullrequest:comment_created" -> classifyComment(webhookPayload, botAccount, payload);
+            default -> WebhookEvent.ignored("unhandled Bitbucket event key '" + eventKey + "'");
         };
+    }
+
+    // ---- Classification ----
+
+    private WebhookEvent classifyUpdate(Bot bot, WebhookPayload payload, BitbucketAccount botAccount,
+                                        Map<String, Object> raw) {
+        // Both record what they saw, so neither may be short-circuited away.
+        boolean headMoved = stateTracker.headMoved(bot, payload);
+        boolean reviewerAdded = botReviewerAdded(bot, payload, botAccount, raw);
+        if (reviewerAdded) {
+            payload.setAction("review_requested");
+            return event(WebhookEventKind.PR_REVIEWER_ADDED, payload, botAccount, raw);
+        }
+        if (headMoved) {
+            return event(WebhookEventKind.PR_SYNCHRONIZED, payload, botAccount, raw);
+        }
+        return WebhookEvent.ignored("pull request update without new commits or the bot being added as reviewer");
+    }
+
+    private WebhookEvent classifyComment(WebhookPayload payload, BitbucketAccount botAccount, Map<String, Object> raw) {
+        WebhookPayload.Comment comment = payload.getComment();
+        if (comment == null || payload.getPullRequest() == null) {
+            return WebhookEvent.ignored("Bitbucket comment event without comment or pull request");
+        }
+        boolean inline = comment.getPath() != null;
+        return event(inline ? WebhookEventKind.PR_INLINE_COMMENT : WebhookEventKind.PR_COMMENT,
+                payload, botAccount, raw);
+    }
+
+    /**
+     * Builds a non-ignored event. Identity is matched by Bitbucket account, not username:
+     * the bot's own events, its reviewer status and its mention all go by account id/uuid.
+     * A mention's opaque {@code @{account_id}} markup is replaced with the readable name, so
+     * downstream handlers and the AI see something meaningful.
+     */
+    private WebhookEvent event(WebhookEventKind kind, WebhookPayload payload, BitbucketAccount botAccount,
+                               Map<String, Object> raw) {
+        String rawMention = botAccount.mention();
+        String readableMention = botAccount.readableMention();
+        WebhookPayload.Comment comment = payload.getComment();
+        boolean mentioned = comment != null && BotMention.isMentioned(comment.getBody(), rawMention);
+        if (mentioned) {
+            comment.setBody(BotMention.replaceMention(comment.getBody(), rawMention, readableMention));
+        }
+        return WebhookEvent.builder()
+                .kind(kind)
+                .payload(payload)
+                .fromBot(isBotEvent(botAccount, raw))
+                .botIsReviewer(hasBotReviewer(botAccount, raw))
+                .botMentioned(mentioned)
+                .botAlias(readableMention)
+                .build();
     }
 
     /**
@@ -113,66 +169,6 @@ public class BitbucketWebhookHandler {
             botService.recordError(bot, error);
             return null;
         }
-    }
-
-    private ResponseEntity<String> handlePullRequestOpenedOrUpdated(Bot bot, BitbucketAccount botAccount, String eventKey,
-                                                                     WebhookPayload payload, Map<String, Object> raw) {
-        if (("pullrequest:created".equals(eventKey) || "pullrequest:open".equals(eventKey))
-                ? (bot.isRunOnPrCreation() || hasBotReviewer(botAccount, raw))
-                : botReviewerWasAdded(botAccount, raw)) {
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
-        }
-        return ResponseEntity.ok("ignored");
-    }
-
-    private ResponseEntity<String> handlePullRequestClosed(Bot bot, WebhookPayload payload) {
-        botWebhookService.handlePrClosed(bot, payload);
-        return ResponseEntity.ok("session closed");
-    }
-
-    private ResponseEntity<String> handlePullRequestComment(Bot bot, WebhookPayload payload,
-                                                             BitbucketAccount botAccount) {
-        String rawMention = botAccount.mention();
-        String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (!BotMention.isMentioned(body, rawMention)) {
-            return ResponseEntity.ok("ignored");
-        }
-
-        // Replace the opaque @{account_id} markup so downstream handlers and the AI see a readable name
-        String botAlias = botAccount.readableMention();
-        payload.getComment().setBody(body.replace(rawMention, botAlias));
-
-        // Feedback is consumed before every other routing decision, and with the alias the comment
-        // now carries: the readable mention is not the configured username, so parsing with the
-        // username alone would let "@AI_Bot feedback O12-F1 incorrect, please review again" through
-        // to the review-again heuristic.
-        boolean inline = payload.getComment().getPath() != null;
-        if (botWebhookService.tryHandleLearningCommand(bot, payload,
-                inline
-                        ? org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_INLINE
-                        : org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT,
-                botAlias)) {
-            return ResponseEntity.ok("feedback recorded");
-        }
-
-        // Bitbucket inline comments have a path set via the "inline" field
-        if (inline) {
-            botWebhookService.handleInlineComment(bot, payload);
-            return ResponseEntity.ok("inline comment response triggered");
-        }
-
-        if (botWebhookService.isReviewAgainRequest(payload, botAlias)) {
-            if (!botWebhookService.isPullRequestAuthor(payload)) {
-                return ResponseEntity.ok("ignored");
-            }
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
-        }
-
-        // General PR comment mentioning the bot
-        botWebhookService.handleBotCommand(bot, payload);
-        return ResponseEntity.ok("command received");
     }
 
     // ---- Bitbucket → WebhookPayload translation ----
@@ -205,15 +201,6 @@ public class BitbucketWebhookHandler {
     private WebhookPayload translatePullRequestCommentEvent(Map<String, Object> raw) {
         WebhookPayload payload = translatePullRequestEvent(raw, "created");
         payload.setComment(extractComment((Map<String, Object>) raw.get("comment")));
-
-        if (payload.getPullRequest() != null) {
-            WebhookPayload.Issue issue = new WebhookPayload.Issue();
-            issue.setNumber(payload.getPullRequest().getNumber());
-            issue.setTitle(payload.getPullRequest().getTitle());
-            WebhookPayload.IssuePullRequest ipr = new WebhookPayload.IssuePullRequest();
-            issue.setPullRequest(ipr);
-            payload.setIssue(issue);
-        }
         return payload;
     }
 
@@ -358,14 +345,18 @@ public class BitbucketWebhookHandler {
         return pullRequest != null && containsAccount(pullRequest.get("reviewers"), botAccount);
     }
 
-    private boolean botReviewerWasAdded(BitbucketAccount botAccount, Map<String, Object> raw) {
-        Map<?, ?> changes = asMap(raw.get("changes"));
-        Map<?, ?> reviewersChange = changes != null ? asMap(changes.get("reviewers")) : null;
-        if (reviewersChange == null) {
+    /**
+     * Whether the bot has joined the pull request's reviewers since the previous event.
+     * A payload without a reviewer list leaves the recorded state untouched, so that the
+     * omission is not read as a removal.
+     */
+    private boolean botReviewerAdded(Bot bot, WebhookPayload payload, BitbucketAccount botAccount,
+                                     Map<String, Object> raw) {
+        Map<?, ?> pullRequest = asMap(raw.get("pullrequest"));
+        if (pullRequest == null || !(pullRequest.get("reviewers") instanceof List<?>)) {
             return false;
         }
-        return containsAccount(reviewersChange.get("new"), botAccount)
-                && !containsAccount(reviewersChange.get("old"), botAccount);
+        return stateTracker.reviewerAdded(bot, payload, hasBotReviewer(botAccount, raw));
     }
 
     private boolean containsAccount(Object users, BitbucketAccount account) {

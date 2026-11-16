@@ -432,7 +432,6 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         }, List.of(), "fetch reviews for PR #{} in {}", pullNumber, repo);
     }
 
-    @SuppressWarnings("unchecked")
     private AzureDevopsReview toAzureDevopsReview(Map<?, ?> reviewer) {
         AzureDevopsReview review = new AzureDevopsReview();
         Object vote = reviewer.get("vote");
@@ -517,8 +516,8 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      * {@code content}, {@code commentType} and {@code _links} — and never the enclosing
      * thread's {@code threadContext}. Without this lookup an inline (per-file) comment is
      * indistinguishable from a top-level one, and
-     * {@code AzureDevopsWebhookHandler#handlePullRequestComment} would route every inline
-     * {@code @bot} mention to the generic command path.
+     * {@code AzureDevopsWebhookTranslator} would classify every inline
+     * {@code @bot} mention as a top-level pull request comment.
      *
      * @return the thread's anchor, or {@code null} when the thread has no file context
      *         (a top-level conversation comment) or could not be fetched
@@ -613,7 +612,8 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
                         .queryParam("api-version", API_VERSION)
                         .build(vars(scope, pullNumber)))
                 .retrieve()
-                .body(new ParameterizedTypeReference<Map<String, Object>>() {}),
+                .body(new ParameterizedTypeReference<>() {
+                }),
                 null, "fetch PR #{} details in {}", pullNumber, repo);
         return Optional.ofNullable(pr).map(AzureDevopsApiClient::toPullRequestDetails);
     }

@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Pins which {@link BotWebhookService} methods run off the webhook thread.
  * <p>
- * The provider handlers and the internal dispatchers call these methods on the injected Spring proxy,
+ * The webhook dispatcher and the internal dispatchers call these methods on the injected Spring proxy,
  * so the annotation position is behaviour, not decoration:
  * <ul>
  *   <li>An entry point without {@code @Async} blocks the provider's HTTP response, which then times
@@ -22,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       and the async proxy answers {@code null} for a primitive, which surfaces as
  *       {@code AopInvocationException} in the caller.</li>
  * </ul>
- * The handler tests mock this service, so they cannot see either mistake; these assertions read the
+ * The dispatcher tests mock this service, so they cannot see either mistake; these assertions read the
  * class itself.
  */
 class BotWebhookServiceAsyncContractTest {
@@ -33,15 +33,6 @@ class BotWebhookServiceAsyncContractTest {
                 .filter(candidate -> Arrays.equals(candidate.getParameterTypes(), parameters))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("BotWebhookService." + name + " not found"));
-    }
-
-    @Test
-    void handleBotCommandStillRunsOffTheWebhookThread() {
-        assertThat(method("handleBotCommand", Bot.class, WebhookPayload.class)
-                .isAnnotationPresent(Async.class))
-                .as("handleBotCommand must be @Async, or a review started from a comment blocks the "
-                        + "provider's HTTP response")
-                .isTrue();
     }
 
     @Test

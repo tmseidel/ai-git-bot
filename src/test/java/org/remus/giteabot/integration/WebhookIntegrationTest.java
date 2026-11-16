@@ -183,6 +183,7 @@ class WebhookIntegrationTest {
         long startTime = System.currentTimeMillis();
         mockMvc.perform(post("/api/webhook/" + secret)
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Gitea-Event", "pull_request")
                         .content(webhookPayload))
                 .andExpect(status().isOk())
                 .andExpect(content().string("review triggered"));
@@ -204,6 +205,7 @@ class WebhookIntegrationTest {
 
         mockMvc.perform(post("/api/webhook/nonexistent-secret-xyz")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Gitea-Event", "pull_request")
                         .content(webhookPayload))
                 .andExpect(status().isNotFound());
     }
@@ -240,6 +242,7 @@ class WebhookIntegrationTest {
 
         mockMvc.perform(post("/api/webhook/" + bot.getWebhookSecret())
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Gitea-Event", "pull_request")
                         .content(webhookPayload))
                 .andExpect(status().isOk())
                 .andExpect(content().string("session closed"));
