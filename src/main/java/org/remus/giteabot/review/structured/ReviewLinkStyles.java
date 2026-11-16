@@ -1,5 +1,6 @@
 package org.remus.giteabot.review.structured;
 
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryType;
 
 /**
@@ -13,14 +14,20 @@ public final class ReviewLinkStyles {
     }
 
     /**
-     * @param cloneBaseUrl credential-free web base of the integration, e.g. {@code https://github.com}
-     * @param revision     commit the review was generated against; {@code null} disables links
+     * @param platform the integration's platform; its clone URL is the credential-free web base,
+     *                 e.g. {@code https://github.com}
+     * @param revision commit the review was generated against; {@code null} disables links
      */
-    public static ReviewLinkStyle forProvider(RepositoryType type, String cloneBaseUrl,
+    public static ReviewLinkStyle forProvider(RepositoryType type, RepositoryPlatform platform,
                                               String owner, String repo, String revision) {
+        String cloneBaseUrl = platform != null ? platform.getCloneUrl() : null;
         if (type == null || isEmpty(cloneBaseUrl) || isEmpty(owner) || isEmpty(repo)
                 || isEmpty(revision)) {
             return ReviewLinkStyle.NONE;
+        }
+        if (type == RepositoryType.AZURE_DEVOPS) {
+            return ref -> platform.getFileWebUrl(owner, repo, revision, ref.path(),
+                    ref.startLine(), ref.endLine()).orElse(null);
         }
         String base = stripTrailingSlash(cloneBaseUrl) + "/" + owner + "/" + repo;
         return ref -> {
@@ -34,9 +41,7 @@ public final class ReviewLinkStyles {
                         + anchor(ref, "#L", "-");
                 case BITBUCKET -> base + "/src/" + revision + "/" + path
                         + anchor(ref, "#lines-", ":");
-                // Azure DevOps addresses a file through query parameters and per-provider project
-                // names; a path-only line anchor would be a fabricated link.
-                case AZURE_DEVOPS -> null;
+                case AZURE_DEVOPS -> throw new IllegalStateException("handled above");
             };
         };
     }

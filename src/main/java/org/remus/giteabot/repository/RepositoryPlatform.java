@@ -146,6 +146,19 @@ public abstract class RepositoryPlatform {
     }
 
     /**
+     * The browser URL of {@code path} at {@code revision}, anchored to the given lines, for
+     * providers whose file links cannot be derived from {@code {cloneUrl}/{owner}/{repo}}.
+     * Empty means the caller decides, or renders the location as plain text.
+     *
+     * @param startLine first line to highlight, or {@code null} for the whole file
+     * @param endLine   last line to highlight, or {@code null} for a single line
+     */
+    public Optional<String> getFileWebUrl(String owner, String repo, String revision, String path,
+                                          @Nullable Integer startLine, @Nullable Integer endLine) {
+        return Optional.empty();
+    }
+
+    /**
      * Returns the exception {@link #getRepositoryRemote} throws for a transport this provider
      * resolves no remote for. Without it, Git would be handed SSH credentials together with an
      * HTTP remote and fail with an unrelated authentication error.

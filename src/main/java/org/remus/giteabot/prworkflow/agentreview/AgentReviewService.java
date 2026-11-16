@@ -185,7 +185,7 @@ public class AgentReviewService {
     private ReviewLinkStyle linkStyle(WebhookPayload payload, String owner, String repo) {
         return ReviewLinkStyles.forProvider(
                 bot.getGitIntegration() != null ? bot.getGitIntegration().getProviderType() : null,
-                repositoryPlatform.getCloneUrl(), owner, repo, expectedHeadSha(payload));
+                repositoryPlatform, owner, repo, expectedHeadSha(payload));
     }
 
     /** The bot's provider mention, or {@code null} when the integration has no username. */
