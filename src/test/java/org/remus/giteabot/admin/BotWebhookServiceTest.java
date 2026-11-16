@@ -5,6 +5,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.validation.Workspace;
@@ -302,6 +304,48 @@ class BotWebhookServiceTest {
 
         comment.setBody("@reviewbot please review this again");
         assertTrue(botWebhookService.isReviewAgainRequest(payload, "@reviewbot"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "@ai_bot please review again",
+            "@ai_bot - Review the Pull-Request again",
+            "@ai_bot review the MR again",
+            "@ai_bot please review the diff again",
+            "@ai_bot can you re-review?",
+            "@ai_bot rereview please",
+            "@ai_bot re review please",
+            "@ai_bot review the pull request again",
+            "@ai_bot review the merge request again",
+            "@ai_bot repeat the code-review",
+            "@ai_bot repeat the code review",
+            "@ai_bot repeat your review"})
+    void isReviewAgainRequest_acceptsExplicitRequests(String body) {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setBody(body);
+        payload.setComment(comment);
+
+        assertTrue(botWebhookService.isReviewAgainRequest(payload, "@ai_bot"), body);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "@ai_bot can you explain that review comment again?",
+            "@ai_bot the review flagged this again, why?",
+            "@ai_bot please review the failing test again and fix it",
+            "@ai_bot review this file",
+            "@ai_bot repeat that explanation of the review",
+            "@ai_bot what did the review say again?",
+            "@ai_bot preview again",
+            "@ai_bot reviewed again, still failing"})
+    void isReviewAgainRequest_rejectsQuestionsThatOnlyMentionReviewAndAgain(String body) {
+        WebhookPayload payload = new WebhookPayload();
+        WebhookPayload.Comment comment = new WebhookPayload.Comment();
+        comment.setBody(body);
+        payload.setComment(comment);
+
+        assertFalse(botWebhookService.isReviewAgainRequest(payload, "@ai_bot"), body);
     }
 
     // ---- handlePrComment routing tests ----

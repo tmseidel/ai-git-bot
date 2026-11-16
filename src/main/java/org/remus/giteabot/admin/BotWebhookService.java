@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Handles webhook events for persisted {@link Bot} entities using their
@@ -46,6 +47,22 @@ import java.util.Set;
 @Slf4j
 @Service
 public class BotWebhookService {
+
+    /**
+     * Phrasings that ask for the review to be run again: "re-review", "review (this / the
+     * pull request / the diff ...) again", "repeat the (code) review". Deliberately narrow:
+     * a comment merely containing "review" and "again" — "can you explain that review
+     * comment again?" — is a question for the bot, not a request to rerun every workflow.
+     */
+    private static final Pattern REVIEW_AGAIN = Pattern.compile(String.join("|",
+            // re-review, re review, rereview
+            "\\bre-?\\s?review\\b",
+            // review again, review (this / the PR / the diff ...) again
+            "\\breview\\s+(?:(?:this|it|the|that|my|our)\\s+)?"
+                    + "(?:(?:pull[\\s-]?request|pr|merge[\\s-]?request|mr|changes|code|diff)\\s+)?again\\b",
+            // repeat the (code) review
+            "\\brepeat\\s+(?:(?:the|your|a)\\s+)?(?:code[\\s-]?)?review\\b"),
+            Pattern.CASE_INSENSITIVE);
 
     private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final AgentSessionService agentSessionService;
@@ -864,9 +881,8 @@ public class BotWebhookService {
             return false;
         }
         // Ignore the alias itself, so a bot named e.g. @reviewbot does not count as asking for a review
-        String normalized = BotMention.replaceMention(body, botAlias, " ").toLowerCase();
-        return normalized.contains("review")
-                && (normalized.contains("again") || normalized.contains("re-review") || normalized.contains("repeat"));
+        String normalized = BotMention.replaceMention(body, botAlias, " ");
+        return REVIEW_AGAIN.matcher(normalized).find();
     }
 
     /**
