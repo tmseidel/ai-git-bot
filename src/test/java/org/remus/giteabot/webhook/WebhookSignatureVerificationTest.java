@@ -27,11 +27,11 @@ class WebhookSignatureVerificationTest {
     private static final byte[] BODY = "{\"action\":\"opened\"}".getBytes(StandardCharsets.UTF_8);
     private static final String HMAC = WebhookSignatures.hmacSha256Hex(SECRET, BODY);
 
-    private final WebhookTranslator gitea = new GiteaWebhookTranslator();
-    private final WebhookTranslator github = new GitHubWebhookTranslator();
-    private final WebhookTranslator gitlab = new GitLabWebhookTranslator();
-    private final WebhookTranslator bitbucket = new BitbucketWebhookTranslator(null, null, null);
-    private final WebhookTranslator azureDevops = new AzureDevopsWebhookTranslator(null, null);
+    private final WebhookTranslator gitea = new GiteaWebhookTranslator(null);
+    private final WebhookTranslator github = new GitHubWebhookTranslator(null);
+    private final WebhookTranslator gitlab = new GitLabWebhookTranslator(null);
+    private final WebhookTranslator bitbucket = new BitbucketWebhookTranslator(null, null);
+    private final WebhookTranslator azureDevops = new AzureDevopsWebhookTranslator(null, null, null);
 
     @Test
     void hmacSha256Hex_matchesAKnownValue() {

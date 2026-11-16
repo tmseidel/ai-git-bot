@@ -90,6 +90,17 @@ class WebhookIntegrationTest {
     }
 
     private static void setupGiteaServer() {
+        // The account the token authenticates as: the webhook translator identifies the bot by it.
+        giteaServer.createContext("/api/v1/user", exchange -> {
+            byte[] response = """
+                    {"id": 42, "login": "ai_bot", "full_name": "AI Bot", "email": "ai_bot@example.com"}
+                    """.getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
+        });
         giteaServer.createContext("/api/v1/repos/", exchange -> {
             String path = exchange.getRequestURI().getPath();
             String method = exchange.getRequestMethod();
@@ -260,7 +271,7 @@ class WebhookIntegrationTest {
                         "body": "This PR adds JWT-based authentication.",
                         "state": "open",
                         "user": {"login": "testowner"},
-                        "requested_reviewers": [{"login": "ai_bot"}],
+                        "requested_reviewers": [{"id": 42, "login": "ai_bot"}],
                         "head": {"ref": "feature/auth", "sha": "abc123"},
                         "base": {"ref": "main", "sha": "def456"}
                     },

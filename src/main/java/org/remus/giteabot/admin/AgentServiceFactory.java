@@ -85,7 +85,7 @@ public class AgentServiceFactory {
         requireSystemPrompt(bot);
         return new WriterAgentService(platform, aiClient, promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService,
-                bot.getSystemPrompt().getWriterAgentSystemPrompt(), bot.getGitIntegration().getUsername(),
+                bot.getSystemPrompt().getWriterAgentSystemPrompt(),
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
                 getContextWindowTokens(bot), pythonExecution);

@@ -19,7 +19,7 @@ class GitLabWebhookPayloadTranslationTest {
 
     @BeforeEach
     void setUp() {
-        handler = new GitLabWebhookTranslator();
+        handler = new GitLabWebhookTranslator(null);
     }
 
     @ParameterizedTest

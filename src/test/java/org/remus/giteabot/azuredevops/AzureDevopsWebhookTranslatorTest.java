@@ -3,9 +3,11 @@ package org.remus.giteabot.azuredevops;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.PullRequestStateTracker;
+import org.remus.giteabot.event.TestBotAccounts;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 
@@ -35,11 +37,12 @@ class AzureDevopsWebhookTranslatorTest {
     @BeforeEach
     void setUp() {
         repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
-        translator = new AzureDevopsWebhookTranslator(repositoryPlatformFactory, new PullRequestStateTracker());
+        translator = new AzureDevopsWebhookTranslator(repositoryPlatformFactory, new PullRequestStateTracker(),
+                TestBotAccounts.resolver(TestBotAccounts.user("bot@contoso.com"), repositoryPlatformFactory,
+                        mock(BotService.class)));
 
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://dev.azure.com/contoso");
-        integration.setUsername("bot@contoso.com");
 
         bot = new Bot();
         bot.setId(1L);
@@ -50,6 +53,23 @@ class AzureDevopsWebhookTranslatorTest {
     /** Azure DevOps carries the event type in the body, so no header is needed. */
     private WebhookEvent translate(Map<String, Object> payload) {
         return translator.translate(bot, Map.of(), payload);
+    }
+
+    // ---- Bot account ----
+
+    @Test
+    void botAccount_isAskedForInTheRepositorysOrganization() {
+        translate(pullRequestPayload("git.pullrequest.created"));
+
+        verify(repositoryPlatformFactory.getPlatform(bot.getGitIntegration())).getUser("contoso");
+    }
+
+    @Test
+    void unresolvableBotAccount_ignoresEvent() {
+        translator = new AzureDevopsWebhookTranslator(repositoryPlatformFactory, new PullRequestStateTracker(),
+                TestBotAccounts.unresolvable("TF400813: not authorized"));
+
+        assertEquals(WebhookEventKind.IGNORED, translate(pullRequestPayload("git.pullrequest.created")).kind());
     }
 
     // ---- Lifecycle ----
@@ -83,7 +103,7 @@ class AzureDevopsWebhookTranslatorTest {
     void pullRequestCreatedByTheBot_isFromTheBot() {
         // Azure DevOps reports the creator of a new pull request as its createdBy.
         WebhookEvent event = translate(withResource(pullRequestPayload("git.pullrequest.created"),
-                "createdBy", Map.of("uniqueName", "bot@contoso.com")));
+                "createdBy", Map.of("id", "id-" + "bot@contoso.com", "uniqueName", "bot@contoso.com")));
 
         assertTrue(event.fromBot());
     }
@@ -227,7 +247,7 @@ class AzureDevopsWebhookTranslatorTest {
 
         WebhookEvent event = translate(withResource(
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA), "reviewers",
-                List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 10))));
+                List.of(Map.of("id", "id-" + "bot@contoso.com", "uniqueName", "bot@contoso.com", "vote", 10))));
 
         assertEquals(WebhookEventKind.IGNORED, event.kind());
     }
@@ -238,7 +258,7 @@ class AzureDevopsWebhookTranslatorTest {
 
         WebhookEvent event = translate(withResource(
                 pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA), "reviewers",
-                List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 0))));
+                List.of(Map.of("id", "id-" + "bot@contoso.com", "uniqueName", "bot@contoso.com", "vote", 0))));
 
         assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, event.kind());
     }
@@ -265,7 +285,7 @@ class AzureDevopsWebhookTranslatorTest {
                 "resource", Map.of(
                         "comment", Map.of("id", 7,
                                 "content", "@bot@contoso.com please review",
-                                "author", Map.of("uniqueName", "dev@contoso.com"))));
+                                "author", Map.of("id", "id-" + "dev@contoso.com", "uniqueName", "dev@contoso.com"))));
         // Note: "pullRequest" is deliberately absent from "resource".
 
         assertEquals(WebhookEventKind.IGNORED, translate(payload).kind());
@@ -305,7 +325,7 @@ class AzureDevopsWebhookTranslatorTest {
 
         assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
         assertFalse(event.botMentioned());
-        verifyNoInteractions(repositoryPlatformFactory);
+        verify(repositoryPlatformFactory, never()).getApiClient(any());
     }
 
     // ---- (b) organizationFromResourceContainers(Map) — envelope-based resolution ----
@@ -394,7 +414,7 @@ class AzureDevopsWebhookTranslatorTest {
                 "resource", Map.of(
                         "comment", Map.of("id", 7,
                                 "content", content,
-                                "author", Map.of("uniqueName", "dev@contoso.com"),
+                                "author", Map.of("id", "id-" + "dev@contoso.com", "uniqueName", "dev@contoso.com"),
                                 "_links", Map.of("threads", Map.of("href",
                                         "https://dev.azure.com/contoso/_apis/git/repositories/"
                                                 + "my-service/pullRequests/42/threads/5"))),
@@ -409,7 +429,7 @@ class AzureDevopsWebhookTranslatorTest {
     private static Map<String, Object> pullRequestPayloadWithReviewers(String eventType, String sha,
                                                                        String... uniqueNames) {
         return withResource(pullRequestPayloadWithHeadSha(eventType, sha), "reviewers",
-                java.util.Arrays.stream(uniqueNames).map(name -> Map.of("uniqueName", name)).toList());
+                java.util.Arrays.stream(uniqueNames).map(name -> Map.of("id", "id-" + name, "uniqueName", name)).toList());
     }
 
     private static Map<String, Object> pullRequestPayloadWithoutReviewers(String eventType, String sha) {
@@ -442,7 +462,7 @@ class AzureDevopsWebhookTranslatorTest {
                         "status", "active",
                         "sourceRefName", "refs/heads/feature",
                         "targetRefName", "refs/heads/main",
-                        "createdBy", Map.of("uniqueName", "dev@contoso.com"),
+                        "createdBy", Map.of("id", "id-" + "dev@contoso.com", "uniqueName", "dev@contoso.com"),
                         "reviewers", List.of(),
                         "repository", Map.of("name", "my-service",
                                 "project", Map.of("name", "MyProject"),

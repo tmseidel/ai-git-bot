@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
+import org.remus.giteabot.event.BotAccountResolver;
 import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.PullRequestStateTracker;
 import org.remus.giteabot.event.WebhookEvent;
@@ -14,6 +15,7 @@ import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.stereotype.Component;
 
 import java.net.URI;
@@ -67,6 +69,7 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
 
     private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final PullRequestStateTracker stateTracker;
+    private final BotAccountResolver botAccountResolver;
 
     @Override
     public RepositoryType providerType() {
@@ -100,7 +103,14 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
             return WebhookEvent.ignored("unhandled Azure DevOps event type '" + eventType + "'");
         }
 
-        BotIdentity identity = BotIdentity.of(bot);
+        // Azure DevOps answers the identity lookup only inside an organization the token may
+        // access, so it is asked in the repository's owner, the event's organization.
+        RepositoryUser botAccount = botAccountResolver.resolve(bot,
+                webhookPayload.getRepository().getOwner().getLogin());
+        if (botAccount == null) {
+            return WebhookEvent.ignored("bot account could not be resolved");
+        }
+        BotIdentity identity = new BotIdentity(botAccount);
         return switch (eventType) {
             case "git.pullrequest.created" -> {
                 // Seed the head sha and the reviewer list so the git.pullrequest.updated
@@ -470,12 +480,11 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
         if (user == null) {
             return null;
         }
-        WebhookPayload.Owner owner = new WebhookPayload.Owner();
-        // Only uniqueName identifies the user. displayName is user-editable, and the login
-        // feeds the bot-user, whitelist and PR-author checks, so falling back to it would
-        // let anyone match those by renaming themselves.
-        owner.setLogin((String) user.get("uniqueName"));
-        return owner;
+        // The id is the identity GUID, which the bot is recognised by. As the login only
+        // uniqueName will do: displayName is user-editable, and the login feeds the whitelist
+        // and PR-author checks, so falling back to it would let anyone match those by
+        // renaming themselves.
+        return WebhookPayload.Owner.of(user.get("id"), (String) user.get("uniqueName"));
     }
 
     /**
@@ -483,7 +492,7 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
      * <p>
      * {@code Stream.toList()} keeps nulls, and {@link #extractUser} returns one for an
      * entry that is absent or not an object, so an unfiltered list would hand
-     * {@link BotIdentity#isReviewer} a null to call {@code getLogin()} on. An empty list still
+     * {@link BotIdentity#isReviewer} a null to call {@code getId()} on. An empty list still
      * means "no reviewers"; only a {@code null} list means "this subscription does not
      * send them", which {@link #botReviewerAdded} must keep telling apart.
      */

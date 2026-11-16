@@ -5,7 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.event.TestBotAccounts;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -18,6 +20,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * Tests how {@link GitLabWebhookTranslator} turns GitLab webhooks into {@link WebhookEvent}s.
@@ -30,11 +34,10 @@ class GitLabWebhookTranslatorTest {
 
     @BeforeEach
     void setUp() {
-        translator = new GitLabWebhookTranslator();
+        translator = new GitLabWebhookTranslator(TestBotAccounts.resolver("ai_bot"));
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername("ai_bot");
         bot.setGitIntegration(gitIntegration);
     }
 
@@ -52,6 +55,29 @@ class GitLabWebhookTranslatorTest {
         assertEquals(WebhookEventKind.PR_OPENED, event.kind());
         assertTrue(event.botIsReviewer());
         assertFalse(event.fromBot());
+    }
+
+    @Test
+    void unresolvableBotAccount_ignoresEvent() {
+        translator = new GitLabWebhookTranslator(TestBotAccounts.unresolvable("401 Unauthorized"));
+
+        WebhookEvent event = translate("Merge Request Hook",
+                mergeRequestPayload("open", List.of(user("ai_bot")), null));
+
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
+    }
+
+    @Test
+    void unhandledEventType_isIgnoredWithoutResolvingTheBotAccount() {
+        BotService botService = mock(BotService.class);
+        translator = new GitLabWebhookTranslator(TestBotAccounts.unresolvable("401 Unauthorized", botService));
+        // Pipeline events carry object_attributes too, so that check alone does not stop them.
+        Map<String, Object> pipeline = new HashMap<>(Map.of(
+                "object_kind", "pipeline",
+                "object_attributes", Map.of("id", 31, "status", "success")));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("Pipeline Hook", pipeline).kind());
+        verifyNoInteractions(botService);
     }
 
     @Test
@@ -352,6 +378,6 @@ class GitLabWebhookTranslatorTest {
     }
 
     private Map<String, Object> user(String username) {
-        return Map.of("username", username, "name", username);
+        return Map.of("id", "id-" + username, "username", username, "name", username);
     }
 }

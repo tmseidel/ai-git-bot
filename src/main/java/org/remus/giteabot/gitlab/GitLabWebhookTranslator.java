@@ -1,7 +1,9 @@
 package org.remus.giteabot.gitlab;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.event.BotAccountResolver;
 import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
@@ -11,11 +13,12 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Translates GitLab webhooks into provider-neutral {@link WebhookEvent}s.
@@ -31,9 +34,15 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GitLabWebhookTranslator implements WebhookTranslator {
 
     static final String EVENT_HEADER = "X-Gitlab-Event";
+
+    /** The event types {@link #translate} classifies; every other one is ignored. */
+    private static final Set<String> HANDLED_EVENT_TYPES = Set.of("Merge Request Hook", "Note Hook", "Issue Hook");
+
+    private final BotAccountResolver botAccountResolver;
 
     @Override
     public RepositoryType providerType() {
@@ -57,16 +66,27 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
 
         log.debug("Processing GitLab event: {} for bot '{}'", eventType, bot.getName());
 
+        // Checked before the bot's account is resolved: that may ask GitLab, and a failure is
+        // recorded on the bot, which pipeline, job and push events must not cause.
+        if (!HANDLED_EVENT_TYPES.contains(eventType)) {
+            return WebhookEvent.ignored("unhandled GitLab event type '" + eventType + "'");
+        }
+
         Map<String, Object> attrs = (Map<String, Object>) payload.get("object_attributes");
         if (attrs == null) {
             return WebhookEvent.ignored("GitLab " + eventType + " without object_attributes");
         }
 
-        BotIdentity identity = BotIdentity.of(bot);
+        RepositoryUser botAccount = botAccountResolver.resolve(bot, null);
+        if (botAccount == null) {
+            return WebhookEvent.ignored("bot account could not be resolved");
+        }
+        BotIdentity identity = new BotIdentity(botAccount);
         return switch (eventType) {
             case "Merge Request Hook" -> classifyMergeRequest(bot, identity, payload, attrs);
             case "Note Hook" -> classifyNote(identity, payload, attrs);
             case "Issue Hook" -> classifyIssue(identity, payload, attrs);
+            // Required for exhaustiveness only: HANDLED_EVENT_TYPES let nothing else through.
             default -> WebhookEvent.ignored("unhandled GitLab event type '" + eventType + "'");
         };
     }
@@ -247,9 +267,7 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         // Sender
         Map<String, Object> user = (Map<String, Object>) gitlabPayload.get("user");
         if (user != null) {
-            WebhookPayload.Owner sender = new WebhookPayload.Owner();
-            sender.setLogin((String) user.get("username"));
-            payload.setSender(sender);
+            payload.setSender(gitLabUser(user));
         }
 
         return payload;
@@ -272,19 +290,8 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         // Set the first assignee (GitLab uses assignee_id in object_attributes)
         List<Map<String, Object>> assignees = (List<Map<String, Object>>) gitlabPayload.get("assignees");
         if (assignees != null && !assignees.isEmpty()) {
-            Map<String, Object> firstAssignee = assignees.getFirst();
-            WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-            assignee.setLogin((String) firstAssignee.get("username"));
-            issue.setAssignee(assignee);
-
-            // Map all assignees
-            List<WebhookPayload.Owner> allAssignees = new ArrayList<>();
-            for (Map<String, Object> a : assignees) {
-                WebhookPayload.Owner ao = new WebhookPayload.Owner();
-                ao.setLogin((String) a.get("username"));
-                allAssignees.add(ao);
-            }
-            issue.setAssignees(allAssignees);
+            issue.setAssignee(gitLabUser(assignees.getFirst()));
+            issue.setAssignees(extractGitLabOwners(assignees));
         }
 
         payload.setIssue(issue);
@@ -298,9 +305,7 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         // Sender
         Map<String, Object> user = (Map<String, Object>) gitlabPayload.get("user");
         if (user != null) {
-            WebhookPayload.Owner sender = new WebhookPayload.Owner();
-            sender.setLogin((String) user.get("username"));
-            payload.setSender(sender);
+            payload.setSender(gitLabUser(user));
         }
 
         return payload;
@@ -460,20 +465,19 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         if (user == null || user.get("username") == null) {
             return null;
         }
-        WebhookPayload.Owner owner = new WebhookPayload.Owner();
-        owner.setLogin((String) user.get("username"));
-        return owner;
+        return gitLabUser(user);
     }
 
     private List<WebhookPayload.Owner> extractGitLabOwners(List<Map<String, Object>> owners) {
         if (owners == null) return null;
         return owners.stream()
-                .map(ownerMap -> {
-                    WebhookPayload.Owner owner = new WebhookPayload.Owner();
-                    owner.setLogin((String) ownerMap.get("username"));
-                    return owner;
-                })
+                .map(this::gitLabUser)
                 .toList();
+    }
+
+    /** A GitLab user object: its numeric {@code id} and its {@code username} as login. */
+    private WebhookPayload.Owner gitLabUser(Map<String, Object> user) {
+        return WebhookPayload.Owner.of(user.get("id"), (String) user.get("username"));
     }
 
 }
