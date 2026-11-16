@@ -39,7 +39,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -83,31 +82,6 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      */
     private AzureDevopsPlatform platform;
 
-    /**
-     * Cached identity GUID of the authenticated bot, resolved lazily for voting, keyed by
-     * organization. {@link #NO_IDENTITY} marks an organization where the lookup came back
-     * empty, so the request behind it is not repeated for every vote.
-     * <p>
-     * One key, not one field: on {@code https://dev.azure.com} a single integration serves
-     * any number of organizations — the organization is resolved per event from the
-     * webhook payload — and an Azure DevOps identity id is issued per organization. Caching
-     * one GUID for the client would send the first organization's id to every other one,
-     * where it addresses no reviewer. The map is bounded by the number of organizations a
-     * single Personal Access Token can reach, and the client itself is discarded whenever
-     * the integration (and with it the token) changes.
-     */
-    private final Map<String, String> cachedReviewerIds = new ConcurrentHashMap<>();
-
-    /**
-     * Cache entry for an organization the bot has no resolvable identity in.
-     * <p>
-     * Only a definitive answer is remembered — a {@code connectionData} response that
-     * carried no authenticated identity. A lookup that failed with an exception is left
-     * uncached, so a timeout or a 503 costs one extra request on the next vote rather
-     * than silently dropping every vote until the integration is next edited.
-     */
-    private static final String NO_IDENTITY = "";
-
     public AzureDevopsApiClient(RestClient restClient, String baseUrl, GitDiffService gitDiffService) {
         this.restClient = restClient;
         this.baseUrl = baseUrl;
@@ -142,10 +116,6 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     }
 
     /** The path prefix addressing the organization itself, for organization-level APIs. */
-    private Scope organizationScope(AzureDevopsAddress addr) {
-        return organizationScope(addr.organization());
-    }
-
     private Scope organizationScope(String organization) {
         if (AzureDevopsAddress.isOrganizationScopedBy(baseUrl, organization)) {
             return new Scope("/_apis", new Object[0]);
@@ -390,21 +360,21 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
             return;
         }
         AzureDevopsAddress addr = AzureDevopsAddress.parse(owner, repo);
-        String reviewerId = resolveReviewerId(addr);
-        if (reviewerId == null) {
-            return;
-        }
         int vote = action == PostReviewAction.APPROVE ? VOTE_APPROVE : VOTE_WAITING_FOR_AUTHOR;
         Scope scope = repositoryScope(addr);
-        run(() -> restClient.put()
-                .uri(builder -> builder
-                        .path(scope.path() + "/pullRequests/{prId}/reviewers/{reviewerId}")
-                        .queryParam("api-version", API_VERSION)
-                        .build(vars(scope, pullNumber, reviewerId)))
-                .body(Map.of("vote", vote))
-                .retrieve()
-                .toBodilessEntity(),
-                "cast vote on PR #{} in {}", pullNumber, repo);
+        // The review is already posted: an unresolvable identity only skips the vote, like a
+        // failed request, instead of failing the workflow.
+        run(() -> {
+            String reviewerId = platform.getUser(owner).id();
+            restClient.put()
+                    .uri(builder -> builder
+                            .path(scope.path() + "/pullRequests/{prId}/reviewers/{reviewerId}")
+                            .queryParam("api-version", API_VERSION)
+                            .build(vars(scope, pullNumber, reviewerId)))
+                    .body(Map.of("vote", vote))
+                    .retrieve()
+                    .toBodilessEntity();
+        }, "cast vote on PR #{} in {}", pullNumber, repo);
     }
 
     @Override
@@ -793,56 +763,6 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     }
 
     /**
-     * Resolves the authenticated bot's identity GUID, required to cast a vote, from
-     * {@code _apis/connectionData}. Returns {@code null} when the token has no
-     * resolvable identity in this organization, in which case the vote is skipped — the
-     * review comment has already been posted by then, so only the vote is lost.
-     * <p>
-     * {@code connectionData} is the only lookup. Matching {@code credentials.username()}
-     * against the pull request's existing reviewers would be an obvious second source,
-     * but Azure DevOps Personal Access Tokens authenticate as HTTP Basic with an
-     * <em>empty</em> username, so the integration form deliberately has no username field
-     * and {@code credentials.username()} is always null here — a fallback on it could
-     * never run.
-     * <p>
-     * The lookup is organization-scoped, and so is the cache that holds its result; see
-     * {@link #cachedReviewerIds}.
-     */
-    private String resolveReviewerId(AzureDevopsAddress addr) {
-        String cacheKey = addr.organization().toLowerCase(Locale.ROOT);
-        String cached = cachedReviewerIds.get(cacheKey);
-        if (cached != null) {
-            return NO_IDENTITY.equals(cached) ? null : cached;
-        }
-        Scope scope = organizationScope(addr);
-        try {
-            Map<String, Object> data = restClient.get()
-                    .uri(builder -> builder
-                            .path(scope.path() + "/connectionData")
-                            .queryParam("api-version", API_VERSION_CONNECTION_DATA)
-                            .build(scope.vars()))
-                    .retrieve()
-                    .body(new ParameterizedTypeReference<>() {});
-            if (data != null && data.get("authenticatedUser") instanceof Map<?, ?> user
-                    && user.get("id") instanceof String id && !id.isBlank()) {
-                cachedReviewerIds.put(cacheKey, id);
-                return id;
-            }
-        } catch (Exception e) {
-            // A timeout or a 503 says nothing about whether this token has an identity
-            // here, so it is left uncached and the next vote looks again.
-            log.debug("connectionData lookup failed; skipping vote: {}", e.getMessage());
-            return null;
-        }
-        // An answered-but-empty connectionData is a definitive "no identity here" and is
-        // worth remembering: the client outlives many events.
-        log.warn("Azure DevOps returned no authenticated identity for organization '{}'; "
-                + "skipping vote", addr.organization());
-        cachedReviewerIds.put(cacheKey, NO_IDENTITY);
-        return null;
-    }
-
-    /**
      * Resolves the identity from {@code connectionData} inside the organization {@code owner}
      * (the collection on Azure DevOps Server). The identity, its {@code id} and e-mail included, is
      * the same in every organization; the organization only decides where it is asked. The
@@ -861,7 +781,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
     @Override
     public RepositoryUser getAuthenticatedUser(String owner) {
         if (owner == null || owner.isBlank()) {
-            throw new IllegalStateException("Azure DevOps identifies the token per organization, but none was given");
+            throw new IllegalStateException("Azure DevOps is asked for the token's identity inside an organization, but none was given");
         }
         Scope scope = organizationScope(owner);
         ConnectionData data = restClient.get()

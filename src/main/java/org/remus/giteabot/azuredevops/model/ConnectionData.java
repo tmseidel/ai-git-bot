@@ -20,7 +20,7 @@ public class ConnectionData {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Identity {
 
-        /** The same at account and organization level; upper or lower case depending on the API. */
+        /** The account's identity id: the same in every organization. */
         private String id;
 
         private String providerDisplayName;
