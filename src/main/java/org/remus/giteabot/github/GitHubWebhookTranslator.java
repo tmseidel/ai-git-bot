@@ -2,22 +2,21 @@ package org.remus.giteabot.github;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
+import org.remus.giteabot.event.BotIdentity;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
+import org.remus.giteabot.event.WebhookSignatures;
+import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.RepositoryType;
 import org.remus.giteabot.repository.model.CommentId;
-import org.remus.giteabot.util.BotMention;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 import java.util.Map;
 
 /**
- * Handler for GitHub webhook events.
- * <p>
- * Receives GitHub webhook payloads and translates them into the common
- * {@link WebhookPayload} model used by the rest of the application, then
- * delegates to {@link BotWebhookService} for actual processing.
+ * Translates GitHub webhooks into provider-neutral {@link WebhookEvent}s.
  * <p>
  * GitHub event types are delivered via the {@code X-GitHub-Event} header.
  * Supported events: pull_request, issue_comment, pull_request_review,
@@ -25,130 +24,118 @@ import java.util.Map;
  */
 @Slf4j
 @Component
-public class GitHubWebhookHandler {
+public class GitHubWebhookTranslator implements WebhookTranslator {
 
-    private final BotWebhookService botWebhookService;
+    static final String EVENT_HEADER = "X-GitHub-Event";
 
-    public GitHubWebhookHandler(BotWebhookService botWebhookService) {
-        this.botWebhookService = botWebhookService;
+    @Override
+    public RepositoryType providerType() {
+        return RepositoryType.GITHUB;
     }
 
-    /**
-     * Handles a GitHub webhook event for the given bot.
-     *
-     * @param bot       the bot to process the webhook for
-     * @param eventType the GitHub event type from X-GitHub-Event header
-     * @param payload   the raw webhook payload
-     * @return response indicating the result of webhook processing
-     */
-    public ResponseEntity<String> handleWebhook(Bot bot, String eventType, Map<String, Object> payload) {
+    /** GitHub signs the body: {@code X-Hub-Signature-256: sha256=<hex hmac>}. */
+    @Override
+    public boolean verifySignature(String signingSecret, Map<String, String> headers, byte[] rawBody) {
+        return WebhookSignatures.matches("sha256=" + WebhookSignatures.hmacSha256Hex(signingSecret, rawBody),
+                headers.get("X-Hub-Signature-256"));
+    }
+
+    @Override
+    public WebhookEvent translate(Bot bot, Map<String, String> headers, Map<String, Object> payload) {
+        String eventType = headers.get(EVENT_HEADER);
         if (eventType == null) {
-            log.warn("Missing X-GitHub-Event header for GitHub webhook");
-            return ResponseEntity.ok("ignored");
+            log.warn("Missing {} header for GitHub webhook", EVENT_HEADER);
+            return WebhookEvent.ignored("missing " + EVENT_HEADER + " header");
         }
 
-        log.debug("Processing GitHub event: {} for bot '{}'", eventType, bot.getName());
+        log.debug("Processing GitHub event: {} (action={}) for bot '{}'", eventType, payload.get("action"), bot.getName());
 
         WebhookPayload webhookPayload = translatePayload(eventType, payload);
         if (webhookPayload == null) {
-            log.warn("Could not translate GitHub payload for event type: {}", eventType);
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("unhandled GitHub event type '" + eventType + "'");
         }
 
-        // Ignore events triggered by the bot itself
-        if (botWebhookService.isBotUser(bot, webhookPayload)) {
-            log.debug("Ignoring GitHub webhook event from bot's own user '{}'", bot.getGitIntegration().getUsername());
-            return ResponseEntity.ok("ignored");
+        // Every event is about a pull request or an issue; a payload carrying neither is malformed.
+        if (webhookPayload.getPullRequest() == null && webhookPayload.getIssue() == null) {
+            return WebhookEvent.ignored("GitHub " + eventType + " event without a pull request or issue");
         }
 
-        String botAlias = botWebhookService.getBotAlias(bot);
-
+        BotIdentity identity = BotIdentity.of(bot);
+        String action = webhookPayload.getAction();
         return switch (eventType) {
-            case "pull_request" -> handlePullRequestEvent(bot, webhookPayload);
-            case "issue_comment" -> handleIssueCommentEvent(bot, webhookPayload, botAlias);
-            case "pull_request_review" -> handlePullRequestReviewEvent(bot, webhookPayload);
-            case "pull_request_review_comment" -> handlePullRequestReviewCommentEvent(bot, webhookPayload, botAlias);
-            case "issues" -> handleIssuesEvent(bot, webhookPayload);
-            default -> {
-                log.debug("Unhandled GitHub event type: {}", eventType);
-                yield ResponseEntity.ok("ignored");
-            }
+            case "pull_request" -> classifyPullRequest(identity, webhookPayload, payload);
+            case "issue_comment" -> classifyIssueComment(identity, webhookPayload);
+            case "pull_request_review" -> "reviewed".equals(action)
+                    ? WebhookEvent.of(WebhookEventKind.PR_REVIEW_SUBMITTED, webhookPayload, identity)
+                    : WebhookEvent.ignored("pull_request_review action '" + action + "' is not 'submitted'");
+            case "pull_request_review_comment" -> "created".equals(action)
+                    ? WebhookEvent.of(WebhookEventKind.PR_INLINE_COMMENT, webhookPayload, identity)
+                    : WebhookEvent.ignored("review comment action '" + action + "' is not 'created'");
+            case "issues" -> classifyIssue(identity, webhookPayload, payload);
+            default -> WebhookEvent.ignored("unhandled GitHub event type '" + eventType + "'");
         };
     }
 
-    private ResponseEntity<String> handlePullRequestEvent(Bot bot, WebhookPayload payload) {
+    // ---- Classification ----
+
+    @SuppressWarnings("unchecked")
+    private WebhookEvent classifyPullRequest(BotIdentity identity, WebhookPayload payload, Map<String, Object> raw) {
         String action = payload.getAction();
-        if (("opened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
-                || ("reopened".equals(action) && (bot.isRunOnPrCreation() || hasBotReviewer(bot, payload)))
-                || ("synchronized".equals(action) && bot.isRunOnPrUpdate())
-                || ("review_requested".equals(action) && isRequestedReviewer(bot, payload))) {
-            botWebhookService.reviewPullRequest(bot, payload);
-            return ResponseEntity.ok("review triggered");
-        }
-        if ("closed".equals(action)) {
-            botWebhookService.handlePrClosed(bot, payload);
-            return ResponseEntity.ok("session closed");
-        }
-        return ResponseEntity.ok("ignored");
+        return switch (action != null ? action : "") {
+            case "opened" -> WebhookEvent.of(WebhookEventKind.PR_OPENED, payload, identity);
+            case "reopened" -> WebhookEvent.of(WebhookEventKind.PR_REOPENED, payload, identity);
+            case "synchronized" -> WebhookEvent.of(WebhookEventKind.PR_SYNCHRONIZED, payload, identity);
+            case "closed" -> WebhookEvent.of(WebhookEventKind.PR_CLOSED, payload, identity);
+            case "review_requested" -> identity.is(payload.getRequestedReviewer())
+                    ? WebhookEvent.of(WebhookEventKind.PR_REVIEWER_ADDED, payload, identity)
+                    : WebhookEvent.ignored("review requested from someone other than the bot");
+            // GitHub sends one "assigned" event per assignee and names the user just assigned
+            // in the top-level "assignee", so someone else being assigned later is ignored.
+            case "assigned" -> identity.is(extractOwner((Map<String, Object>) raw.get("assignee")))
+                    ? WebhookEvent.of(WebhookEventKind.PR_ASSIGNED, payload, identity)
+                    : WebhookEvent.ignored("pull request assigned to someone other than the bot");
+            default -> WebhookEvent.ignored("unhandled GitHub pull_request action '" + action + "'");
+        };
     }
 
-    private ResponseEntity<String> handleIssueCommentEvent(Bot bot, WebhookPayload payload,
-                                                            String botAlias) {
+    /**
+     * GitHub delivers pull request conversation comments as {@code issue_comment} events
+     * on the pull request's issue; {@code issue.pull_request} tells them apart from
+     * comments on plain issues.
+     */
+    private WebhookEvent classifyIssueComment(BotIdentity identity, WebhookPayload payload) {
         if (!"created".equals(payload.getAction())) {
-            return ResponseEntity.ok("ignored");
+            return WebhookEvent.ignored("comment action '" + payload.getAction() + "' is not 'created'");
         }
-        String body = payload.getComment() != null ? payload.getComment().getBody() : null;
-        if (!BotMention.isMentioned(body, botAlias)) {
-            return ResponseEntity.ok("ignored");
-        }
-        // Check if the comment is on a PR (issue with pull_request link)
         if (payload.getIssue() != null && payload.getIssue().getPullRequest() != null) {
-            botWebhookService.handleBotCommand(bot, payload);
-            return ResponseEntity.ok("command received");
+            return WebhookEvent.of(WebhookEventKind.PR_COMMENT, payload, identity);
         }
-        // Plain issue comment
-        botWebhookService.handleIssueComment(bot, payload);
-        return ResponseEntity.ok("issue comment received");
+        return WebhookEvent.of(WebhookEventKind.ISSUE_COMMENT, payload, identity);
     }
 
-    private ResponseEntity<String> handlePullRequestReviewEvent(Bot bot, WebhookPayload payload) {
-        if (!"reviewed".equals(payload.getAction())) {
-            return ResponseEntity.ok("ignored");
-        }
-        botWebhookService.handleReviewSubmitted(bot, payload);
-        return ResponseEntity.ok("review comments processing triggered");
-    }
-
-    private ResponseEntity<String> handlePullRequestReviewCommentEvent(Bot bot,
-                                                                        WebhookPayload payload,
-                                                                        String botAlias) {
-        if (!"created".equals(payload.getAction())) {
-            return ResponseEntity.ok("ignored");
-        }
-        if (payload.getComment() != null
-                && BotMention.isMentioned(payload.getComment().getBody(), botAlias)) {
-            botWebhookService.handleInlineComment(bot, payload);
-            return ResponseEntity.ok("inline comment response triggered");
-        }
-        return ResponseEntity.ok("ignored");
-    }
-
-    private ResponseEntity<String> handleIssuesEvent(Bot bot, WebhookPayload payload) {
+    private WebhookEvent classifyIssue(BotIdentity identity, WebhookPayload payload, Map<String, Object> raw) {
         String action = payload.getAction();
-        if ("assigned".equals(action)) {
-            if (payload.getIssue() != null
-                    && payload.getIssue().getAssignee() != null
-                    && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getIssue().getAssignee().getLogin())) {
-                botWebhookService.handleIssueAssigned(bot, payload);
-                return ResponseEntity.ok("agent triggered");
-            }
-            return ResponseEntity.ok("ignored");
-        }
-        if (("opened".equals(action) || "reopened".equals(action)) && bot.isRunOnIssueCreation()) {
-            botWebhookService.handleIssueCreated(bot, payload);
-            return ResponseEntity.ok("agent triggered");
-        }
-        return ResponseEntity.ok("ignored");
+        return switch (action != null ? action : "") {
+            case "assigned" -> payload.getIssue() != null && botWasAssigned(identity, payload, raw)
+                    ? WebhookEvent.of(WebhookEventKind.ISSUE_ASSIGNED, payload, identity)
+                    : WebhookEvent.ignored("issue assigned to someone other than the bot");
+            case "opened" -> WebhookEvent.of(WebhookEventKind.ISSUE_OPENED, payload, identity);
+            case "reopened" -> WebhookEvent.of(WebhookEventKind.ISSUE_REOPENED, payload, identity);
+            default -> WebhookEvent.ignored("unhandled GitHub issues action '" + action + "'");
+        };
+    }
+
+    /**
+     * GitHub sends one "assigned" event per assignee, naming the user just assigned in the
+     * top-level "assignee". {@code issue.assignee} is only the issue's first assignee: going
+     * by it would miss the bot being added second, and re-trigger it whenever someone else is
+     * added to an issue it is already first on. It is the fallback for payloads without the
+     * top-level field.
+     */
+    @SuppressWarnings("unchecked")
+    private boolean botWasAssigned(BotIdentity identity, WebhookPayload payload, Map<String, Object> raw) {
+        WebhookPayload.Owner assigned = extractOwner((Map<String, Object>) raw.get("assignee"));
+        return identity.is(assigned != null ? assigned : payload.getIssue().getAssignee());
     }
 
     // ---- GitHub → WebhookPayload translation ----
@@ -213,12 +200,6 @@ public class GitHubWebhookHandler {
         payload.setComment(extractReviewComment((Map<String, Object>) raw.get("comment")));
         if (payload.getPullRequest() != null) {
             payload.setNumber(payload.getPullRequest().getNumber());
-            WebhookPayload.Issue issue = new WebhookPayload.Issue();
-            issue.setNumber(payload.getPullRequest().getNumber());
-            issue.setTitle(payload.getPullRequest().getTitle());
-            WebhookPayload.IssuePullRequest ipr = new WebhookPayload.IssuePullRequest();
-            issue.setPullRequest(ipr);
-            payload.setIssue(issue);
         }
         return payload;
     }
@@ -274,6 +255,7 @@ public class GitHubWebhookHandler {
         pullRequest.setDiffUrl((String) pr.get("diff_url"));
         pullRequest.setUser(extractOwner((Map<String, Object>) pr.get("user")));
         pullRequest.setRequestedReviewers(extractOwners((List<Map<String, Object>>) pr.get("requested_reviewers")));
+        pullRequest.setAssignees(extractOwners((List<Map<String, Object>>) pr.get("assignees")));
         Map<String, Object> head = (Map<String, Object>) pr.get("head");
         if (head != null) {
             WebhookPayload.Head h = new WebhookPayload.Head();
@@ -390,17 +372,5 @@ public class GitHubWebhookHandler {
             return n.longValue();
         }
         return null;
-    }
-
-    private boolean hasBotReviewer(Bot bot, WebhookPayload payload) {
-        return payload.getPullRequest() != null
-                && payload.getPullRequest().getRequestedReviewers() != null
-                && payload.getPullRequest().getRequestedReviewers().stream()
-                .anyMatch(reviewer -> bot.getGitIntegration().getUsername().equalsIgnoreCase(reviewer.getLogin()));
-    }
-
-    private boolean isRequestedReviewer(Bot bot, WebhookPayload payload) {
-        return payload.getRequestedReviewer() != null
-                && bot.getGitIntegration().getUsername().equalsIgnoreCase(payload.getRequestedReviewer().getLogin());
     }
 }

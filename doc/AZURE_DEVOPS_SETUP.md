@@ -166,6 +166,8 @@ Service Hook subscription's configuration (and the URL/secret combination) as se
 
 ## Review Workflow
 
+See [Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for every trigger per provider.
+
 - First review: create the pull request with the bot already listed as a reviewer, or add
   the bot as a reviewer after opening the PR. Both work without **Run on PR creation** or
   **Run on PR update**; adding the bot as a reviewer is an explicit request for a review,
@@ -179,10 +181,19 @@ Service Hook subscription's configuration (and the URL/secret combination) as se
   @ai_bot - Review the Pull-Request again
   ```
 
-- **Only the pull request author's comments trigger a re-review.** A comment from anyone
-  else that mentions the bot and asks for a re-review is silently ignored — the bot still
-  responds to other bot commands and @-mentions from any user, but the "review again"
-  request specifically is author-restricted.
+- **Anyone may ask for a re-review**, like for any other comment that mentions the bot.
+  With a **User Whitelist** on the bot, the commenter must be listed.
+- **Public repositories:** without a **User Whitelist**, anyone who can comment can make
+  the bot run its PR workflows (a "review again" request, slash commands) and spend AI
+  tokens. Set a whitelist on bots that serve repositories where people you don't trust can
+  comment. See [User Whitelist](USER_GUIDE.md#per-bot-user-whitelist-token-spend-guard).
+- **User Whitelist and automatic reviews**: Azure DevOps pull request events do not say
+  who made the change. For reviews started by an event (PR created, bot added as
+  reviewer, new commits, reactivation) the whitelist is therefore checked against the
+  **pull request's author**, not against whoever added the bot or pushed. A pull request
+  opened by someone who is not listed is never reviewed automatically; a listed user can
+  still ask for a review with a "review again" comment, which is checked against the
+  commenter.
 
 ### Post-review action and votes
 

@@ -517,8 +517,8 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      * {@code content}, {@code commentType} and {@code _links} — and never the enclosing
      * thread's {@code threadContext}. Without this lookup an inline (per-file) comment is
      * indistinguishable from a top-level one, and
-     * {@code AzureDevopsWebhookHandler#handlePullRequestComment} would route every inline
-     * {@code @bot} mention to the generic command path.
+     * {@code AzureDevopsWebhookTranslator} would classify every inline
+     * {@code @bot} mention as a top-level pull request comment.
      *
      * @return the thread's anchor, or {@code null} when the thread has no file context
      *         (a top-level conversation comment) or could not be fetched

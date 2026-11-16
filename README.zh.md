@@ -207,7 +207,7 @@ Bot 直接在线程中回答，并保持对话上下文。
 
 ### E2E 测试生成
 
-将一个 PR 分配给 bot，它可以为变更生成 Playwright 测试套件，部署预览环境，在预览上运行测试，并将结果发布回 PR。
+将 PR 分配给 bot，或将 bot 添加为 PR 的审阅者，它可以为变更生成 Playwright 测试套件，部署预览环境，在预览上运行测试，并将结果发布回 PR。
 
 <details>
 <summary>📸 截图：PR 中的 E2E 测试生成</summary>

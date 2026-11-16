@@ -225,9 +225,12 @@ Each bot gets a unique webhook URL displayed in the web UI:
 
 | Event | Gitea | GitHub | GitLab | Bitbucket | Azure DevOps |
 |-------|-------|--------|--------|-----------|--------------|
-| Pull Request | ✅ | ✅ | ✅ Merge request events | ✅ PR: Created/Updated | ✅ PR created/updated |
+| Pull Request | ✅ | ✅ | ✅ Merge request events | ✅ PR: Created, Updated, Merged, Declined | ✅ PR created/updated |
 | Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | ✅ PR comment events |
 | Issues (agents) | ✅ | ✅ | ✅ Issues events | — | — (Work Items) |
+
+What the bot does with each event, per provider and bot setting, is listed in
+[PR Workflows → Triggers per Git provider](https://github.com/tmseidel/ai-git-bot/blob/main/doc/PR_WORKFLOWS.md#triggers-per-git-provider).
 
 ---
 

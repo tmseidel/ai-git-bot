@@ -100,7 +100,7 @@ A private primary address is never used.
 
 Webhooks tell GitHub to notify the bot when pull request events occur. Each bot has a unique webhook URL.
 
-Code reviews are explicit-request only: pushes to an existing pull request do not trigger another review by themselves.
+By default, a review runs when a pull request is opened with the bot as a reviewer, or when the bot is requested as a reviewer or assigned to the pull request later; pushes to an existing pull request trigger another review only when **Run workflow when PR head is updated** is enabled. See [Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for every trigger per provider.
 
 ### Getting the Webhook URL
 
@@ -117,7 +117,7 @@ Code reviews are explicit-request only: pushes to an existing pull request do no
    - **Content type:** `application/json`
    - **Secret:** Set a strong random secret here and enter the same value as **Webhook signing secret** on the bot. AI-Git-Bot then verifies the `X-Hub-Signature-256` HMAC of every delivery and rejects forged events. (Leave empty only on fully trusted networks — authentication then relies solely on the URL path secret.)
 3. Under **Which events would you like to trigger this webhook?**, select **Let me select individual events**, then enable:
-   - ✅ **Pull requests** (PR opened, reviewer added, reviewer re-requested)
+   - ✅ **Pull requests** (PR opened/reopened/closed, new commits, reviewer added or re-requested, bot assigned)
    - ✅ **Pull request reviews**
    - ✅ **Pull request review comments**
    - ✅ **Issue comments**
@@ -158,9 +158,10 @@ In the bot's web UI:
 ## Review Workflow
 
 - First review: create the pull request with the bot already listed under **Reviewers**, or add the bot as a reviewer after opening the PR.
-- Re-review: use GitHub's **Re-request review** action for the bot reviewer.
-- New commits: pushing to the PR does not run another review. Re-request the bot when you want a fresh review.
-- PR and inline comments that mention the bot are handled only when they are written by the pull request author.
+- Re-review: use GitHub's **Re-request review** action for the bot reviewer, or comment with the bot mention and an explicit re-review request (anyone may; with a **User Whitelist**, only listed users), for example `@ai-code-reviewer please review this again`.
+- New commits: pushing to the PR runs another review only when **Run workflow when PR head is updated** is enabled on the bot. Otherwise re-request the bot when you want a fresh review.
+- Comments: a PR comment or inline code comment that mentions the bot is answered whoever wrote it, a "review again" request included. With a **User Whitelist** on the bot, the commenter must be listed.
+- **Public repositories:** without a **User Whitelist**, anyone who can comment can make the bot run its PR workflows (a "review again" request, slash commands) and spend AI tokens. Set a whitelist on bots that serve repositories where people you don't trust can comment. See [User Whitelist](USER_GUIDE.md#per-bot-user-whitelist-token-spend-guard).
 
 ## GitHub Enterprise Server
 

@@ -213,7 +213,7 @@ The bot answers directly in the thread and keeps conversation context.
 
 ### E2E Test Generation
 
-Assign an PR to a bot and it can generate a Playwright test suite for the changes, deploy a preview environment, run the tests against that preview, and post the results back to the PR.
+Assign a PR to the bot or request it as reviewer, and it can generate a Playwright test suite for the changes, deploy a preview environment, run the tests against that preview, and post the results back to the PR.
 
 <details>
 <summary>📸 Screenshot: E2E test generation as part of a PR</summary>
