@@ -33,6 +33,12 @@ public class GitHubPlatform extends RepositoryPlatform {
     }
 
     @Override
+    public Optional<String> getIssueWebUrl(String owner, String repo, @Nullable Long number) {
+        return number == null ? Optional.empty()
+                : repositoryWebUrl(owner, repo).map(base -> base + "/issues/" + number);
+    }
+
+    @Override
     protected Optional<String> commentAnchor(PullRequestCommentKind kind, String commentId) {
         if (!isNumericId(commentId)) {
             return Optional.empty();

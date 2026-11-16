@@ -70,6 +70,11 @@ class WorkflowRunMigrationTest {
             List<String> oldTables = rows(statement, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
                     + "WHERE TABLE_NAME IN ('AI_USAGE_LOG', 'AI_ERROR_LOG')");
             assertThat(oldTables).isEmpty();
+
+            // The audit session id is dropped again once runs carry the repository and number.
+            List<String> sessionColumns = rows(statement, "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    + "WHERE COLUMN_NAME = 'SESSION_ID' AND TABLE_NAME IN ('WORKFLOW_RUN', 'AI_INTERACTION')");
+            assertThat(sessionColumns).isEmpty();
         }
     }
 

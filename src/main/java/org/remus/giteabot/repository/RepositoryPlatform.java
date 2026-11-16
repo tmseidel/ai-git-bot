@@ -177,6 +177,14 @@ public abstract class RepositoryPlatform {
     }
 
     /**
+     * The browser URL of issue {@code number}. Empty when the provider's issue page is not known
+     * or the repository's web address cannot be resolved; a wrong link is worse than none.
+     */
+    public Optional<String> getIssueWebUrl(String owner, String repo, @Nullable Long number) {
+        return Optional.empty();
+    }
+
+    /**
      * The browser URL of one comment on pull request {@code number}: the
      * {@linkplain #getPullRequestWebUrl pull request page} anchored to the comment. Empty
      * when the provider's anchor for this kind of comment is not known.

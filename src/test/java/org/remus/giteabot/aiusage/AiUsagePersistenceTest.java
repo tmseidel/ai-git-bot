@@ -18,7 +18,6 @@ import org.remus.giteabot.workflowrun.WorkflowRun;
 import org.remus.giteabot.workflowrun.WorkflowRunRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.ActiveProfiles;
@@ -257,7 +256,7 @@ class AiUsagePersistenceTest {
     }
 
     @Test
-    void rowsComeWithoutPayloadsAndThePayloadLoadsInFullById() {
+    void fullPayloadsAreStoredAndTheDashboardCountsFailedRunsAndAllTokens() {
         String big = "{\"messages\":\"" + "x".repeat(150_000) + "\"}";
         try (AuditRun run = AiAuditContext.openRun("review", TRIGGER)) {
             recordUsage(run, "small", 10, 1, "{\"a\":1}", "{\"b\":2}");
@@ -268,23 +267,12 @@ class AiUsagePersistenceTest {
             run.fail("401 Unauthorized");
         }
 
-        Page<AiUsageRow> rows = service.findUsage(null, null, 0, 20, "inputTokens", false);
-
-        assertThat(rows.getTotalElements()).isEqualTo(2);
-        assertThat(rows.getContent()).extracting(AiUsageRow::aiIntegrationName).containsExactly("big", "small");
-        AiUsageRow bigRow = rows.getContent().getFirst();
-        assertThat(bigRow.round()).isEqualTo(2);
-
-        AiUsageRawPayload payload = service.findRawPayload(bigRow.id()).orElseThrow();
+        AiInteraction bigOne = interactionRepository.findAll().stream()
+                .filter(interaction -> "big".equals(interaction.getAiIntegrationName())).findFirst().orElseThrow();
+        AiUsageRawPayload payload = interactionRepository.findRawPayloadById(bigOne.getId()).orElseThrow();
         assertThat(payload.rawRequest()).isEqualTo(big);
         assertThat(payload.rawResponse()).isNull();
-        assertThat(service.findRawPayload(-1L)).isEmpty();
 
-        Page<AiErrorRow> errors = service.findErrors(null, null, 0, 20, "timestamp", false);
-        assertThat(errors.getContent()).singleElement().satisfies(error -> {
-            assertThat(error.aiIntegrationName()).isEqualTo("broken");
-            assertThat(error.errorMessage()).isEqualTo("401 Unauthorized");
-        });
         assertThat(service.countErrorsSince(java.time.Instant.EPOCH)).isEqualTo(1);
         assertThat(service.totalInputTokens()).isEqualTo(40);
     }

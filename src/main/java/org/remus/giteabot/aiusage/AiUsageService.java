@@ -1,7 +1,5 @@
 package org.remus.giteabot.aiusage;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.ai.AiAuditContext;
@@ -14,22 +12,16 @@ import org.remus.giteabot.workflowrun.WorkflowRun;
 import org.remus.giteabot.workflowrun.WorkflowRunRepository;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.time.Instant;
-import java.util.Map;
-import java.util.Optional;
 
 /**
- * Records and queries the audit log of AI provider interactions.
+ * Records the audit log of AI provider interactions; the Workflow runs page reads it through
+ * {@link org.remus.giteabot.workflowrun.WorkflowRunQueryService}.
  *
  * <p>Recording: every request to the provider becomes an {@link AiInteraction} of the
  * open {@link AuditRun} on the calling thread (see {@link AiAuditContext}). The run's
@@ -42,17 +34,8 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class AiUsageService implements AuditRun.Sink {
 
-    /** Page size of the tables on the "Usage" page. */
-    public static final int PAGE_SIZE = 20;
-
-    /** Upper bound for user-requested page sizes — keeps a single page query bounded. */
-    public static final int MAX_PAGE_SIZE = 100;
-
     /** Error message of runs and interactions that were still running when the application stopped. */
     static final String INTERRUPTED_MESSAGE = "Interrupted by restart";
-
-    /** Page size for streaming exports — keeps heap bounded (~10 MB worst case). */
-    private static final int EXPORT_PAGE_SIZE = 100;
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 2000;
     private static final int MAX_STACK_TRACE_LENGTH = 100_000;
@@ -62,16 +45,6 @@ public class AiUsageService implements AuditRun.Sink {
      * context), but a single call can carry a whole file, so they are capped.
      */
     private static final int MAX_TOOL_ARGUMENTS_LENGTH = 65_535;
-
-    /** Sort keys the Usage page sends, mapped to {@link AiInteraction} properties. */
-    private static final Map<String, String> USAGE_SORT_COLUMNS = Map.of(
-            "timestamp", "startedAt", "aiIntegrationName", "aiIntegrationName", "sessionId", "sessionId",
-            "round", "roundNumber", "inputTokens", "inputTokens", "outputTokens", "outputTokens",
-            "cacheCreationInputTokens", "cacheCreationInputTokens",
-            "cacheReadInputTokens", "cacheReadInputTokens");
-    private static final Map<String, String> ERROR_SORT_COLUMNS = Map.of(
-            "timestamp", "startedAt", "aiIntegrationName", "aiIntegrationName", "sessionId", "sessionId",
-            "errorMessage", "errorMessage");
 
     private final AiInteractionRepository interactionRepository;
     private final AiToolCallRepository toolCallRepository;
@@ -98,7 +71,6 @@ public class AiUsageService implements AuditRun.Sink {
             interaction.setRoundNumber(run.getRound());
             interaction.setAttempt(run.getAttempt());
             interaction.setAiIntegrationName(aiIntegrationName);
-            interaction.setSessionId(AiAuditContext.getSessionId());
             interaction.setStatus(RunStatus.RUNNING);
             interaction.setStartedAt(run.getAttemptStartedAt());
             run.setInteractionId(interactionRepository.save(interaction).getId());
@@ -177,7 +149,6 @@ public class AiUsageService implements AuditRun.Sink {
         entity.setRepoName(trigger.repoName());
         entity.setTriggerKind(trigger.triggerKind());
         entity.setTriggerNumber(trigger.triggerNumber());
-        entity.setSessionId(trigger.sessionId());
         entity.setState(RunStatus.RUNNING);
         entity.setStartedAt(run.getAttemptStartedAt());
         run.attach(runRepository.save(entity).getId(), this);
@@ -239,7 +210,7 @@ public class AiUsageService implements AuditRun.Sink {
         }
     }
 
-    // ------------------------------------------------------------------ queries
+    // ------------------------------------------------------------------ housekeeping and totals
 
     /** Removes every finished run with its interactions and tool calls. Running runs are kept. */
     @Transactional
@@ -247,82 +218,6 @@ public class AiUsageService implements AuditRun.Sink {
         toolCallRepository.deleteAllOfFinishedRuns();
         interactionRepository.deleteAllOfFinishedRuns();
         runRepository.deleteAllFinished();
-    }
-
-    /** A page of successful interactions; the raw payloads are not loaded (see {@link #findRawPayload}). */
-    @Transactional(readOnly = true)
-    public Page<AiUsageRow> findUsage(Instant from, Instant to, int page, int pageSize,
-                                      String sortColumn, boolean ascending) {
-        String column = USAGE_SORT_COLUMNS.getOrDefault(sortColumn, "startedAt");
-        return interactionRepository.findUsageRows(effectiveFrom(from), effectiveTo(to),
-                PageRequest.of(page, effectivePageSize(pageSize), sortOf(column, ascending)));
-    }
-
-    /**
-     * The raw payloads of one interaction, or empty when it does not exist or raw payload
-     * capture is disabled (stored payloads are then not shown, as the page hides the Details column).
-     */
-    @Transactional(readOnly = true)
-    public Optional<AiUsageRawPayload> findRawPayload(long id) {
-        if (!rawPayloadsEnabled()) {
-            return Optional.empty();
-        }
-        return interactionRepository.findRawPayloadById(id);
-    }
-
-    /** A page of failed interactions. */
-    @Transactional(readOnly = true)
-    public Page<AiErrorRow> findErrors(Instant from, Instant to, int page, int pageSize,
-                                       String sortColumn, boolean ascending) {
-        String column = ERROR_SORT_COLUMNS.getOrDefault(sortColumn, "startedAt");
-        return interactionRepository.findErrorRows(effectiveFrom(from), effectiveTo(to),
-                PageRequest.of(page, effectivePageSize(pageSize), sortOf(column, ascending)));
-    }
-
-    /**
-     * Normalizes a user-requested page size: non-positive values fall back to
-     * {@link #PAGE_SIZE}, oversized values are clamped to {@link #MAX_PAGE_SIZE}
-     * (the largest size the rows-per-page select offers) so a single request can
-     * never force an unbounded page query.
-     */
-    private static int effectivePageSize(int pageSize) {
-        return pageSize > 0 ? Math.min(pageSize, MAX_PAGE_SIZE) : PAGE_SIZE;
-    }
-
-    /**
-     * Streams all failed interactions in the given timespan as a JSON array directly to the
-     * provided output stream. Results are fetched in pages of {@value #EXPORT_PAGE_SIZE} rows so
-     * that heap usage stays bounded regardless of the total number of matching rows.
-     *
-     * <p>This method intentionally does <em>not</em> carry a {@code @Transactional} annotation —
-     * each page query opens its own short-lived read-only transaction via the Spring Data proxy,
-     * which is the correct pattern for streaming responses that outlive a single transaction.</p>
-     */
-    public void exportErrors(Instant from, Instant to, OutputStream outputStream) throws IOException {
-        Instant f = effectiveFrom(from);
-        Instant t = effectiveTo(to);
-
-        try (JsonGenerator gen = new ObjectMapper().getFactory().createGenerator(outputStream)) {
-            gen.writeStartArray();
-            int page = 0;
-            Page<AiErrorRow> result;
-            do {
-                result = interactionRepository.findErrorRows(f, t,
-                        PageRequest.of(page, EXPORT_PAGE_SIZE, Sort.by(Sort.Direction.DESC, "startedAt")));
-                for (AiErrorRow entry : result.getContent()) {
-                    gen.writeStartObject();
-                    gen.writeStringField("timestamp", entry.timestamp() != null ? entry.timestamp().toString() : null);
-                    gen.writeStringField("aiIntegration", entry.aiIntegrationName());
-                    gen.writeStringField("sessionId", entry.sessionId());
-                    gen.writeStringField("errorMessage", entry.errorMessage());
-                    gen.writeStringField("stackTrace", entry.stackTrace());
-                    gen.writeEndObject();
-                }
-                gen.flush();
-                page++;
-            } while (result.hasNext());
-            gen.writeEndArray();
-        }
     }
 
     /**
@@ -345,22 +240,6 @@ public class AiUsageService implements AuditRun.Sink {
     @Transactional(readOnly = true)
     public long totalOutputTokens() {
         return interactionRepository.sumOutputTokens();
-    }
-
-    private static Sort sortOf(String column, boolean ascending) {
-        Sort sort = Sort.by(ascending ? Sort.Direction.ASC : Sort.Direction.DESC, column);
-        if (!"startedAt".equals(column)) {
-            sort = sort.and(Sort.by(Sort.Direction.DESC, "startedAt"));
-        }
-        return sort;
-    }
-
-    private static Instant effectiveFrom(Instant from) {
-        return from != null ? from : Instant.EPOCH;
-    }
-
-    private static Instant effectiveTo(Instant to) {
-        return to != null ? to : Instant.now().plusSeconds(60);
     }
 
     private boolean rawPayloadsEnabled() {

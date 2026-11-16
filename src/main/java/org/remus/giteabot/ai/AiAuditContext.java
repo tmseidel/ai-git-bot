@@ -3,28 +3,18 @@ package org.remus.giteabot.ai;
 /**
  * Thread-local context that correlates AI interactions with what caused them: the open
  * {@link AuditRun workflow run} of the current thread. It receives the AI interactions and tool
- * calls, and its {@link AuditTrigger trigger} provides the session identifier (e.g.
- * {@code owner/repo#42}).
+ * calls.
  *
  * <p>The PR and issue workflow orchestrators open a run per workflow with try-with-resources.
  * Runs do not nest: workflows run one after another, and every AI call of a webhook task is made
- * inside one of them. Webhook handlers clear the context in a {@code finally} block, so a run can
- * never outlive its task.</p>
+ * inside one of them. {@link AiAuditContextClearingTaskDecorator} clears the context after every
+ * async task, so a run left open can never outlive its task.</p>
  */
 public final class AiAuditContext {
 
     private static final ThreadLocal<AuditRun> CURRENT = new ThreadLocal<>();
 
     private AiAuditContext() {
-    }
-
-    /**
-     * The session id ({@code owner/repo#n}) of the open run's trigger, or {@code null} outside a
-     * run.
-     */
-    public static String getSessionId() {
-        AuditRun run = CURRENT.get();
-        return run != null ? run.getTrigger().sessionId() : null;
     }
 
     /**

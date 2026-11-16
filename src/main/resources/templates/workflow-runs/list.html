@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.workflowRuns}, ~{::pageContent})}">
+<body>
+    <div th:fragment="pageContent" id="workflowRunsPage" th:data-locale="${#locale.toLanguageTag()}">
+
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2><i class="bi bi-graph-up" aria-hidden="true"></i> <span th:text="#{nav.workflowRuns}">Workflow runs</span></h2>
+            <div>
+                <button type="button" class="btn btn-outline-secondary btn-sm me-2" id="expandAllRuns">
+                    <i class="bi bi-arrows-expand" aria-hidden="true"></i> <span th:text="#{page.systemSettings.expandAll}">Expand all</span>
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="collapseAllRuns">
+                    <i class="bi bi-arrows-collapse" aria-hidden="true"></i> <span th:text="#{page.systemSettings.collapseAll}">Collapse all</span>
+                </button>
+            </div>
+        </div>
+
+        <style>
+            .sort-link { text-decoration: none; color: inherit; }
+            .run-toggle { width: 32px; height: 32px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+            .run-toggle .bi { transition: transform 0.2s ease-in-out; }
+            .run-toggle[aria-expanded="true"] .bi { transform: rotate(90deg); }
+            .run-detail-cell { padding-left: 60px !important; }
+            .legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+            .split-model { background: #0d6efd; }
+            .split-tools { background: #ffc107; }
+            .error-log-pre { white-space: pre-wrap; word-break: break-word; max-height: 24rem; overflow-y: auto; }
+            .attempt-cell { padding-left: 1.5rem !important; }
+        </style>
+
+        <!-- Filters: kept in the query string, so links can open a pre-filtered list -->
+        <form method="get" th:action="@{/workflow-runs}" class="mb-4 d-flex flex-column gap-2" id="runFilters">
+            <input type="hidden" name="tz" id="filterTz" th:value="${filter.tz}"/>
+            <input type="hidden" name="size" th:value="${filter.size}"/>
+            <input type="hidden" name="dir" th:value="${filter.dir}"/>
+            <input type="hidden" name="state" th:value="${filter.selectedState()}"/>
+            <div class="row g-2 align-items-end">
+                <div class="col-auto" style="width: 11rem;">
+                    <label for="filterRunId" class="form-label mb-0 small" th:text="#{workflowRuns.filter.runId}">Workflow run ID</label>
+                    <input type="number" min="1" class="form-control form-control-sm" id="filterRunId" name="runId" th:value="${filter.runId}"/>
+                </div>
+                <div class="col-auto" style="width: 14rem;">
+                    <label for="filterProject" class="form-label mb-0 small" th:text="#{workflowRuns.filter.project}">Project</label>
+                    <select class="form-select form-select-sm" id="filterProject" name="project">
+                        <option value="" th:text="#{workflowRuns.filter.allProjects}">All projects</option>
+                        <option th:each="p : ${options.projects}" th:value="${p}" th:text="${p}"
+                                th:selected="${p == filter.project}">owner/repo</option>
+                    </select>
+                </div>
+                <div class="col-auto" style="width: 9rem;">
+                    <label for="filterNumber" class="form-label mb-0 small" th:text="#{workflowRuns.filter.number}">PR / issue number</label>
+                    <input type="number" min="1" class="form-control form-control-sm" id="filterNumber" name="number" th:value="${filter.number}"/>
+                </div>
+                <div class="col-auto" style="width: 13rem;">
+                    <label for="filterType" class="form-label mb-0 small" th:text="#{workflowRuns.filter.type}">Workflow type</label>
+                    <select class="form-select form-select-sm" id="filterType" name="type">
+                        <option value="" th:text="#{workflowRuns.filter.allTypes}">All types</option>
+                        <option th:each="t : ${options.workflowTypes}" th:value="${t}"
+                                th:text="${#messages.msgOrNull('workflow.' + t + '.name') ?: t}"
+                                th:selected="${t == filter.type}">type</option>
+                    </select>
+                </div>
+                <div class="col-auto" style="width: 11rem;">
+                    <label for="filterBot" class="form-label mb-0 small" th:text="#{workflowRuns.filter.bot}">Bot</label>
+                    <select class="form-select form-select-sm" id="filterBot" name="bot">
+                        <option value="" th:text="#{workflowRuns.filter.allBots}">All bots</option>
+                        <option th:each="b : ${options.bots}" th:value="${b.id}" th:text="${b.name}"
+                                th:selected="${b.id == filter.bot}">bot</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row g-2 align-items-end">
+                <div class="col-auto">
+                    <span class="form-label mb-0 small d-block" id="filterStateLabel" th:text="#{workflowRuns.filter.state}">State</span>
+                    <div class="btn-group btn-group-sm" role="group" aria-labelledby="filterStateLabel">
+                        <a th:href="|@{/workflow-runs}?${filter.with('state', null)}|"
+                           th:with="selected=${filter.selectedState()?.name()}"
+                           th:class="${selected == null} ? 'btn btn-secondary' : 'btn btn-outline-secondary'"
+                           th:attr="aria-current=${selected == null} ? 'true' : null">
+                            <span th:text="#{workflowRuns.state.ALL}">All</span>
+                            <span class="badge text-bg-secondary ms-1"
+                                  th:text="${allCount}">0</span>
+                        </a>
+                        <a th:each="s : ${ {'SUCCEEDED', 'ERROR', 'RUNNING'} }"
+                           th:with="selected=${filter.selectedState()?.name()}"
+                           th:href="|@{/workflow-runs}?${filter.with('state', s)}|"
+                           th:class="${selected == s} ? 'btn btn-secondary' : 'btn btn-outline-secondary'"
+                           th:attr="aria-current=${selected == s} ? 'true' : null">
+                            <span th:text="${#messages.msg('workflowRuns.state.' + s)}">State</span>
+                            <span class="badge text-bg-secondary ms-1"
+                                  th:text="${stateCounts.get(T(org.remus.giteabot.workflowrun.RunStatus).valueOf(s))}">0</span>
+                        </a>
+                    </div>
+                </div>
+                <div class="col-auto pb-1 me-2">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="filterWarnings" name="warnings" value="true"
+                               th:checked="${filter.warnings}"/>
+                        <label class="form-check-label small" for="filterWarnings" th:text="#{workflowRuns.filter.onlyWarnings}">Only runs with warnings</label>
+                    </div>
+                </div>
+                <div class="col-auto pb-1 me-2">
+                    <div class="form-check mb-0">
+                        <input class="form-check-input" type="checkbox" id="filterFailedCalls" name="failedCalls" value="true"
+                               th:checked="${filter.failedCalls}"/>
+                        <label class="form-check-label small" for="filterFailedCalls" th:text="#{workflowRuns.filter.onlyFailedCalls}">Only runs with failed AI calls</label>
+                    </div>
+                </div>
+                <div class="col-auto" style="width: 13rem;">
+                    <label for="filterFrom" class="form-label mb-0 small" th:text="#{workflowRuns.filter.startedFrom}">Started from</label>
+                    <input type="datetime-local" class="form-control form-control-sm" id="filterFrom" name="from" th:value="${filter.from}"/>
+                </div>
+                <div class="col-auto" style="width: 13rem;">
+                    <label for="filterTo" class="form-label mb-0 small" th:text="#{workflowRuns.filter.startedUntil}">Started until</label>
+                    <input type="datetime-local" class="form-control form-control-sm" id="filterTo" name="to" th:value="${filter.to}"/>
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary btn-sm">
+                        <i class="bi bi-funnel" aria-hidden="true"></i> <span th:text="#{button.filter}">Filter</span>
+                    </button>
+                    <a th:href="@{/workflow-runs}" class="btn btn-outline-secondary btn-sm" th:text="#{button.reset}">Reset</a>
+                </div>
+            </div>
+        </form>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center gap-2">
+                <div>
+                    <h5 class="mb-0" th:text="#{nav.workflowRuns}">Workflow runs</h5>
+                    <small class="text-secondary" th:text="#{workflowRuns.description}">One entry per triggered workflow.</small>
+                </div>
+                <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                    <span class="badge text-bg-secondary" th:text="|${runs.totalElements} #{workflowRuns.entries}|">0 entries</span>
+                    <a th:href="|@{/workflow-runs/export}?${filter.with('page', null)}|" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-download" aria-hidden="true"></i> <span th:text="#{button.exportJson}">Export as JSON</span>
+                    </a>
+                    <form th:action="@{/workflow-runs/clear}" method="post" class="d-inline"
+                          th:attr="onsubmit=|return confirm('#{workflowRuns.confirmClear}')|">
+                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                            <i class="bi bi-trash" aria-hidden="true"></i> <span th:text="#{button.clearAll}">Clear all</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <div class="card-body">
+                <div th:if="${runs.totalElements == 0}" class="text-center py-4">
+                    <i class="bi bi-inbox fs-1 text-secondary" aria-hidden="true"></i>
+                    <p class="text-secondary mt-2" th:text="#{workflowRuns.noRuns}">No workflow runs recorded yet.</p>
+                </div>
+                <div th:if="${runs.totalElements > 0}" class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-group-divider">
+                        <tr>
+                            <th style="width: 44px;"><span class="visually-hidden" th:text="#{workflowRuns.expandRun('')}">Expand</span></th>
+                            <th th:text="#{workflowRuns.column.run}">Run</th>
+                            <th th:text="#{workflowRuns.column.state}">State</th>
+                            <th th:text="#{workflowRuns.column.type}">Workflow type</th>
+                            <th th:text="#{workflowRuns.column.bot}">Bot</th>
+                            <th th:text="#{workflowRuns.column.triggeredBy}">Triggered by</th>
+                            <th>
+                                <a class="sort-link" th:href="|@{/workflow-runs}?${filter.with('dir', filter.ascending ? 'desc' : 'asc')}|">
+                                    <span th:text="#{workflowRuns.column.started}">Started</span>
+                                    <i th:class="${filter.ascending} ? 'bi bi-caret-up-fill' : 'bi bi-caret-down-fill'" aria-hidden="true"></i>
+                                </a>
+                            </th>
+                            <th class="text-end" th:text="#{workflowRuns.column.duration}">Duration</th>
+                            <th class="text-end" th:text="#{workflowRuns.column.rounds}">Rounds</th>
+                            <th class="text-end" th:text="#{workflowRuns.column.toolCalls}">Tool calls</th>
+                            <th class="text-end" th:text="#{workflowRuns.column.tokens}">Tokens in / out</th>
+                        </tr>
+                        </thead>
+                        <tbody th:each="r : ${runs.content}" th:with="expanded=${filter.expand != null && filter.expand == r.run.id}">
+                        <tr>
+                            <td>
+                                <button type="button" class="btn btn-link link-secondary run-toggle"
+                                        th:attr="aria-expanded=${expanded} ? 'true' : 'false',aria-controls=|run-detail-${r.run.id}|,aria-label=#{workflowRuns.expandRun(${r.run.id})}">
+                                    <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                                </button>
+                            </td>
+                            <td><code th:text="|#${r.run.id}|">#1</code></td>
+                            <td>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <th:block th:replace="~{workflow-runs/list :: stateBadge(${r.run.state.name()})}"></th:block>
+                                    <span th:if="${r.run.roundLimitReached}" class="badge text-bg-warning"
+                                          th:title="#{workflowRuns.warning.roundLimitHint}">
+                                        <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> <span th:text="#{workflowRuns.warning.roundLimit}">Round limit reached</span>
+                                    </span>
+                                    <span th:if="${r.outputTruncated}" class="badge text-bg-warning"
+                                          th:title="#{workflowRuns.warning.truncatedHint}">
+                                        <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> <span th:text="#{workflowRuns.warning.truncated}">Output truncated</span>
+                                    </span>
+                                </div>
+                            </td>
+                            <td th:text="${#messages.msgOrNull('workflow.' + r.run.workflowType + '.name') ?: r.run.workflowType}">type</td>
+                            <td th:text="${r.run.botName != null ? r.run.botName : '—'}">bot</td>
+                            <td>
+                                <span class="text-secondary" th:if="${r.run.repoOwner != null}"
+                                      th:text="|${r.run.repoOwner}/${r.run.repoName}|">owner/repo</span>
+                                <th:block th:if="${r.run.triggerNumber != null}"
+                                          th:with="ref=${r.run.triggerKind != null} ? ${#messages.msg('workflowRuns.ref.' + r.run.triggerKind.name(), r.run.triggerNumber)} : |#${r.run.triggerNumber}|">
+                                    <a th:if="${r.triggerUrl != null}" th:href="${r.triggerUrl}" target="_blank" rel="noopener noreferrer"
+                                       th:text="${ref}">PR #1</a>
+                                    <span th:if="${r.triggerUrl == null}" th:text="${ref}">PR #1</span>
+                                </th:block>
+                            </td>
+                            <td class="text-nowrap"><time th:datetime="${r.run.startedAt}" data-format="datetime" th:text="${r.run.startedAt}">start</time></td>
+                            <td class="text-end text-nowrap" th:data-duration-ms="${r.durationMs}" th:text="|${r.durationMs} ms|">0 ms</td>
+                            <td class="text-end" th:data-number="${r.rounds}" th:text="${r.rounds}">0</td>
+                            <td class="text-end text-nowrap">
+                                <span th:data-number="${r.toolCalls}" th:text="${r.toolCalls}">0</span><span th:if="${r.failedToolCalls > 0}"
+                                      class="text-danger-emphasis small" th:text="| · #{workflowRuns.toolCallsFailed(${r.failedToolCalls})}|"> · 1 failed</span>
+                            </td>
+                            <td class="text-end text-nowrap">
+                                <span th:data-number="${r.inputTokens}" th:text="${r.inputTokens}">0</span>
+                                <span class="text-secondary">/</span>
+                                <span th:data-number="${r.outputTokens}" th:text="${r.outputTokens}">0</span>
+                            </td>
+                        </tr>
+                        <tr th:id="|run-detail-${r.run.id}|" class="run-detail" th:classappend="${expanded} ? '' : 'd-none'">
+                            <td colspan="11" class="p-0">
+                                <div class="bg-body-tertiary border-top pe-4 py-3 d-flex flex-column gap-3 run-detail-cell">
+                                    <div class="d-flex flex-wrap align-items-center gap-4 small">
+                                        <span class="d-inline-flex align-items-center gap-2">
+                                            <span class="text-secondary" th:text="#{workflowRuns.runId}">Run ID</span>
+                                            <code th:text="${r.run.id}">1</code>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1"
+                                                    th:data-copy="${r.run.id}" th:aria-label="#{workflowRuns.copyRunId}">
+                                                <i class="bi bi-clipboard" aria-hidden="true"></i>
+                                            </button>
+                                        </span>
+                                        <span><span class="text-secondary" th:text="#{workflowRuns.aiIntegration}">AI integration</span> <span th:text="${r.run.aiIntegrationName ?: '—'}">ai</span></span>
+                                        <span><span class="text-secondary" th:text="#{workflowRuns.gitIntegration}">Git integration</span> <span th:text="${r.run.gitIntegrationName ?: '—'}">git</span></span>
+                                        <a th:if="${r.triggerUrl != null}" th:href="${r.triggerUrl}" target="_blank" rel="noopener noreferrer">
+                                            <span th:text="${r.run.triggerKind != null} ? ${#messages.msg('workflowRuns.ref.' + r.run.triggerKind.name(), r.run.triggerNumber)} : ''">PR #1</span>
+                                            <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                                        </a>
+                                    </div>
+                                    <div class="d-flex flex-wrap align-items-center gap-4 small">
+                                        <span><span class="text-secondary" th:text="#{workflowRuns.cacheWrite}">Cache write</span> <span th:data-number="${r.cacheCreationInputTokens}" th:text="${r.cacheCreationInputTokens}">0</span></span>
+                                        <span><span class="text-secondary" th:text="#{workflowRuns.cacheRead}">Cache read</span> <span th:data-number="${r.cacheReadInputTokens}" th:text="${r.cacheReadInputTokens}">0</span></span>
+                                        <span th:title="#{workflowRuns.cacheHitRateHint}"><span class="text-secondary" th:text="#{workflowRuns.cacheHitRate}">Cache hit rate</span>
+                                            <span th:if="${r.cacheHitRate() != null}" th:data-percent="${r.cacheHitRate()}" th:text="${r.cacheHitRate()}">0</span><span th:if="${r.cacheHitRate() == null}">—</span></span>
+                                        <span><span class="text-secondary" th:text="#{workflowRuns.time}">Time</span>
+                                            <span class="legend-dot split-model" aria-hidden="true"></span><span th:text="#{workflowRuns.model}">Model</span> <span th:data-duration-ms="${r.modelTimeMs}" th:text="|${r.modelTimeMs} ms|">0 ms</span> ·
+                                            <span class="legend-dot split-tools" aria-hidden="true"></span><span th:text="#{workflowRuns.tools}">Tools</span> <span th:data-duration-ms="${r.toolTimeMs}" th:text="|${r.toolTimeMs} ms|">0 ms</span></span>
+                                    </div>
+                                    <table class="table table-sm table-hover align-middle mb-0 border rounded overflow-hidden">
+                                        <thead>
+                                        <tr class="small">
+                                            <th th:text="#{workflowRuns.round.round}">Round</th>
+                                            <th th:text="#{workflowRuns.round.started}">Started</th>
+                                            <th class="text-end" th:text="#{workflowRuns.round.duration}">Duration</th>
+                                            <th class="text-end" th:text="#{workflowRuns.round.tools}">Tools</th>
+                                            <th class="text-end" th:text="#{workflowRuns.round.tokens}">Tokens in / out</th>
+                                            <th th:text="#{workflowRuns.round.stopReason}">Stop reason / error</th>
+                                            <th><span class="visually-hidden" th:text="#{workflowRuns.round.actions}">Actions</span></th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr th:each="a : ${r.attempts}"
+                                            th:class="${a.failed} ? 'table-danger' : (${a.running} ? 'table-info' : (${a.truncated or a.roundLimit} ? 'table-warning' : ''))">
+                                            <td th:if="${a.firstOfRound}" th:text="${a.row.roundNumber}">1</td>
+                                            <td th:unless="${a.firstOfRound}" class="attempt-cell small text-secondary">
+                                                <i class="bi bi-arrow-return-right" aria-hidden="true"></i>
+                                                <span th:text="#{workflowRuns.round.attempt(${a.row.attempt})}">attempt 2</span>
+                                            </td>
+                                            <td class="text-nowrap"><time th:datetime="${a.row.startedAt}" data-format="time" th:text="${a.row.startedAt}">time</time></td>
+                                            <td class="text-end text-nowrap">
+                                                <span th:data-duration-ms="${a.durationMs(now)}" th:text="|${a.durationMs(now)} ms|">0 ms</span>
+                                                <span th:if="${a.running}" class="small text-secondary" th:text="#{workflowRuns.round.soFar}">so far</span>
+                                            </td>
+                                            <td class="text-end text-nowrap">
+                                                <th:block th:unless="${a.failed}">
+                                                    <span th:data-number="${a.toolCalls}" th:text="${a.toolCalls}">0</span><span th:if="${a.failedToolCalls > 0}"
+                                                          class="text-danger-emphasis" th:text="| #{workflowRuns.round.toolsFailed(${a.failedToolCalls})}|"> (1 failed)</span>
+                                                </th:block>
+                                                <span th:if="${a.failed}">—</span>
+                                            </td>
+                                            <td class="text-end text-nowrap">
+                                                <th:block th:unless="${a.failed || a.running}">
+                                                    <span th:data-number="${a.row.inputTokens}" th:text="${a.row.inputTokens}">0</span>
+                                                    <span class="text-secondary">/</span>
+                                                    <span th:data-number="${a.row.outputTokens}" th:text="${a.row.outputTokens}">0</span>
+                                                </th:block>
+                                                <span th:if="${a.failed || a.running}">—</span>
+                                            </td>
+                                            <td>
+                                                <span th:if="${a.running}" class="text-info-emphasis">
+                                                    <span class="spinner-border spinner-border-sm me-1" aria-hidden="true" style="width: 0.8rem; height: 0.8rem;"></span>
+                                                    <span th:text="#{workflowRuns.round.running}">Running…</span>
+                                                </span>
+                                                <span th:if="${a.failed}" class="text-danger-emphasis">
+                                                    <i class="bi bi-exclamation-circle" aria-hidden="true"></i> <span th:text="${a.row.errorMessage}">error</span>
+                                                </span>
+                                                <th:block th:unless="${a.running || a.failed}">
+                                                    <code th:text="${a.row.stopReason != null ? #strings.toLowerCase(a.row.stopReason) : '—'}">end_turn</code>
+                                                    <span th:if="${a.truncated}" class="badge text-bg-warning">
+                                                        <i class="bi bi-scissors" aria-hidden="true"></i> <span th:text="#{workflowRuns.round.truncated}">truncated</span>
+                                                    </span>
+                                                    <span th:if="${a.roundLimit}" class="badge text-bg-warning">
+                                                        <i class="bi bi-sign-stop" aria-hidden="true"></i> <span th:text="#{workflowRuns.round.roundLimit}">round limit</span>
+                                                    </span>
+                                                </th:block>
+                                            </td>
+                                            <td class="text-end">
+                                                <button th:unless="${a.running}" type="button" class="btn btn-outline-primary btn-sm py-0"
+                                                        data-bs-toggle="modal" data-bs-target="#interactionModal"
+                                                        th:data-interaction-url="@{/workflow-runs/interactions/{id}(id=${a.row.id})}">
+                                                    <i class="bi bi-eye" aria-hidden="true"></i> <span th:text="#{label.details}">Details</span>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <nav th:if="${runs.totalElements > 0}" class="mt-3 d-flex flex-wrap justify-content-between align-items-center gap-2"
+                     aria-label="Workflow runs pagination">
+                    <ul class="pagination pagination-sm mb-0 flex-wrap" th:if="${runs.totalPages > 1}">
+                        <li class="page-item" th:classappend="${runs.first} ? 'disabled'">
+                            <a class="page-link" th:href="|@{/workflow-runs}?${filter.with('page', 1)}|"><span th:text="#{button.first}">«</span></a>
+                        </li>
+                        <li class="page-item" th:classappend="${runs.first} ? 'disabled'">
+                            <a class="page-link" th:href="|@{/workflow-runs}?${filter.with('page', runs.number)}|"><span th:text="#{button.previous}">Previous</span></a>
+                        </li>
+                        <li th:each="p : ${#numbers.sequence(T(java.lang.Math).max(0, runs.number - 2), T(java.lang.Math).min(runs.totalPages - 1, runs.number + 2))}"
+                            class="page-item" th:classappend="${p == runs.number} ? 'active'">
+                            <a class="page-link" th:href="|@{/workflow-runs}?${filter.with('page', p + 1)}|" th:text="${p + 1}">1</a>
+                        </li>
+                        <li class="page-item" th:classappend="${runs.last} ? 'disabled'">
+                            <a class="page-link" th:href="|@{/workflow-runs}?${filter.with('page', runs.number + 2)}|"><span th:text="#{button.next}">Next</span></a>
+                        </li>
+                        <li class="page-item" th:classappend="${runs.last} ? 'disabled'">
+                            <a class="page-link" th:href="|@{/workflow-runs}?${filter.with('page', runs.totalPages)}|"><span th:text="#{button.last}">»</span></a>
+                        </li>
+                    </ul>
+                    <span th:unless="${runs.totalPages > 1}"></span>
+                    <form class="d-flex align-items-center gap-1" method="get" th:action="@{/workflow-runs}" id="pageSizeForm">
+                        <input type="hidden" th:each="kept : ${filter.paramsWithout('size', 'page')}"
+                               th:name="${kept.key}" th:value="${kept.value}"/>
+                        <label class="small text-secondary" for="runsPageSize" th:text="#{label.rowsPerPage}">Rows per page</label>
+                        <select id="runsPageSize" name="size" class="form-select form-select-sm" style="width: 4.5rem;" onchange="this.form.submit()">
+                            <option th:each="n : ${ {10, 20, 50, 100} }" th:value="${n}" th:text="${n}" th:selected="${filter.size == n}">20</option>
+                        </select>
+                    </form>
+                </nav>
+            </div>
+        </div>
+
+        <!-- Interaction details: one modal for all rows; its content is the fragment served by
+             /workflow-runs/interactions/{id} (workflow-runs/interaction.html) -->
+        <div class="modal fade" id="interactionModal" tabindex="-1" aria-hidden="true" aria-labelledby="interactionModalTitle"
+             th:data-loading="#{workflowRuns.details.loading}" th:data-failed="#{workflowRuns.details.loadFailed}">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="interactionModalTitle" th:text="#{workflowRuns.details.loading}">Loading…</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{button.close}"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script th:src="@{/js/workflow-runs.js}"></script>
+    </div>
+
+    <!-- State badge: icon and text, never colour alone. Outside pageContent, so it only renders where it is inserted. -->
+    <th:block th:fragment="stateBadge(state)">
+        <span th:if="${state == 'SUCCEEDED'}" class="badge text-bg-success"><i class="bi bi-check-circle" aria-hidden="true"></i> <span th:text="#{workflowRuns.state.SUCCEEDED}">Succeeded</span></span>
+        <span th:if="${state == 'ERROR'}" class="badge text-bg-danger"><i class="bi bi-x-octagon" aria-hidden="true"></i> <span th:text="#{workflowRuns.state.ERROR}">Error</span></span>
+        <span th:if="${state == 'RUNNING'}" class="badge text-bg-primary"><i class="bi bi-hourglass-split" aria-hidden="true"></i> <span th:text="#{workflowRuns.state.RUNNING}">Running</span></span>
+    </th:block>
+</body>
+</html>

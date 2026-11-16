@@ -86,6 +86,27 @@ class DashboardControllerTest {
     }
 
     @Test
+    void aiErrorsCardOpensTheRunsWithFailedAiCallsOfTheLastSevenDays() throws Exception {
+        when(botService.findAll()).thenReturn(List.of());
+        java.time.Instant before = java.time.Instant.now().minus(java.time.Duration.ofDays(7));
+
+        String html = mockMvc.perform(get("/dashboard").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        java.util.regex.Matcher link = java.util.regex.Pattern
+                .compile("href=\"/workflow-runs\\?failedCalls=true&amp;from=([0-9T:-]+)&amp;tz=([^\"]+)\"").matcher(html);
+        assertThat(link.find()).as("link to the failed-calls filter").isTrue();
+        // The server's zone goes along, so the page's form does not re-read "from" in the browser's zone.
+        assertThat(java.net.URLDecoder.decode(link.group(2), java.nio.charset.StandardCharsets.UTF_8))
+                .isEqualTo(java.time.ZoneId.systemDefault().getId());
+        java.time.Instant from = java.time.LocalDateTime.parse(link.group(1))
+                .atZone(java.time.ZoneId.systemDefault()).toInstant();
+        assertThat(from).isBetween(before.minus(java.time.Duration.ofMinutes(1)),
+                java.time.Instant.now().minus(java.time.Duration.ofDays(7)));
+    }
+
+    @Test
     void dashboard_rendersSharedBrandingImage() throws Exception {
         when(botService.findAll()).thenReturn(List.of());
 
