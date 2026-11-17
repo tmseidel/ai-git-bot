@@ -125,9 +125,14 @@ public class ToolCatalog {
                     objectSchema(prop("branch", "string", "Branch name to check out."), required("branch")))
                 .withHint("**Switch branches**: `branch-switcher` goes first, before any other repository tool."),
             entry("rg", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
-                    "Run ripgrep across the workspace. Args: [\"pattern\"] or [\"pattern\", \"path\"]; the pattern is a Java regex. "
-                            + "Flags -i, -F, -l and -g <glob> may go anywhere; use -e <pattern> or -- for a pattern starting with -; "
-                            + "[\"--files\", \"path\"] lists files.",
+                    "Run ripgrep across the workspace. Args: [\"pattern\"] or [\"pattern\", \"path\", ...] (every further "
+                            + "element is a path); the pattern is a Java regex. "
+                            + "Flags -i, -F, -l, -o (only the matching part, one line per match), -g <glob>, -A/-B/-C <lines> (context, max 10) and -d/--max-depth <n> "
+                            + "(1 = directly below the path) may go anywhere, "
+                            + "each flag and each value its own element ([\"-C\", \"3\", \"pattern\"]); -n, -H, -r, -R, -E and their long forms "
+                            + "(--line-number, --no-heading, ...) change nothing here and are accepted, any other flag is rejected. "
+                            + "Use -e <pattern> or -- for a pattern starting with -; [\"--files\", \"path\"] lists files. "
+                            + "-g takes \"!glob\" to exclude and {a,b} for alternatives ([\"-g\", \"!src/test/**\"]).",
                     varargsSchema())
                 .withHint("**Search the codebase**: `rg` finds symbol usages."),
             entry("find", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER,  Role.REVIEW),
