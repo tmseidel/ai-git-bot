@@ -1,5 +1,11 @@
 package org.remus.giteabot.prworkflow.agentreview;
 
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
+import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.UnknownHttpStatusCodeException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -208,7 +214,8 @@ class ReviewPublisherTest {
                 .thenReturn(Optional.of(review(ReviewConclusion.FINDINGS_PRESENT,
                         finding("O1234-F1", ReviewSeverity.BLOCKER))));
         // 403 self-approval refused / 422 invalid review: the provider definitely did not take it.
-        doThrow(new IllegalStateException("422 Unprocessable Entity"))
+        doThrow(HttpClientErrorException.create(HttpStatus.UNPROCESSABLE_ENTITY, "Unprocessable Entity",
+                HttpHeaders.EMPTY, new byte[0], null))
                 .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
 
         assertThat(publisher.publish(formalRequest()).outcome())
@@ -235,6 +242,55 @@ class ReviewPublisherTest {
         assertThrows(UncheckedIOException.class,
                 () -> publisher.publish(plainRequest("head", "head", () -> false)));
         verify(publicationService, atLeastOnce()).finish(1L, ReviewPublicationState.UNCERTAIN, null);
+    }
+
+    @Test
+    void aGatewayErrorIsUncertainSoTheFormalSubmissionIsNotRetriedAsAComment() {
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.FINDINGS_PRESENT,
+                        finding("O1234-F1", ReviewSeverity.BLOCKER))));
+        // The proxy gave up waiting while the provider may still have accepted the review; the
+        // message says nothing about a timeout.
+        doThrow(HttpServerErrorException.create(HttpStatus.BAD_GATEWAY, "Bad Gateway",
+                HttpHeaders.EMPTY, new byte[0], null))
+                .when(repositoryClient).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+
+        assertThrows(HttpServerErrorException.class, () -> publisher.publish(formalRequest()));
+
+        verify(repositoryClient, never()).postReviewComment(anyString(), anyString(), anyLong(), anyString());
+        verify(publicationService).finish(1L, ReviewPublicationState.UNCERTAIN, null);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {500, 502, 503, 504})
+    void aServerErrorIsUncertain(int status) {
+        assertThat(ReviewPublisher.classify(HttpServerErrorException.create(HttpStatus.valueOf(status),
+                "error", HttpHeaders.EMPTY, new byte[0], null)))
+                .isEqualTo(ReviewPublicationState.UNCERTAIN);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {400, 401, 403, 404, 409, 422, 429})
+    void aClientErrorIsADefiniteRefusal(int status) {
+        // Even when the provider's message mentions a timeout, a 4xx means it did not take the review.
+        assertThat(ReviewPublisher.classify(HttpClientErrorException.create(HttpStatus.valueOf(status),
+                "upstream timeout", HttpHeaders.EMPTY, new byte[0], null)))
+                .isEqualTo(ReviewPublicationState.FAILED);
+    }
+
+    @Test
+    void noAnswerAtAllIsUncertainAndAnErrorBeforeTheRequestIsFailed() {
+        assertThat(ReviewPublisher.classify(new ResourceAccessException("I/O error",
+                new java.net.SocketTimeoutException("Read timed out"))))
+                .isEqualTo(ReviewPublicationState.UNCERTAIN);
+        assertThat(ReviewPublisher.classify(new IllegalStateException("wrapped",
+                new java.util.concurrent.TimeoutException())))
+                .isEqualTo(ReviewPublicationState.UNCERTAIN);
+        assertThat(ReviewPublisher.classify(new IllegalArgumentException("connection reset in the message only")))
+                .isEqualTo(ReviewPublicationState.FAILED);
+        assertThat(ReviewPublisher.classify(new UnknownHttpStatusCodeException(599, "", HttpHeaders.EMPTY,
+                new byte[0], null)))
+                .isEqualTo(ReviewPublicationState.UNCERTAIN);
     }
 
     @Test

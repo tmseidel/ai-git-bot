@@ -1,6 +1,5 @@
 package org.remus.giteabot.learning.feedback;
 
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -16,6 +15,10 @@ import org.remus.giteabot.review.structured.ReviewRecordRepository;
 import org.remus.giteabot.review.structured.ReviewState;
 import org.remus.giteabot.review.structured.WorkflowOutput;
 import org.remus.giteabot.review.structured.WorkflowOutputRepository;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.util.Optional;
 
@@ -39,7 +42,7 @@ class FeedbackServiceTest {
     @Mock private WorkflowOutputRepository outputRepository;
     @Mock private ReviewRecordRepository reviewRepository;
     @Mock private ReferenceAllocator referenceAllocator;
-    @Mock private EntityManager entityManager;
+    @Mock private PlatformTransactionManager transactionManager;
 
     private FeedbackService service;
     private ReviewRecord review;
@@ -47,7 +50,8 @@ class FeedbackServiceTest {
     @BeforeEach
     void setUp() {
         service = new FeedbackService(feedbackRepository, outputRepository, reviewRepository,
-                referenceAllocator, entityManager);
+                referenceAllocator, transactionManager);
+        lenient().when(transactionManager.getTransaction(any())).thenAnswer(invocation -> new SimpleTransactionStatus());
         WorkflowOutput output = new WorkflowOutput();
         output.setId(10L);
         output.setReference("O1234");
@@ -281,6 +285,39 @@ class FeedbackServiceTest {
         when(feedbackRepository.findByReference("FB9")).thenReturn(Optional.of(record));
 
         assertThat(service.show(SCOPE, "FB9")).isEmpty();
+    }
+
+    @Test
+    void losingTheRaceToAParallelDeliveryAnswersWithTheWinnersRecord() {
+        WorkflowFeedback winner = new WorkflowFeedback();
+        winner.setReference("FB6");
+        winner.setTargetReference("O1234");
+        winner.setTargetType(FeedbackTargetType.OUTPUT);
+        winner.setVerdict(FeedbackVerdict.USEFUL);
+        winner.setActor("alice");
+        when(feedbackRepository.findBySourceKey(source().sourceKey()))
+                .thenReturn(Optional.empty(), Optional.of(winner));
+        when(feedbackRepository.saveAndFlush(any(WorkflowFeedback.class)))
+                .thenThrow(new DataIntegrityViolationException("uk_workflow_feedback_source_key"));
+
+        FeedbackService.Recorded recorded = service.submit(SCOPE, source(),
+                FeedbackTarget.output("O1234"), FeedbackVerdict.USEFUL, "", "alice");
+
+        assertThat(recorded.duplicate()).isTrue();
+        assertThat(recorded.reference()).isEqualTo("FB6");
+        // The failed attempt is rolled back before the winner is read in a transaction of its own.
+        verify(transactionManager).rollback(any());
+        verify(transactionManager, org.mockito.Mockito.times(2)).getTransaction(any());
+    }
+
+    @Test
+    void anIntegrityViolationThatIsNoDuplicateIsNotReportedAsOne() {
+        DataIntegrityViolationException unrelated = new DataIntegrityViolationException("fk_feedback_output");
+        when(feedbackRepository.findBySourceKey(anyString())).thenReturn(Optional.empty());
+        when(feedbackRepository.saveAndFlush(any(WorkflowFeedback.class))).thenThrow(unrelated);
+
+        assertThatThrownBy(() -> service.submit(SCOPE, source(), FeedbackTarget.output("O1234"),
+                FeedbackVerdict.USEFUL, "", "alice")).isSameAs(unrelated);
     }
 
     private static FeedbackSource source() {

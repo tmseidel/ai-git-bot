@@ -16,11 +16,13 @@ import org.remus.giteabot.review.structured.ReviewPublicationService;
 import org.remus.giteabot.review.structured.ReviewPublicationState;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -214,20 +216,24 @@ public class ReviewPublisher {
     }
 
     /**
-     * A definite refusal is retryable as {@code FAILED}; a timeout or a dropped connection leaves
-     * the outcome unknown, and claiming {@code FAILED} there would invite a duplicate comment.
+     * A definite refusal is retryable as {@code FAILED}; an outcome the provider may still have
+     * applied is {@code UNCERTAIN}, since claiming {@code FAILED} there would invite a duplicate
+     * comment.
+     * <p>
+     * Decided by the HTTP status where the provider answered: a 4xx is a refusal, while a 5xx —
+     * a gateway error in front of a provider that accepted the review included — is uncertain. No
+     * answer at all (a timeout or a dropped connection, surfaced as an {@link IOException} or a
+     * {@link TimeoutException}) is uncertain too. Exception messages are never inspected: their
+     * wording differs per provider and proxy.
      */
     static ReviewPublicationState classify(RuntimeException failure) {
         Throwable current = failure;
         while (current != null) {
-            if (current instanceof IOException) {
-                return ReviewPublicationState.UNCERTAIN;
+            if (current instanceof RestClientResponseException response) {
+                return response.getStatusCode().is4xxClientError()
+                        ? ReviewPublicationState.FAILED : ReviewPublicationState.UNCERTAIN;
             }
-            String type = current.getClass().getSimpleName().toLowerCase(Locale.ROOT);
-            String message = current.getMessage() == null
-                    ? "" : current.getMessage().toLowerCase(Locale.ROOT);
-            if (type.contains("timeout") || message.contains("timed out")
-                    || message.contains("timeout") || message.contains("connection reset")) {
+            if (current instanceof IOException || current instanceof TimeoutException) {
                 return ReviewPublicationState.UNCERTAIN;
             }
             current = current.getCause();

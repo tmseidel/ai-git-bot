@@ -1,6 +1,5 @@
 package org.remus.giteabot.learning.feedback;
 
-import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.review.structured.ReferenceAllocator;
@@ -15,7 +14,10 @@ import org.remus.giteabot.review.structured.WorkflowOutputRepository;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Instant;
 import java.util.List;
@@ -45,7 +47,7 @@ public class FeedbackService {
     private final WorkflowOutputRepository outputRepository;
     private final ReviewRecordRepository reviewRepository;
     private final ReferenceAllocator referenceAllocator;
-    private final EntityManager entityManager;
+    private final PlatformTransactionManager transactionManager;
 
     /**
      * One accepted assessment. {@code duplicate} means this comment was already recorded — the
@@ -61,9 +63,34 @@ public class FeedbackService {
                           String repoName, String supersededBy, Instant createdAt) {
     }
 
-    @Transactional
+    /**
+     * Records one assessment. The attempt runs in its own transaction: when a parallel delivery of
+     * the same comment wins the unique source key, that transaction is rolled back (on PostgreSQL it
+     * is aborted outright), so the winner's record is read afterwards in a fresh one.
+     */
     public Recorded submit(FeedbackScope scope, FeedbackSource source, FeedbackTarget target,
                            FeedbackVerdict verdict, String reason, String actor) {
+        TransactionTemplate attempt = new TransactionTemplate(transactionManager);
+        attempt.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        try {
+            return attempt.execute(status -> submitOnce(scope, source, target, verdict, reason, actor));
+        } catch (DataIntegrityViolationException concurrentDuplicate) {
+            // A parallel delivery of the same comment won the unique index; its record is the
+            // answer, and this attempt must not add a second one or claim to have created it.
+            TransactionTemplate reread = new TransactionTemplate(transactionManager);
+            reread.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            reread.setReadOnly(true);
+            Optional<WorkflowFeedback> winner = reread.execute(status ->
+                    feedbackRepository.findBySourceKey(source.sourceKey()));
+            if (winner.isEmpty()) {
+                throw concurrentDuplicate;
+            }
+            return recorded(winner.get(), true);
+        }
+    }
+
+    private Recorded submitOnce(FeedbackScope scope, FeedbackSource source, FeedbackTarget target,
+                            FeedbackVerdict verdict, String reason, String actor) {
         if (verdict == null || target == null) {
             throw new FeedbackRejectedException("incomplete-command",
                     "A feedback command needs a review target and a verdict.");
@@ -114,18 +141,7 @@ public class FeedbackService {
         record.setCommentId(source.commentId());
         record.setSourceKey(source.sourceKey());
 
-        try {
-            feedbackRepository.saveAndFlush(record);
-        } catch (DataIntegrityViolationException concurrentDuplicate) {
-            // A parallel delivery of the same comment won the unique index; its record is the
-            // answer, and this attempt must not add a second one or claim to have created it.
-            entityManager.clear();
-            return feedbackRepository.findBySourceKey(source.sourceKey())
-                    .map(existing -> recorded(existing, true))
-                    .orElseThrow(() -> new FeedbackRejectedException("duplicate-race",
-                            "This comment was being recorded concurrently; check `feedback list` "
-                                    + "before retrying."));
-        }
+        feedbackRepository.saveAndFlush(record);
 
         log.info("Recorded feedback {} ({}) on {} by {}", reference, verdict.token(),
                 target.reference(), normalizedActor);
