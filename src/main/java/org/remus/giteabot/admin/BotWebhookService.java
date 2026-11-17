@@ -8,6 +8,7 @@ import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
+import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
@@ -78,6 +79,7 @@ public class BotWebhookService {
     private final AgentReviewSlashCommandHandler agentReviewSlashCommandHandler;
     private final ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
     private final I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
+    private final FeedbackCommandHandler feedbackCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
@@ -91,6 +93,7 @@ public class BotWebhookService {
                              AgentReviewSlashCommandHandler agentReviewSlashCommandHandler,
                              ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler,
                              I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
+                             FeedbackCommandHandler feedbackCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
         this.repositoryPlatformFactory = repositoryPlatformFactory;
@@ -103,6 +106,7 @@ public class BotWebhookService {
         this.agentReviewSlashCommandHandler = agentReviewSlashCommandHandler;
         this.readmeSyncSlashCommandHandler = readmeSyncSlashCommandHandler;
         this.i18nCoverageSlashCommandHandler = i18nCoverageSlashCommandHandler;
+        this.feedbackCommandHandler = feedbackCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
         this.issueWorkflowOrchestrator = issueWorkflowOrchestrator;
     }
@@ -236,6 +240,32 @@ public class BotWebhookService {
             return payload.getPullRequest().getHead().getRef();
         }
         return null;
+    }
+
+    /**
+     * Learning/feedback commands are classified and consumed before every other routing decision:
+     * before review-again heuristics, before coding-session forwarding, and before the
+     * "no PR workflow enabled" short circuit. A recognized command never reaches an AI conversation,
+     * so a malformed one cannot start code review, change code, or generate tests.
+     * <p>
+     * Deliberately <em>not</em> {@code @Async}: callers use the return value to decide whether to
+     * continue routing, and the async proxy returns {@code null} for a primitive result — which
+     * becomes an {@code AopInvocationException} in the caller.
+     *
+     * @param effectiveAlias the mention the provider left in the comment, when it rewrote one;
+     *                       {@code null} keeps the configured username
+     * @return {@code true} when the comment was a learning command and has been handled
+     */
+    public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind,
+                                           String effectiveAlias) {
+        try {
+            return feedbackCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias);
+        } catch (RuntimeException e) {
+            // Falling through would forward feedback text into an AI conversation.
+            log.error("[Bot '{}'] Learning command handling failed: {}", bot.getName(),
+                    e.getMessage(), e);
+            return true;
+        }
     }
 
     /**
@@ -740,13 +770,7 @@ public class BotWebhookService {
     }
 
     private Long resolvePrOrIssueNumber(WebhookPayload payload) {
-        if (payload.getPullRequest() != null && payload.getPullRequest().getNumber() != null) {
-            return payload.getPullRequest().getNumber();
-        }
-        if (payload.getIssue() != null && payload.getIssue().getNumber() != null) {
-            return payload.getIssue().getNumber();
-        }
-        return payload.getNumber();
+        return PrPayloadHydrator.resolvePrNumber(payload);
     }
 
     /**

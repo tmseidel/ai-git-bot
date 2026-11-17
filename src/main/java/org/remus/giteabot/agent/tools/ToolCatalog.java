@@ -52,8 +52,15 @@ public class ToolCatalog {
      *
      * <p>{@code REVIEW} must be explicitly assigned to each read-only built-in.
      * Context classification or WRITER membership alone never grants review access.</p>
+     *
+     * <p>{@code REVIEW_OUTPUT} is the agentic-review submission protocol
+     * ({@link ToolKind#REVIEW_OUTPUT}). It is advertised to every agentic review
+     * regardless of the operator's exploration selection, and it is deliberately not
+     * part of the bot tool configuration: a protocol tool is not a repository
+     * capability an operator can grant or revoke.</p>
      */
-    public enum Role { CODING, WRITER, REVIEW, PR_WORKFLOW }
+    public enum Role { CODING, WRITER, REVIEW, PR_WORKFLOW, REVIEW_OUTPUT, REVIEW_CONTEXT }
+
 
     /** Intersects the bot configuration with explicit REVIEW-role entries; null denies all built-ins. */
     public Set<String> reviewToolNames(Set<String> allowed) {
@@ -329,7 +336,82 @@ public class ToolCatalog {
                     objectSchema(
                             prop("code", "string", "Python source to execute."),
                             required("code")))
-                .withHint("**An answer that takes several reads, or a step between them**: reach for `execute-code` instead of crawling. One program gathers, filters and prints, and the intermediate results never enter your context — several `cat` or `rg` calls become one; its description says how to call it.")
+                .withHint("**An answer that takes several reads, or a step between them**: reach for `execute-code` instead of crawling. One program gathers, filters and prints, and the intermediate results never enter your context — several `cat` or `rg` calls become one; its description says how to call it."),
+
+            // ---- agentic-review submission protocol (REVIEW_OUTPUT role only) ----
+            // These are required for every agentic review and are never part of the bot tool
+            // configuration: they mutate the review draft, not the workspace.
+            entry("review-upsert-finding", ToolKind.REVIEW_OUTPUT, EnumSet.of(Role.REVIEW_OUTPUT),
+                    "Create or update one finding of this review. The finding is persisted server-side "
+                            + "with a server-assigned ID — never write the review Markdown yourself. "
+                            + "Use a stable `clientKey` per finding; sending the same key again corrects "
+                            + "that finding and keeps its ID. Send the finding's current `revision` as "
+                            + "`expectedRevision` when correcting it. The response returns `findingId`, "
+                            + "`reference`, `revision` and the new `draftRevision`. Editing a finding "
+                            + "invalidates the assessment, so set it again before completing.",
+                    reviewUpsertFindingSchema()),
+            entry("review-remove-finding", ToolKind.REVIEW_OUTPUT, EnumSet.of(Role.REVIEW_OUTPUT),
+                    "Withdraw a finding you reported earlier in this review, for example because "
+                            + "inspecting the enclosing code showed the concern was unfounded. Send the "
+                            + "finding's `findingId` and its current `revision`. The finding keeps its "
+                            + "identity and is never renumbered. Withdrawing invalidates the assessment, "
+                            + "so set it again before completing.",
+                    objectSchema(
+                            prop("operationId", "string", "Unique ID for this call; reuse it only when retrying the identical call."),
+                            prop("findingId", "integer", "The server-assigned findingId returned when the finding was submitted."),
+                            prop("expectedRevision", "integer", "The finding's current revision."),
+                            prop("reason", "string", "Why the finding is withdrawn; stored with the finding."),
+                            required("operationId", "findingId", "expectedRevision", "reason"))),
+            entry("review-get-draft", ToolKind.REVIEW_OUTPUT, EnumSet.of(Role.REVIEW_OUTPUT),
+                    "Read the current draft of this review: draft revision, active findings with their "
+                            + "IDs, revisions and titles, and whether the assessment still covers the "
+                            + "current finding set. Call it after a revision conflict or after context "
+                            + "was compacted, before submitting again. It takes no arguments and can only "
+                            + "see this run's review.",
+                    objectSchema()),
+            entry("review-set-assessment", ToolKind.REVIEW_OUTPUT, EnumSet.of(Role.REVIEW_OUTPUT),
+                    "Set the overall assessment of this review. The conclusion must match the findings "
+                            + "you reported: FINDINGS_PRESENT with at least one active finding, "
+                            + "NO_FINDINGS with none, INCONCLUSIVE when you could not verify enough — "
+                            + "then `limitations` is required. Send the current `expectedDraftRevision`; "
+                            + "the response returns the updated one.",
+                    objectSchema(
+                            prop("operationId", "string", "Unique ID for this call; reuse it only when retrying the identical call."),
+                            prop("expectedDraftRevision", "integer", "The draftRevision this assessment is based on."),
+                            prop("summary", "string", "The overall assessment of the change, in Markdown: "
+                                    + "what it does, how sound the approach and implementation are, the main "
+                                    + "risks, and what is done well. Several paragraphs or a short list where "
+                                    + "the change warrants it; a trivial change can be judged briefly."),
+                            prop("conclusion", "string", "FINDINGS_PRESENT, NO_FINDINGS or INCONCLUSIVE."),
+                            prop("reviewedAreas", "string", "What you actually inspected: files, callers, tests. Markdown allowed."),
+                            prop("limitations", "string", "What you did not or could not verify. Required for INCONCLUSIVE."),
+                            required("operationId", "expectedDraftRevision", "summary", "conclusion", "reviewedAreas", "limitations"))),
+            entry("review-complete", ToolKind.REVIEW_OUTPUT, EnumSet.of(Role.REVIEW_OUTPUT),
+                    "Finish the review: validates the draft and freezes it as the published review. "
+                            + "Call it alone, never in the same batch as another tool, after all findings "
+                            + "and the assessment have been submitted. Send the current "
+                            + "`expectedDraftRevision` and the number of findings that are still active. "
+                            + "Zero findings is valid only with an explicit assessment. The response "
+                            + "returns the review reference and content hash; the review is immutable "
+                            + "afterwards.",
+                    objectSchema(
+                            prop("operationId", "string", "Unique ID for this call; reuse it only when retrying the identical call."),
+                            prop("expectedDraftRevision", "integer", "The draftRevision being completed."),
+                            prop("expectedFindingCount", "integer", "Number of findings still active in the draft."),
+                            required("operationId", "expectedDraftRevision", "expectedFindingCount"))),
+
+            // ---- agentic-review lookup (READ-ONLY; advertised to reviews and follow-ups) ----
+            // A follow-up runs without conversation history, so this is how an agent resolves a
+            // reference a user cites. It reads stored records only, inside the run's own scope.
+            entry("review-lookup", ToolKind.REVIEW_CONTEXT, EnumSet.of(Role.REVIEW_CONTEXT),
+                    "Read the reviews this bot already published on this pull request. Call it with "
+                            + "no arguments to list them with their references, with `reference` "
+                            + "(`O1234`, `O1234-F1` or `O1234-A`) to read one target in full, or with "
+                            + "`query` to search the findings' text. Use it whenever the user cites a "
+                            + "reference or asks about something you reported before.",
+                    objectSchema(
+                            prop("reference", "string", "Optional: O1234 (review), O1234-F1 (finding) or O1234-A (assessment)."),
+                            prop("query", "string", "Optional: text to search in published findings.")))
     );
 
     /**
@@ -434,6 +516,28 @@ public class ToolCatalog {
     /** Names of the agent-control tools. Unfiltered. */
     public List<String> agentControlToolNames() {
         return namesOf(ToolKind.AGENT_CONTROL);
+    }
+
+    /**
+     * Names of the agentic-review submission protocol. Always advertised to an agentic
+     * review, never filtered by the operator's tool selection and never part of the bot
+     * tool configuration.
+     */
+    public List<String> reviewOutputToolNames() {
+        return namesOf(ToolKind.REVIEW_OUTPUT);
+    }
+
+    /**
+     * The submission-protocol descriptors of one agentic review. Composed with the
+     * operator-selected read-only surface by the review strategy; MCP is deliberately not
+     * part of it, because a submission tool is never an MCP tool.
+     */
+    public List<ToolDescriptor> reviewContextDescriptors() {
+        return nativeDescriptors(Role.REVIEW_CONTEXT, null, null);
+    }
+
+    public List<ToolDescriptor> reviewOutputDescriptors() {
+        return nativeDescriptors(Role.REVIEW_OUTPUT, null, null);
     }
 
     /**
@@ -558,8 +662,9 @@ public class ToolCatalog {
             };
         }
         return switch (kind) {
-            // AGENT_CONTROL is silent, so its bucket only keeps this switch exhaustive.
-            case CONTEXT, REPOSITORY, MCP, AGENT_CONTROL -> DisplayBucket.CONTEXT;
+            // AGENT_CONTROL and REVIEW_OUTPUT are silent, so their bucket only keeps this switch exhaustive.
+            case CONTEXT, REPOSITORY, MCP, AGENT_CONTROL, REVIEW_OUTPUT,
+                    REVIEW_CONTEXT -> DisplayBucket.CONTEXT;
             case FILE -> DisplayBucket.MUTATION;
             case VALIDATION, UNKNOWN -> DisplayBucket.VALIDATION;
             default -> throw new IllegalStateException("Unexpected value: " + kind);
@@ -644,6 +749,68 @@ public class ToolCatalog {
         args.putObject("items").put("type", "string");
         root.putArray("required").add("args");
         return root;
+    }
+
+    /**
+     * Schema of {@code review-upsert-finding}. Its evidence is an array of typed objects, so it
+     * is built here instead of through {@link #objectSchema}: a review-output call is dispatched
+     * from its typed JSON (never flattened to a positional vector), and evidence flattened into
+     * strings would lose the path/side/line structure the persisted finding needs.
+     */
+    private static ObjectNode reviewUpsertFindingSchema() {
+        ObjectNode root = JSON.createObjectNode();
+        root.put("type", "object");
+        ObjectNode props = root.putObject("properties");
+        putString(props, "operationId", "Unique ID for this call; reuse it only when retrying the identical call.");
+        putString(props, "clientKey", "Stable draft-local key for this finding, e.g. \"settings-auth\". Reuse it to correct the same finding.");
+        props.putObject("expectedRevision").put("type", "integer")
+                .put("description", "When correcting an existing finding: its current revision. Omit when creating.");
+        ObjectNode severity = props.putObject("severity");
+        severity.put("type", "string");
+        severity.put("description", "How serious the problem is. BLOCKER — must be fixed before "
+                + "merging (bug, security hole, broken test, missing error handling, anything that "
+                + "could cause a production defect). MEDIUM — should be addressed, but need not block "
+                + "on its own (code quality, unclear naming, missing edge-case tests, maintainability "
+                + "risk). LOW — minor, stylistic or optional. The review decision is computed from "
+                + "these severities, so classify honestly and do not inflate them.");
+        severity.putArray("enum").add("BLOCKER").add("MEDIUM").add("LOW");
+        putString(props, "category", "Short classification, e.g. \"authorization\", \"correctness\", \"performance\".");
+        putString(props, "title", "One-line summary of the problem.");
+        putString(props, "explanation", "What is wrong and why, with the reasoning that led you there. "
+                + "Markdown is allowed; quote the relevant code in a fenced block when it makes the "
+                + "problem clearer.");
+        putString(props, "impact", "What can go wrong because of it.");
+        putString(props, "recommendation", "The concrete change you recommend. When the fix is code, "
+                + "show it: a short fenced code block with a language tag (e.g. ```java) containing the "
+                + "suggested code, not the whole file.");
+        ObjectNode evidence = props.putObject("evidence");
+        evidence.put("type", "array");
+        evidence.put("description",
+                "Typed source locations supporting the finding: the code you read and why it supports the claim. "
+                        + "Omit only for a repository-wide finding, which must then explain its evidence in `explanation`.");
+        ObjectNode items = evidence.putObject("items");
+        items.put("type", "object");
+        ObjectNode itemProps = items.putObject("properties");
+        putString(itemProps, "path", "Repository-relative path of the file.");
+        ObjectNode side = itemProps.putObject("side");
+        side.put("type", "string");
+        side.put("description", "Revision the location refers to: HEAD for the pull request, BASE for deleted files.");
+        side.putArray("enum").add("BASE").add("HEAD");
+        itemProps.putObject("startLine").put("type", "integer")
+                .put("description", "First line of the range (1-based). Omit for a whole-file reference.");
+        itemProps.putObject("endLine").put("type", "integer")
+                .put("description", "Last line of the range, inclusive. Omit for a single line or a whole file.");
+        putString(itemProps, "description", "What this location shows and why it supports the finding.");
+        var itemRequired = items.putArray("required");
+        itemRequired.add("path").add("side").add("description");
+        var required = root.putArray("required");
+        required.add("operationId").add("clientKey").add("severity").add("category").add("title")
+                .add("explanation").add("impact").add("recommendation");
+        return root;
+    }
+
+    private static void putString(ObjectNode properties, String name, String description) {
+        properties.putObject(name).put("type", "string").put("description", description);
     }
 
     private static ObjectNode objectSchema(Object... parts) {

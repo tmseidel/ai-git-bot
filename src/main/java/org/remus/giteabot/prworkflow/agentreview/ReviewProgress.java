@@ -31,6 +31,7 @@ final class ReviewProgress implements Consumer<ProgressUpdate> {
     private final Instant startedAt;
     private CommentId commentId;
     private Instant lastActivityAt;
+    private boolean sawToolActivity;
     private String activity = "Preparing repository";
     private int round;
     private int completedToolCalls;
@@ -67,8 +68,17 @@ final class ReviewProgress implements Consumer<ProgressUpdate> {
         round = update.round();
         completedToolCalls += update.completedToolCalls();
         Instant now = clock.instant();
-        if (lastActivityAt != null && Duration.between(lastActivityAt, now).compareTo(UPDATE_INTERVAL) < 0) {
+        // The loop reports "Waiting for model" before every AI call, so an interval that throttles
+        // the first real tool round would leave the comment on that placeholder until the run ends.
+        // The first round that actually completed tool calls always writes; after that the interval
+        // applies, which keeps a fast round from rewriting the comment several times a second.
+        boolean firstToolActivity = update.completedToolCalls() > 0 && !sawToolActivity;
+        if (lastActivityAt != null && !firstToolActivity
+                && Duration.between(lastActivityAt, now).compareTo(UPDATE_INTERVAL) < 0) {
             return;
+        }
+        if (update.completedToolCalls() > 0) {
+            sawToolActivity = true;
         }
         lastActivityAt = now;
         updateComment(now);
@@ -95,7 +105,7 @@ final class ReviewProgress implements Consumer<ProgressUpdate> {
         body.append("Tracking the review progress for **PR #").append(prNumber).append("**.\n\n")
                 .append("- Latest activity: ").append(activity)
                 .append("\n- Rounds: ").append(round)
-                .append(" · Inspection tool calls completed: ").append(completedToolCalls);
+                .append(" · Tool calls completed: ").append(completedToolCalls);
         Duration elapsed = Duration.between(startedAt, now);
         body.append("\n- Started: ").append(TIMESTAMP.format(startedAt))
                 .append("\n- Elapsed: ");

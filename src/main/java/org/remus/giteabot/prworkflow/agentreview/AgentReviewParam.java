@@ -13,11 +13,11 @@ public enum AgentReviewParam implements WorkflowParamName {
     /** Opt-in progress comments for review and clarification runs. */
     ENABLE_PROGRESS_COMMENTS("enableProgressComments"),
 
-    /** When true, the workflow may post a formal PR review decision (approve/request-changes). */
+    /**
+     * When true, the workflow may post a formal PR review decision. The decision itself is computed
+     * from the persisted findings and the thresholds below — it is never asked of the model.
+     */
     ENABLE_FORMAL_REVIEW_DECISION("enableFormalReviewDecision"),
-
-    /** Operator-provided criteria for when to approve, request changes, or leave the PR unchanged. */
-    FORMAL_REVIEW_DECISION_PROMPT("formalReviewDecisionPrompt"),
 
     /** Maximum allowed number of BLOCKER findings for a formal APPROVE decision. */
     BLOCKER_THRESHOLD("blockerThreshold"),
@@ -26,7 +26,13 @@ public enum AgentReviewParam implements WorkflowParamName {
     MEDIUM_THRESHOLD("mediumThreshold"),
 
     /** Maximum allowed number of LOW findings for a formal APPROVE decision. */
-    LOW_THRESHOLD("lowThreshold");
+    LOW_THRESHOLD("lowThreshold"),
+
+    /**
+     * Accept agentic-review feedback and retain supplemental learning evidence. Structured review
+     * generation and rendering do not depend on it.
+     */
+    FEEDBACK_ENABLED("feedbackEnabled");
 
     private final String key;
 

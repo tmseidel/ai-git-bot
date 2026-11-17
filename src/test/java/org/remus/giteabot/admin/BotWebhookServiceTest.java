@@ -56,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -97,6 +98,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.readmesync.ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
+    @Mock private org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler;
     @Mock private ReviewChunkingProperties chunkingProperties;
     @Mock private org.remus.giteabot.eventhook.EventHookPublisher eventHookPublisher;
     @Mock private org.remus.giteabot.notification.WorkflowRetryNotices retryNotices;
@@ -136,7 +138,8 @@ class BotWebhookServiceTest {
                 prWorkflowOrchestrator, e2eTestPrCloseHandler,
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
                 agentReviewSlashCommandHandler, readmeSyncSlashCommandHandler,
-                i18nCoverageSlashCommandHandler, workflowSelectionService,
+                i18nCoverageSlashCommandHandler,
+                feedbackCommandHandler, workflowSelectionService,
                 issueWorkflowOrchestrator);
         codingIssueConfiguration = namedConfiguration(101L, "coding-issue-cfg");
         writerIssueConfiguration = namedConfiguration(102L, "writer-issue-cfg");
@@ -1869,6 +1872,49 @@ class BotWebhookServiceTest {
             botWebhookService.handlePrComment(bot, payload);
 
             assertNull(AiAuditContext.getSessionId(), "an early return must not leave the session behind");
+        }
+    }
+
+    @Nested
+    class LearningCommandTests {
+
+        private WebhookPayload feedbackPayload() {
+            return buildPrCommentPayload("Test", "my-repo", 140L, 1055L,
+                    "@claude_bot feedback O1234 useful");
+        }
+
+        @Test
+        void handledCommandIsReportedAsConsumed() {
+            WebhookPayload payload = feedbackPayload();
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(true);
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"), payload,
+                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT,
+                    "@AI_Bot"));
+
+            verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
+                    eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT),
+                    eq("@AI_Bot"));
+        }
+
+        @Test
+        void ordinaryCommentIsNotConsumed() {
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(false);
+
+            assertFalse(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    feedbackPayload(),
+                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null));
+        }
+
+        @Test
+        void aFailingLearningCommandIsStillConsumed() {
+            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any()))
+                    .thenThrow(new IllegalStateException("feedback store unavailable"));
+
+            // Falling through would forward feedback text into an AI conversation.
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    feedbackPayload(),
+                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null));
         }
     }
 

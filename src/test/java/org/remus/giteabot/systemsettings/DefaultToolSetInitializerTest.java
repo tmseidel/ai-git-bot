@@ -71,6 +71,21 @@ class DefaultToolSetInitializerTest {
                 .containsAll(agentControl);
     }
 
+    /**
+     * The agentic-review submission protocol is not a repository capability: it is required for
+     * every agentic review and must never appear in the operator's tool list, the whitelist or the
+     * seeded default configuration.
+     */
+    @Test
+    void reviewProtocolToolsAreNeverSelectable() {
+        assertThat(builtinToolRegistry.builtinTools())
+                .extracting(BuiltinToolRegistry.BuiltinTool::name)
+                .noneMatch(name -> name.startsWith("review-"));
+
+        initializer.run(null);
+        assertThat(selectedToolNames()).noneMatch(name -> name.startsWith("review-"));
+    }
+
     private List<String> selectedToolNames() {
         Long defaultId = botToolConfigurationService.findDefault().orElseThrow().getId();
         return botToolSelectionRepository

@@ -242,6 +242,8 @@ These variables control how the PR diff is split for review:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REVIEW_CHUNKING_MAX_DIFF_CHARS_PER_CHUNK` | `120000` | Maximum diff chars per review chunk. |
+| `REVIEW_COMMENT_FOOTER` | `*Agentic review by [AI Git Bot](https://gitbot.eu)*` | Footer of every published agentic-review comment (Markdown). Empty publishes reviews without a footer. |
+| `REVIEW_COMMENT_CLARIFICATION_FOOTER` | `*Agentic review follow-up by [AI Git Bot](https://gitbot.eu)*` | Footer of the answer to a follow-up question (Markdown). Empty publishes the answer without one. |
 | `REVIEW_CHUNKING_MAX_DIFF_CHUNKS` | `8` | Maximum number of diff chunks. |
 | `REVIEW_CHUNKING_RETRY_TRUNCATED_CHUNK_CHARS` | `60000` | Diff chunk size when retrying a truncated chunk. |
 

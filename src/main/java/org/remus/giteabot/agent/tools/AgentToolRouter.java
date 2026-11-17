@@ -112,6 +112,17 @@ public class AgentToolRouter {
         if (tool.isBlank()) {
             return new ToolResult(false, -1, "", "Empty tool name");
         }
+        // Review-output tools mutate the review draft, not the workspace. The review submission
+        // executor dispatches them from their typed JSON; a repository router would otherwise treat
+        // their names as unknown and try to run them.
+        if (catalog.kindOf(tool) == ToolKind.REVIEW_OUTPUT) {
+            return new ToolResult(false, -1, "", "Tool '" + tool
+                    + "' writes the review draft and is not available through the repository router");
+        }
+        if (catalog.kindOf(tool) == ToolKind.REVIEW_CONTEXT) {
+            return new ToolResult(false, -1, "", "Tool '" + tool
+                    + "' reads stored reviews and is not available through the repository router");
+        }
         if (mode == Mode.REVIEW && !catalog.reviewToolNames(allowedBuiltinTools).contains(tool)
                 && mcpToolCatalog.tools().stream().noneMatch(selected -> selected.qualifiedName().equals(tool))) {
             return new ToolResult(false, -1, "", "Tool is not enabled for read-only review: " + tool);

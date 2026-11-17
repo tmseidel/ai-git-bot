@@ -54,7 +54,7 @@ class AzureDevopsPayloadTranslationTest {
         assertEquals("base-sha", payload.getPullRequest().getBase().getSha());
         assertEquals(1, payload.getPullRequest().getRequestedReviewers().size());
         assertEquals("bot@contoso.com",
-                payload.getPullRequest().getRequestedReviewers().get(0).getLogin());
+                payload.getPullRequest().getRequestedReviewers().getFirst().getLogin());
     }
 
     @Test
@@ -178,7 +178,7 @@ class AzureDevopsPayloadTranslationTest {
         assertNotNull(payload);
         assertNull(payload.getSender().getLogin());
         assertNull(payload.getPullRequest().getUser().getLogin());
-        assertNull(payload.getPullRequest().getRequestedReviewers().get(0).getLogin());
+        assertNull(payload.getPullRequest().getRequestedReviewers().getFirst().getLogin());
     }
 
     @Test

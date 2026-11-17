@@ -176,6 +176,25 @@ class AgentToolRouterWhitelistTest {
                 .contains("execute-code", "write-file", "branch-switcher", "mvn");
     }
 
+    /**
+     * A review-output tool writes the review draft, not the workspace. It must be refused here and
+     * never reach a file, context or validation executor — a repository router that treated the
+     * name as unknown would try to run it and report a misleading "tool is not implemented".
+     */
+    @Test
+    void execute_reviewOutputTool_isRefusedInsteadOfDispatched() {
+        ToolExecutionService tes = mock(ToolExecutionService.class);
+        McpOrchestrationService orchestration = mock(McpOrchestrationService.class);
+        AgentToolRouter router = newRouter(tes, null, McpToolCatalog.empty(), orchestration);
+
+        for (String tool : List.of("review-upsert-finding", "review-get-draft", "review-complete")) {
+            ToolResult res = router.execute(AgentToolRouter.Mode.REVIEW, ctx(tool, List.of("{}")));
+            assertThat(res.success()).as(tool).isFalse();
+            assertThat(res.error()).contains("review draft");
+        }
+        org.mockito.Mockito.verifyNoInteractions(tes, orchestration);
+    }
+
     // Mockito argThat helpers kept inline to avoid an extra import.
     private static String eqStr(String expected) {
         return org.mockito.ArgumentMatchers.argThat(expected::equals);

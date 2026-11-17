@@ -6,7 +6,10 @@ import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -44,6 +47,55 @@ public class AzureDevopsPlatform extends RepositoryPlatform {
         String organizationSegment = addr.isOrganizationScopedBy(base)
                 ? "" : "/" + addr.organization();
         return base + organizationSegment + "/" + addr.project() + "/_git/" + addr.name();
+    }
+
+    /**
+     * Azure DevOps addresses a file through query parameters on the repository's
+     * {@code /_git/} page: {@code version=GC{sha}} pins the commit, and a line selection
+     * runs from {@code line} up to column 1 of {@code lineEnd}, so the last highlighted
+     * line is {@code lineEnd - 1}. Independent of the Git transport: the clone base is the
+     * web host either way. An unresolvable address yields no link rather than a guessed one.
+     */
+    @Override
+    public Optional<String> getFileWebUrl(String owner, String repo, String revision, String path,
+                                          @Nullable Integer startLine, @Nullable Integer endLine) {
+        if (revision == null || revision.isBlank() || path == null || path.isBlank()) {
+            return Optional.empty();
+        }
+        AzureDevopsAddress addr;
+        String base;
+        try {
+            addr = AzureDevopsAddress.parse(owner, repo);
+            base = validatedCloneBaseUrl(cloneUrl);
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return Optional.empty();
+        }
+        String organizationSegment = addr.isOrganizationScopedBy(base)
+                ? "" : "/" + encodeSegment(addr.organization());
+        StringBuilder url = new StringBuilder(base).append(organizationSegment)
+                .append('/').append(encodeSegment(addr.project()))
+                .append("/_git/").append(encodeSegment(addr.name()))
+                .append("?path=").append(encodeQueryPath(path.startsWith("/") ? path : "/" + path))
+                .append("&version=GC").append(encodeQueryValue(revision));
+        if (startLine != null) {
+            int last = endLine != null && endLine > startLine ? endLine : startLine;
+            url.append("&line=").append(startLine)
+                    .append("&lineEnd=").append(last + 1)
+                    .append("&lineStartColumn=1&lineEndColumn=1&lineStyle=plain");
+        }
+        return Optional.of(url.append("&_a=contents").toString());
+    }
+
+    private static String encodeSegment(String value) {
+        return encodeQueryValue(value).replace("+", "%20");
+    }
+
+    private static String encodeQueryPath(String path) {
+        return encodeQueryValue(path).replace("+", "%20").replace("%2F", "/");
+    }
+
+    private static String encodeQueryValue(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     /** Azure DevOps Git remotes only accept the PAT as a pre-emptive Basic header. */

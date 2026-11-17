@@ -432,7 +432,6 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
         }, List.of(), "fetch reviews for PR #{} in {}", pullNumber, repo);
     }
 
-    @SuppressWarnings("unchecked")
     private AzureDevopsReview toAzureDevopsReview(Map<?, ?> reviewer) {
         AzureDevopsReview review = new AzureDevopsReview();
         Object vote = reviewer.get("vote");
@@ -613,7 +612,8 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
                         .queryParam("api-version", API_VERSION)
                         .build(vars(scope, pullNumber)))
                 .retrieve()
-                .body(new ParameterizedTypeReference<Map<String, Object>>() {}),
+                .body(new ParameterizedTypeReference<>() {
+                }),
                 null, "fetch PR #{} details in {}", pullNumber, repo);
         return Optional.ofNullable(pr).map(AzureDevopsApiClient::toPullRequestDetails);
     }

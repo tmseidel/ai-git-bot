@@ -8,6 +8,7 @@ import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.WebhookTranslator;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
@@ -74,7 +75,12 @@ public class WebhookEventDispatcher {
                 yield ResponseEntity.ok("review comments processing triggered");
             }
             case PR_INLINE_COMMENT -> {
-                botWebhookService.handleInlineComment(bot, completePrComment(payload));
+                WebhookPayload completed = completePrComment(payload);
+                if (botWebhookService.tryHandleLearningCommand(bot, completed,
+                        FeedbackCommandHandler.COMMENT_KIND_INLINE, event.botAlias())) {
+                    yield ResponseEntity.ok("feedback recorded");
+                }
+                botWebhookService.handleInlineComment(bot, completed);
                 yield ResponseEntity.ok("inline comment response triggered");
             }
             case PR_COMMENT -> handlePrComment(bot, event);
@@ -104,12 +110,19 @@ public class WebhookEventDispatcher {
      * the pull request belongs to an agent session and otherwise runs slash commands or
      * the review command.
      * <p>
+     * Feedback commands are consumed first: their reason is free text and may contain
+     * "review again", which must not rerun the review.
+     * <p>
      * A pull request that belongs to an agent session never takes the review path: there
      * a comment is an instruction to the agent, and "review the failing test again and fix
      * it" must not start a review of the bot's own pull request.
      */
     private ResponseEntity<String> handlePrComment(Bot bot, WebhookEvent event) {
         WebhookPayload payload = completePrComment(event.payload());
+        if (botWebhookService.tryHandleLearningCommand(bot, payload,
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, event.botAlias())) {
+            return ResponseEntity.ok("feedback recorded");
+        }
         if (botWebhookService.isReviewAgainRequest(payload, event.botAlias())
                 && !botWebhookService.hasAgentSession(bot, payload)) {
             if (!botWebhookService.isCallerAllowed(bot, payload)) {

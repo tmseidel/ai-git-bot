@@ -28,11 +28,11 @@ class ReviewProgressTest {
         progress.start();
         progress.accept(new ProgressUpdate(1, "Waiting for model", 0));
         now.set(now.get().plusSeconds(14));
-        progress.accept(new ProgressUpdate(1, "Repository inspection completed", 1));
+        progress.accept(new ProgressUpdate(1, "inspected repository: cat", 1));
         now.set(now.get().plusSeconds(1));
         progress.accept(new ProgressUpdate(2, "Waiting for model", 0));
         now.set(now.get().plusSeconds(1));
-        progress.accept(new ProgressUpdate(2, "Repository inspection completed", 2));
+        progress.accept(new ProgressUpdate(2, "recorded a finding", 2));
         progress.finish(true);
 
         var bodies = org.mockito.ArgumentCaptor.forClass(String.class);
@@ -42,22 +42,55 @@ class ReviewProgressTest {
                 Tracking the review progress for **PR #1**.
 
                 - Latest activity: Preparing repository
-                - Rounds: 0 · Inspection tool calls completed: 0
+                - Rounds: 0 · Tool calls completed: 0
                 - Started: 2026-10-13 00:00:00 UTC
                 - Elapsed: 0s · Last update: 2026-10-13 00:00:00 UTC"""));
         verify(client, times(3)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)), bodies.capture());
         assertThat(bodies.getAllValues()).satisfiesExactly(
-                body -> assertThat(body).contains("Rounds: 1", "Elapsed: 0s", "Inspection tool calls completed: 0"),
-                body -> assertThat(body).contains("Rounds: 2", "Elapsed: 15s", "Inspection tool calls completed: 1"),
+                body -> assertThat(body).contains("Rounds: 1", "Elapsed: 0s", "Tool calls completed: 0"),
+                // The first completed tool round is never throttled, so it lands at 14s, still round 1.
+                body -> assertThat(body).contains("- Latest activity: inspected repository: cat",
+                        "Rounds: 1", "Elapsed: 14s", "Tool calls completed: 1"),
                 body -> assertThat(body).isEqualTo("""
                         ## 🤖 Agentic Review Progress
 
                         Tracking the review progress for **PR #1**.
 
                         - Latest activity: Completed
-                        - Rounds: 2 · Inspection tool calls completed: 3
+                        - Rounds: 2 · Tool calls completed: 3
                         - Started: 2026-10-13 00:00:00 UTC
                         - Elapsed: 16s · Last update: 2026-10-13 00:00:16 UTC"""));
+    }
+
+    @Test
+    void theLatestActivityFollowsTheWorkOnceTheIntervalHasPassed() {
+        RepositoryApiClient client = mock(RepositoryApiClient.class);
+        when(client.postPullRequestComment(eq("owner"), eq("repo"), eq(1L), anyString()))
+                .thenReturn(CommentId.NumericCommentId.of(42L));
+        AtomicReference<Instant> now = new AtomicReference<>(Instant.parse("2026-10-13T00:00:00Z"));
+        Clock clock = mock(Clock.class);
+        when(clock.instant()).thenAnswer(invocation -> now.get());
+        ReviewProgress progress = new ReviewProgress(client, "owner", "repo", 1L, clock);
+
+        progress.start();
+        progress.accept(new ProgressUpdate(1, "inspected repository: cat, rg", 2));
+        now.set(now.get().plusSeconds(5));
+        progress.accept(new ProgressUpdate(2, "recorded a finding", 1));
+        now.set(now.get().plusSeconds(10));
+        progress.accept(new ProgressUpdate(3, "set the assessment", 1));
+
+        var bodies = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(client, times(2)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L),
+                eq(CommentId.NumericCommentId.of(42L)), bodies.capture());
+        // The first round that completed tool calls always lands, even inside the interval.
+        assertThat(bodies.getAllValues().get(0))
+                .contains("- Latest activity: inspected repository: cat, rg")
+                .contains("Tool calls completed: 2");
+        // The 5s update was throttled; the 15s one proves the line keeps following the run.
+        assertThat(bodies.getAllValues().get(1))
+                .contains("- Latest activity: set the assessment")
+                .contains("Rounds: 3")
+                .contains("Tool calls completed: 4");
     }
 
     @Test
@@ -108,8 +141,9 @@ class ReviewProgressTest {
         assertThatCode(() -> progress.accept(new ProgressUpdate(1, "Waiting for model", 0)))
                 .doesNotThrowAnyException();
         now.set(now.get().plusSeconds(14));
-        progress.accept(new ProgressUpdate(1, "Repository inspection completed", 1));
-        verify(client).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L), eq(CommentId.NumericCommentId.of(42L)), anyString());
+        progress.accept(new ProgressUpdate(1, "inspected repository: cat", 1));
+        verify(client, times(2)).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L),
+                eq(CommentId.NumericCommentId.of(42L)), anyString());
         now.set(now.get().plusSeconds(1));
         progress.accept(new ProgressUpdate(2, "Waiting for model", 0));
         progress.finish(true);

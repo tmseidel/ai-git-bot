@@ -26,6 +26,9 @@ services:
       #   openssl rand -base64 32
       APP_ENCRYPTION_KEY: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
       APP_PUBLIC_URL: "http://localhost:8080"
+      # Footers of published agentic-review and follow-up comments (Markdown). Empty disables.
+      REVIEW_COMMENT_FOOTER: "*Agentic review by [AI Git Bot](https://gitbot.eu)*"
+      REVIEW_COMMENT_CLARIFICATION_FOOTER: "*Agentic review follow-up by [AI Git Bot](https://gitbot.eu)*"
       DATABASE_URL: "jdbc:h2:mem:giteabot;DB_CLOSE_DELAY=-1"
       DATABASE_DRIVER: "org.h2.Driver"
       # Credentials are plaintext here and encrypted on import: treat this file

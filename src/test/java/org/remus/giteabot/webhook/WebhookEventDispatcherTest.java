@@ -14,6 +14,7 @@ import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
 import org.springframework.http.ResponseEntity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -200,5 +201,32 @@ class WebhookEventDispatcherTest {
         assertEquals(42L, captor.getValue().getIssue().getNumber());
         assertNotNull(captor.getValue().getIssue().getPullRequest());
         assertEquals(true, captor.getValue().getIssue().getPullRequest().getMerged());
+    }
+
+    @Test
+    void feedbackComment_isConsumedBeforeTheReviewAgainCheck() {
+        comment(BOT_ALIAS + " feedback O12-F1 incorrect, please review again");
+        when(botWebhookService.tryHandleLearningCommand(bot, payload,
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, BOT_ALIAS)).thenReturn(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
+    }
+
+    @Test
+    void inlineFeedbackComment_isConsumedWithTheInlineKind() {
+        comment(BOT_ALIAS + " feedback O12-A needs-improvement");
+        when(botWebhookService.tryHandleLearningCommand(bot, payload,
+                FeedbackCommandHandler.COMMENT_KIND_INLINE, BOT_ALIAS)).thenReturn(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_INLINE_COMMENT).botMentioned(true).build());
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).handleInlineComment(any(), any());
     }
 }
