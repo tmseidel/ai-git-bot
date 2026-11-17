@@ -83,8 +83,11 @@ class ReviewCommentRendererTest {
         String rendered = renderer.render(review(ReviewConclusion.NO_FINDINGS, "Fine.", null, null,
                 List.of()));
 
-        assertTrue(rendered.endsWith("---\n\n*Reviewed by [Acme Engineering]"
-                + "(https://acme.example/review)*"));
+        assertTrue(rendered.endsWith("""
+                ---
+                
+                *Reviewed by [Acme Engineering]\
+                (https://acme.example/review)*"""));
     }
 
     @Test

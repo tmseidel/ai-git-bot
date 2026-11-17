@@ -10,6 +10,4 @@ public interface ReviewPublicationRepository extends JpaRepository<ReviewPublica
     Optional<ReviewPublication> findTopByReviewIdOrderByRenderRevisionDesc(Long reviewId);
 
     List<ReviewPublication> findByReviewIdOrderByRenderRevisionAsc(Long reviewId);
-
-    boolean existsByReviewIdAndState(Long reviewId, ReviewPublicationState state);
 }

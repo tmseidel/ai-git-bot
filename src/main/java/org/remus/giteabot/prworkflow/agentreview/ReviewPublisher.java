@@ -36,6 +36,12 @@ import java.util.function.Supplier;
  * the model. The intent is committed before the Git call: a crash leaves a visible {@code PENDING}
  * row rather than a silently missing review, and an unknown outcome is recorded as
  * {@code UNCERTAIN} instead of being retried into a duplicate.</p>
+ *
+ * <p>No path posts a review whose earlier delivery is {@code PUBLISHED}, {@code PENDING} or
+ * {@code UNCERTAIN}: the first publication and a republish alike stop with
+ * {@link PublicationOutcome#ALREADY_PUBLISHED} or {@link PublicationOutcome#UNRESOLVED}. Only
+ * {@link #republishConfirmedNotDelivered} — a person checked the pull request — overrides an
+ * unresolved delivery.</p>
  */
 @Slf4j
 @Component
@@ -75,7 +81,12 @@ public class ReviewPublisher {
         /** Deliberately not posted: the review no longer describes the pull request. */
         SUPPRESSED,
         /** Already on the pull request; a second copy would duplicate it. */
-        ALREADY_PUBLISHED
+        ALREADY_PUBLISHED,
+        /**
+         * An earlier delivery is {@code PENDING} or {@code UNCERTAIN} and may already be on the pull
+         * request. Nothing is posted until a person confirms it is not.
+         */
+        UNRESOLVED
     }
 
     /**
@@ -96,21 +107,31 @@ public class ReviewPublisher {
         }
     }
 
-    /** Publishes a finalized review that has no successful publication yet. */
+    /** Publishes a finalized review that has no earlier delivery that may have arrived. */
     public Publication publish(PublicationRequest request) {
         return deliver(request, false);
     }
 
     /**
-     * Retries a delivery that failed or whose outcome is unknown, by rerendering the same stored
-     * review. A review that is already published is not reposted: updating a bot-owned comment (or
-     * an explicit replacement) is a separate, deliberate action.
+     * Retries a delivery that definitely failed, by rerendering the same stored review. A published
+     * review is not reposted — updating a bot-owned comment is a separate, deliberate action — and a
+     * {@code PENDING} or {@code UNCERTAIN} delivery is answered with
+     * {@link PublicationOutcome#UNRESOLVED}: whether it arrived is for a person to check.
      */
     public Publication republish(PublicationRequest request) {
+        return deliver(request, false);
+    }
+
+    /**
+     * Retries after a person checked the pull request and found no copy of an earlier
+     * {@code PENDING} or {@code UNCERTAIN} delivery; those deliveries are recorded as
+     * {@code FAILED}. A {@code PUBLISHED} delivery still blocks.
+     */
+    public Publication republishConfirmedNotDelivered(PublicationRequest request) {
         return deliver(request, true);
     }
 
-    private Publication deliver(PublicationRequest request, boolean retry) {
+    private Publication deliver(PublicationRequest request, boolean confirmedNotDelivered) {
         FinalizedReview review = reviewService.findFinalizedByReference(request.outputReference())
                 .orElse(null);
         if (review == null) {
@@ -120,18 +141,15 @@ public class ReviewPublisher {
                     request.outputReference());
             return Publication.suppressed("the finalized review record is missing");
         }
-        if (retry && alreadyPublished(request.outputReference())) {
-            log.info("Agentic review {} is already published; refusing to post a duplicate. "
-                    + "Update the existing comment instead.", review.reference());
-            return new Publication(PublicationOutcome.ALREADY_PUBLISHED,
-                    "the review is already published on this pull request");
-        }
-
         String body = request.feedbackHint() == null
                 ? renderer.render(review, request.linkStyle())
                 : renderer.render(review, request.linkStyle()) + "\n\n" + request.feedbackHint();
-        ReviewPublication publication = publicationService.start(review.reference(),
-                request.provider(), request.channel(), body);
+        ReviewPublicationService.Start start = publicationService.start(review.reference(),
+                request.provider(), request.channel(), body, confirmedNotDelivered);
+        if (!start.isStarted()) {
+            return refused(review, start.blockedBy());
+        }
+        ReviewPublication publication = start.publication();
 
         String suppression = suppressionReason(request);
         if (suppression != null) {
@@ -157,8 +175,8 @@ public class ReviewPublisher {
             if (action == PostReviewAction.NONE || state == ReviewPublicationState.UNCERTAIN) {
                 publicationService.finish(publication.getId(), state, null);
                 if (state == ReviewPublicationState.UNCERTAIN) {
-                    log.warn("Delivery of agentic review {} is uncertain ({}); no fallback is attempted "
-                                    + "and the review stays stored for an explicit republish",
+                    log.warn("Delivery of agentic review {} is uncertain ({}); no fallback is attempted. "
+                                    + "Check the pull request: only a confirmed republish posts it again",
                             review.reference(), e.getMessage());
                 }
                 throw e;
@@ -185,14 +203,18 @@ public class ReviewPublisher {
         return Publication.published();
     }
 
-    /**
-     * Whether this review already reached the pull request in any revision. Checking only the newest
-     * revision would repost a review that was published and then failed to rerender.
-     */
-    private boolean alreadyPublished(String outputReference) {
-        return reviewService.findReviewIdByReference(outputReference)
-                .map(publicationService::delivered)
-                .orElse(false);
+    private static Publication refused(FinalizedReview review, ReviewPublicationState blockedBy) {
+        if (blockedBy == ReviewPublicationState.PUBLISHED) {
+            log.info("Agentic review {} is already published; refusing to post a duplicate. "
+                    + "Update the existing comment instead.", review.reference());
+            return new Publication(PublicationOutcome.ALREADY_PUBLISHED,
+                    "the review is already published on this pull request");
+        }
+        log.warn("Agentic review {} has a {} delivery that may already be on the pull request; "
+                + "not posting again until a person confirms it is not", review.reference(), blockedBy);
+        return new Publication(PublicationOutcome.UNRESOLVED, "an earlier delivery is "
+                + blockedBy.name().toLowerCase(Locale.ROOT)
+                + " and may already be on the pull request; check it before republishing");
     }
 
     /**

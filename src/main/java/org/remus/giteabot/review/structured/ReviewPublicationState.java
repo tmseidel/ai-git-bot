@@ -6,7 +6,11 @@ package org.remus.giteabot.review.structured;
  */
 public enum ReviewPublicationState {
 
-    /** Intent persisted before the Git call: a crash mid-delivery stays visible. */
+    /**
+     * Intent persisted before the Git call: a crash mid-delivery stays visible. While a delivery is
+     * pending — still running, or orphaned by a crash after the Git call — no other delivery of the
+     * review starts until a person confirms it did not arrive.
+     */
     PENDING,
 
     /** The provider accepted the review (or its plain-comment fallback). */
@@ -16,8 +20,8 @@ public enum ReviewPublicationState {
     FAILED,
 
     /**
-     * The outcome is unknown (timeout, dropped connection). A retry may duplicate the comment, so
-     * it is not automatic.
+     * The outcome is unknown (timeout, dropped connection, server error). A retry may duplicate the
+     * comment, so only a person who checked the pull request can release it.
      */
     UNCERTAIN,
 

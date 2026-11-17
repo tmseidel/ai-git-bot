@@ -157,7 +157,7 @@ public class AgentReviewService {
                                     : null));
             return switch (publication.outcome()) {
                 case PUBLISHED -> ReviewResult.POSTED;
-                case SUPPRESSED -> {
+                case SUPPRESSED, UNRESOLVED -> {
                     log.warn("Agentic review {} was not published: {}", result.reference(),
                             publication.reason());
                     yield ReviewResult.SUPPRESSED;

@@ -37,6 +37,7 @@ import java.util.function.BooleanSupplier;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -72,14 +73,13 @@ class ReviewPublisherTest {
                 new ReviewCommentRenderer(new org.remus.giteabot.config.ReviewCommentProperties()), eventHooks);
         bot = new Bot();
         bot.setId(3L);
-        lenient().when(publicationService.start(anyString(), anyString(), anyString(), anyString()))
+        lenient().when(publicationService.start(anyString(), anyString(), anyString(), anyString(), anyBoolean()))
                 .thenAnswer(invocation -> {
                     ReviewPublication publication = new ReviewPublication();
                     publication.setId(1L);
                     publication.setRenderRevision(1);
-                    return publication;
+                    return new ReviewPublicationService.Start(publication, null);
                 });
-        lenient().when(reviewService.findReviewIdByReference(anyString())).thenReturn(Optional.of(1L));
     }
 
     @Test
@@ -121,7 +121,7 @@ class ReviewPublisherTest {
 
         verify(publicationService).start(eq("O1234"), eq("GITEA"), eq("pull_request_review"),
                 argThat(body -> body.contains("AI Review · O1234")
-                        && body.contains("🔴 BLOCKER · `O1234-F1`")));
+                        && body.contains("🔴 BLOCKER · `O1234-F1`")), eq(false));
         verify(repositoryClient).postReview(eq("acme"), eq("web"), eq(9L), anyString(),
                 eq(PostReviewAction.REQUEST_CHANGES));
         verify(publicationService).finish(1L, ReviewPublicationState.PUBLISHED, null);
@@ -297,7 +297,7 @@ class ReviewPublisherTest {
     void republishRefusesToDuplicateAnAlreadyPublishedReview() {
         when(reviewService.findFinalizedByReference("O1234"))
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
-        when(publicationService.delivered(1L)).thenReturn(true);
+        blockedBy(ReviewPublicationState.PUBLISHED);
 
         assertThat(publisher.republish(plainRequest("head", "head", () -> false)).outcome())
                 .isEqualTo(ReviewPublisher.PublicationOutcome.ALREADY_PUBLISHED);
@@ -308,14 +308,60 @@ class ReviewPublisherTest {
     void republishRetriesAFailedDeliveryWithoutAModelCall() {
         when(reviewService.findFinalizedByReference("O1234"))
                 .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
-        when(publicationService.delivered(1L)).thenReturn(false);
 
         assertThat(publisher.republish(plainRequest("head", "head", () -> false)).outcome())
                 .isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
 
-        verify(publicationService).start(eq("O1234"), anyString(), anyString(), anyString());
+        verify(publicationService).start(eq("O1234"), anyString(), anyString(), anyString(), eq(false));
         verify(repositoryClient).postReview(eq("acme"), eq("web"), eq(9L), anyString(),
                 eq(PostReviewAction.NONE));
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = ReviewPublicationState.class,
+            names = {"PENDING", "UNCERTAIN"})
+    void anUnresolvedEarlierDeliveryStopsTheFirstPublishAndARepublish(ReviewPublicationState state) {
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
+        // A crash after the Git call left PENDING, or a timeout left UNCERTAIN: the review may be
+        // on the pull request already. A re-dispatched job must not post it again.
+        blockedBy(state);
+
+        assertThat(publisher.publish(plainRequest("head", "head", () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.UNRESOLVED);
+        assertThat(publisher.republish(plainRequest("head", "head", () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.UNRESOLVED);
+
+        verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+        verify(repositoryClient, never()).postReviewComment(anyString(), anyString(), anyLong(), anyString());
+        verify(publicationService, never()).finish(anyLong(), any(), any());
+    }
+
+    @Test
+    void theFirstPublishRefusesAReviewThatIsAlreadyPublished() {
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
+        blockedBy(ReviewPublicationState.PUBLISHED);
+
+        assertThat(publisher.publish(plainRequest("head", "head", () -> false)).outcome())
+                .isEqualTo(ReviewPublisher.PublicationOutcome.ALREADY_PUBLISHED);
+        verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+    }
+
+    @Test
+    void onlyAConfirmedRepublishPassesTheConfirmationOn() {
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
+
+        assertThat(publisher.republishConfirmedNotDelivered(plainRequest("head", "head", () -> false))
+                .outcome()).isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
+
+        verify(publicationService).start(eq("O1234"), anyString(), anyString(), anyString(), eq(true));
+    }
+
+    private void blockedBy(ReviewPublicationState state) {
+        when(publicationService.start(anyString(), anyString(), anyString(), anyString(), anyBoolean()))
+                .thenReturn(new ReviewPublicationService.Start(null, state));
     }
 
     @Test

@@ -170,6 +170,8 @@ class AgentReviewCompletionTest {
                 .filter(record -> record.getOutput() != null
                         && record.getOutput().getId().equals(invocation.getArgument(0)))
                 .findFirst());
+        lenient().when(reviewRepository.findForUpdateByOutputId(anyLong()))
+                .thenAnswer(invocation -> reviewRepository.findByOutputId(invocation.getArgument(0)));
         lenient().when(reviewRepository.save(any(ReviewRecord.class))).thenAnswer(invocation -> {
             ReviewRecord record = invocation.getArgument(0);
             if (record.getId() == null) {
@@ -200,6 +202,12 @@ class AgentReviewCompletionTest {
         });
         lenient().when(publicationRepository.findById(anyLong()))
                 .thenAnswer(invocation -> Optional.ofNullable(publications.get(invocation.getArgument(0))));
+        lenient().when(publicationRepository.findByReviewIdOrderByRenderRevisionAsc(anyLong()))
+                .thenAnswer(invocation -> publications.values().stream()
+                        .filter(publication -> publication.getReviewId().equals(invocation.getArgument(0)))
+                        .sorted(java.util.Comparator.comparingInt(
+                                org.remus.giteabot.review.structured.ReviewPublication::getRenderRevision))
+                        .toList());
         lenient().when(publicationRepository.findTopByReviewIdOrderByRenderRevisionDesc(anyLong()))
                 .thenAnswer(invocation -> publications.values().stream()
                         .filter(publication -> publication.getReviewId().equals(invocation.getArgument(0)))
