@@ -37,7 +37,7 @@
                                 <td th:text="${integration.name}"></td>
                                 <td th:text="${integration.username}"></td>
                                 <td>
-                                    <span class="badge bg-secondary" th:text="${integration.providerType}"></span>
+                                    <span class="badge bg-secondary" th:text="${integration.providerType?.displayName}"></span>
                                 </td>
                                 <td th:text="${integration.url}"></td>
                                 <td>
