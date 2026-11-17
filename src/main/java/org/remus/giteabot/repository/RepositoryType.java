@@ -6,9 +6,20 @@ package org.remus.giteabot.repository;
  * and has its own set of configurable properties.
  */
 public enum RepositoryType {
-    GITEA,
-    GITHUB,
-    GITLAB,
-    BITBUCKET,
-    AZURE_DEVOPS
+    GITEA("Gitea"),
+    GITHUB("GitHub"),
+    GITLAB("GitLab"),
+    BITBUCKET("Bitbucket"),
+    AZURE_DEVOPS("Azure DevOps");
+
+    private final String displayName;
+
+    RepositoryType(String displayName) {
+        this.displayName = displayName;
+    }
+
+    /** Human-readable provider name shown in the admin UI. */
+    public String getDisplayName() {
+        return displayName;
+    }
 }

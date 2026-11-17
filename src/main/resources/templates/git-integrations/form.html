@@ -39,7 +39,7 @@
                                     onchange="updateFormFields()">
                                 <option value="" th:text="#{message.selectProvider}">Select a provider...</option>
                                 <option th:each="type : ${providerTypes}"
-                                        th:value="${type}" th:text="${type}"></option>
+                                        th:value="${type}" th:text="${type.displayName}"></option>
                             </select>
                             <div class="form-text" th:text="#{help.gitProvider}">The Git hosting platform you want to connect to.</div>
                         </div>
