@@ -378,9 +378,12 @@ public class ToolCatalog {
                     objectSchema(
                             prop("operationId", "string", "Unique ID for this call; reuse it only when retrying the identical call."),
                             prop("expectedDraftRevision", "integer", "The draftRevision this assessment is based on."),
-                            prop("summary", "string", "One short paragraph judging the change as a whole."),
+                            prop("summary", "string", "The overall assessment of the change, in Markdown: "
+                                    + "what it does, how sound the approach and implementation are, the main "
+                                    + "risks, and what is done well. Several paragraphs or a short list where "
+                                    + "the change warrants it; a trivial change can be judged briefly."),
                             prop("conclusion", "string", "FINDINGS_PRESENT, NO_FINDINGS or INCONCLUSIVE."),
-                            prop("reviewedAreas", "string", "What you actually inspected, in prose."),
+                            prop("reviewedAreas", "string", "What you actually inspected: files, callers, tests. Markdown allowed."),
                             prop("limitations", "string", "What you did not or could not verify. Required for INCONCLUSIVE."),
                             required("operationId", "expectedDraftRevision", "summary", "conclusion", "reviewedAreas", "limitations"))),
             entry("review-complete", ToolKind.REVIEW_OUTPUT, EnumSet.of(Role.REVIEW_OUTPUT),
@@ -773,9 +776,13 @@ public class ToolCatalog {
         severity.putArray("enum").add("BLOCKER").add("MEDIUM").add("LOW");
         putString(props, "category", "Short classification, e.g. \"authorization\", \"correctness\", \"performance\".");
         putString(props, "title", "One-line summary of the problem.");
-        putString(props, "explanation", "What is wrong and why, with the reasoning that led you there.");
+        putString(props, "explanation", "What is wrong and why, with the reasoning that led you there. "
+                + "Markdown is allowed; quote the relevant code in a fenced block when it makes the "
+                + "problem clearer.");
         putString(props, "impact", "What can go wrong because of it.");
-        putString(props, "recommendation", "The concrete change you recommend.");
+        putString(props, "recommendation", "The concrete change you recommend. When the fix is code, "
+                + "show it: a short fenced code block with a language tag (e.g. ```java) containing the "
+                + "suggested code, not the whole file.");
         ObjectNode evidence = props.putObject("evidence");
         evidence.put("type", "array");
         evidence.put("description",

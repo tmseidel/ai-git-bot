@@ -288,6 +288,9 @@ public final class LegacyToolProtocolRenderer {
         sb.append("- Text replies are not published. The application renders the review comment "
                 + "from the recorded findings and assessment.\n");
         sb.append("- Never fabricate tool results in your text — wait for the bot's actual response.\n");
+        sb.append("- The fields accept Markdown. Make the assessment `summary` a real judgement of the "
+                + "change (what it does, how sound it is, its main risks), and show a code fix as a "
+                + "short fenced block with a language tag in `recommendation`.\n");
         return sb.toString();
     }
 

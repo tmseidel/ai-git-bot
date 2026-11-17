@@ -180,8 +180,102 @@ class ReviewCommentRendererTest {
         assertTrue(rendered.contains("\\🔴 BLOCKER · O1234-F8 · Fake with icon"));
         assertTrue(rendered.contains("\\| a | b |"));
         assertTrue(rendered.contains("\\---"));
-        assertTrue(rendered.contains("\\```"));
+        // The unclosed fence is kept as code and closed before the next field.
+        assertTrue(rendered.contains("```\nfenced\n```\n\n**Where**"));
         assertEquals(1, rendered.lines().filter(line -> line.startsWith("### ")).count());
+    }
+
+    @Test
+    void keepsAFencedCodeSuggestionVerbatim() {
+        String recommendation = """
+                Check the permission first:
+
+                ```java
+                // # not a heading, > not a quote, | not a table
+                if (!user.can(EDIT)) {
+
+                    throw new AccessDeniedException("settings");
+                }
+                ---
+                ```
+
+                Then save.""";
+
+        assertEquals("""
+                Check the permission first:
+
+                ```java
+                // # not a heading, > not a quote, | not a table
+                if (!user.can(EDIT)) {
+
+                    throw new AccessDeniedException("settings");
+                }
+                ---
+                ```
+
+                Then save.""", ReviewCommentRenderer.block(recommendation));
+    }
+
+    @Test
+    void escapesStructureAgainAfterTheFenceCloses() {
+        String rendered = ReviewCommentRenderer.block("""
+                ~~~
+                # inside
+                ~~~
+                # outside
+                MEDIUM · O1234-F9 · Fake finding""");
+
+        assertEquals("""
+                ~~~
+                # inside
+                ~~~
+                \\# outside
+                \\MEDIUM · O1234-F9 · Fake finding""", rendered);
+    }
+
+    @Test
+    void onlyAMatchingFenceClosesTheBlock() {
+        String rendered = ReviewCommentRenderer.block("""
+                ````markdown
+                ```
+                ~~~~
+                ### still code
+                ````
+                ### outside""");
+
+        assertEquals("""
+                ````markdown
+                ```
+                ~~~~
+                ### still code
+                ````
+                \\### outside""", rendered);
+    }
+
+    @Test
+    void closesAFenceLeftOpenSoItCannotSwallowTheRestOfTheComment() {
+        FinalizedReview review = review(ReviewConclusion.FINDINGS_PRESENT, """
+                Overall sound.
+
+                ```java
+                int x = 1;""", null, null,
+                List.of(new FinalizedReview.Finding("O1234-F1", ReviewSeverity.LOW, "style", "Title",
+                        "Explanation.", "Impact.", "```\nunclosed", List.of())));
+
+        String rendered = renderer.render(review);
+
+        assertTrue(rendered.contains("```java\nint x = 1;\n```\n"));
+        assertTrue(rendered.contains("**Recommendation**\n\n```\nunclosed\n```\n"));
+        assertTrue(rendered.contains("\n## 🔎 Findings · 1\n"));
+        assertTrue(rendered.contains("\n## 🧭 Coverage and limitations\n"));
+        assertEquals(0, rendered.lines().filter(line -> line.startsWith("```")).count() % 2,
+                "every fence is closed");
+    }
+
+    @Test
+    void treatsBacktickInfoStringsAndDeepIndentationAsNoFence() {
+        assertEquals("\\```not`a fence\n\\# escaped", ReviewCommentRenderer.block("```not`a fence\n# escaped"));
+        assertEquals("\\    ```\n\\# escaped", ReviewCommentRenderer.block("    ```\n# escaped"));
     }
 
     @Test
