@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.springframework.scheduling.annotation.Async;
 
@@ -35,7 +36,7 @@ class BotWebhookServiceAsyncContractTest {
     @Test
     void theWebhookEntryPointsAreAllAsync() {
         List<Method> entryPoints = List.of(
-                method("reviewPullRequest", Bot.class, WebhookPayload.class),
+                method("reviewPullRequest", Bot.class, WebhookPayload.class, WebhookEventKind.class),
                 method("handlePrComment", Bot.class, WebhookPayload.class),
                 method("handleInlineComment", Bot.class, WebhookPayload.class),
                 method("handleReviewSubmitted", Bot.class, WebhookPayload.class),

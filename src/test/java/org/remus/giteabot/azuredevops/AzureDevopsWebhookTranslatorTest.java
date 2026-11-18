@@ -3,14 +3,11 @@ package org.remus.giteabot.azuredevops;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
-import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.event.PullRequestStateTracker;
-import org.remus.giteabot.webhook.TranslatingWebhookHandler;
-import org.remus.giteabot.webhook.WebhookEventDispatcher;
-import org.springframework.http.ResponseEntity;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
 
 import java.util.List;
 import java.util.Map;
@@ -18,29 +15,27 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Covers how {@link AzureDevopsWebhookTranslator} classifies events and, through the real
- * {@link WebhookEventDispatcher}, which {@link BotWebhookService} handler they reach:
- * routing, bot-loop suppression, the event-to-event state, and the various "ignored"
- * paths. The payload translation itself is covered by {@link AzureDevopsPayloadTranslationTest}.
+ * Covers how {@link AzureDevopsWebhookTranslator} turns Azure DevOps Service Hook events into
+ * {@link WebhookEvent}s: classification, bot identity, the event-to-event state that tells a
+ * push from a vote or edit, and the various "ignored" paths. The payload translation itself is
+ * covered by {@link AzureDevopsPayloadTranslationTest}; what the bot does with each kind by
+ * {@code WebhookEventDispatcherTest}.
  */
 class AzureDevopsWebhookTranslatorTest {
 
-    private BotWebhookService botWebhookService;
+    private static final String SHA = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+
     private RepositoryPlatformFactory repositoryPlatformFactory;
     private AzureDevopsWebhookTranslator translator;
-    private TranslatingWebhookHandler handler;
     private Bot bot;
 
     @BeforeEach
     void setUp() {
-        botWebhookService = mock(BotWebhookService.class);
         repositoryPlatformFactory = mock(RepositoryPlatformFactory.class);
         translator = new AzureDevopsWebhookTranslator(repositoryPlatformFactory, new PullRequestStateTracker());
-        handler = new TranslatingWebhookHandler(translator, null, botWebhookService);
 
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://dev.azure.com/contoso");
@@ -49,76 +44,66 @@ class AzureDevopsWebhookTranslatorTest {
         bot = new Bot();
         bot.setId(1L);
         bot.setName("test-bot");
-        bot.setRunOnPrCreation(true);
         bot.setGitIntegration(integration);
+    }
 
+    /** Azure DevOps carries the event type in the body, so no header is needed. */
+    private WebhookEvent translate(Map<String, Object> payload) {
+        return translator.translate(bot, Map.of(), payload);
+    }
+
+    // ---- Lifecycle ----
+
+    @Test
+    void pullRequestCreated_isPrOpened() {
+        WebhookEvent event = translate(pullRequestPayload("git.pullrequest.created"));
+
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertFalse(event.fromBot());
     }
 
     @Test
-    void pullRequestCreated_triggersReview() {
-        handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.created"));
-
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
-    }
-
-    @Test
-    void pullRequestCompleted_closesSession() {
+    void pullRequestCompletedOrAbandoned_isPrClosed() {
         // Completion arrives as an "updated" event carrying status completed.
-        handler.handleWebhook(bot, pullRequestPayloadWithStatus(
-                "git.pullrequest.updated", "completed"));
-
-        verify(botWebhookService).handlePrClosed(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_CLOSED,
+                translate(pullRequestPayloadWithStatus("git.pullrequest.updated", "completed")).kind());
+        assertEquals(WebhookEventKind.PR_CLOSED,
+                translate(pullRequestPayloadWithStatus("git.pullrequest.updated", "abandoned")).kind());
     }
 
     @Test
-    void pullRequestMergeAttempt_doesNotCloseSession() {
+    void pullRequestMergeAttempt_isIgnored() {
         // Regression guard: "git.pullrequest.merged" is Azure DevOps's "merge attempted"
         // event and fires when the preview merge commit is built — including right after
         // the PR is opened. Closing on it would kill the session under an open PR.
-        var response = handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.merged"));
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handlePrClosed(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, translate(pullRequestPayload("git.pullrequest.merged")).kind());
     }
 
     @Test
-    void eventFromBotItself_isIgnored() {
+    void pullRequestCreatedByTheBot_isFromTheBot() {
         // Azure DevOps reports the creator of a new pull request as its createdBy.
-        assertEquals("ignored",
-                handler.handleWebhook(bot, withResource(pullRequestPayload("git.pullrequest.created"),
-                        "createdBy", Map.of("uniqueName", "bot@contoso.com")))
-                        .getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        WebhookEvent event = translate(withResource(pullRequestPayload("git.pullrequest.created"),
+                "createdBy", Map.of("uniqueName", "bot@contoso.com")));
+
+        assertTrue(event.fromBot());
     }
 
     @Test
-    void unknownEventType_isIgnoredWithOk() {
-        var response = handler.handleWebhook(bot, pullRequestPayload("git.push"));
-
-        assertTrue(response.getStatusCode().is2xxSuccessful());
-        assertEquals("ignored", response.getBody());
-        verifyNoMoreInteractions(ignoreStubs(botWebhookService));
+    void unknownEventType_isIgnored() {
+        assertEquals(WebhookEventKind.IGNORED, translate(pullRequestPayload("git.push")).kind());
     }
 
     @Test
     void missingEventType_isIgnored() {
-        var response = handler.handleWebhook(bot, Map.of("resource", Map.of()));
-
-        assertTrue(response.getStatusCode().is2xxSuccessful());
-        assertEquals("ignored", response.getBody());
+        assertEquals(WebhookEventKind.IGNORED, translate(Map.of("resource", Map.of())).kind());
     }
 
     // ---- git.pullrequest.updated fires on far more than pushes ----
 
     @Test
-    void pullRequestUpdated_withNewSourceCommit_triggersReview() {
-        bot.setRunOnPrUpdate(true);
-
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha(
-                "git.pullrequest.updated", "aaaa1111bbbb2222cccc3333dddd4444eeee5555"));
-
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    void pullRequestUpdated_withNewSourceCommit_isPrSynchronized() {
+        assertEquals(WebhookEventKind.PR_SYNCHRONIZED,
+                translate(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA)).kind());
     }
 
     @Test
@@ -126,111 +111,98 @@ class AzureDevopsWebhookTranslatorTest {
         // A reviewer voting, or the author editing the title/description, produces a
         // git.pullrequest.updated event with the source branch still at the same commit.
         // Re-reviewing the whole PR on those would burn AI tokens on every human click.
-        bot.setRunOnPrUpdate(true);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA));
 
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
-        var second = handler.handleWebhook(bot,
-                pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
+        WebhookEvent second = translate(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA));
 
-        assertEquals("ignored", second.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.IGNORED, second.kind());
     }
 
     @Test
     void pullRequestCreated_seedsHeadShaSoTheFollowUpUpdateIsNotAPush() {
         // Azure DevOps fires git.pullrequest.updated moments after creation. Without
         // seeding on create, that event looks like the first push and doubles the review.
-        bot.setRunOnPrUpdate(true);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.created", SHA));
 
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
+        WebhookEvent update = translate(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA));
 
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.IGNORED, update.kind());
     }
 
     @Test
-    void pullRequestUpdated_withoutSourceCommit_stillTriggersReview() {
+    void pullRequestUpdated_withoutSourceCommit_isAlwaysPrSynchronized() {
         // A subscription with a reduced "Resource details to send" omits the commit.
         // Dropping those events would be worse than an occasional redundant review.
-        bot.setRunOnPrUpdate(true);
+        assertEquals(WebhookEventKind.PR_SYNCHRONIZED, translate(pullRequestPayload("git.pullrequest.updated")).kind());
+        assertEquals(WebhookEventKind.PR_SYNCHRONIZED, translate(pullRequestPayload("git.pullrequest.updated")).kind());
+    }
 
-        handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.updated"));
-        handler.handleWebhook(bot, pullRequestPayload("git.pullrequest.updated"));
+    // ---- Reactivation ----
 
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    @Test
+    void reactivatedPullRequest_isPrReopenedAtTheSameCommit() {
+        // Azure DevOps has no reopened event: reactivating an abandoned pull request is
+        // an update whose status is active again. Closing forgets the tracked sha, so the
+        // reactivation is not mistaken for a duplicate of the last update either.
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA));
+        translate(withResource(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA), "status", "abandoned"));
+
+        WebhookEvent reactivated = translate(pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA));
+
+        assertEquals(WebhookEventKind.PR_REOPENED, reactivated.kind());
+        assertFalse(reactivated.botIsReviewer());
     }
 
     @Test
-    void pullRequestReopenedAfterClose_reviewsAgainAtTheSameCommit() {
-        // Closing forgets the tracked sha, so a PR that is completed and later updated
-        // again at the same commit is not mistaken for a duplicate.
-        bot.setRunOnPrUpdate(true);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+    void reactivatedPullRequestWithBotReviewer_isPrReopenedWithTheBotAsReviewer() {
+        // Every other provider reviews a reopened PR when the bot is a requested reviewer,
+        // without needing run-on-update; the reopen kind lets the dispatcher do the same.
+        translate(pullRequestPayloadWithReviewers("git.pullrequest.created", SHA, "bot@contoso.com"));
+        translate(withResource(pullRequestPayloadWithReviewers(
+                "git.pullrequest.updated", SHA, "bot@contoso.com"), "status", "abandoned"));
 
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
-        handler.handleWebhook(bot, withResource(
-                pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "status", "abandoned"));
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
+        WebhookEvent reactivated = translate(pullRequestPayloadWithReviewers(
+                "git.pullrequest.updated", SHA, "bot@contoso.com"));
 
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_REOPENED, reactivated.kind());
+        assertTrue(reactivated.botIsReviewer());
     }
 
     // ---- Reviewer added after the pull request was opened ----
 
     @Test
-    void botAddedAsReviewerAfterOpen_triggersReview() {
+    void botAddedAsReviewerAfterOpen_isPrReviewerAdded() {
         // Azure DevOps sends no review_requested event: adding the bot as a reviewer of
         // an open pull request arrives as a plain "updated" whose reviewer list now
-        // carries the bot, with the source branch exactly where it was. Neither run-on
-        // switch is set, which is the configuration the review-trigger notice describes.
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        // carries the bot, with the source branch exactly where it was.
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.created", SHA));
 
-        var response = handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "bot@contoso.com"));
+        WebhookEvent event = translate(pullRequestPayloadWithReviewers("git.pullrequest.updated", SHA, "bot@contoso.com"));
 
-        assertEquals("review triggered", response.getBody());
-        // Marked as a review request, so the bot acknowledges it like one elsewhere.
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot),
-                argThat(payload -> "review_requested".equals(payload.getAction())));
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, event.kind());
     }
 
     @Test
-    void botAlreadyReviewer_doesNotReviewAgainOnEveryFollowUpUpdate() {
+    void botAlreadyReviewer_isNotAddedAgainOnEveryFollowUpUpdate() {
         // Votes and title edits keep the bot in the reviewer list. Reacting to the list
         // rather than to the change to it would re-review the pull request every time.
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+        WebhookEvent first = translate(pullRequestPayloadWithReviewers("git.pullrequest.updated", SHA, "bot@contoso.com"));
+        WebhookEvent second = translate(pullRequestPayloadWithReviewers("git.pullrequest.updated", SHA, "bot@contoso.com"));
 
-        handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "bot@contoso.com"));
-        var second = handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "bot@contoso.com"));
-
-        assertEquals("ignored", second.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, first.kind());
+        assertEquals(WebhookEventKind.IGNORED, second.kind());
     }
 
     @Test
-    void botReviewerAtCreation_isNotReviewedTwiceByTheFollowUpUpdate() {
+    void botReviewerAtCreation_isNotAddedAgainByTheFollowUpUpdate() {
         // The reviewer list is seeded at creation for the same reason the head sha is:
         // Azure DevOps fires an "updated" event moments after the pull request opens.
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+        WebhookEvent created = translate(pullRequestPayloadWithReviewers("git.pullrequest.created", SHA, "bot@contoso.com"));
+        WebhookEvent update = translate(pullRequestPayloadWithReviewers("git.pullrequest.updated", SHA, "bot@contoso.com"));
 
-        handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.created", sha, "bot@contoso.com"));
-        handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "bot@contoso.com"));
-
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_OPENED, created.kind());
+        assertTrue(created.botIsReviewer());
+        assertEquals(WebhookEventKind.IGNORED, update.kind());
     }
 
     @Test
@@ -238,113 +210,56 @@ class AzureDevopsWebhookTranslatorTest {
         // A subscription configured with reduced "Resource details to send" omits
         // reviewers entirely. Treating that as a removal would make the next full
         // payload look like a fresh review request.
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
+        translate(pullRequestPayloadWithReviewers("git.pullrequest.created", SHA, "bot@contoso.com"));
+        WebhookEvent withoutReviewers = translate(pullRequestPayloadWithoutReviewers("git.pullrequest.updated", SHA));
+        WebhookEvent withReviewers = translate(pullRequestPayloadWithReviewers("git.pullrequest.updated", SHA, "bot@contoso.com"));
 
-        handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.created", sha, "bot@contoso.com"));
-        var response = handler.handleWebhook(bot,
-                pullRequestPayloadWithoutReviewers("git.pullrequest.updated", sha));
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.IGNORED, withoutReviewers.kind());
+        assertEquals(WebhookEventKind.IGNORED, withReviewers.kind());
     }
 
     @Test
-    void botsOwnVoteAddingItToTheReviewerList_doesNotTriggerASecondReview() {
+    void botsOwnVoteAddingItToTheReviewerList_isNotAReviewerAddition() {
         // Casting a vote adds the caller to the reviewer list. With the bot not an explicit
         // reviewer, its post-review vote arrives as an "updated" listing the bot with a
         // non-zero vote, and must not be read as a fresh review request.
-        bot.setRunOnPrCreation(true);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
-        verify(botWebhookService, times(1)).reviewPullRequest(any(), any());
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.created", SHA));
 
-        var response = handler.handleWebhook(bot, withResource(
-                pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "reviewers",
+        WebhookEvent event = translate(withResource(
+                pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA), "reviewers",
                 List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 10))));
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, times(1)).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
     }
 
     @Test
-    void botAddedAsReviewerWithoutAVote_stillTriggersReview() {
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
+    void botAddedAsReviewerWithoutAVote_isPrReviewerAdded() {
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.created", SHA));
 
-        var response = handler.handleWebhook(bot, withResource(
-                pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha), "reviewers",
+        WebhookEvent event = translate(withResource(
+                pullRequestPayloadWithHeadSha("git.pullrequest.updated", SHA), "reviewers",
                 List.of(Map.of("uniqueName", "bot@contoso.com", "vote", 0))));
 
-        assertEquals("review triggered", response.getBody());
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, event.kind());
     }
 
     @Test
-    void otherReviewerAdded_doesNotTriggerReview() {
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
+    void otherReviewerAdded_isIgnored() {
+        translate(pullRequestPayloadWithHeadSha("git.pullrequest.created", SHA));
 
-        var response = handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "someone-else@contoso.com"));
+        WebhookEvent event = translate(pullRequestPayloadWithReviewers(
+                "git.pullrequest.updated", SHA, "someone-else@contoso.com"));
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
     }
 
-    @Test
-    void reactivatedPullRequestIsTreatedAsReopened_notAsAPlainUpdate() {
-        // Azure DevOps has no reopened event: reactivating an abandoned pull request is
-        // an update whose status is active again. Every other provider reviews a
-        // reopened PR when the bot is a requested reviewer, without needing
-        // run-on-update, and this must match.
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
-        handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.created", sha, "bot@contoso.com"));
-        verify(botWebhookService, times(1)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
-
-        handler.handleWebhook(bot, withResource(pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "bot@contoso.com"), "status", "abandoned"));
-
-        var response = handler.handleWebhook(bot, pullRequestPayloadWithReviewers(
-                "git.pullrequest.updated", sha, "bot@contoso.com"));
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService, times(2)).reviewPullRequest(eq(bot), any(WebhookPayload.class));
-    }
-
-    @Test
-    void reactivatedPullRequestWithoutBotReviewer_isNotReviewedWhenBothSwitchesAreOff() {
-        bot.setRunOnPrCreation(false);
-        bot.setRunOnPrUpdate(false);
-        String sha = "aaaa1111bbbb2222cccc3333dddd4444eeee5555";
-        handler.handleWebhook(bot, pullRequestPayloadWithHeadSha("git.pullrequest.created", sha));
-        handler.handleWebhook(bot, pullRequestPayloadWithStatus("git.pullrequest.updated", "abandoned"));
-
-        var response = handler.handleWebhook(bot,
-                pullRequestPayloadWithHeadSha("git.pullrequest.updated", sha));
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
-    }
-
-    // ---- (a) null-guard on translateCommentEvent: pr == null ----
+    // ---- Comments ----
 
     @Test
     void commentWithoutPullRequest_isIgnoredEvenWhenBodyMentionsBotAlias() {
-        // Dangerous path: a malformed comment payload missing resource.pullRequest,
-        // where the comment body still mentions the bot alias. Without the null
-        // guard, the dispatcher would happily call handlePrComment (or worse,
-        // reviewPullRequest/handleInlineComment) with a payload whose pull
-        // request, repository, number and issue are all null.
+        // A malformed comment payload missing resource.pullRequest, where the comment body
+        // still mentions the bot alias. Without the null guard, a comment handler would be
+        // reached with a payload whose pull request, repository, number and issue are null.
         Map<String, Object> payload = Map.of(
                 "eventType", "ms.vss-code.git-pullrequest-comment-event",
                 "resource", Map.of(
@@ -353,12 +268,44 @@ class AzureDevopsWebhookTranslatorTest {
                                 "author", Map.of("uniqueName", "dev@contoso.com"))));
         // Note: "pullRequest" is deliberately absent from "resource".
 
-        var response = handler.handleWebhook(bot, payload);
+        assertEquals(WebhookEventKind.IGNORED, translate(payload).kind());
+    }
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handlePrComment(any(), any());
-        verify(botWebhookService, never()).handleInlineComment(any(), any());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    @Test
+    void inlineCommentMentioningBot_isHydratedIntoPrInlineComment() {
+        AzureDevopsApiClient client = mock(AzureDevopsApiClient.class);
+        when(repositoryPlatformFactory.getApiClient(bot.getGitIntegration())).thenReturn(client);
+        when(client.getInlineThreadContext(any(), any(), any(), anyLong()))
+                .thenReturn(new AzureDevopsApiClient.InlineThreadContext("src/Foo.java", 12));
+
+        WebhookEvent event = translate(commentPayload("@bot@contoso.com why this?"));
+
+        assertEquals(WebhookEventKind.PR_INLINE_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+        assertEquals("src/Foo.java", event.payload().getComment().getPath());
+        assertEquals(12, event.payload().getComment().getLine());
+    }
+
+    @Test
+    void conversationCommentMentioningBot_isPrComment() {
+        AzureDevopsApiClient client = mock(AzureDevopsApiClient.class);
+        when(repositoryPlatformFactory.getApiClient(bot.getGitIntegration())).thenReturn(client);
+
+        WebhookEvent event = translate(commentPayload("@bot@contoso.com please explain"));
+
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+    }
+
+    @Test
+    void commentNotMentioningBot_isNotHydrated() {
+        // Azure DevOps fires the comment event for every comment on every pull request;
+        // only those addressing the bot are worth an API call.
+        WebhookEvent event = translate(commentPayload("looks good"));
+
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertFalse(event.botMentioned());
+        verifyNoInteractions(repositoryPlatformFactory);
     }
 
     // ---- (b) organizationFromResourceContainers(Map) — envelope-based resolution ----
@@ -440,24 +387,6 @@ class AzureDevopsWebhookTranslatorTest {
         assertNull(translator.organizationFromCollectionBaseUrl("not a url"));
         // Nothing to read: no path segment, and no legacy host label to fall back to.
         assertNull(translator.organizationFromCollectionBaseUrl("https://tfs.example.com/"));
-    }
-
-    // ---- Comments ----
-
-    @Test
-    void inlineCommentMentioningBot_isHydratedAndRoutesToHandleInlineComment() {
-        AzureDevopsApiClient client = mock(AzureDevopsApiClient.class);
-        when(repositoryPlatformFactory.getApiClient(bot.getGitIntegration())).thenReturn(client);
-        when(client.getInlineThreadContext(any(), any(), any(), anyLong()))
-                .thenReturn(new AzureDevopsApiClient.InlineThreadContext("src/Foo.java", 12));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, commentPayload("@bot@contoso.com why this?"));
-
-        assertEquals("inline comment response triggered", response.getBody());
-        var captor = org.mockito.ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handleInlineComment(eq(bot), captor.capture());
-        assertEquals("src/Foo.java", captor.getValue().getComment().getPath());
-        assertEquals(12, captor.getValue().getComment().getLine());
     }
 
     private static Map<String, Object> commentPayload(String content) {
