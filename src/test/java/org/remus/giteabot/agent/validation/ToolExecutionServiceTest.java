@@ -313,6 +313,336 @@ class ToolExecutionServiceTest {
     }
 
     @Test
+    void executeContextTool_rg_invalidRegexIsSearchedLiterallyAndSaysSo() throws IOException {
+        Path file = tempDir.resolve("src/Config.java");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "void reviewPullRequest(A a) {}\n");
+
+        ToolResult hit = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("reviewPullRequest(", "src"));
+        ToolResult miss = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("nope(", "src"));
+
+        assertThat(hit.success()).isTrue();
+        assertThat(hit.output()).contains("not a valid regex").contains("literal")
+                .contains("src/Config.java:1: void reviewPullRequest(A a) {}");
+        assertThat(miss.output()).contains("not a valid regex").contains("No matches found");
+    }
+
+    @Test
+    void executeContextTool_rg_validRegexHasNoLiteralNote() throws IOException {
+        Path file = tempDir.resolve("src/Config.java");
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, "class Config {}\n");
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("Config", "src"));
+
+        assertThat(result.output()).doesNotContain("not a valid regex");
+    }
+
+    @Test
+    void executeContextTool_rg_capsMatchesPerFileUnlessOneFileIsSearched() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Snapshot.pcf"), "prune: true\n".repeat(12));
+        Files.writeString(tempDir.resolve("src/App.pkl"), "prune = true\n");
+
+        ToolResult wide = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("prune", "src"));
+        ToolResult oneFile = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("prune", "src/Snapshot.pcf"));
+        ToolResult filesOnly = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-l", "prune", "src"));
+
+        int perFile = ToolExecutionService.MAX_SEARCH_MATCHES_PER_FILE;
+        assertThat(wide.output().lines().filter(l -> l.startsWith("src/Snapshot.pcf:"))).hasSize(perFile + 1);
+        assertThat(wide.output()).contains("src/Snapshot.pcf:" + perFile + ": prune: true")
+                .doesNotContain("src/Snapshot.pcf:" + (perFile + 1) + ":")
+                .contains("src/Snapshot.pcf: … " + (12 - perFile) + " more matches in this file; "
+                        + "search that file alone to see all.")
+                .contains("src/App.pkl:1: prune = true");
+        assertThat(oneFile.output().lines()).hasSize(12);
+        assertThat(filesOnly.output().lines()).containsExactly("src/App.pkl", "src/Snapshot.pcf");
+    }
+
+    @Test
+    void executeContextTool_rg_saysSoWhenItStopsAtTheResultCap() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Big.txt"), "needle\n".repeat(250));
+        Files.writeString(tempDir.resolve("src/Small.txt"), "needle\n".repeat(3));
+
+        ToolResult capped = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("needle", "src/Big.txt"));
+        ToolResult complete = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("needle", "src/Small.txt"));
+
+        assertThat(capped.output().lines().findFirst()).contains(ToolExecutionService.SEARCH_CAPPED_NOTE);
+        assertThat(capped.output().lines().filter(l -> l.startsWith("src/Big.txt:"))).hasSize(200);
+        assertThat(complete.output()).doesNotContain(ToolExecutionService.SEARCH_CAPPED_NOTE);
+    }
+
+    @Test
+    void executeContextTool_rg_doesNotSayCappedForExactlyAsManyMatchesAsTheCap() throws IOException {
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Exact.txt"), "needle\n".repeat(200));
+        Files.writeString(tempDir.resolve("src/One.txt"), "needle\n".repeat(201));
+
+        ToolResult exact = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("needle", "src/Exact.txt"));
+        ToolResult over = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("needle", "src/One.txt"));
+
+        assertThat(exact.output().lines().filter(l -> l.contains("Exact.txt:"))).hasSize(200);
+        assertThat(exact.output()).doesNotContain(ToolExecutionService.SEARCH_CAPPED_NOTE);
+        assertThat(over.output()).startsWith(ToolExecutionService.SEARCH_CAPPED_NOTE);
+    }
+
+    @Test
+    void executeContextTool_rg_usesSingularForOneRemainingMatch() throws IOException {
+        int perFile = ToolExecutionService.MAX_SEARCH_MATCHES_PER_FILE;
+        Files.createDirectories(tempDir.resolve("src"));
+        Files.writeString(tempDir.resolve("src/Snapshot.pcf"), "prune: true\n".repeat(perFile + 1));
+        Files.writeString(tempDir.resolve("src/App.pkl"), "prune = true\n");
+
+        ToolResult result = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("prune", "src"));
+
+        assertThat(result.output()).contains("src/Snapshot.pcf: … 1 more match in this file; "
+                + "search that file alone to see all.");
+    }
+
+    @Test
+    void executeContextTool_rg_searchesEveryGivenPathLikeRipgrep() throws IOException {
+        Files.createDirectories(tempDir.resolve("doc"));
+        Files.createDirectories(tempDir.resolve("prompts"));
+        Files.writeString(tempDir.resolve("doc/AGENT.md"), "use rg here\n");
+        Files.writeString(tempDir.resolve("doc/TOOLS.md"), "rg and find\n");
+        Files.writeString(tempDir.resolve("prompts/review.md"), "nothing\n");
+
+        // with -e every positional is a path
+        ToolResult all = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-e", "rg ", "prompts", "doc/AGENT.md", "doc/TOOLS.md"));
+        // a second pattern passed as a path: reported as not found, the other path is still searched
+        ToolResult secondPattern = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("rg", "doc", "find|grep"));
+        ToolResult noneExists = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("rg", "gone", "missing"));
+        ToolResult overlapping = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("find", "doc", "doc/TOOLS.md"));
+        ToolResult listing = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files", "prompts", "doc/AGENT.md"));
+
+        assertThat(all.output()).contains("doc/AGENT.md:1: use rg here", "doc/TOOLS.md:1: rg and find")
+                .doesNotContain("Not searched");
+        assertThat(secondPattern.success()).isTrue();
+        assertThat(secondPattern.output()).startsWith("Not searched, path not found: find|grep")
+                .contains("doc/AGENT.md:1:");
+        assertThat(noneExists.success()).isFalse();
+        assertThat(noneExists.error()).isEqualTo("Path not found: gone, missing");
+        assertThat(overlapping.output()).isEqualTo("doc/TOOLS.md:1: rg and find");
+        assertThat(listing.output()).isEqualTo("doc/AGENT.md\nprompts/review.md");
+    }
+
+    @Test
+    void executeContextTool_rg_maxDepthLimitsTheSearchAndTheFileList() throws IOException {
+        Files.createDirectories(tempDir.resolve("sub/deep"));
+        Files.writeString(tempDir.resolve("Top.txt"), "needle\n");
+        Files.writeString(tempDir.resolve("sub/deep/Low.txt"), "needle\n");
+
+        ToolResult shallow = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-d", "1", "needle"));
+        ToolResult deep = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--max-depth=3", "needle"));
+        ToolResult files = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files", "--maxdepth", "1"));
+        ToolResult bad = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-d", "x", "needle"));
+
+        assertThat(shallow.output()).contains("Top.txt:1:").doesNotContain("Low.txt");
+        assertThat(deep.output()).contains("Top.txt:1:").contains("sub/deep/Low.txt:1:");
+        assertThat(files.output()).isEqualTo("Top.txt");
+        assertThat(bad.success()).isFalse();
+        assertThat(bad.error()).startsWith("-d needs a non-negative number, got 'x'.");
+    }
+
+    @Test
+    void executeContextTool_rg_printsContextLinesLikeRipgrep() throws IOException {
+        Files.writeString(tempDir.resolve("A.txt"), "l1\nl2\nhit3\nl4\nl5\nl6\nl7\nhit8\nl9\n");
+        Files.writeString(tempDir.resolve("B.txt"), "hit1\nb2\n");
+
+        ToolResult after = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-A", "1", "hit", "A.txt"));
+        ToolResult around = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-C2", "hit", "A.txt"));
+        ToolResult longForm = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--before-context=1", "hit3", "A.txt"));
+        ToolResult twoFiles = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-B", "1", "hit[13]", "-g", "*.txt"));
+
+        assertThat(after.output().lines()).containsExactly(
+                "A.txt:3: hit3", "A.txt-4- l4", "--", "A.txt:8: hit8", "A.txt-9- l9");
+        // overlapping windows merge into one group without a separator
+        assertThat(around.output().lines()).containsExactly(
+                "A.txt-1- l1", "A.txt-2- l2", "A.txt:3: hit3", "A.txt-4- l4", "A.txt-5- l5",
+                "A.txt-6- l6", "A.txt-7- l7", "A.txt:8: hit8", "A.txt-9- l9");
+        assertThat(longForm.output().lines()).containsExactly("A.txt-2- l2", "A.txt:3: hit3");
+        assertThat(twoFiles.output().lines()).containsExactly(
+                "A.txt-2- l2", "A.txt:3: hit3", "--", "B.txt:1: hit1");
+    }
+
+    @Test
+    void executeContextTool_rg_specificContextWinsAndLargeValuesAreClamped() throws IOException {
+        StringBuilder content = new StringBuilder();
+        for (int i = 1; i <= 30; i++) {
+            content.append(i == 15 ? "hit" : "l" + i).append('\n');
+        }
+        Files.writeString(tempDir.resolve("A.txt"), content);
+
+        ToolResult mixed = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-A", "0", "-C", "1", "hit", "A.txt"));
+        ToolResult huge = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-C", "500", "hit", "A.txt"));
+
+        assertThat(mixed.output().lines()).containsExactly("A.txt-14- l14", "A.txt:15: hit");
+        int max = ToolExecutionService.MAX_SEARCH_CONTEXT_LINES;
+        assertThat(huge.output().lines()).hasSize(2 * max + 1)
+                .startsWith("A.txt-" + (15 - max) + "- l" + (15 - max));
+    }
+
+    @Test
+    void executeContextTool_rg_rejectsUnsupportedFlagsWithAHint() throws IOException {
+        Files.writeString(tempDir.resolve("A.txt"), "foo\n");
+
+        ToolResult invert = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-v", "foo"));
+        ToolResult clustered = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-iw", "foo"));
+        ToolResult longOption = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--word-regexp", "foo"));
+        ToolResult badCount = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-A", "x", "foo"));
+        ToolResult missingValue = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("foo", "-C"));
+        ToolResult glued = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-A2 \"name: Postgres__Host\"", "A.txt"));
+
+        assertThat(invert.success()).isFalse();
+        assertThat(invert.error()).startsWith("Unsupported flag -v.").contains(ToolExecutionService.SEARCH_SUPPORTED_FLAGS);
+        assertThat(clustered.error()).startsWith("Unsupported flag -w in -iw.");
+        assertThat(longOption.error()).startsWith("Unsupported option --word-regexp.");
+        assertThat(badCount.error()).startsWith("-A needs a number of lines, got 'x'.");
+        assertThat(missingValue.error()).startsWith("Flag -C needs a value.");
+        assertThat(glued.success()).isFalse();
+        assertThat(glued.error()).contains("holds a flag and its value in one element")
+                .contains("If it is a pattern that starts with -, pass it as [\"-e\", ")
+                .contains("or put \"--\" before it");
+    }
+
+    @Test
+    void executeContextTool_rg_onlyMatchingPrintsEachMatchLikeRipgrep() throws IOException {
+        Files.writeString(tempDir.resolve("list.html"), """
+                <td>${entry.model}</td><td>${entry.tokens}</td>
+                <p>static text</p>
+                <td>${entry.cost}</td>
+                """);
+
+        ToolResult only = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-o", "\\$\\{entry\\.[a-zA-Z]+", "list.html"));
+        ToolResult longForm = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("--only-matching", "entry\\.cost", "list.html"));
+        ToolResult withContext = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("-o", "-B", "1", "entry\\.cost", "list.html"));
+        ToolResult emptyMatches = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-o", "q*", "list.html"));
+
+        assertThat(only.output()).isEqualTo("""
+                list.html:1: ${entry.model
+                list.html:1: ${entry.tokens
+                list.html:3: ${entry.cost""");
+        assertThat(longForm.output()).isEqualTo("list.html:3: entry.cost");
+        // as in ripgrep, context lines stay whole
+        assertThat(withContext.output()).isEqualTo("list.html-2- <p>static text</p>\nlist.html:3: entry.cost");
+        // a pattern that matches only the empty string prints nothing for that line
+        assertThat(emptyMatches.output()).doesNotContain("list.html:");
+    }
+
+    @Test
+    void executeContextTool_rg_rejectsBlankValuesAndReadsANonOptionAsThePattern() throws IOException {
+        Files.writeString(tempDir.resolve("Git.txt"), "git clone --depth 1\nplain line\n");
+
+        ToolResult emptyPattern = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-e", "", "Git.txt"));
+        ToolResult emptyGlob = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("clone", "-g", " "));
+        ToolResult emptyLong = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--regexp=", "Git.txt"));
+        // no option is named like that, so it is the pattern
+        ToolResult alternatives = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("--depth|depth 1|shallow", "Git.txt"));
+        ToolResult unknownOption = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--depth", "Git.txt"));
+
+        assertThat(emptyPattern.error()).startsWith("Flag -e needs a non-empty value.");
+        assertThat(emptyGlob.error()).startsWith("Flag -g needs a non-empty value.");
+        assertThat(emptyLong.error()).startsWith("Flag --regexp needs a non-empty value.");
+        assertThat(alternatives.success()).isTrue();
+        assertThat(alternatives.output()).isEqualTo("Git.txt:1: git clone --depth 1");
+        assertThat(unknownOption.error()).startsWith("Unsupported option --depth. To search for it, pass [\"-e\", \"--depth\"].");
+    }
+
+    @Test
+    void executeContextTool_rg_rejectsAGluedFlagValueInsteadOfSearchingForIt() throws IOException {
+        Files.writeString(tempDir.resolve("A.java"), "foo\n");
+
+        ToolResult equalsForm = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-g=*.java", "foo"));
+        ToolResult glob = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("-g*.java", "foo"));
+        // the same text after -- or -e is a pattern
+        ToolResult asPattern = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--", "-g=*.java"));
+
+        assertThat(equalsForm.success()).isFalse();
+        assertThat(equalsForm.error()).startsWith("Cannot read '-g=*.java' as flags")
+                .contains("[\"-g\", \"*.java\"]");
+        assertThat(glob.success()).isFalse();
+        assertThat(asPattern.success()).isTrue();
+        assertThat(asPattern.output()).startsWith("No matches found");
+    }
+
+    @Test
+    void executeContextTool_rg_acceptsNoOpFlags() throws IOException {
+        Files.writeString(tempDir.resolve("A.txt"), "foo\n");
+
+        ToolResult grepStyle = service.executeContextTool(Workspace.unmanaged(tempDir), "grep", List.of("-rnHE", "foo", "."));
+        ToolResult longNoOps = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("--no-heading", "--color=never", "--line-number", "foo"));
+        ToolResult afterDashDash = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--", "-v", "A.txt"));
+
+        assertThat(grepStyle.output()).isEqualTo("A.txt:1: foo");
+        assertThat(longNoOps.output()).isEqualTo("A.txt:1: foo");
+        assertThat(afterDashDash.success()).isTrue();
+        assertThat(afterDashDash.output()).startsWith("No matches found for pattern: -v");
+    }
+
+    @Test
+    void executeContextTool_rg_globsExcludeWithBangAndAlternateWithBraces() throws IOException {
+        Files.createDirectories(tempDir.resolve("src/main"));
+        Files.createDirectories(tempDir.resolve("src/test"));
+        Files.writeString(tempDir.resolve("src/main/Router.java"), "case \"pr-diff\" ->\n");
+        Files.writeString(tempDir.resolve("src/main/Catalog.kt"), "\"pr-diff\"\n");
+        Files.writeString(tempDir.resolve("src/test/RouterTest.java"), "\"pr-diff\"\n");
+        Files.writeString(tempDir.resolve("NOTES.md"), "pr-diff\n");
+
+        ToolResult noTests = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("pr-diff|pr_diff", "-n", "--glob", "!src/test/**"));
+        ToolResult codeOnly = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("pr-diff", "-g", "*.{java,kt}"));
+        ToolResult javaNoTests = service.executeContextTool(Workspace.unmanaged(tempDir), "rg",
+                List.of("pr-diff", "-g", "*.java", "-g", "!**/test/**"));
+        ToolResult listing = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("--files", "-g", "!*.md"));
+
+        assertThat(noTests.output()).contains("src/main/Router.java:1:", "src/main/Catalog.kt:1:", "NOTES.md:1:")
+                .doesNotContain("RouterTest");
+        assertThat(codeOnly.output()).contains("Router.java", "Catalog.kt", "RouterTest.java")
+                .doesNotContain("NOTES.md");
+        assertThat(javaNoTests.output()).contains("src/main/Router.java:1:")
+                .doesNotContain("Catalog.kt").doesNotContain("RouterTest");
+        assertThat(listing.output()).contains("src/main/Router.java").doesNotContain("NOTES.md");
+    }
+
+    @Test
+    void globToRegex_supportsDoubleStarSlashBracesAndLiteralStrays() {
+        String anyDepth = ToolExecutionService.globToRegex("**/*.java");
+        assertThat("A.java").matches(anyDepth);
+        assertThat("src/main/A.java").matches(anyDepth);
+        assertThat("A.kt").doesNotMatch(anyDepth);
+
+        assertThat("a.kt").matches(ToolExecutionService.globToRegex("*.{java,kt}"));
+        assertThat("x.txt").matches(ToolExecutionService.globToRegex("{x}.txt"));
+        assertThat("a,b}").matches(ToolExecutionService.globToRegex("a,b}"));
+        // an unclosed brace still compiles and matches its alternatives
+        assertThat("ab").matches(ToolExecutionService.globToRegex("a{b,c"));
+    }
+
+    @Test
+    void executeContextTool_rg_notesSurviveTheCutOfALongOutput() throws IOException {
+        // 60 files x 3 matching lines of about 80 chars: over the 10,000-character output limit, but under the
+        // 200-result search cap
+        Files.createDirectories(tempDir.resolve("big"));
+        for (int i = 0; i < 60; i++) {
+            Files.writeString(tempDir.resolve("big/F" + i + ".txt"), ("needle " + "x".repeat(60) + "\n").repeat(3));
+        }
+
+        ToolResult search = service.executeContextTool(Workspace.unmanaged(tempDir), "rg", List.of("needle", "big", "gone"));
+
+        assertThat(search.outputTruncated()).isTrue();
+        assertThat(search.output()).startsWith("Not searched, path not found: gone\n");
+    }
+
+    @Test
     void executeContextTool_gitLog_passesAllowedFiltersAsOptionValues() throws Exception {
         git("init", "-q");
         commitAs("alice", "add feature", "alpha");
