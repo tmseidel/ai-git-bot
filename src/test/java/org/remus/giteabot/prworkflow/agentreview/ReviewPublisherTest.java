@@ -1,19 +1,27 @@
 package org.remus.giteabot.prworkflow.agentreview;
 
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
+import org.springframework.web.client.RestClient;
 import org.springframework.web.client.UnknownHttpStatusCodeException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
+import org.remus.giteabot.gitlab.GitLabApiClient;
+import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.review.structured.FinalizedReview;
@@ -50,6 +58,9 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
  * Publication is a pure function of the stored review: the comment is the renderer's output, the
@@ -164,6 +175,47 @@ class ReviewPublisherTest {
         assertThat(published.reason()).contains("head");
         verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
         verify(publicationService).finish(1L, ReviewPublicationState.SUPPRESSED, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void checksGitLabHeadBeforePublishing(boolean headMoved) {
+        String reviewedSha = "a".repeat(40);
+        String currentSha = headMoved ? "b".repeat(40) : reviewedSha;
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://gitlab.example.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient gitLab = new GitLabApiClient(builder.build());
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/acme%2Fweb/merge_requests/9"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"state":"opened","source_project_id":19,"target_project_id":27,
+                         "source_branch":"feature/login","sha":"%s","diff_refs":{"head_sha":"%s"}}
+                        """.formatted(reviewedSha, reviewedSha), MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/19/repository/branches/feature%2Flogin"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"name":"feature/login","commit":{"id":"%s"}}
+                        """.formatted(currentSha), MediaType.APPLICATION_JSON));
+        when(reviewService.findFinalizedByReference("O1234"))
+                .thenReturn(Optional.of(review(ReviewConclusion.NO_FINDINGS)));
+
+        var request = new ReviewPublisher.PublicationRequest(repositoryClient, bot, "acme", "web", 9L, "O1234",
+                true, new AgentReviewService.SeverityThresholds(0, null, null), ReviewLinkStyle.NONE,
+                "GITLAB", "pull_request_review", reviewedSha,
+                () -> PrPayloadHydrator.resolveHeadSha(gitLab, "acme", "web", 9L), () -> false, null);
+        var result = publisher.publish(request);
+
+        if (headMoved) {
+            assertThat(result.outcome()).isEqualTo(ReviewPublisher.PublicationOutcome.SUPPRESSED);
+            verifyNoInteractions(repositoryClient);
+            verify(publicationService).finish(1L, ReviewPublicationState.SUPPRESSED, null);
+        } else {
+            assertThat(result.outcome()).isEqualTo(ReviewPublisher.PublicationOutcome.PUBLISHED);
+            verify(repositoryClient).postReview(eq("acme"), eq("web"), eq(9L), anyString(),
+                    eq(PostReviewAction.APPROVE));
+            verify(publicationService).finish(1L, ReviewPublicationState.PUBLISHED, null);
+        }
+        server.verify();
     }
 
     @Test
