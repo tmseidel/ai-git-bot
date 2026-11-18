@@ -21,6 +21,7 @@ import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -63,8 +64,9 @@ public class AgentReviewExecution {
      * @param outcome   what happened
      * @param reviewId  the draft this run opened (present for every outcome but {@link Outcome#NO_DIFF})
      * @param reference the finalized {@code O<n>} reference when {@code outcome == FINALIZED}
+     * @param reviewedHeadSha the webhook's head, resolved when abbreviated by Bitbucket, if known
      */
-    public record Result(Outcome outcome, Long reviewId, String reference) {
+    public record Result(Outcome outcome, Long reviewId, String reference, String reviewedHeadSha) {
 
         public boolean finalized() {
             return outcome == Outcome.FINALIZED;
@@ -150,7 +152,7 @@ public class AgentReviewExecution {
         String diff = repositoryClient.getPullRequestDiff(owner, repo, prNumber);
         if (diff == null || diff.isBlank()) {
             log.warn("No diff found for PR #{} in {}/{} — skipping agentic review", prNumber, owner, repo);
-            return new Result(Outcome.NO_DIFF, null, null);
+            return new Result(Outcome.NO_DIFF, null, null, null);
         }
         DiffSummary diffSummary = DiffSummary.parse(diff);
         log.info("Parsed diff summary for PR #{}: {}", prNumber, diffSummary.statLine());
@@ -160,11 +162,12 @@ public class AgentReviewExecution {
         if (headBranch == null) {
             log.warn("Could not resolve PR head branch for PR #{} in {}/{} — skipping agentic review "
                     + "(refusing to review the default branch)", prNumber, owner, repo);
-            return new Result(Outcome.FAILED, null, null);
+            return new Result(Outcome.FAILED, null, null, null);
         }
 
+        String reviewedHeadSha = resolveReviewedHead(payload.getPullRequest().getHead());
         ReviewDraftHandle draft = reviewService.createDraft(
-                draftRequest(payload, owner, repo, prNumber, options.runId()));
+                draftRequest(payload, owner, repo, prNumber, options.runId(), reviewedHeadSha));
         ReviewProgress progress = options.enableProgressComments()
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
         boolean finalized = false;
@@ -182,7 +185,7 @@ public class AgentReviewExecution {
                         "⚠️ **AI Agent (Review)**: Could not check out this pull request, so the "
                                 + "review was skipped. The bot log holds the Git output.");
                 reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
-                return new Result(Outcome.FAILED, draft.reviewId(), null);
+                return new Result(Outcome.FAILED, draft.reviewId(), null, null);
             }
             String systemPrompt = resolveReviewPrompt();
             LoopOutcome outcome;
@@ -196,11 +199,11 @@ public class AgentReviewExecution {
                 log.warn("Agentic review for PR #{} ended without a finalized review; nothing will be "
                         + "published", prNumber);
                 reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
-                return new Result(Outcome.FAILED, draft.reviewId(), null);
+                return new Result(Outcome.FAILED, draft.reviewId(), null, null);
             }
             finalized = true;
-            captureSnapshot(payload, owner, repo, prNumber, reference, systemPrompt, diff, options);
-            return new Result(Outcome.FINALIZED, draft.reviewId(), reference);
+            captureSnapshot(payload, owner, repo, prNumber, reference, systemPrompt, diff, options, reviewedHeadSha);
+            return new Result(Outcome.FINALIZED, draft.reviewId(), reference, reviewedHeadSha);
         } catch (WorkflowCancelledException e) {
             reviewService.closeDraft(draft.reviewId(), ReviewState.CANCELLED);
             log.warn("Agentic review for PR #{} was cancelled; its draft stays incomplete", prNumber);
@@ -300,12 +303,10 @@ public class AgentReviewExecution {
      * failure here leaves the review usable and the evidence explicitly incomplete.
      */
     private void captureSnapshot(WebhookPayload payload, String owner, String repo, Long prNumber,
-                                 String reference, String systemPrompt, String diff, Options options) {
+                                 String reference, String systemPrompt, String diff, Options options, String pinnedHead) {
         if (!options.learningSettings().feedbackEnabled()) {
             return;
         }
-        String pinnedHead = payload.getPullRequest().getHead() != null
-                ? payload.getPullRequest().getHead().getSha() : null;
         String pinnedBase = payload.getPullRequest().getBase() != null
                 ? payload.getPullRequest().getBase().getSha() : null;
         List<String> reasons = new ArrayList<>();
@@ -489,14 +490,22 @@ public class AgentReviewExecution {
 
     // ------------------------------------------------------------------ scope
 
+    private String resolveReviewedHead(WebhookPayload.Head head) {
+        if (head == null) {
+            return null;
+        }
+        if (repositoryClient instanceof BitbucketApiClient bitbucket) {
+            return bitbucket.resolveCommitSha(head.getRepositoryFullName(), head.getSha());
+        }
+        return head.getSha();
+    }
+
     private ReviewDraftRequest draftRequest(WebhookPayload payload, String owner, String repo,
-                                            Long prNumber, Long runId) {
+                                            Long prNumber, Long runId, String headSha) {
         Long integrationId = bot.getGitIntegration() != null ? bot.getGitIntegration().getId() : null;
         Long providerRepositoryId = payload.getRepository().getId();
         String baseSha = payload.getPullRequest().getBase() != null
                 ? payload.getPullRequest().getBase().getSha() : null;
-        String headSha = payload.getPullRequest().getHead() != null
-                ? payload.getPullRequest().getHead().getSha() : null;
         return new ReviewDraftRequest(integrationId, bot.getId(), owner, repo,
                 providerRepositoryId == null ? null : String.valueOf(providerRepositoryId),
                 prNumber, runId, UUID.randomUUID().toString(), baseSha, headSha);

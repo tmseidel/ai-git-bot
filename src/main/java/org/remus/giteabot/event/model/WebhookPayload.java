@@ -59,6 +59,8 @@ public class WebhookPayload {
     public static class Head {
         private String ref;
         private String sha;
+        /** Repository owning this ref when supplied by the provider. */
+        private String repositoryFullName;
     }
 
     @Data

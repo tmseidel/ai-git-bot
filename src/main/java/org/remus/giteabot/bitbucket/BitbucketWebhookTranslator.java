@@ -299,7 +299,7 @@ public class BitbucketWebhookTranslator implements WebhookTranslator {
         return c;
     }
 
-    /** Extracts the branch and commit of a pull request's {@code source} or {@code destination}. */
+    /** Extracts the branch, commit and repository of a pull request's {@code source} or {@code destination}. */
     private WebhookPayload.Head extractRef(Map<?, ?> side) {
         if (side == null) return null;
         WebhookPayload.Head head = new WebhookPayload.Head();
@@ -308,6 +308,10 @@ public class BitbucketWebhookTranslator implements WebhookTranslator {
         }
         if (side.get("commit") instanceof Map<?, ?> commit) {
             head.setSha((String) commit.get("hash"));
+        }
+        if (side.get("repository") instanceof Map<?, ?> repository
+                && repository.get("full_name") instanceof String fullName) {
+            head.setRepositoryFullName(fullName);
         }
         return head;
     }
