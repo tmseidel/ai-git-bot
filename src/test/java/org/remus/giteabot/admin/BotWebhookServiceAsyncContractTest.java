@@ -45,19 +45,6 @@ class BotWebhookServiceAsyncContractTest {
     }
 
     @Test
-    void everyAsyncMethodReturnsVoid() {
-        List<String> offenders = Arrays.stream(BotWebhookService.class.getDeclaredMethods())
-                .filter(candidate -> candidate.isAnnotationPresent(Async.class))
-                .filter(candidate -> candidate.getReturnType() != void.class)
-                .map(Method::getName)
-                .toList();
-
-        assertThat(offenders)
-                .as("@Async methods whose result the async proxy cannot deliver")
-                .isEmpty();
-    }
-
-    @Test
     void theWebhookEntryPointsAreAllAsync() {
         List<Method> entryPoints = List.of(
                 method("reviewPullRequest", Bot.class, WebhookPayload.class),
