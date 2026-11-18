@@ -48,6 +48,18 @@ class GitIntegrationServiceTest {
     }
 
     @Test
+    void save_trimsUrl() {
+        GitIntegration integration = new GitIntegration();
+        integration.setProviderType(RepositoryType.GITEA);
+        integration.setUrl(" https://gitea.example.com \n");
+        when(gitIntegrationRepository.saveAndFlush(any(GitIntegration.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        GitIntegration result = gitIntegrationService.save(integration, false);
+
+        assertEquals("https://gitea.example.com", result.getUrl());
+    }
+
+    @Test
     void validateSave_rejectsKnownHostsWithoutSingleEndpoint() {
         GitIntegration integration =
                 sshIntegration("|1|abcdefghijklmnop|qrstuvwxyz012345 ssh-ed25519 AAAA");

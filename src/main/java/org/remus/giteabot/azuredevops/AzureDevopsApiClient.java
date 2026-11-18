@@ -14,6 +14,7 @@ import org.remus.giteabot.azuredevops.model.GitPullRequestIteration;
 import org.remus.giteabot.azuredevops.model.IdentityRef;
 import org.remus.giteabot.azuredevops.model.ListResponse;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
+import org.remus.giteabot.repository.OwnerRequiredException;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
@@ -777,8 +778,9 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
      * Without an {@code owner}, as at startup or when an integration is saved, the organization or
      * collection the integration URL names is asked; bare {@code https://dev.azure.com} names none.
      *
-     * @throws IllegalStateException when neither {@code owner} nor the integration URL names an
-     *                               organization, or the token has no identity there
+     * @throws OwnerRequiredException when neither {@code owner} nor the integration URL names an
+     *                                organization
+     * @throws IllegalStateException  when the token has no identity there
      */
     @Override
     public RepositoryUser getAuthenticatedUser(String owner) {
@@ -786,7 +788,7 @@ public class AzureDevopsApiClient implements RepositoryApiClient {
             owner = AzureDevopsAddress.organizationOf(baseUrl);
         }
         if (owner == null) {
-            throw new IllegalStateException("Azure DevOps is asked for the token's identity inside an organization, "
+            throw new OwnerRequiredException("Azure DevOps is asked for the token's identity inside an organization, "
                     + "but neither the event nor the integration URL names one");
         }
         Scope scope = organizationScope(owner);
