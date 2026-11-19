@@ -130,11 +130,9 @@ public final class PrPayloadHydrator {
             return null;
         }
         try {
-            return client.getPullRequestDetails(owner, repo, prNumber)
-                    .map(PullRequestDetails::headSha)
-                    .orElse(null);
+            return client.getPullRequestHeadSha(owner, repo, prNumber);
         } catch (RuntimeException e) {
-            log.debug("getPullRequestDetails failed for {}/{}#{}: {}",
+            log.debug("getPullRequestHeadSha failed for {}/{}#{}: {}",
                     owner, repo, prNumber, e.getMessage());
             return null;
         }

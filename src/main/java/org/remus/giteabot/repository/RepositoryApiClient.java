@@ -224,6 +224,22 @@ public interface RepositoryApiClient {
     }
 
     /**
+     * Fetches the current PR head SHA, or {@code null} if it cannot be determined.
+     * Providers may override this to avoid fetching unrelated PR details.
+     */
+    default String getPullRequestHeadSha(String owner, String repo, Long pullNumber) {
+        return getPullRequestDetails(owner, repo, pullNumber).map(PullRequestDetails::headSha).orElse(null);
+    }
+
+    /**
+     * Returns the reported commit SHA. Providers that abbreviate IDs resolve them in the named
+     * repository, returning {@code null} if they cannot confirm the full ID.
+     */
+    default String resolveCommitSha(String repositoryFullName, String sha) {
+        return sha;
+    }
+
+    /**
      * Re-fetches whether a PR is open for workflow writes. The default relies on the
      * state mapped by {@link #getPullRequestDetails}; other providers override it. Missing state denies
      * writes, and API failures propagate to the workflow.

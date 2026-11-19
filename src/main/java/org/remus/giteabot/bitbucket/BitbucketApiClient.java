@@ -149,6 +149,12 @@ public class BitbucketApiClient implements RepositoryApiClient {
                 string(object(destination.get("branch")).get("name")), pullRequestCommitSha(destination)));
     }
 
+    @Override
+    public String getPullRequestHeadSha(String owner, String repo, Long pullNumber) {
+        Map<String, Object> pr = fetchPullRequest(owner, repo, pullNumber);
+        return pr == null ? null : pullRequestCommitSha(object(pr.get("source")));
+    }
+
     private String pullRequestCommitSha(Map<?, ?> side) {
         return resolveCommitSha(string(object(side.get("repository")).get("full_name")),
                 string(object(side.get("commit")).get("hash")));
@@ -157,6 +163,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
     /**
      * Returns a full commit SHA, or {@code null} if Bitbucket cannot confirm an abbreviation in the named repository.
      */
+    @Override
     public String resolveCommitSha(String repository, String hash) {
         if (hash == null) {
             return null;

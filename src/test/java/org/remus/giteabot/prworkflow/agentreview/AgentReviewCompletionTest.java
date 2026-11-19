@@ -74,6 +74,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -228,6 +229,7 @@ class AgentReviewCompletionTest {
         lenient().when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         service = serviceFor(platform, RepositoryType.GITEA);
+        lenient().when(repositoryClient.resolveCommitSha(any(), any())).thenCallRealMethod();
         lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
         lenient().when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
         lenient().when(workspaceService.preparePullRequestWorkspace(platform, "owner", "repo",
@@ -377,28 +379,41 @@ class AgentReviewCompletionTest {
         String newPrefix = "def123456789";
         // A full current SHA can share the old prefix without being the reviewed commit.
         String newSha = (abbreviatedCurrent ? newPrefix : oldPrefix) + "b".repeat(28);
+        String basePrefix = "789abc123456";
+        String baseSha = basePrefix + "c".repeat(28);
         String api = "https://api.bitbucket.org/2.0";
         String pr = api + "/repositories/owner/repo/pullrequests/1";
         String forkCommits = api + "/repositories/contributor/fork/commit/";
         RestClient.Builder builder = RestClient.builder().baseUrl(api);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
-        var bitbucketPlatform = TestPlatforms.of(new BitbucketApiClient(builder.build(), "https://bitbucket.org"));
+        var adapter = new BitbucketApiClient(builder.build(), "https://bitbucket.org");
+        var bitbucketPlatform = TestPlatforms.of(mock(RepositoryApiClient.class, delegatesTo(adapter)));
         var bitbucket = serviceFor(bitbucketPlatform, RepositoryType.BITBUCKET);
         payload.getPullRequest().getHead().setSha(oldPrefix);
         payload.getPullRequest().getHead().setRepositoryFullName("contributor/fork");
+        var base = new WebhookPayload.Head();
+        base.setRef("main");
+        base.setSha(basePrefix);
+        base.setRepositoryFullName("owner/repo");
+        payload.getPullRequest().setBase(base);
         server.expect(requestTo(forkCommits + oldPrefix)).andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess(bitbucketCommit(oldSha), MediaType.APPLICATION_JSON));
+                .andRespond(withSuccess(bitbucketCommit(oldSha, "contributor/fork"), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(api + "/repositories/owner/repo/commit/" + basePrefix))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(bitbucketCommit(baseSha, "owner/repo"), MediaType.APPLICATION_JSON));
         server.expect(requestTo(pr + "/diff")).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess(DIFF, MediaType.TEXT_PLAIN));
         server.expect(ExpectedCount.times(2), requestTo(pr)).andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
                         {"state":"OPEN","source":{"branch":{"name":"feature"},"commit":{"hash":"%s"},
-                         "repository":{"full_name":"contributor/fork"}}}
-                        """.formatted(abbreviatedCurrent ? newPrefix : (moved ? newSha : oldSha)),
+                         "repository":{"full_name":"contributor/fork"}},
+                         "destination":{"branch":{"name":"main"},"commit":{"hash":"%s"},
+                         "repository":{"full_name":"owner/repo"}}}
+                        """.formatted(abbreviatedCurrent ? newPrefix : (moved ? newSha : oldSha), basePrefix),
                         MediaType.APPLICATION_JSON));
         if (abbreviatedCurrent) {
             server.expect(ExpectedCount.times(2), requestTo(forkCommits + newPrefix)).andExpect(method(HttpMethod.GET))
-                    .andRespond(withSuccess(bitbucketCommit(newSha), MediaType.APPLICATION_JSON));
+                    .andRespond(withSuccess(bitbucketCommit(newSha, "contributor/fork"), MediaType.APPLICATION_JSON));
         }
         if (!moved) {
             server.expect(requestTo(pr + "/comments")).andExpect(method(HttpMethod.POST))
@@ -414,15 +429,18 @@ class AgentReviewCompletionTest {
                 .isEqualTo(moved ? AgentReviewService.ReviewResult.SUPPRESSED : AgentReviewService.ReviewResult.POSTED);
         assertThat(publications.get(1L).getState())
                 .isEqualTo(moved ? ReviewPublicationState.SUPPRESSED : ReviewPublicationState.PUBLISHED);
+        assertThat(storedReviews.get(1L).getBaseSha()).isEqualTo(baseSha);
         verify(snapshotRepository).save(argThat(snapshot -> oldSha.equals(snapshot.getHeadSha())
-                && snapshot.getIncompleteReason().contains("head moved") == moved));
+                && baseSha.equals(snapshot.getBaseSha())
+                && (snapshot.getIncompleteReason() != null
+                && snapshot.getIncompleteReason().contains("head moved")) == moved));
         server.verify();
     }
 
-    private static String bitbucketCommit(String sha) {
+    private static String bitbucketCommit(String sha, String repository) {
         return """
-                {"type":"commit","hash":"%s","repository":{"full_name":"contributor/fork"}}
-                """.formatted(sha);
+                {"type":"commit","hash":"%s","repository":{"full_name":"%s"}}
+                """.formatted(sha, repository);
     }
 
     @Test

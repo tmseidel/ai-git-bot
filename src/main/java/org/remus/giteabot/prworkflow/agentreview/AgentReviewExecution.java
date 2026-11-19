@@ -21,7 +21,6 @@ import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
-import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -165,9 +164,8 @@ public class AgentReviewExecution {
             return new Result(Outcome.FAILED, null, null, null);
         }
 
-        String reviewedHeadSha = resolveReviewedHead(payload.getPullRequest().getHead());
-        ReviewDraftHandle draft = reviewService.createDraft(
-                draftRequest(payload, owner, repo, prNumber, options.runId(), reviewedHeadSha));
+        ReviewDraftRequest request = draftRequest(payload, owner, repo, prNumber, options.runId());
+        ReviewDraftHandle draft = reviewService.createDraft(request);
         ReviewProgress progress = options.enableProgressComments()
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
         boolean finalized = false;
@@ -202,8 +200,8 @@ public class AgentReviewExecution {
                 return new Result(Outcome.FAILED, draft.reviewId(), null, null);
             }
             finalized = true;
-            captureSnapshot(payload, owner, repo, prNumber, reference, systemPrompt, diff, options, reviewedHeadSha);
-            return new Result(Outcome.FINALIZED, draft.reviewId(), reference, reviewedHeadSha);
+            captureSnapshot(payload, request, reference, systemPrompt, diff, options);
+            return new Result(Outcome.FINALIZED, draft.reviewId(), reference, request.headSha());
         } catch (WorkflowCancelledException e) {
             reviewService.closeDraft(draft.reviewId(), ReviewState.CANCELLED);
             log.warn("Agentic review for PR #{} was cancelled; its draft stays incomplete", prNumber);
@@ -302,21 +300,19 @@ public class AgentReviewExecution {
      * enables collection, and never allowed to affect the review that was already finalized: a
      * failure here leaves the review usable and the evidence explicitly incomplete.
      */
-    private void captureSnapshot(WebhookPayload payload, String owner, String repo, Long prNumber,
-                                 String reference, String systemPrompt, String diff, Options options, String pinnedHead) {
+    private void captureSnapshot(WebhookPayload payload, ReviewDraftRequest request, String reference,
+                                 String systemPrompt, String diff, Options options) {
         if (!options.learningSettings().feedbackEnabled()) {
             return;
         }
-        String pinnedBase = payload.getPullRequest().getBase() != null
-                ? payload.getPullRequest().getBase().getSha() : null;
+        String reviewedHead = request.headSha();
         List<String> reasons = new ArrayList<>();
-        String currentHead = PrPayloadHydrator.resolveHeadSha(repositoryClient, owner, repo,
-                prNumber == null ? 0 : prNumber);
-        if (pinnedHead != null && currentHead != null && !pinnedHead.equals(currentHead)) {
-            reasons.add("the pull request head moved from " + pinnedHead + " to " + currentHead
+        String currentHead = PrPayloadHydrator.resolveHeadSha(repositoryClient, request.repoOwner(), request.repoName(),
+                request.prNumber() == null ? 0 : request.prNumber());
+        if (reviewedHead != null && currentHead != null && !reviewedHead.equals(currentHead)) {
+            reasons.add("the pull request head moved from " + reviewedHead + " to " + currentHead
                     + " while the review ran, so the diff and the checkout may describe different revisions");
         }
-        Long providerRepositoryId = payload.getRepository().getId();
         try {
             snapshotService.capture(new ReviewSnapshotRequest(reference,
                     payload.getPullRequest().getTitle(), payload.getPullRequest().getBody(), diff,
@@ -324,9 +320,9 @@ public class AgentReviewExecution {
                     bot.getWorkflowConfiguration() != null
                             ? bot.getWorkflowConfiguration().getId() : null,
                     options.learningSettings().fingerprint(),
-                    pinnedBase, pinnedHead,
+                    request.baseSha(), reviewedHead,
                     refOf(payload.getPullRequest().getBase()), refOf(payload.getPullRequest().getHead()),
-                    providerRepositoryId == null ? null : String.valueOf(providerRepositoryId),
+                    request.providerRepositoryId(),
                     reasons));
         } catch (RuntimeException e) {
             log.warn("Could not capture the learning snapshot for review {}: {}", reference,
@@ -490,25 +486,18 @@ public class AgentReviewExecution {
 
     // ------------------------------------------------------------------ scope
 
-    private String resolveReviewedHead(WebhookPayload.Head head) {
-        if (head == null) {
-            return null;
-        }
-        if (repositoryClient instanceof BitbucketApiClient bitbucket) {
-            return bitbucket.resolveCommitSha(head.getRepositoryFullName(), head.getSha());
-        }
-        return head.getSha();
+    private String resolveReviewedSha(WebhookPayload.Head ref) {
+        return ref == null ? null : repositoryClient.resolveCommitSha(ref.getRepositoryFullName(), ref.getSha());
     }
 
     private ReviewDraftRequest draftRequest(WebhookPayload payload, String owner, String repo,
-                                            Long prNumber, Long runId, String headSha) {
+                                            Long prNumber, Long runId) {
         Long integrationId = bot.getGitIntegration() != null ? bot.getGitIntegration().getId() : null;
         Long providerRepositoryId = payload.getRepository().getId();
-        String baseSha = payload.getPullRequest().getBase() != null
-                ? payload.getPullRequest().getBase().getSha() : null;
         return new ReviewDraftRequest(integrationId, bot.getId(), owner, repo,
                 providerRepositoryId == null ? null : String.valueOf(providerRepositoryId),
-                prNumber, runId, UUID.randomUUID().toString(), baseSha, headSha);
+                prNumber, runId, UUID.randomUUID().toString(),
+                resolveReviewedSha(payload.getPullRequest().getBase()), resolveReviewedSha(payload.getPullRequest().getHead()));
     }
 
     private String fetchFiles(String owner, String repo, String ref, List<String> filePaths) {
