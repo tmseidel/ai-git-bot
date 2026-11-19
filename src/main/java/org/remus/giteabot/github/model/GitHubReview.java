@@ -20,15 +20,8 @@ public class GitHubReview implements Review {
 
     private String state;
 
-    private GitHubUser user;
-
     @JsonProperty("submitted_at")
     private String submittedAt;
-
-    @Override
-    public String getUserLogin() {
-        return user != null ? user.getLogin() : null;
-    }
 
     /**
      * GitHub reviews don't include a comments_count field in the review object.

@@ -13,6 +13,8 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettings;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettingsResolver;
 import org.remus.giteabot.repository.RepositoryApiClient;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.CommentId;
 
 import java.util.List;
@@ -44,6 +46,7 @@ class FeedbackCommandHandlerTest {
     @Mock private AgentReviewLearningSettingsResolver learningSettingsResolver;
     @Mock private RepositoryPlatformFactory repositoryPlatformFactory;
     @Mock private RepositoryApiClient repositoryClient;
+    @Mock private RepositoryPlatform platform;
 
     private FeedbackCommandHandler handler;
     private Bot bot;
@@ -57,9 +60,10 @@ class FeedbackCommandHandlerTest {
         bot.setName("review-bot");
         GitIntegration integration = new GitIntegration();
         integration.setId(1L);
-        integration.setUsername("ai_bot");
         bot.setGitIntegration(integration);
         lenient().when(repositoryPlatformFactory.getApiClient(any())).thenReturn(repositoryClient);
+        lenient().when(repositoryPlatformFactory.getPlatform(any())).thenReturn(platform);
+        lenient().when(platform.getUser(any())).thenReturn(new RepositoryUser("7", "ai_bot", null, null));
         lenient().when(learningSettingsResolver.resolve(any(Bot.class)))
                 .thenReturn(new AgentReviewLearningSettings(true));
         lenient().when(authorizationService.canContribute(any(), anyString())).thenReturn(true);
@@ -228,17 +232,11 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", false));
 
         // Bitbucket leaves its readable mention in the body after rewriting @{account_id}; the
-        // configured username is unrelated (a Bitbucket account is addressed by id, and the display
+        // account's username is unrelated (a Bitbucket account is addressed by id, and the display
         // name is what users actually type).
-        Bot bitbucketBot = new Bot();
-        bitbucketBot.setId(2L);
-        bitbucketBot.setName("review-bot");
-        GitIntegration integration = new GitIntegration();
-        integration.setId(1L);
-        integration.setUsername("bitbucket-agent");
-        bitbucketBot.setGitIntegration(integration);
+        when(platform.getUser(any())).thenReturn(new RepositoryUser("{bb-uuid}", "bitbucket-agent", null, null));
 
-        assertThat(handler.tryHandle(bitbucketBot, payload("@AI_Bot feedback O1234 useful"),
+        assertThat(handler.tryHandle(bot, payload("@AI_Bot feedback O1234 useful"),
                 FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, "@AI_Bot")).isTrue();
 
         verify(feedbackService).submit(any(), any(), eq(FeedbackTarget.output("O1234")),
@@ -415,10 +413,7 @@ class FeedbackCommandHandlerTest {
 
     @Test
     void overviewsNameTheBotLinkTheSourceAndCarryTheCursor() {
-        org.remus.giteabot.repository.RepositoryPlatform platform =
-                org.mockito.Mockito.mock(org.remus.giteabot.repository.RepositoryPlatform.class);
         when(platform.getCloneUrl()).thenReturn("https://github.com");
-        when(repositoryPlatformFactory.getPlatform(any())).thenReturn(platform);
         bot.getGitIntegration().setProviderType(org.remus.giteabot.repository.RepositoryType.GITHUB);
         when(feedbackService.list(any(), eq(true), any(), eq("CURSOR1")))
                 .thenReturn(new FeedbackService.ListPage(List.of(summary("FB31", 12L)), "CURSOR2"));

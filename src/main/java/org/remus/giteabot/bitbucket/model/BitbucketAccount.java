@@ -1,22 +1,18 @@
-package org.remus.giteabot.bitbucket;
+package org.remus.giteabot.bitbucket.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.Nullable;
-
-import java.util.Map;
+import org.remus.giteabot.repository.model.RepositoryUser;
 
 /**
- * Identity of a Bitbucket Cloud account, as returned by {@code GET /user} or embedded
- * in webhook payloads ({@code actor}, {@code comment.user}, {@code reviewers}).
+ * Identity of a Bitbucket Cloud account, as returned by {@code GET /user}.
  * <p>
- * Webhook payloads never expose e-mail addresses, so the bot's own account is resolved
- * once from the configured e-mail/API-token pair and compared by its stable
- * {@code account_id} / {@code uuid} afterwards.
+ * Supplies the {@code @{account_id}} markup Bitbucket stores mentions as, and a readable
+ * replacement for it.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record BitbucketAccount(
-        String uuid,
         @JsonProperty("account_id") String accountId,
         // called public name in bitbucket Account Settings
         String nickname,
@@ -24,30 +20,20 @@ public record BitbucketAccount(
         @JsonProperty("display_name") String displayName
 ) {
 
-    /** Treats blank values like missing ones, so an empty id never matches another account. */
+    /** Treats blank values like missing ones, so an empty id never yields a mention. */
     public BitbucketAccount {
-        uuid = blankToNull(uuid);
         accountId = blankToNull(accountId);
         nickname = blankToNull(nickname);
         displayName = blankToNull(displayName);
     }
 
-    /** Returns whether the raw Bitbucket user object refers to this account. */
-    public boolean isSameAccount(@Nullable Map<?, ?> user) {
-        if (user == null) {
-            return false;
-        }
-
-        BitbucketAccount other = new BitbucketAccount(
-                asString(user.get("uuid")),
-                asString(user.get("account_id")),
-                asString(user.get("nickname")),
-                asString(user.get("display_name")));
-
-        if (accountId != null && accountId.equals(other.accountId)) {
-            return true;
-        }
-        return uuid != null && uuid.equals(other.uuid);
+    /**
+     * The Bitbucket account behind {@code user}, the account a Bitbucket integration
+     * authenticates as: its {@linkplain RepositoryUser#id() id} is the {@code account_id} and
+     * its {@linkplain RepositoryUser#displayName() display name} the account's {@link #name()}.
+     */
+    public static BitbucketAccount of(RepositoryUser user) {
+        return new BitbucketAccount(user.id(), null, user.displayName());
     }
 
     /**
@@ -75,10 +61,6 @@ public record BitbucketAccount(
      */
     public @Nullable String name() {
         return displayName != null ? displayName : nickname;
-    }
-
-    private static @Nullable String asString(@Nullable Object value) {
-        return value instanceof String s ? s : null;
     }
 
     private static @Nullable String blankToNull(@Nullable String value) {

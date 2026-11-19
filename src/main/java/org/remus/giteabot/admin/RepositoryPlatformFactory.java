@@ -7,11 +7,16 @@ import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryProviderMetadata;
 import org.remus.giteabot.repository.RepositoryProviderRegistry;
 import org.remus.giteabot.repository.model.HttpCredentials;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.SshCredentials;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
@@ -73,6 +78,34 @@ public class RepositoryPlatformFactory {
         RepositoryProviderMetadata provider = providerRegistry.getProvider(integration.getProviderType());
         return provider.createPlatform(integration, token,
                 provider.createHttpCredentials(integration, token), null, userTtl).getClient();
+    }
+
+    /**
+     * Returns the account the integration's token authenticates as if its platform has resolved
+     * it, without asking the provider or building a platform, for display in the admin UI. An
+     * expired account is still returned; one resolved before the integration was edited is not.
+     */
+    public Optional<RepositoryUser> findCachedUser(GitIntegration integration) {
+        if (integration.getId() == null || integration.getUpdatedAt() == null) {
+            return Optional.empty();
+        }
+        CachedPlatform cached = cache.get(integration.getId());
+        if (cached == null || cached.updatedAtMillis != integration.getUpdatedAt().toEpochMilli()) {
+            return Optional.empty();
+        }
+        return cached.platform.findCachedUser();
+    }
+
+    /**
+     * Returns the usernames of {@link #findCachedUser} by integration id; integrations whose
+     * account has not been resolved yet are left out.
+     */
+    public Map<Long, String> findCachedUsernames(Collection<GitIntegration> integrations) {
+        Map<Long, String> usernames = new HashMap<>();
+        for (GitIntegration integration : integrations) {
+            findCachedUser(integration).ifPresent(user -> usernames.put(integration.getId(), user.username()));
+        }
+        return usernames;
     }
 
     private CachedPlatform getCachedPlatform(GitIntegration integration) {

@@ -15,8 +15,6 @@ public interface Review {
 
     String getState();
 
-    String getUserLogin();
-
     String getSubmittedAt();
 
     Integer getCommentsCount();

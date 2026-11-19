@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
+import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettings;
@@ -59,7 +60,7 @@ public class FeedbackCommandHandler {
      *                       key; {@link #COMMENT_KIND_REVIEW} reads the submitted review's body
      * @param effectiveAlias the mention the provider left in the comment body, or {@code null} when it
      *                       did not rewrite it. Bitbucket replaces {@code @{account_id}} with a
-     *                       readable name, so the configured username alone would never match
+     *                       readable name, so the account's own alias alone would never match
      * @return {@code true} when the comment was a feedback command and has been consumed
      */
     public boolean tryHandle(Bot bot, WebhookPayload payload, String commentKind,
@@ -68,7 +69,7 @@ public class FeedbackCommandHandler {
         if (bot == null || source == null) {
             return false;
         }
-        String configured = aliasOf(bot);
+        String configured = aliasOf(bot, payload);
         String alias = effectiveAlias == null || effectiveAlias.isBlank() ? configured : effectiveAlias;
         Optional<FeedbackCommand> parsed = FeedbackCommandParser.parse(source.body(), alias, configured);
         if (parsed.isEmpty()) {
@@ -219,9 +220,23 @@ public class FeedbackCommandHandler {
         }
     }
 
-    private static String aliasOf(Bot bot) {
-        return bot.getGitIntegration() == null || bot.getGitIntegration().getUsername() == null
-                ? null : "@" + bot.getGitIntegration().getUsername();
+    /**
+     * The alias of the account the bot's token authenticates as, or {@code null} when that account
+     * cannot be resolved; the effective alias from the event then has to match on its own.
+     */
+    private String aliasOf(Bot bot, WebhookPayload payload) {
+        if (bot.getGitIntegration() == null) {
+            return null;
+        }
+        String owner = payload.ownerLogin();
+        try {
+            return new BotIdentity(repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getUser(owner))
+                    .alias();
+        } catch (IllegalStateException e) {
+            log.debug("[Bot '{}'] Bot account unavailable for feedback commands: {}",
+                    bot.getName(), e.getMessage());
+            return null;
+        }
     }
 
     private static Source sourceOf(WebhookPayload payload, String commentKind) {

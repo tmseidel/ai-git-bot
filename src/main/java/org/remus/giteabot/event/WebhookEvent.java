@@ -8,10 +8,11 @@ import org.remus.giteabot.event.model.WebhookPayload;
  * and the facts about the bot that only the provider can establish.
  * <p>
  * Translators fill in every bot-relative fact ({@code fromBot}, {@code botIsReviewer},
- * {@code botMentioned}) because matching the bot's identity differs per provider —
- * a login on Gitea/GitHub/GitLab, an {@code account_id} on Bitbucket, a
- * {@code uniqueName} on Azure DevOps. The dispatcher never inspects raw payloads
- * or compares users itself.
+ * {@code botMentioned}) because where a payload carries its users' ids, and how it marks
+ * a mention, differs per provider — the numeric id on Gitea/GitHub/GitLab, the
+ * {@code account_id} on Bitbucket (whose mentions are {@code @{account_id}} markup), the
+ * identity GUID on Azure DevOps; see {@link BotIdentity}. The dispatcher never inspects
+ * raw payloads or compares users itself.
  *
  * @param kind          what happened
  * @param payload       the translated payload; {@code null} only for {@link WebhookEventKind#IGNORED}

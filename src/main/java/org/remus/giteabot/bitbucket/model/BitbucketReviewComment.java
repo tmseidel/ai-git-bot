@@ -35,8 +35,8 @@ public class BitbucketReviewComment implements ReviewComment {
     }
 
     @Override
-    public String getUserLogin() {
-        return user != null ? user.getDisplayName() : null;
+    public String getUserId() {
+        return user != null ? user.getAccountId() : null;
     }
 
     @Data

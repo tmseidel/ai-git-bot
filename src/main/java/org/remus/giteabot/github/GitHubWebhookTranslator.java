@@ -1,7 +1,9 @@
 package org.remus.giteabot.github;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.event.BotAccountResolver;
 import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
@@ -24,9 +26,12 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GitHubWebhookTranslator implements WebhookTranslator {
 
     static final String EVENT_HEADER = "X-GitHub-Event";
+
+    private final BotAccountResolver botAccountResolver;
 
     @Override
     public RepositoryType providerType() {
@@ -60,18 +65,21 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
             return WebhookEvent.ignored("GitHub " + eventType + " event without a pull request or issue");
         }
 
-        BotIdentity identity = BotIdentity.of(bot);
-        String action = webhookPayload.getAction();
+        BotIdentity identity = botAccountResolver.resolve(bot, null).orElse(null);
+        if (identity == null) {
+            return WebhookEvent.ignored(BotAccountResolver.UNRESOLVED);
+        }
+        String action = (String) payload.get("action");
         return switch (eventType) {
-            case "pull_request" -> classifyPullRequest(identity, webhookPayload, payload);
-            case "issue_comment" -> classifyIssueComment(identity, webhookPayload);
-            case "pull_request_review" -> "reviewed".equals(action)
+            case "pull_request" -> classifyPullRequest(identity, action, webhookPayload, payload);
+            case "issue_comment" -> classifyIssueComment(identity, action, webhookPayload);
+            case "pull_request_review" -> "submitted".equals(action)
                     ? WebhookEvent.of(WebhookEventKind.PR_REVIEW_SUBMITTED, webhookPayload, identity)
                     : WebhookEvent.ignored("pull_request_review action '" + action + "' is not 'submitted'");
             case "pull_request_review_comment" -> "created".equals(action)
                     ? WebhookEvent.of(WebhookEventKind.PR_INLINE_COMMENT, webhookPayload, identity)
                     : WebhookEvent.ignored("review comment action '" + action + "' is not 'created'");
-            case "issues" -> classifyIssue(identity, webhookPayload, payload);
+            case "issues" -> classifyIssue(identity, action, webhookPayload, payload);
             default -> WebhookEvent.ignored("unhandled GitHub event type '" + eventType + "'");
         };
     }
@@ -79,12 +87,12 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
     // ---- Classification ----
 
     @SuppressWarnings("unchecked")
-    private WebhookEvent classifyPullRequest(BotIdentity identity, WebhookPayload payload, Map<String, Object> raw) {
-        String action = payload.getAction();
+    private WebhookEvent classifyPullRequest(BotIdentity identity, String action, WebhookPayload payload,
+                                             Map<String, Object> raw) {
         return switch (action != null ? action : "") {
             case "opened" -> WebhookEvent.of(WebhookEventKind.PR_OPENED, payload, identity);
             case "reopened" -> WebhookEvent.of(WebhookEventKind.PR_REOPENED, payload, identity);
-            case "synchronized" -> WebhookEvent.of(WebhookEventKind.PR_SYNCHRONIZED, payload, identity);
+            case "synchronize" -> WebhookEvent.of(WebhookEventKind.PR_SYNCHRONIZED, payload, identity);
             case "closed" -> WebhookEvent.of(WebhookEventKind.PR_CLOSED, payload, identity);
             case "review_requested" -> identity.is(payload.getRequestedReviewer())
                     ? WebhookEvent.of(WebhookEventKind.PR_REVIEWER_ADDED, payload, identity)
@@ -103,9 +111,9 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
      * on the pull request's issue; {@code issue.pull_request} tells them apart from
      * comments on plain issues.
      */
-    private WebhookEvent classifyIssueComment(BotIdentity identity, WebhookPayload payload) {
-        if (!"created".equals(payload.getAction())) {
-            return WebhookEvent.ignored("comment action '" + payload.getAction() + "' is not 'created'");
+    private WebhookEvent classifyIssueComment(BotIdentity identity, String action, WebhookPayload payload) {
+        if (!"created".equals(action)) {
+            return WebhookEvent.ignored("comment action '" + action + "' is not 'created'");
         }
         if (payload.getIssue() != null && payload.getIssue().getPullRequest() != null) {
             return WebhookEvent.of(WebhookEventKind.PR_COMMENT, payload, identity);
@@ -113,8 +121,8 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
         return WebhookEvent.of(WebhookEventKind.ISSUE_COMMENT, payload, identity);
     }
 
-    private WebhookEvent classifyIssue(BotIdentity identity, WebhookPayload payload, Map<String, Object> raw) {
-        String action = payload.getAction();
+    private WebhookEvent classifyIssue(BotIdentity identity, String action, WebhookPayload payload,
+                                       Map<String, Object> raw) {
         return switch (action != null ? action : "") {
             case "assigned" -> payload.getIssue() != null && botWasAssigned(identity, payload, raw)
                     ? WebhookEvent.of(WebhookEventKind.ISSUE_ASSIGNED, payload, identity)
@@ -154,7 +162,6 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
     @SuppressWarnings("unchecked")
     private WebhookPayload translatePullRequestEvent(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction(mapAction((String) raw.get("action")));
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setPullRequest(extractPullRequest((Map<String, Object>) raw.get("pull_request")));
@@ -168,7 +175,6 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
     @SuppressWarnings("unchecked")
     private WebhookPayload translateIssueCommentEvent(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction((String) raw.get("action"));
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setComment(extractComment((Map<String, Object>) raw.get("comment")));
@@ -179,7 +185,6 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
     @SuppressWarnings("unchecked")
     private WebhookPayload translatePullRequestReviewEvent(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction(mapReviewAction((String) raw.get("action")));
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setPullRequest(extractPullRequest((Map<String, Object>) raw.get("pull_request")));
@@ -193,7 +198,6 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
     @SuppressWarnings("unchecked")
     private WebhookPayload translatePullRequestReviewCommentEvent(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction((String) raw.get("action"));
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setPullRequest(extractPullRequest((Map<String, Object>) raw.get("pull_request")));
@@ -207,7 +211,6 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
     @SuppressWarnings("unchecked")
     private WebhookPayload translateIssuesEvent(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction((String) raw.get("action"));
         payload.setSender(extractSender(raw));
         payload.setRepository(extractRepository(raw));
         payload.setIssue(extractIssue((Map<String, Object>) raw.get("issue")));
@@ -218,11 +221,7 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
 
     @SuppressWarnings("unchecked")
     private WebhookPayload.Owner extractSender(Map<String, Object> raw) {
-        Map<String, Object> sender = (Map<String, Object>) raw.get("sender");
-        if (sender == null) return null;
-        WebhookPayload.Owner owner = new WebhookPayload.Owner();
-        owner.setLogin((String) sender.get("login"));
-        return owner;
+        return extractOwner((Map<String, Object>) raw.get("sender"));
     }
 
     @SuppressWarnings("unchecked")
@@ -233,12 +232,7 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
         repository.setId(toLong(repo.get("id")));
         repository.setName((String) repo.get("name"));
         repository.setFullName((String) repo.get("full_name"));
-        Map<String, Object> ownerMap = (Map<String, Object>) repo.get("owner");
-        if (ownerMap != null) {
-            WebhookPayload.Owner owner = new WebhookPayload.Owner();
-            owner.setLogin((String) ownerMap.get("login"));
-            repository.setOwner(owner);
-        }
+        repository.setOwner(extractOwner((Map<String, Object>) repo.get("owner")));
         return repository;
     }
 
@@ -279,12 +273,7 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
         WebhookPayload.Comment c = new WebhookPayload.Comment();
         c.setId(CommentId.NumericCommentId.of(toLong(comment.get("id"))));
         c.setBody((String) comment.get("body"));
-        Map<String, Object> user = (Map<String, Object>) comment.get("user");
-        if (user != null) {
-            WebhookPayload.Owner u = new WebhookPayload.Owner();
-            u.setLogin((String) user.get("login"));
-            c.setUser(u);
-        }
+        c.setUser(extractOwner((Map<String, Object>) comment.get("user")));
         return c;
     }
 
@@ -315,28 +304,14 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
             ipr.setMerged(prLink.get("merged_at") != null ? Boolean.TRUE : null);
             i.setPullRequest(ipr);
         }
-        Map<String, Object> assignee = (Map<String, Object>) issue.get("assignee");
-        if (assignee != null) {
-            WebhookPayload.Owner a = new WebhookPayload.Owner();
-            a.setLogin((String) assignee.get("login"));
-            i.setAssignee(a);
-        }
-        List<Map<String, Object>> assignees = (List<Map<String, Object>>) issue.get("assignees");
-        if (assignees != null) {
-            i.setAssignees(assignees.stream().map(am -> {
-                WebhookPayload.Owner ao = new WebhookPayload.Owner();
-                ao.setLogin((String) am.get("login"));
-                return ao;
-            }).toList());
-        }
+        i.setAssignee(extractOwner((Map<String, Object>) issue.get("assignee")));
+        i.setAssignees(extractOwners((List<Map<String, Object>>) issue.get("assignees")));
         return i;
     }
 
     private WebhookPayload.Owner extractOwner(Map<String, Object> owner) {
         if (owner == null) return null;
-        WebhookPayload.Owner o = new WebhookPayload.Owner();
-        o.setLogin((String) owner.get("login"));
-        return o;
+        return WebhookPayload.Owner.of(owner.get("id"), (String) owner.get("login"));
     }
 
     private List<WebhookPayload.Owner> extractOwners(List<Map<String, Object>> owners) {
@@ -351,20 +326,6 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
         r.setType((String) review.get("state"));
         r.setContent((String) review.get("body"));
         return r;
-    }
-
-    private String mapAction(String githubAction) {
-        if ("synchronize".equals(githubAction)) {
-            return "synchronized";
-        }
-        return githubAction;
-    }
-
-    private String mapReviewAction(String githubAction) {
-        if ("submitted".equals(githubAction)) {
-            return "reviewed";
-        }
-        return githubAction;
     }
 
     private Long toLong(Object value) {

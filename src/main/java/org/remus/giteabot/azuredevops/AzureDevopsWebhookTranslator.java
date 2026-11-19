@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.azuredevops.model.ThreadCommentId;
+import org.remus.giteabot.event.BotAccountResolver;
 import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.PullRequestStateTracker;
 import org.remus.giteabot.event.WebhookEvent;
@@ -67,6 +68,7 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
 
     private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final PullRequestStateTracker stateTracker;
+    private final BotAccountResolver botAccountResolver;
 
     @Override
     public RepositoryType providerType() {
@@ -100,7 +102,13 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
             return WebhookEvent.ignored("unhandled Azure DevOps event type '" + eventType + "'");
         }
 
-        BotIdentity identity = BotIdentity.of(bot);
+        // Azure DevOps answers the identity lookup only inside an organization the token may
+        // access, so it is asked in the repository's owner, the event's organization.
+        BotIdentity identity = botAccountResolver.resolve(bot,
+                webhookPayload.getRepository().getOwner().getLogin()).orElse(null);
+        if (identity == null) {
+            return WebhookEvent.ignored(BotAccountResolver.UNRESOLVED);
+        }
         return switch (eventType) {
             case "git.pullrequest.created" -> {
                 // Seed the head sha and the reviewer list so the git.pullrequest.updated
@@ -128,7 +136,7 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
      */
     private WebhookEvent classifyUpdate(Bot bot, BotIdentity identity, WebhookPayload payload) {
         // Completion and abandonment arrive here, not on git.pullrequest.merged.
-        if ("closed".equals(payload.getAction())) {
+        if (isClosed(payload)) {
             stateTracker.markClosed(bot, payload);
             return WebhookEvent.of(WebhookEventKind.PR_CLOSED, payload, identity);
         }
@@ -145,7 +153,6 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
         }
         if (reviewerAdded) {
             // The Azure DevOps equivalent of a review_requested event elsewhere.
-            payload.setAction("review_requested");
             return WebhookEvent.of(WebhookEventKind.PR_REVIEWER_ADDED, payload, identity);
         }
         if (!moved) {
@@ -273,8 +280,8 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
 
     WebhookPayload translatePayload(String eventType, Map<String, Object> raw) {
         return switch (eventType) {
-            case "git.pullrequest.created" -> translatePullRequestEvent(raw, "opened");
-            case "git.pullrequest.updated" -> translatePullRequestUpdatedEvent(raw);
+            case "git.pullrequest.created" -> translatePullRequestEvent(raw, true);
+            case "git.pullrequest.updated" -> translatePullRequestEvent(raw, false);
             case "ms.vss-code.git-pullrequest-comment-event" -> translateCommentEvent(raw);
             // git.pullrequest.merged ("Pull request merge attempted") and any other/unknown
             // event type carry no actionable lifecycle information — ignored.
@@ -282,16 +289,18 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
         };
     }
 
-    @SuppressWarnings("unchecked")
-    private WebhookPayload translatePullRequestUpdatedEvent(Map<String, Object> raw) {
-        Map<String, Object> resource = (Map<String, Object>) raw.get("resource");
-        String status = resource != null ? (String) resource.get("status") : null;
-        String action = ("completed".equals(status) || "abandoned".equals(status)) ? "closed" : "synchronized";
-        return translatePullRequestEvent(raw, action);
+    /** Whether the pull request was completed (merged) or abandoned. */
+    private static boolean isClosed(WebhookPayload payload) {
+        String status = payload.getPullRequest() != null ? payload.getPullRequest().getState() : null;
+        return "completed".equals(status) || "abandoned".equals(status);
     }
 
+    /**
+     * @param created whether the event is {@code git.pullrequest.created}; only then is the
+     *                pull request's author also the event's sender
+     */
     @SuppressWarnings("unchecked")
-    private WebhookPayload translatePullRequestEvent(Map<String, Object> raw, String action) {
+    private WebhookPayload translatePullRequestEvent(Map<String, Object> raw, boolean created) {
         Map<String, Object> resource = (Map<String, Object>) raw.get("resource");
         if (resource == null) {
             return null;
@@ -304,18 +313,17 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
         }
 
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction(action);
         // resource.createdBy is the pull request's *author*, not the user whose action
         // raised the event — Azure DevOps sends no actor on pull request events at all.
         // The two coincide only on creation, so the sender is set only there.
         //
-        // Carrying the author over to "synchronized" and "closed" would make
+        // Carrying the author over to updates (pushes, closes) would make
         // BotIdentity#triggered treat every event on a bot-created pull request
         // (the offer-as-pr lifecycle, createPullRequest) as self-triggered and drop it,
         // so a human pushing to the bot's own PR would never get a re-review. Leaving it
         // unset costs nothing: self-triggered updates — notably the bot's own reviewer
         // vote — are filtered by the head-sha comparison in #classifyUpdate.
-        if ("opened".equals(action)) {
+        if (created) {
             payload.setSender(extractUser((Map<String, Object>) resource.get("createdBy")));
         }
         payload.setRepository(repository);
@@ -350,7 +358,6 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
         }
 
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction("created");
         payload.setSender(extractUser(comment != null ? (Map<String, Object>) comment.get("author") : null));
         payload.setComment(extractComment(comment));
 
@@ -471,12 +478,11 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
         if (user == null) {
             return null;
         }
-        WebhookPayload.Owner owner = new WebhookPayload.Owner();
-        // Only uniqueName identifies the user. displayName is user-editable, and the login
-        // feeds the bot-user, whitelist and PR-author checks, so falling back to it would
-        // let anyone match those by renaming themselves.
-        owner.setLogin((String) user.get("uniqueName"));
-        return owner;
+        // The id is the identity GUID, which the bot is recognised by. As the login only
+        // uniqueName will do: displayName is user-editable, and the login feeds the whitelist
+        // and PR-author checks, so falling back to it would let anyone match those by
+        // renaming themselves.
+        return WebhookPayload.Owner.of(user.get("id"), (String) user.get("uniqueName"));
     }
 
     /**
@@ -484,7 +490,7 @@ public class AzureDevopsWebhookTranslator implements WebhookTranslator {
      * <p>
      * {@code Stream.toList()} keeps nulls, and {@link #extractUser} returns one for an
      * entry that is absent or not an object, so an unfiltered list would hand
-     * {@link BotIdentity#isReviewer} a null to call {@code getLogin()} on. An empty list still
+     * {@link BotIdentity#isReviewer} a null to call {@code getId()} on. An empty list still
      * means "no reviewers"; only a {@code null} list means "this subscription does not
      * send them", which {@link #botReviewerAdded} must keep telling apart.
      */

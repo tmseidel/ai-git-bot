@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.springframework.scheduling.annotation.Async;
 
@@ -14,16 +15,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Pins which {@link BotWebhookService} methods run off the webhook thread.
  * <p>
  * The webhook dispatcher and the internal dispatchers call these methods on the injected Spring proxy,
- * so the annotation position is behaviour, not decoration:
- * <ul>
- *   <li>An entry point without {@code @Async} blocks the provider's HTTP response, which then times
- *       out and is redelivered.</li>
- *   <li>{@code tryHandleLearningCommand} must stay synchronous — callers branch on its return value,
- *       and the async proxy answers {@code null} for a primitive, which surfaces as
- *       {@code AopInvocationException} in the caller.</li>
- * </ul>
- * The dispatcher tests mock this service, so they cannot see either mistake; these assertions read the
- * class itself.
+ * so the annotation position is behaviour, not decoration: an entry point without {@code @Async} blocks
+ * the provider's HTTP response, which then times out and is redelivered. The dispatcher tests mock this
+ * service, so they cannot see that mistake; this assertion reads the class itself.
+ * <p>
+ * The opposite drift — {@code @Async} landing on a method whose result the caller needs, such as
+ * {@code tryHandleLearningCommand} — is caught for every class by
+ * {@code ArchitectureTest#async_methods_return_void_or_a_future}.
  */
 class BotWebhookServiceAsyncContractTest {
 
@@ -36,31 +34,9 @@ class BotWebhookServiceAsyncContractTest {
     }
 
     @Test
-    void theLearningCommandCheckIsSynchronousSoItsResultCanBeUsed() {
-        Method check = method("tryHandleLearningCommand", Bot.class, WebhookPayload.class,
-                String.class, String.class);
-
-        assertThat(check.isAnnotationPresent(Async.class)).isFalse();
-        assertThat(check.getReturnType()).isEqualTo(boolean.class);
-    }
-
-    @Test
-    void everyAsyncMethodReturnsVoid() {
-        List<String> offenders = Arrays.stream(BotWebhookService.class.getDeclaredMethods())
-                .filter(candidate -> candidate.isAnnotationPresent(Async.class))
-                .filter(candidate -> candidate.getReturnType() != void.class)
-                .map(Method::getName)
-                .toList();
-
-        assertThat(offenders)
-                .as("@Async methods whose result the async proxy cannot deliver")
-                .isEmpty();
-    }
-
-    @Test
     void theWebhookEntryPointsAreAllAsync() {
         List<Method> entryPoints = List.of(
-                method("reviewPullRequest", Bot.class, WebhookPayload.class),
+                method("reviewPullRequest", Bot.class, WebhookPayload.class, WebhookEventKind.class),
                 method("handlePrComment", Bot.class, WebhookPayload.class),
                 method("handleInlineComment", Bot.class, WebhookPayload.class),
                 method("handleReviewSubmitted", Bot.class, WebhookPayload.class),

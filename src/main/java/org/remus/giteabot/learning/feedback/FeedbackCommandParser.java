@@ -32,7 +32,7 @@ public final class FeedbackCommandParser {
     /**
      * @param mentionAliases every mention the command may use — a provider can rewrite the mention it
      *                       received (Bitbucket turns {@code @{account_id}} into a readable name), so
-     *                       the effective alias and the configured username are both acceptable
+     *                       the effective alias and the account's username are both acceptable
      * @return the command, or empty when the comment carries no {@code feedback} command for one of
      *         these mentions — in that case the comment must keep its ordinary routing.
      */

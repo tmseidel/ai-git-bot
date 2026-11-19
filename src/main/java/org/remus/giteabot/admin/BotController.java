@@ -48,12 +48,15 @@ public class BotController {
     private final BotToolSelectionService botToolSelectionService;
     private final WorkflowConfigurationService workflowConfigurationService;
     private final DeploymentTargetService deploymentTargetService;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
     private final MessageSource messageSource;
 
     @GetMapping
     public String list(Model model) {
         List<Bot> bots = botService.findAll();
         model.addAttribute("bots", bots);
+        model.addAttribute("gitUsernames",
+                repositoryPlatformFactory.findCachedUsernames(bots.stream().map(Bot::getGitIntegration).toList()));
         model.addAttribute("activeNav", "bots");
         return "bots/list";
     }
@@ -157,7 +160,9 @@ public class BotController {
     private void addFormAttributes(Model model) {
         List<SystemPrompt> systemPrompts = systemPromptService.findAll();
         model.addAttribute("aiIntegrations", aiIntegrationService.findAll());
-        model.addAttribute("gitIntegrations", gitIntegrationService.findAll());
+        List<GitIntegration> gitIntegrations = gitIntegrationService.findAll();
+        model.addAttribute("gitIntegrations", gitIntegrations);
+        model.addAttribute("gitUsernames", repositoryPlatformFactory.findCachedUsernames(gitIntegrations));
         // Defaults so the missing-integration modal expression is null-safe on the
         // edit form and the save-error re-render; newForm() overrides these.
         model.addAttribute("missingAiIntegration", false);

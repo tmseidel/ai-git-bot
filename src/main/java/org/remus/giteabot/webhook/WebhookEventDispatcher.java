@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.EnumSet;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Decides, for every Git provider alike, what the bot does with a translated
@@ -22,11 +23,13 @@ import java.util.Set;
  * All trigger rules live here: the bot's own events are dropped, pull request
  * creation and updates honour {@code runOnPrCreation} / {@code runOnPrUpdate},
  * requesting the bot as reviewer or assigning it to a pull request always triggers a
- * review, and comments are only acted on when they mention the bot. Provider-specific concerns — identity
- * matching, telling a push apart from a title edit, resolving inline comment anchors —
- * belong to the {@link WebhookTranslator}s. Pull request comment payloads are completed
- * here ({@link #completePrComment}), since providers deliver only the pull request or only
- * its issue.
+ * review, and comments are only acted on when they mention the bot. Automatic reviews of
+ * a commit that was just reviewed are collapsed by the {@link ReviewTriggerDebouncer},
+ * since one user action can fire several of these events at once. Provider-specific
+ * concerns — identity matching, telling a push apart from a title edit, resolving inline
+ * comment anchors — belong to the {@link WebhookTranslator}s. Pull request comment
+ * payloads are completed here ({@link #completePrComment}), since providers deliver only
+ * the pull request or only its issue.
  */
 @Slf4j
 @Component
@@ -42,12 +45,18 @@ public class WebhookEventDispatcher {
             WebhookEventKind.PR_COMMENT, WebhookEventKind.PR_INLINE_COMMENT);
 
     private final BotWebhookService botWebhookService;
+    private final ReviewTriggerDebouncer debouncer;
 
     public ResponseEntity<String> dispatch(Bot bot, WebhookEvent event) {
         if (event.kind() == WebhookEventKind.IGNORED) {
             return ignored(bot, event, event.ignoreReason());
         }
         if (event.fromBot()) {
+            if (event.kind() == WebhookEventKind.PR_CLOSED) {
+                // The bot closing a pull request still ends its debounce window, so a
+                // reopen at the same commit is reviewed again.
+                debouncer.forget(bot, event.payload());
+            }
             return ignored(bot, event, "event triggered by the bot itself");
         }
         if (COMMENT_KINDS.contains(event.kind()) && !event.botMentioned()) {
@@ -67,6 +76,7 @@ public class WebhookEventDispatcher {
                     : ignored(bot, event, "runOnPrUpdate is off");
             case PR_REVIEWER_ADDED, PR_ASSIGNED -> automaticReview(bot, event);
             case PR_CLOSED -> {
+                debouncer.forget(bot, payload);
                 botWebhookService.handlePrClosed(bot, payload);
                 yield ResponseEntity.ok("session closed");
             }
@@ -134,7 +144,7 @@ public class WebhookEventDispatcher {
             if (!botWebhookService.isCallerAllowed(bot, payload)) {
                 return ignored(bot, event, "caller is not on the bot's user whitelist");
             }
-            botWebhookService.reviewPullRequest(bot, payload);
+            botWebhookService.reviewPullRequest(bot, payload, event.kind());
             return ResponseEntity.ok("review triggered");
         }
         botWebhookService.handlePrComment(bot, payload);
@@ -142,15 +152,37 @@ public class WebhookEventDispatcher {
     }
 
     /**
-     * A review the bot starts on its own, as opposed to one asked for in a comment.
-     * {@link BotWebhookService#reviewPullRequest} checks the whitelist as well, so no other
-     * caller can skip it.
+     * A review the bot starts on its own, as opposed to one asked for in a comment: dropped
+     * when the same commit was just reviewed because of another event of the same burst.
+     * <p>
+     * The whitelist is consulted before the commit is claimed: a trigger from a caller who
+     * is not allowed would otherwise hold the claim and suppress the same request from one
+     * who is, e.g. a maintainer adding the bot as reviewer right after a contributor opened
+     * the pull request. {@link BotWebhookService#reviewPullRequest} checks the whitelist as
+     * well, so no other caller can skip it.
      */
     private ResponseEntity<String> automaticReview(Bot bot, WebhookEvent event) {
         if (!botWebhookService.isCallerAllowed(bot, event.payload())) {
             return ignored(bot, event, "caller is not on the bot's user whitelist");
         }
-        botWebhookService.reviewPullRequest(bot, event.payload());
+        WebhookPayload payload = event.payload();
+        if (!debouncer.tryClaim(bot, payload)) {
+            return ignored(bot, event, "a review of this commit was triggered moments ago");
+        }
+        CompletableFuture<Boolean> reviewed;
+        try {
+            reviewed = botWebhookService.reviewPullRequest(bot, payload, event.kind());
+        } catch (RuntimeException e) {
+            debouncer.release(bot, payload);
+            throw e;
+        }
+        // A skipped or failed review must not hold the claim: a re-request within the
+        // window is then a retry, not a duplicate.
+        reviewed.whenComplete((ran, error) -> {
+            if (error != null || !Boolean.TRUE.equals(ran)) {
+                debouncer.release(bot, payload);
+            }
+        });
         return ResponseEntity.ok("review triggered");
     }
 

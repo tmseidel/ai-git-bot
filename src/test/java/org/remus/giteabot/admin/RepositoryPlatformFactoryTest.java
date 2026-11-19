@@ -51,7 +51,8 @@ class RepositoryPlatformFactoryTest {
         when(providerRegistry.getProvider(RepositoryType.GITEA)).thenReturn(provider);
         lenient().when(provider.createHttpCredentials(any(), anyString())).thenAnswer(invocation ->
                 new HttpCredentials(null, invocation.getArgument(1)));
-        when(provider.createPlatform(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        // Lenient: tests that stand a mocked platform in for one integration replace it.
+        lenient().when(provider.createPlatform(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             GitIntegration integration = invocation.getArgument(0);
             return new GiteaPlatform(integration.getUrl(), integration.getUrl(),
                     invocation.getArgument(2), invocation.getArgument(3), new GiteaApiClient(restClient),
@@ -163,6 +164,43 @@ class RepositoryPlatformFactoryTest {
         assertThat(httpCredentials.getValue()).isEqualTo(new HttpCredentials(null, "new-token"));
         verify(integrationService, never()).decryptToken(any());
         verify(integrationService, never()).decryptSshPrivateKey(any());
+    }
+
+    @Test
+    void cachedUsernames_comeOnlyFromPlatformsThatResolvedTheirAccount() {
+        GitIntegration resolved = integration(1L, "Resolved", GitTransport.HTTP);
+        GitIntegration unresolved = integration(2L, "Unresolved", GitTransport.HTTP);
+        GitIntegration neverBuilt = integration(3L, "NeverBuilt", GitTransport.HTTP);
+        RepositoryPlatform resolvedPlatform = org.mockito.Mockito.mock(RepositoryPlatform.class);
+        RepositoryPlatform unresolvedPlatform = org.mockito.Mockito.mock(RepositoryPlatform.class);
+        org.mockito.Mockito.doReturn(resolvedPlatform).when(provider).createPlatform(eq(resolved), any(), any(), any(), any());
+        org.mockito.Mockito.doReturn(unresolvedPlatform).when(provider).createPlatform(eq(unresolved), any(), any(), any(), any());
+        when(resolvedPlatform.findCachedUser()).thenReturn(java.util.Optional.of(
+                new org.remus.giteabot.repository.model.RepositoryUser("1", "ai_bot", null, null)));
+        when(unresolvedPlatform.findCachedUser()).thenReturn(java.util.Optional.empty());
+        factory.getPlatform(resolved);
+        factory.getPlatform(unresolved);
+
+        assertThat(factory.findCachedUsernames(java.util.List.of(resolved, unresolved, neverBuilt)))
+                .isEqualTo(java.util.Map.of(1L, "ai_bot"));
+        // Showing a list never builds a platform, let alone asks a provider.
+        verify(provider, never()).createPlatform(eq(neverBuilt), any(), any(), any(), any());
+    }
+
+    @Test
+    void cachedUser_isForgottenOnceTheIntegrationIsEdited() {
+        GitIntegration integration = integration(1L, "Gitea", GitTransport.HTTP);
+        RepositoryPlatform platform = org.mockito.Mockito.mock(RepositoryPlatform.class);
+        org.mockito.Mockito.doReturn(platform).when(provider).createPlatform(eq(integration), any(), any(), any(), any());
+        lenient().when(platform.findCachedUser()).thenReturn(java.util.Optional.of(
+                new org.remus.giteabot.repository.model.RepositoryUser("1", "ai_bot", null, null)));
+        factory.getPlatform(integration);
+
+        GitIntegration edited = integration(1L, "Gitea", GitTransport.HTTP);
+        edited.setUpdatedAt(integration.getUpdatedAt().plusSeconds(60));
+
+        // The token may have changed, so the account resolved before the edit is not shown.
+        assertThat(factory.findCachedUser(edited)).isEmpty();
     }
 
     private GitIntegration integration(long id, String name, GitTransport transport) {

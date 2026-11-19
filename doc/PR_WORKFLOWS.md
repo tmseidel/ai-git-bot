@@ -74,6 +74,12 @@ request:
 | **Run workflow when PR head is updated** | Off | Runs configured workflows whenever new commits are pushed to the PR branch. Title and description edits, label changes and reviewer votes do not count. |
 | **Branch Filter** | Blank (all refs allowed) | Restricts triggering to PRs whose target (base) branch matches the comma-separated glob list — e.g. `releases/*` runs workflows only on PRs into a release branch. A non-matching PR is ignored — no workflow, no PR comment — and the skip is logged at `INFO`. |
 
+Opening a PR with the bot as reviewer, or assigning the bot and requesting it as reviewer
+in one go, makes most providers send several events at once (opened, review requested,
+assigned). They all ask for the same commit, so only the first one starts a run; further
+automatic triggers for that commit within a minute are dropped. An explicit "review again"
+comment always runs.
+
 Turn on **Run workflow when PR is opened** if you want a workflow to run for
 every PR unconditionally.
 

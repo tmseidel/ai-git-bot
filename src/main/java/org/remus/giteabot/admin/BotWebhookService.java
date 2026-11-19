@@ -6,12 +6,15 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.BotIdentity;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
 import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
+import org.remus.giteabot.prworkflow.PrWorkflowRun;
+import org.remus.giteabot.prworkflow.PrWorkflowRunStatus;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
@@ -25,15 +28,18 @@ import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.review.CodeReviewService;
 import org.remus.giteabot.util.BotMention;
 import org.remus.giteabot.util.BranchFilter;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 /**
@@ -52,6 +58,13 @@ import java.util.regex.Pattern;
 @Slf4j
 @Service
 public class BotWebhookService {
+
+    /**
+     * The triggers a review is acknowledged for with a 👀 reaction on the pull request:
+     * those where nobody has asked the bot anything yet.
+     */
+    private static final Set<WebhookEventKind> ACKNOWLEDGED_TRIGGERS =
+            EnumSet.of(WebhookEventKind.PR_OPENED, WebhookEventKind.PR_REVIEWER_ADDED);
 
     /**
      * Phrasings that ask for the review to be run again: "re-review", "review (this / the
@@ -119,14 +132,22 @@ public class BotWebhookService {
      * Checks the user whitelist ({@link #isCallerAllowed}) before anything else, so that no
      * caller can start a review for someone who is not allowed. The
      * {@link org.remus.giteabot.webhook.WebhookEventDispatcher} checks it before every review
-     * it starts as well.
+     * it starts as well, because it has to decide before it claims the commit.
+     *
+     * @return completes with {@code true} when at least one workflow ran without failing —
+     *         a workflow that skipped itself or was cancelled counts as having run, since
+     *         retrying it would not change the outcome; {@code false} when the review was
+     *         skipped (caller not allowed, branch filtered, no workflow enabled) or every
+     *         workflow failed. The dispatcher uses it to release its debounce claim, so a
+     *         re-request is not swallowed.
+     * @param trigger what started the review; decides whether it is acknowledged with a reaction
      */
     @Async
-    public void reviewPullRequest(Bot bot, WebhookPayload payload) {
+    public CompletableFuture<Boolean> reviewPullRequest(Bot bot, WebhookPayload payload, WebhookEventKind trigger) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
             if (!isCallerAllowed(bot, payload)) {
-                return;
+                return CompletableFuture.completedFuture(false);
             }
 
             // A review asked for in a conversation comment ("review again") arrives without
@@ -134,14 +155,18 @@ public class BotWebhookService {
             // issue comments (GitHub, Gitea). The branch filter and the workflows need both.
             PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
             if (!prWorkflowAllowedForBranch(bot, payload)) {
-                return;
+                return CompletableFuture.completedFuture(false);
             }
-            acknowledgePullRequest(bot, payload);
+            acknowledgePullRequest(bot, payload, trigger);
             try {
-                prWorkflowOrchestrator.runAll(bot, payload);
+                boolean reviewed = prWorkflowOrchestrator.runAll(bot, payload).stream()
+                        .map(PrWorkflowRun::getStatus)
+                        .anyMatch(status -> status != PrWorkflowRunStatus.FAILED);
+                return CompletableFuture.completedFuture(reviewed);
             } catch (Exception e) {
                 log.error("[Bot '{}'] Failed to run PR workflows: {}", bot.getName(), e.getMessage(), e);
                 botService.recordError(bot, e.getMessage());
+                return CompletableFuture.completedFuture(false);
             }
         } finally {
             AiAuditContext.clear();
@@ -174,9 +199,8 @@ public class BotWebhookService {
         }
     }
 
-    private void acknowledgePullRequest(Bot bot, WebhookPayload payload) {
-        if (!"opened".equals(payload.getAction())
-                && !"review_requested".equals(payload.getAction())) {
+    private void acknowledgePullRequest(Bot bot, WebhookPayload payload, WebhookEventKind trigger) {
+        if (!ACKNOWLEDGED_TRIGGERS.contains(trigger)) {
             return;
         }
         if (payload.getRepository() == null
@@ -253,7 +277,7 @@ public class BotWebhookService {
      * becomes an {@code AopInvocationException} in the caller.
      *
      * @param effectiveAlias the mention the provider left in the comment, when it rewrote one;
-     *                       {@code null} keeps the configured username
+     *                       {@code null} keeps the account's username
      * @return {@code true} when the comment was a learning command and has been handled
      */
     public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind,
@@ -468,7 +492,7 @@ public class BotWebhookService {
             try {
                 if (agenticEnabled) {
                     String question = extractReviewBody(payload);
-                    if (!BotMention.isMentioned(question, BotIdentity.of(bot).alias())) {
+                    if (!BotMention.isMentioned(question, botIdentity(bot, payload).alias())) {
                         log.debug("[Bot '{}'] Submitted review does not mention the bot — ignoring (agentic-review only responds when addressed)",
                                 bot.getName());
                         return;
@@ -580,13 +604,12 @@ public class BotWebhookService {
             // Issue creation is handled by reusing the issue-assigned workflow. The
             // individual workflow implementations check that the issue is assigned to
             // the bot, so treat this creation event as a virtual assignment to this bot.
-            WebhookPayload.Issue issue = payload.getIssue();
-            if (issue != null) {
-                WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-                assignee.setLogin(bot.getGitIntegration().getUsername());
-                issue.setAssignee(assignee);
-            }
             try {
+                WebhookPayload.Issue issue = payload.getIssue();
+                if (issue != null) {
+                    RepositoryUser account = botIdentity(bot, payload).account();
+                    issue.setAssignee(WebhookPayload.Owner.of(account.id(), account.username()));
+                }
                 issueWorkflowOrchestrator.runAssigned(bot, payload);
             } catch (Exception e) {
                 // Defense-in-depth: the orchestrator already records errors per workflow.
@@ -699,7 +722,7 @@ public class BotWebhookService {
         String repo = payload.getRepository().getName();
         try {
             RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
-            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, platform));
+            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, platform, owner));
             platform.getClient().postPullRequestComment(owner, repo, prNumber, body);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to post unrecognised-command reply on PR #{}: {}",
@@ -709,21 +732,28 @@ public class BotWebhookService {
 
     /**
      * Name to show after {@code @} in replies: the provider's mention name if it has one,
-     * otherwise the bot username. Falls back to "bot" when the provider lookup fails, since
-     * the bot username may not identify the bot on that provider (e.g. Bitbucket).
+     * otherwise the username of the account the integration authenticates as, asked in
+     * {@code owner}. Falls back to "bot" when the provider lookup fails.
      */
-    private String resolveMentionName(Bot bot, RepositoryPlatform platform) {
+    private String resolveMentionName(Bot bot, RepositoryPlatform platform, String owner) {
         try {
-            var providerName = platform.getBotMentionName();
-            if (providerName.isPresent()) {
-                return providerName.get();
-            }
+            return platform.getBotMentionName().orElseGet(() -> platform.getUser(owner).username());
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Could not resolve the bot's mention name from the Git provider: {}",
                     bot.getName(), e.getMessage());
             return "bot";
         }
-        return bot.getGitIntegration().getUsername();
+    }
+
+    /**
+     * The bot as the account its Git integration authenticates as, asked in the owner of the
+     * payload's repository (which only Azure DevOps needs).
+     *
+     * @throws IllegalStateException when the provider cannot be asked and nothing is cached
+     */
+    private BotIdentity botIdentity(Bot bot, WebhookPayload payload) {
+        String owner = payload.ownerLogin();
+        return new BotIdentity(repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getUser(owner));
     }
 
     private String buildUnrecognisedCommandReply(Bot bot, String mention) {

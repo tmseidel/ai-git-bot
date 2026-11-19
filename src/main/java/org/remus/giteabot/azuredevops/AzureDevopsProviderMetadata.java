@@ -88,9 +88,14 @@ public class AzureDevopsProviderMetadata implements RepositoryProviderMetadata {
                 .build();
     }
 
+    /**
+     * The token alone: Azure DevOps ignores the username of a Personal Access Token, so Git sends
+     * the same {@code Authorization: Basic} header as the API client, see
+     * {@link #buildAuthorizationHeader}.
+     */
     @Override
     public HttpCredentials createHttpCredentials(GitIntegration integration, String decryptedToken) {
-        return new HttpCredentials(integration.getUsername(), decryptedToken);
+        return new HttpCredentials(null, decryptedToken);
     }
 
     @Override

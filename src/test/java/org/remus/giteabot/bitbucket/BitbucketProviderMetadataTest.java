@@ -115,7 +115,6 @@ class BitbucketProviderMetadataTest {
         GitIntegration integration = new GitIntegration();
         integration.setUrl("https://bitbucket.org");
         integration.setProviderType(RepositoryType.BITBUCKET);
-        integration.setUsername("bot@example.com");
 
         HttpCredentials credentials = metadata.createHttpCredentials(integration, "api-token");
 

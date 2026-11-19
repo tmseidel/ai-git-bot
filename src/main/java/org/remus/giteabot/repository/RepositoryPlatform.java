@@ -77,6 +77,15 @@ public abstract class RepositoryPlatform {
         return user.get(owner);
     }
 
+    /**
+     * Returns the account the token authenticates as if it has been resolved before, without
+     * asking the provider; an expired account is still returned. For display only: use
+     * {@link #getUser(String)} to act as the bot.
+     */
+    public Optional<RepositoryUser> findCachedUser() {
+        return user.peek();
+    }
+
     /** Returns the transport Git commands use. */
     public GitTransport getTransport() {
         return sshCredentials != null ? GitTransport.SSH : GitTransport.HTTP;
@@ -118,9 +127,9 @@ public abstract class RepositoryPlatform {
     }
 
     /**
-     * Returns the name users type after {@code @} to address the bot, for providers that
-     * derive the bot's identity from the integration credentials rather than from the
-     * bot's configured username (e.g. Bitbucket). Empty means "use the bot username".
+     * Returns the name users type after {@code @} to address the bot, for providers whose
+     * mentions do not use the account's username (e.g. Bitbucket). Empty means "use the
+     * username of the account the token authenticates as".
      */
     public Optional<String> getBotMentionName() {
         return Optional.empty();
