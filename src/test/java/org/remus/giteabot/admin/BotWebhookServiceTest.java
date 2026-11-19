@@ -125,7 +125,7 @@ class BotWebhookServiceTest {
         AgentServiceFactory agentServiceFactory = new AgentServiceFactory(aiClientFactory,
                 repositoryPlatformFactory, promptService, agentConfig, agentSessionService,
                 toolExecutionService, toolCatalog, workspaceService,
-                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService, null);
+                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService, null, botService);
         org.remus.giteabot.issueworkflow.IssueWorkflowRegistry issueWorkflowRegistry =
                 new org.remus.giteabot.issueworkflow.IssueWorkflowRegistry(java.util.List.of(
                         new org.remus.giteabot.issueworkflow.coding.CodingIssueWorkflow(agentServiceFactory),
