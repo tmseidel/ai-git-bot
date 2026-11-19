@@ -1,5 +1,6 @@
 package org.remus.giteabot.ai;
 
+import org.remus.giteabot.util.Throwables;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientResponseException;
 
@@ -133,7 +134,7 @@ public interface AiClient {
         if (error == null) {
             return false;
         }
-        RestClientResponseException httpError = findHttpError(error);
+        RestClientResponseException httpError = Throwables.findCause(error, RestClientResponseException.class);
         if (httpError == null) {
             // Providers that surface overload without an HTTP status (gRPC-style
             // messages). The numeric status must appear in the message, so a bare
@@ -152,21 +153,6 @@ public interface AiClient {
             return false;
         }
         return containsOverloadMarker(compact(httpError.getResponseBodyAsString()));
-    }
-
-    private static RestClientResponseException findHttpError(Throwable error) {
-        Throwable current = error;
-        while (current != null) {
-            if (current instanceof RestClientResponseException httpError) {
-                return httpError;
-            }
-            Throwable cause = current.getCause();
-            if (cause == current) {
-                break;
-            }
-            current = cause;
-        }
-        return null;
     }
 
     /** Statuses providers use for a temporary capacity spike; Anthropic uses 529. */
