@@ -15,7 +15,9 @@ import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
@@ -32,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * GitLab-specific implementation of {@link RepositoryApiClient}.
@@ -141,6 +144,50 @@ public class GitLabApiClient implements RepositoryApiClient {
                     + "project " + sourceId.longValue() + " of merge request !" + pullNumber);
         }
         return resolved;
+    }
+
+    /** Reads merge request metadata and, for an open request, its live source commit. */
+    @Override
+    public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        Map<String, Object> mr = gitlabRestClient.get()
+                .uri(MERGE_PATH, encodeProjectPath(owner, repo), pullNumber)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        if (mr == null) {
+            return Optional.empty();
+        }
+        PullRequestState state = switch (stringOrNull(mr.get("state"))) {
+            case "opened" -> PullRequestState.OPEN;
+            case "closed" -> PullRequestState.CLOSED_WITHOUT_MERGE;
+            case "merged" -> PullRequestState.MERGED;
+            case null, default -> null;
+        };
+        String sourceBranch = PullRequestHeads.nonBlank(stringOrNull(mr.get(SOURCE_BRANCH)));
+        // The MR's sha and diff_refs can lag the live branch tips.
+        String headSha = state == PullRequestState.OPEN
+                ? readSourceBranchSha(mr.get("source_project_id"), sourceBranch)
+                : null;
+        return Optional.of(new PullRequestDetails(
+                stringOrNull(mr.get("title")), stringOrNull(mr.get("description")), state,
+                sourceBranch, headSha, stringOrNull(mr.get("target_branch")), null));
+    }
+
+    private String readSourceBranchSha(Object sourceProjectId, String sourceBranch) {
+        if (sourceBranch == null || !(sourceProjectId instanceof Integer || sourceProjectId instanceof Long)
+                || ((Number) sourceProjectId).longValue() <= 0) {
+            return null;
+        }
+        Map<String, Object> branch = gitlabRestClient.get()
+                .uri("/api/v4/projects/{projectId}/repository/branches/{branch}", sourceProjectId, sourceBranch)
+                .retrieve()
+                .body(new ParameterizedTypeReference<>() {});
+        return branch != null && branch.get("commit") instanceof Map<?, ?> commit
+                ? PullRequestHeads.nonBlank(stringOrNull(commit.get("id")))
+                : null;
+    }
+
+    private static String stringOrNull(Object value) {
+        return value instanceof String text ? text : null;
     }
 
     @Override

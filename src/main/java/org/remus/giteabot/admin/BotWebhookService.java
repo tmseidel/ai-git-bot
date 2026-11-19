@@ -6,12 +6,15 @@ import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.event.BotIdentity;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
 import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
+import org.remus.giteabot.prworkflow.PrWorkflowRun;
+import org.remus.giteabot.prworkflow.PrWorkflowRunStatus;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewSlashCommandHandler;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
@@ -31,9 +34,11 @@ import org.remus.giteabot.util.BranchFilter;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.util.EnumSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Pattern;
 
 /**
@@ -52,6 +57,13 @@ import java.util.regex.Pattern;
 @Slf4j
 @Service
 public class BotWebhookService {
+
+    /**
+     * The triggers a review is acknowledged for with a 👀 reaction on the pull request:
+     * those where nobody has asked the bot anything yet.
+     */
+    private static final Set<WebhookEventKind> ACKNOWLEDGED_TRIGGERS =
+            EnumSet.of(WebhookEventKind.PR_OPENED, WebhookEventKind.PR_REVIEWER_ADDED);
 
     /**
      * Phrasings that ask for the review to be run again: "re-review", "review (this / the
@@ -119,14 +131,22 @@ public class BotWebhookService {
      * Checks the user whitelist ({@link #isCallerAllowed}) before anything else, so that no
      * caller can start a review for someone who is not allowed. The
      * {@link org.remus.giteabot.webhook.WebhookEventDispatcher} checks it before every review
-     * it starts as well.
+     * it starts as well, because it has to decide before it claims the commit.
+     *
+     * @return completes with {@code true} when at least one workflow ran without failing —
+     *         a workflow that skipped itself or was cancelled counts as having run, since
+     *         retrying it would not change the outcome; {@code false} when the review was
+     *         skipped (caller not allowed, branch filtered, no workflow enabled) or every
+     *         workflow failed. The dispatcher uses it to release its debounce claim, so a
+     *         re-request is not swallowed.
+     * @param trigger what started the review; decides whether it is acknowledged with a reaction
      */
     @Async
-    public void reviewPullRequest(Bot bot, WebhookPayload payload) {
+    public CompletableFuture<Boolean> reviewPullRequest(Bot bot, WebhookPayload payload, WebhookEventKind trigger) {
         try {
             AiAuditContext.setSessionId(auditSessionId(payload));
             if (!isCallerAllowed(bot, payload)) {
-                return;
+                return CompletableFuture.completedFuture(false);
             }
 
             // A review asked for in a conversation comment ("review again") arrives without
@@ -134,14 +154,18 @@ public class BotWebhookService {
             // issue comments (GitHub, Gitea). The branch filter and the workflows need both.
             PrPayloadHydrator.hydrate(payload, () -> repositoryPlatformFactory.getApiClient(bot.getGitIntegration()));
             if (!prWorkflowAllowedForBranch(bot, payload)) {
-                return;
+                return CompletableFuture.completedFuture(false);
             }
-            acknowledgePullRequest(bot, payload);
+            acknowledgePullRequest(bot, payload, trigger);
             try {
-                prWorkflowOrchestrator.runAll(bot, payload);
+                boolean reviewed = prWorkflowOrchestrator.runAll(bot, payload).stream()
+                        .map(PrWorkflowRun::getStatus)
+                        .anyMatch(status -> status != PrWorkflowRunStatus.FAILED);
+                return CompletableFuture.completedFuture(reviewed);
             } catch (Exception e) {
                 log.error("[Bot '{}'] Failed to run PR workflows: {}", bot.getName(), e.getMessage(), e);
                 botService.recordError(bot, e.getMessage());
+                return CompletableFuture.completedFuture(false);
             }
         } finally {
             AiAuditContext.clear();
@@ -174,9 +198,8 @@ public class BotWebhookService {
         }
     }
 
-    private void acknowledgePullRequest(Bot bot, WebhookPayload payload) {
-        if (!"opened".equals(payload.getAction())
-                && !"review_requested".equals(payload.getAction())) {
+    private void acknowledgePullRequest(Bot bot, WebhookPayload payload, WebhookEventKind trigger) {
+        if (!ACKNOWLEDGED_TRIGGERS.contains(trigger)) {
             return;
         }
         if (payload.getRepository() == null

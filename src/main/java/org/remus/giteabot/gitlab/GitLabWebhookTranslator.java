@@ -80,35 +80,23 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         WebhookPayload webhookPayload = translateMergeRequestPayload(payload, attrs);
 
         return switch (gitlabAction != null ? gitlabAction : "") {
-            case "open" -> {
-                webhookPayload.setAction("opened");
-                yield WebhookEvent.of(WebhookEventKind.PR_OPENED, webhookPayload, identity);
-            }
-            case "reopen" -> {
-                webhookPayload.setAction("reopened");
-                yield WebhookEvent.of(WebhookEventKind.PR_REOPENED, webhookPayload, identity);
-            }
+            case "open" -> WebhookEvent.of(WebhookEventKind.PR_OPENED, webhookPayload, identity);
+            case "reopen" -> WebhookEvent.of(WebhookEventKind.PR_REOPENED, webhookPayload, identity);
             case "update" -> {
                 Map<String, Object> changes = (Map<String, Object>) payload.get("changes");
                 if (botWasAdded(identity, changes, "reviewers")) {
-                    webhookPayload.setAction("review_requested");
                     yield WebhookEvent.of(WebhookEventKind.PR_REVIEWER_ADDED, webhookPayload, identity);
                 }
                 if (botWasAdded(identity, changes, "assignees")) {
-                    webhookPayload.setAction("assigned");
                     yield WebhookEvent.of(WebhookEventKind.PR_ASSIGNED, webhookPayload, identity);
                 }
                 if (isPush(attrs)) {
-                    webhookPayload.setAction("synchronized");
                     yield WebhookEvent.of(WebhookEventKind.PR_SYNCHRONIZED, webhookPayload, identity);
                 }
                 yield WebhookEvent.ignored(
                         "merge request update without a push or the bot being added as reviewer or assignee");
             }
-            case "close", "merge" -> {
-                webhookPayload.setAction("closed");
-                yield WebhookEvent.of(WebhookEventKind.PR_CLOSED, webhookPayload, identity);
-            }
+            case "close", "merge" -> WebhookEvent.of(WebhookEventKind.PR_CLOSED, webhookPayload, identity);
             case "approved" -> {
                 // An "approved" event attributed to the bot while the bot is a reviewer is
                 // treated as GitLab re-requesting a review from it — the one bot-authored
@@ -117,7 +105,6 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
                 if (identity.triggered(webhookPayload)
                         && identity.isReviewer(webhookPayload)
                         && !isApprovePostReviewActionConfigured(bot)) {
-                    webhookPayload.setAction("review_requested");
                     yield WebhookEvent.builder()
                             .kind(WebhookEventKind.PR_REVIEWER_ADDED)
                             .payload(webhookPayload)
@@ -144,7 +131,6 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         }
 
         WebhookPayload webhookPayload = translateNotePayload(payload, attrs);
-        webhookPayload.setAction("created");
 
         if ("Issue".equals(noteableType)) {
             return WebhookEvent.of(WebhookEventKind.ISSUE_COMMENT, webhookPayload, identity);
@@ -172,7 +158,6 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
         if ("open".equals(gitlabAction) || "reopen".equals(gitlabAction)) {
             WebhookPayload webhookPayload = translateIssuePayload(payload, attrs);
             boolean opened = "open".equals(gitlabAction);
-            webhookPayload.setAction(opened ? "opened" : "reopened");
             return WebhookEvent.of(opened ? WebhookEventKind.ISSUE_OPENED : WebhookEventKind.ISSUE_REOPENED, webhookPayload, identity);
         }
         if (!"update".equals(gitlabAction)) {
@@ -184,7 +169,6 @@ public class GitLabWebhookTranslator implements WebhookTranslator {
             return WebhookEvent.ignored("issue update without the bot being newly assigned");
         }
         WebhookPayload webhookPayload = translateIssuePayload(payload, attrs);
-        webhookPayload.setAction("assigned");
         return WebhookEvent.of(WebhookEventKind.ISSUE_ASSIGNED, webhookPayload, identity);
     }
 

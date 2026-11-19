@@ -25,7 +25,6 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:created", raw);
 
         assertNotNull(payload);
-        assertEquals("opened", payload.getAction());
         assertEquals("developer", payload.getSender().getLogin());
         assertEquals("myrepo", payload.getRepository().getName());
         assertEquals("workspace/myrepo", payload.getRepository().getFullName());
@@ -40,17 +39,7 @@ class BitbucketPayloadTranslationTest {
     }
 
     @Test
-    void translatePullRequestUpdated_mapsToSynchronized() {
-        Map<String, Object> raw = createPullRequestPayload();
-
-        WebhookPayload payload = handler.translatePayload("pullrequest:updated", raw);
-
-        assertNotNull(payload);
-        assertEquals("synchronized", payload.getAction());
-    }
-
-    @Test
-    void translatePullRequestFulfilled_mapsToClosed() {
+    void translatePullRequestFulfilled_mapsMerged() {
         Map<String, Object> raw = createPullRequestPayload();
         // Set state to MERGED for fulfilled
         Map<String, Object> pr = new HashMap<>((Map<String, Object>) raw.get("pullrequest"));
@@ -61,18 +50,7 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:fulfilled", rawCopy);
 
         assertNotNull(payload);
-        assertEquals("closed", payload.getAction());
         assertTrue(payload.getPullRequest().getMerged());
-    }
-
-    @Test
-    void translatePullRequestRejected_mapsToClosed() {
-        Map<String, Object> raw = createPullRequestPayload();
-
-        WebhookPayload payload = handler.translatePayload("pullrequest:rejected", raw);
-
-        assertNotNull(payload);
-        assertEquals("closed", payload.getAction());
     }
 
     @Test
@@ -82,7 +60,6 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:comment_created", raw);
 
         assertNotNull(payload);
-        assertEquals("created", payload.getAction());
         assertNotNull(payload.getComment());
         assertEquals(CommentId.NumericCommentId.of(55L), payload.getComment().getId());
         assertEquals("@ai_bot review this", payload.getComment().getBody());
@@ -186,7 +163,6 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:created", raw);
 
         assertNotNull(payload);
-        assertEquals("opened", payload.getAction());
 
         // Actor/sender
         assertNotNull(payload.getSender());

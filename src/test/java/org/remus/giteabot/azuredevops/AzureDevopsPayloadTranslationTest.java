@@ -28,7 +28,6 @@ class AzureDevopsPayloadTranslationTest {
                 "git.pullrequest.created", pullRequestPayload());
 
         assertNotNull(payload);
-        assertEquals("opened", payload.getAction());
         assertEquals("dev@contoso.com", payload.getSender().getLogin());
         // Every consumer reads getName() to build the repo argument passed into
         // RepositoryApiClient, so it must carry the "Project/Repository" form —
@@ -58,24 +57,17 @@ class AzureDevopsPayloadTranslationTest {
     }
 
     @Test
-    void translatePullRequestUpdated_whileActive_mapsToSynchronized() {
-        // pullRequestPayload() has status "active"
-        assertEquals("synchronized", handler.translatePayload(
-                "git.pullrequest.updated", pullRequestPayload()).getAction());
-    }
-
-    @Test
-    void translatePullRequestUpdated_whenCompletedOrAbandoned_mapsToClosed() {
+    void translatePullRequestUpdated_whenCompletedOrAbandoned_carriesTheStatus() {
         // Completion arrives as an "updated" event with status completed — this is the
         // only close signal Azure DevOps sends.
         WebhookPayload completed = handler.translatePayload(
                 "git.pullrequest.updated", withResource(pullRequestPayload(), "status", "completed"));
-        assertEquals("closed", completed.getAction());
+        assertEquals("completed", completed.getPullRequest().getState());
         assertTrue(completed.getPullRequest().getMerged());
 
         WebhookPayload abandoned = handler.translatePayload(
                 "git.pullrequest.updated", withResource(pullRequestPayload(), "status", "abandoned"));
-        assertEquals("closed", abandoned.getAction());
+        assertEquals("abandoned", abandoned.getPullRequest().getState());
         assertFalse(abandoned.getPullRequest().getMerged());
     }
 
@@ -98,7 +90,6 @@ class AzureDevopsPayloadTranslationTest {
                 "ms.vss-code.git-pullrequest-comment-event", commentPayload());
 
         assertNotNull(payload);
-        assertEquals("created", payload.getAction());
         assertEquals(ThreadCommentId.of(5L, 7L), payload.getComment().getId());
         assertEquals("@bot please review", payload.getComment().getBody());
         assertEquals(42L, payload.getPullRequest().getNumber());

@@ -1,6 +1,7 @@
 package org.remus.giteabot;
 
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
@@ -10,6 +11,8 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import org.springframework.scheduling.annotation.Async;
+
+import java.util.concurrent.Future;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
@@ -45,24 +48,25 @@ class ArchitectureTest {
 
     /**
      * An {@code @Async} method returns {@code void} or a {@code Future}. Spring hands the call to an
-     * executor and returns {@code null} to the proxy, so a primitive return type makes the proxy
-     * throw {@code AopInvocationException} in every caller. Keeping the rule mechanical catches the
-     * case where an annotation drifts onto the neighbouring method during an edit.
+     * executor and returns {@code null} to the proxy for any other return type: a primitive makes the
+     * proxy throw {@code AopInvocationException} in every caller, and an object silently reaches the
+     * caller as {@code null}. Keeping the rule mechanical catches the case where an annotation drifts
+     * onto the neighbouring method during an edit.
      */
     @ArchTest
-    static final ArchRule async_methods_never_return_a_primitive =
+    static final ArchRule async_methods_return_void_or_a_future =
             methods().that().areAnnotatedWith(Async.class)
-                    .should(new ArchCondition<JavaMethod>("not return a primitive type") {
+                    .should(new ArchCondition<JavaMethod>("return void or a Future") {
                         @Override
                         public void check(JavaMethod method, ConditionEvents events) {
-                            // void.class is primitive too, and void is exactly what @Async needs
-                            if (method.getRawReturnType().isPrimitive()
-                                    && !method.getRawReturnType().isEquivalentTo(void.class)) {
+                            JavaClass returnType = method.getRawReturnType();
+                            if (!returnType.isEquivalentTo(void.class)
+                                    && !returnType.isAssignableTo(Future.class)) {
                                 events.add(SimpleConditionEvent.violated(method,
                                         method.getFullName() + " is @Async and returns "
-                                                + method.getRawReturnType().getName()
-                                                + " — the async proxy returns null, so every caller fails "
-                                                + "with AopInvocationException"));
+                                                + returnType.getName()
+                                                + " — the async proxy returns null for it, so every caller "
+                                                + "gets null or fails with AopInvocationException"));
                             }
                         }
                     });

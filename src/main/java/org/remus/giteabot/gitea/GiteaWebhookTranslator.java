@@ -71,13 +71,14 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
                 webhookPayload.getSender() != null ? webhookPayload.getSender().getLogin() : "null");
 
         BotIdentity identity = BotIdentity.of(bot);
+        String action = (String) payload.get("action");
         return switch (eventType) {
-            case "issue_comment" -> classifyComment(identity, webhookPayload);
-            case "issues" -> classifyIssue(identity, webhookPayload);
-            case "pull_request" -> classifyPullRequest(identity, webhookPayload);
+            case "issue_comment" -> classifyComment(identity, action, webhookPayload);
+            case "issues" -> classifyIssue(identity, action, webhookPayload);
+            case "pull_request" -> classifyPullRequest(identity, action, webhookPayload);
             // Submitted reviews: one event name per review type, all with action "reviewed".
             case "pull_request_approved", "pull_request_rejected", "pull_request_comment" ->
-                    classifyReview(identity, webhookPayload);
+                    classifyReview(identity, action, webhookPayload);
             default -> {
                 log.info("Ignoring Gitea webhook for bot '{}': unhandled event type '{}'", bot.getName(), eventType);
                 yield WebhookEvent.ignored("unhandled Gitea event type '" + eventType + "'");
@@ -103,8 +104,7 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
      * request is signalled by a top-level {@code pull_request} or, on a plain
      * conversation comment, only by the nested {@code issue.pull_request}.
      */
-    private WebhookEvent classifyComment(BotIdentity identity, WebhookPayload payload) {
-        String action = payload.getAction();
+    private WebhookEvent classifyComment(BotIdentity identity, String action, WebhookPayload payload) {
         if (!"created".equals(action)) {
             return WebhookEvent.ignored("comment action '" + action + "' is not 'created'");
         }
@@ -126,11 +126,10 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
         return WebhookEvent.of(WebhookEventKind.ISSUE_COMMENT, payload, identity);
     }
 
-    private WebhookEvent classifyIssue(BotIdentity identity, WebhookPayload payload) {
+    private WebhookEvent classifyIssue(BotIdentity identity, String action, WebhookPayload payload) {
         if (payload.getIssue() == null) {
             return WebhookEvent.ignored("Gitea issues event without an issue");
         }
-        String action = payload.getAction();
         return switch (action != null ? action : "") {
             // Gitea names no assignee on the event itself, and issue.assignee is only the
             // first of issue.assignees, so the bot is looked for among all of them.
@@ -143,11 +142,10 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
         };
     }
 
-    private WebhookEvent classifyPullRequest(BotIdentity identity, WebhookPayload payload) {
+    private WebhookEvent classifyPullRequest(BotIdentity identity, String action, WebhookPayload payload) {
         if (payload.getPullRequest() == null) {
             return WebhookEvent.ignored("Gitea pull_request event without a pull request");
         }
-        String action = payload.getAction();
         return switch (action != null ? action : "") {
             case "opened" -> WebhookEvent.of(WebhookEventKind.PR_OPENED, payload, identity);
             case "reopened" -> WebhookEvent.of(WebhookEventKind.PR_REOPENED, payload, identity);
@@ -165,8 +163,8 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
         };
     }
 
-    private WebhookEvent classifyReview(BotIdentity identity, WebhookPayload payload) {
-        if (!"reviewed".equals(payload.getAction()) || payload.getReview() == null
+    private WebhookEvent classifyReview(BotIdentity identity, String action, WebhookPayload payload) {
+        if (!"reviewed".equals(action) || payload.getReview() == null
                 || payload.getPullRequest() == null) {
             return WebhookEvent.ignored("Gitea review event without a submitted review");
         }
@@ -178,7 +176,6 @@ public class GiteaWebhookTranslator implements WebhookTranslator {
     @SuppressWarnings("unchecked")
     private WebhookPayload translatePayload(Map<String, Object> raw) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction((String) raw.get("action"));
         payload.setNumber(toLong(raw.get("number")));
         payload.setSender(extractOwner((Map<String, Object>) raw.get("sender")));
         payload.setRepository(extractRepository((Map<String, Object>) raw.get("repository")));

@@ -2,164 +2,233 @@ package org.remus.giteabot.gitlab;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.ArgumentCaptor;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.admin.Bot;
-import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.event.WebhookEvent;
+import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.PostReviewAction;
-import org.remus.giteabot.webhook.TranslatingWebhookHandler;
-import org.remus.giteabot.webhook.WebhookEventDispatcher;
-import org.springframework.http.ResponseEntity;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests how GitLab webhooks are classified by {@link GitLabWebhookTranslator} and, through
- * the real {@link WebhookEventDispatcher}, which {@link BotWebhookService} handler they reach.
+ * Tests how {@link GitLabWebhookTranslator} turns GitLab webhooks into {@link WebhookEvent}s.
+ * What the bot then does with each kind is covered by {@code WebhookEventDispatcherTest}.
  */
-@ExtendWith(MockitoExtension.class)
 class GitLabWebhookTranslatorTest {
 
-    @Mock
-    private BotWebhookService botWebhookService;
-
     private GitLabWebhookTranslator translator;
-    private TranslatingWebhookHandler handler;
     private Bot bot;
 
     @BeforeEach
     void setUp() {
         translator = new GitLabWebhookTranslator();
-        handler = new TranslatingWebhookHandler(translator, GitLabWebhookTranslator.EVENT_HEADER, botWebhookService);
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
         gitIntegration.setUsername("ai_bot");
         bot.setGitIntegration(gitIntegration);
-
     }
 
+    private WebhookEvent translate(String eventType, Map<String, Object> payload) {
+        return translator.translate(bot, Map.of(GitLabWebhookTranslator.EVENT_HEADER, eventType), payload);
+    }
+
+    // ---- Merge request lifecycle ----
+
     @Test
-    void mergeRequestOpenedWithBotReviewer_triggersReview() {
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+    void mergeRequestOpenedWithBotReviewer_isPrOpenedWithTheBotAsReviewer() {
+        WebhookEvent event = translate("Merge Request Hook",
                 mergeRequestPayload("open", List.of(user("ai_bot")), null));
 
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertTrue(event.botIsReviewer());
+        assertFalse(event.fromBot());
     }
 
     @Test
-    void mergeRequestOpenedWithoutBotReviewer_isIgnored() {
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+    void mergeRequestOpenedWithoutBotReviewer_isPrOpenedWithoutTheBotAsReviewer() {
+        WebhookEvent event = translate("Merge Request Hook",
                 mergeRequestPayload("open", List.of(user("human")), null));
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.PR_OPENED, event.kind());
+        assertFalse(event.botIsReviewer());
     }
 
     @Test
-    void mergeRequestOpenedWithRunOnPrCreation_triggersReviewWithoutBotReviewer() {
-        bot.setRunOnPrCreation(true);
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
-                mergeRequestPayload("open", List.of(user("human")), null));
+    void mergeRequestOpenedWithBotAssignee_isNotAnAssignment() {
+        // Only assigning the bot to an existing merge request counts.
+        Map<String, Object> payload = mergeRequestPayload("open", List.of(user("human")), null);
+        payload.put("assignees", List.of(user("ai_bot")));
 
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_OPENED, translate("Merge Request Hook", payload).kind());
     }
 
     @Test
-    void mergeRequestUpdateWithRunOnPrCreation_isStillIgnored() {
-        bot.setRunOnPrCreation(true);
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
-                mergeRequestPayload("update", List.of(user("human")), null));
+    void mergeRequestReopenedWithBotReviewer_isPrReopenedWithTheBotAsReviewer() {
+        WebhookEvent event = translate("Merge Request Hook",
+                mergeRequestPayload("reopen", List.of(user("ai_bot")), null));
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.PR_REOPENED, event.kind());
+        assertTrue(event.botIsReviewer());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"close", "merge"})
+    void mergeRequestClosedOrMerged_isPrClosed(String action) {
+        assertEquals(WebhookEventKind.PR_CLOSED,
+                translate("Merge Request Hook", mergeRequestPayload(action, List.of(), null)).kind());
     }
 
     @Test
-    void mergeRequestUpdateWithoutReviewerChange_isIgnored() {
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+    void mergeRequestUpdateWithoutPushOrBotChange_isIgnored() {
+        WebhookEvent event = translate("Merge Request Hook",
                 mergeRequestPayload("update", List.of(user("ai_bot")), null));
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
     }
 
     @Test
-    void mergeRequestUpdateWhenBotReviewerAdded_triggersReview() {
+    void mergeRequestTitleEdit_isIgnored() {
+        // An update without oldrev is an edit (title, labels, ...), not a push.
+        Map<String, Object> payload = mergeRequestPayload("update", List.of(user("human")),
+                Map.of("title", Map.of("previous", "Old", "current", "New")));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("Merge Request Hook", payload).kind());
+    }
+
+    @Test
+    void mergeRequestPush_isPrSynchronized() {
+        Map<String, Object> payload = mergeRequestPayload("update", List.of(user("human")), null);
+        attrs(payload).put("oldrev", "0123abcd");
+
+        assertEquals(WebhookEventKind.PR_SYNCHRONIZED, translate("Merge Request Hook", payload).kind());
+    }
+
+    @Test
+    void mergeRequestUpdateWhenBotReviewerAdded_isPrReviewerAdded() {
         Map<String, Object> changes = Map.of("reviewers", Map.of(
                 "previous", List.of(user("human")),
                 "current", List.of(user("human"), user("ai_bot"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+        WebhookEvent event = translate("Merge Request Hook",
                 mergeRequestPayload("update", List.of(user("human"), user("ai_bot")), changes));
 
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, event.kind());
     }
 
     @Test
-    void mergeRequestUpdateWhenOtherReviewerAddedButBotAlreadyAssigned_doesNotRetriggerReview() {
-        // Bot was already a reviewer; a different reviewer is now added. The bot should NOT re-review.
+    void mergeRequestUpdateWhenOtherReviewerAddedButBotAlreadyReviewer_isIgnored() {
+        // The bot was already a reviewer; adding someone else must not re-trigger it.
         Map<String, Object> changes = Map.of("reviewers", Map.of(
                 "previous", List.of(user("ai_bot"), user("human1")),
                 "current", List.of(user("ai_bot"), user("human1"), user("human2"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
+        WebhookEvent event = translate("Merge Request Hook",
                 mergeRequestPayload("update", List.of(user("ai_bot"), user("human1"), user("human2")), changes));
 
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
     }
 
     @Test
-    void mergeRequestApprovedFromBotReviewer_triggersReviewRequest() {
+    void mergeRequestUpdateWhenBotAssigned_isPrAssigned() {
+        Map<String, Object> changes = Map.of("assignees", Map.of(
+                "previous", List.of(user("human")),
+                "current", List.of(user("human"), user("ai_bot"))));
+
+        WebhookEvent event = translate("Merge Request Hook",
+                mergeRequestPayload("update", List.of(user("human")), changes));
+
+        assertEquals(WebhookEventKind.PR_ASSIGNED, event.kind());
+    }
+
+    @Test
+    void mergeRequestUpdateWhenOtherAssigneeAddedButBotAlreadyAssigned_isIgnored() {
+        Map<String, Object> changes = Map.of("assignees", Map.of(
+                "previous", List.of(user("ai_bot")),
+                "current", List.of(user("ai_bot"), user("human"))));
+
+        WebhookEvent event = translate("Merge Request Hook",
+                mergeRequestPayload("update", List.of(user("human")), changes));
+
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
+    }
+
+    @Test
+    void mergeRequestApprovedByTheBotAsReviewer_isAReviewRequestNotFromTheBot() {
+        // GitLab's re-request of a review shows up as the bot's own approval.
         Map<String, Object> payload = mergeRequestPayload("approved", List.of(user("ai_bot")), null);
         payload.put("user", user("ai_bot"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
+        WebhookEvent event = translate("Merge Request Hook", payload);
 
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+        assertEquals(WebhookEventKind.PR_REVIEWER_ADDED, event.kind());
+        assertFalse(event.fromBot());
+        assertTrue(event.botIsReviewer());
     }
 
     @Test
-    void mergeRequestApprovedFromBotReviewerAfterConfiguredApprove_isIgnored() {
-        GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername("ai_bot");
-        gitIntegration.setPostReviewAction(PostReviewAction.APPROVE);
-        bot.setGitIntegration(gitIntegration);
+    void mergeRequestApprovedByTheBotAfterItsConfiguredApprove_isIgnored() {
+        bot.getGitIntegration().setPostReviewAction(PostReviewAction.APPROVE);
         Map<String, Object> payload = mergeRequestPayload("approved", List.of(user("ai_bot")), null);
         payload.put("user", user("ai_bot"));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+        assertEquals(WebhookEventKind.IGNORED, translate("Merge Request Hook", payload).kind());
     }
 
     @Test
-    void reviewAgainNote_triggersReview() {
+    void mergeRequestApprovedByAHuman_isIgnored() {
+        assertEquals(WebhookEventKind.IGNORED, translate("Merge Request Hook",
+                mergeRequestPayload("approved", List.of(user("ai_bot")), null)).kind());
+    }
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Note Hook",
-                notePayload("@ai_bot please review this again"));
+    // ---- Notes ----
 
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
+    @Test
+    void mergeRequestNoteWithMention_isPrCommentMentioningTheBot() {
+        WebhookEvent event = translate("Note Hook", notePayload("@ai_bot please review this again"));
+
+        assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
+        assertTrue(event.botMentioned());
+        assertEquals("@ai_bot please review this again", event.payload().getComment().getBody());
+    }
+
+    @Test
+    void mergeRequestNoteOnADiffLine_isPrInlineCommentWithItsAnchor() {
+        Map<String, Object> payload = notePayload("@ai_bot why?");
+        attrs(payload).put("position", Map.of("new_path", "src/Foo.java", "new_line", 12));
+
+        WebhookEvent event = translate("Note Hook", payload);
+
+        assertEquals(WebhookEventKind.PR_INLINE_COMMENT, event.kind());
+        assertEquals("src/Foo.java", event.payload().getComment().getPath());
+        assertEquals(12, event.payload().getComment().getLine());
+    }
+
+    @Test
+    void issueNote_isIssueComment() {
+        Map<String, Object> payload = notePayload("@ai_bot any idea?");
+        attrs(payload).put("noteable_type", "Issue");
+        payload.remove("merge_request");
+        payload.put("issue", Map.of("iid", 3, "title", "Bug", "description", "Broken"));
+
+        assertEquals(WebhookEventKind.ISSUE_COMMENT, translate("Note Hook", payload).kind());
+    }
+
+    @Test
+    void noteOnACommit_isIgnored() {
+        Map<String, Object> payload = notePayload("@ai_bot hi");
+        attrs(payload).put("noteable_type", "Commit");
+
+        assertEquals(WebhookEventKind.IGNORED, translate("Note Hook", payload).kind());
     }
 
     @Test
@@ -184,166 +253,30 @@ class GitLabWebhookTranslatorTest {
         assertEquals("root", translated.getPullRequest().getUser().getLogin());
     }
 
+    // ---- Issues ----
+
     @Test
-    void reviewAgainNote_onAMergeRequestWithAnAgentSession_continuesTheSession() {
-        lenient().when(botWebhookService.hasAgentSession(any(), any(WebhookPayload.class))).thenReturn(true);
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Note Hook",
-                notePayload("@ai_bot please review this again"));
-
-        assertEquals("pr comment received", response.getBody());
-        verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
+    void issueOpen_isIssueOpened() {
+        assertEquals(WebhookEventKind.ISSUE_OPENED, translate("Issue Hook", issuePayload("open")).kind());
     }
 
     @Test
-    void issueOpenedWithRunOnIssueCreation_triggersAgent() {
-        bot.setRunOnIssueCreation(true);
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Issue Hook",
-                issuePayload("open"));
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueCreated(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handleIssueAssigned(any(), any());
+    void issueReopen_isIssueReopened() {
+        assertEquals(WebhookEventKind.ISSUE_REOPENED, translate("Issue Hook", issuePayload("reopen")).kind());
     }
 
     @Test
-    void issueReopenedWithRunOnIssueCreation_triggersAgent() {
-        bot.setRunOnIssueCreation(true);
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Issue Hook",
-                issuePayload("reopen"));
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueCreated(eq(bot), any(WebhookPayload.class));
-    }
-
-    @Test
-    void issueOpenedWithoutRunOnIssueCreation_isIgnored() {
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Issue Hook",
-                issuePayload("open"));
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).handleIssueCreated(any(), any());
-    }
-
-    @Test
-    void issueUpdateWithAssigneeChange_stillRoutesToHandleIssueAssigned() {
+    void issueUpdateWhenBotAssigned_isIssueAssigned() {
         Map<String, Object> changes = Map.of("assignees", Map.of(
                 "previous", List.of(),
                 "current", List.of(user("ai_bot"))));
 
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Issue Hook",
-                issuePayload("update", changes));
-
-        assertEquals("agent triggered", response.getBody());
-        verify(botWebhookService).handleIssueAssigned(eq(bot), any(WebhookPayload.class));
-        verify(botWebhookService, never()).handleIssueCreated(any(), any());
+        assertEquals(WebhookEventKind.ISSUE_ASSIGNED, translate("Issue Hook", issuePayload("update", changes)).kind());
     }
 
     @Test
-    void issueOpenedTranslatesActionToOpened() {
-        bot.setRunOnIssueCreation(true);
-
-        handler.handleWebhook(bot, "Issue Hook", issuePayload("open"));
-
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handleIssueCreated(eq(bot), captor.capture());
-        assertEquals("opened", captor.getValue().getAction());
-    }
-
-    @Test
-    void issueReopenedTranslatesActionToReopened() {
-        bot.setRunOnIssueCreation(true);
-
-        handler.handleWebhook(bot, "Issue Hook", issuePayload("reopen"));
-
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).handleIssueCreated(eq(bot), captor.capture());
-        assertEquals("reopened", captor.getValue().getAction());
-    }
-
-    @Test
-    void mergeRequestOpenedWithBotAssignee_doesNotTriggerAReview() {
-        // Only assigning the bot to an existing merge request counts.
-        Map<String, Object> payload = mergeRequestPayload("open", List.of(user("human")), null);
-        payload.put("assignees", List.of(user("ai_bot")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
-    }
-
-    @Test
-    void mergeRequestUpdateWhenBotAssigned_triggersReview() {
-        Map<String, Object> changes = Map.of("assignees", Map.of(
-                "previous", List.of(user("human")),
-                "current", List.of(user("human"), user("ai_bot"))));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
-                mergeRequestPayload("update", List.of(user("human")), changes));
-
-        assertEquals("review triggered", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture());
-        assertEquals("assigned", captor.getValue().getAction());
-    }
-
-    @Test
-    void mergeRequestUpdateWhenOtherAssigneeAddedButBotAlreadyAssigned_isIgnored() {
-        Map<String, Object> changes = Map.of("assignees", Map.of(
-                "previous", List.of(user("ai_bot")),
-                "current", List.of(user("ai_bot"), user("human"))));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
-                mergeRequestPayload("update", List.of(user("human")), changes));
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
-    }
-
-    @Test
-    void mergeRequestPush_withRunOnPrUpdate_triggersReview() {
-        bot.setRunOnPrUpdate(true);
-        Map<String, Object> payload = mergeRequestPayload("update", List.of(user("human")), null);
-        attrs(payload).put("oldrev", "0123abcd");
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
-
-        assertEquals("review triggered", response.getBody());
-        ArgumentCaptor<WebhookPayload> captor = ArgumentCaptor.forClass(WebhookPayload.class);
-        verify(botWebhookService).reviewPullRequest(eq(bot), captor.capture());
-        assertEquals("synchronized", captor.getValue().getAction());
-    }
-
-    @Test
-    void mergeRequestTitleEdit_withRunOnPrUpdate_isIgnored() {
-        // An update without oldrev is an edit (title, labels, ...), not a push.
-        bot.setRunOnPrUpdate(true);
-        Map<String, Object> payload = mergeRequestPayload("update", List.of(user("human")),
-                Map.of("title", Map.of("previous", "Old", "current", "New")));
-
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook", payload);
-
-        assertEquals("ignored", response.getBody());
-        verify(botWebhookService, never()).reviewPullRequest(any(), any());
-    }
-
-    @Test
-    void mergeRequestReopenedWithBotReviewer_triggersReview() {
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Merge Request Hook",
-                mergeRequestPayload("reopen", List.of(user("ai_bot")), null));
-
-        assertEquals("review triggered", response.getBody());
-        verify(botWebhookService).reviewPullRequest(eq(bot), any(WebhookPayload.class));
-    }
-
-    @Test
-    void mergeRequestNoteWithMention_routesToHandlePrComment() {
-        ResponseEntity<String> response = handler.handleWebhook(bot, "Note Hook", notePayload("@ai_bot please explain"));
-
-        assertEquals("pr comment received", response.getBody());
-        verify(botWebhookService).handlePrComment(eq(bot), any(WebhookPayload.class));
+    void issueUpdateWithoutTheBotBeingAssigned_isIgnored() {
+        assertEquals(WebhookEventKind.IGNORED, translate("Issue Hook", issuePayload("update")).kind());
     }
 
     @SuppressWarnings("unchecked")

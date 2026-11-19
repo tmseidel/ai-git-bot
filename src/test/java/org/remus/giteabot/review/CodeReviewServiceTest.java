@@ -196,7 +196,6 @@ class CodeReviewServiceTest {
     @Test
     void reviewPullRequest_existingSessionIncludesFreshContextButStoresOnlyUpdate() {
         WebhookPayload payload = createTestPayload();
-        payload.setAction("synchronize");
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
         session.addMessage("user", "Previous question");
         session.addMessage("assistant", "Previous answer");
@@ -633,7 +632,6 @@ class CodeReviewServiceTest {
 
     private WebhookPayload createTestPayload() {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction("opened");
 
         WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
         pr.setNumber(1L);
@@ -658,7 +656,6 @@ class CodeReviewServiceTest {
 
     private WebhookPayload createCommentPayload(String body) {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction("created");
 
         WebhookPayload.Comment comment = new WebhookPayload.Comment();
         comment.setId(CommentId.NumericCommentId.of(42L));
@@ -698,7 +695,6 @@ class CodeReviewServiceTest {
 
     private WebhookPayload createReviewSubmittedPayload() {
         WebhookPayload payload = new WebhookPayload();
-        payload.setAction("reviewed");
 
         WebhookPayload.PullRequest pr = new WebhookPayload.PullRequest();
         pr.setNumber(2L);
