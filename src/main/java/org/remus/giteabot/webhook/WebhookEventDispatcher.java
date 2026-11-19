@@ -71,6 +71,12 @@ public class WebhookEventDispatcher {
                 yield ResponseEntity.ok("session closed");
             }
             case PR_REVIEW_SUBMITTED -> {
+                // A review body is free text like a comment: a feedback command there must not
+                // reach the agentic clarification or the review follow-up.
+                if (botWebhookService.tryHandleLearningCommand(bot, payload,
+                        FeedbackCommandHandler.COMMENT_KIND_REVIEW, event.botAlias())) {
+                    yield ResponseEntity.ok("feedback recorded");
+                }
                 botWebhookService.handleReviewSubmitted(bot, payload);
                 yield ResponseEntity.ok("review comments processing triggered");
             }

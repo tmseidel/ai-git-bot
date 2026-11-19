@@ -18,10 +18,10 @@ public sealed interface FeedbackCommand {
 
     /**
      * {@code repositoryWide} distinguishes {@code feedback list repository} from {@code list};
-     * {@code cursor} is the {@code page: <n>} continuation of a previous page, resolved again
-     * inside the caller's own scope so a cursor cannot reach another repository's records.
+     * {@code cursor} is the opaque {@code page: <cursor>} continuation of a previous page, checked
+     * against the caller's own scope (see {@link FeedbackCursor}).
      */
-    record ListRecords(boolean repositoryWide, Long cursor) implements FeedbackCommand {
+    record ListRecords(boolean repositoryWide, String cursor) implements FeedbackCommand {
     }
 
     record Show(String reference) implements FeedbackCommand {

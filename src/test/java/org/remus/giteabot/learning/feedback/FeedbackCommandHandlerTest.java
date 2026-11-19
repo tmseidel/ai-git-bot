@@ -289,12 +289,10 @@ class FeedbackCommandHandlerTest {
 
     @Test
     void listAndShowReadWithoutWriting() {
-        when(feedbackService.list(any(), eq(false), any(), isNull())).thenReturn(List.of());
+        when(feedbackService.list(any(), eq(false), any(), isNull()))
+                .thenReturn(new FeedbackService.ListPage(List.of(), null));
         when(feedbackService.show(any(), eq("FB31"))).thenReturn(Optional.of(
-                new FeedbackService.Summary(1L, "FB31", "O1234-F2", "O1234-F2",
-                        FeedbackTargetType.FINDING, FeedbackVerdict.INCORRECT,
-                        FeedbackState.EFFECTIVE, "alice", "because", 9L, "acme", "web", null,
-                        java.time.Instant.parse("2026-11-14T10:00:00Z"))));
+                new FeedbackService.Detail(summary("FB31", 9L), List.of())));
 
         handler.tryHandle(bot, payload("@ai_bot feedback list"),
                 FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
@@ -305,11 +303,146 @@ class FeedbackCommandHandlerTest {
         ArgumentCaptor<String> replies = ArgumentCaptor.forClass(String.class);
         verify(repositoryClient, org.mockito.Mockito.times(2))
                 .postPullRequestComment(eq("acme"), eq("web"), eq(9L), replies.capture());
-        assertThat(replies.getAllValues().get(0)).contains("No feedback on this pull request yet.");
+        assertThat(replies.getAllValues().get(0))
+                .contains("Feedback for **review-bot** on this pull request: none yet.");
         assertThat(replies.getAllValues().get(1)).contains("FB31").contains("incorrect");
     }
 
+    @Test
+    void aFeedbackCommandInASubmittedReviewIsRecordedFromTheReview() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "bob", false, 50L, FeedbackAcknowledgement.PENDING));
+        WebhookPayload payload = payload("unused");
+        payload.setComment(null);
+        WebhookPayload.Review review = new WebhookPayload.Review();
+        review.setId(4242L);
+        review.setContent("@ai_bot feedback O1234 useful Please review again later, but this was good.");
+        payload.setReview(review);
+        WebhookPayload.Owner reviewer = new WebhookPayload.Owner();
+        reviewer.setLogin("bob");
+        payload.setSender(reviewer);
+
+        assertThat(handler.tryHandle(bot, payload, FeedbackCommandHandler.COMMENT_KIND_REVIEW, null))
+                .isTrue();
+
+        ArgumentCaptor<FeedbackSource> source = ArgumentCaptor.forClass(FeedbackSource.class);
+        verify(feedbackService).submit(any(), source.capture(), eq(FeedbackTarget.output("O1234")),
+                eq(FeedbackVerdict.USEFUL), eq("Please review again later, but this was good."),
+                eq("bob"));
+        assertThat(source.getValue().commentKind()).isEqualTo("REVIEW");
+        assertThat(source.getValue().commentId()).isEqualTo("4242");
+    }
+
+    @Test
+    void aReviewWithoutAFeedbackCommandKeepsItsRouting() {
+        WebhookPayload payload = payload("unused");
+        payload.setComment(null);
+        WebhookPayload.Review review = new WebhookPayload.Review();
+        review.setId(4242L);
+        review.setContent("@ai_bot why is this a blocker?");
+        payload.setReview(review);
+
+        assertThat(handler.tryHandle(bot, payload, FeedbackCommandHandler.COMMENT_KIND_REVIEW, null))
+                .isFalse();
+        verifyNoInteractions(feedbackService);
+    }
+
+    @Test
+    void aPostedConfirmationIsRecordedAsPosted() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "alice", false, 50L, FeedbackAcknowledgement.PENDING));
+
+        handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+
+        verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.POSTED);
+    }
+
+    @Test
+    void aConfirmationThatTimedOutIsUncertainAndARefusedOneFailed() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "alice", false, 50L, FeedbackAcknowledgement.PENDING));
+        doThrow(new org.springframework.web.client.ResourceAccessException("Read timed out",
+                new java.net.SocketTimeoutException()))
+                .doThrow(org.springframework.web.client.HttpClientErrorException.create(
+                        org.springframework.http.HttpStatus.FORBIDDEN, "Forbidden",
+                        org.springframework.http.HttpHeaders.EMPTY, new byte[0], null))
+                .when(repositoryClient)
+                .postPullRequestComment(anyString(), anyString(), anyLong(), anyString());
+
+        handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+        handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+
+        verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.UNCERTAIN);
+        verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.FAILED);
+    }
+
+    @Test
+    void aRedeliveryRepostsARefusedConfirmationOnce() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "alice", true, 50L, FeedbackAcknowledgement.FAILED));
+        when(feedbackService.claimAcknowledgementRetry(50L)).thenReturn(true, false);
+
+        handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+        handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+
+        verify(repositoryClient, org.mockito.Mockito.times(1)).postPullRequestComment(eq("acme"),
+                eq("web"), eq(9L), org.mockito.ArgumentMatchers.contains("Recorded **FB7**"));
+        verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.POSTED);
+    }
+
+    @Test
+    void aRedeliveryNeverRepostsAnUncertainConfirmation() {
+        when(feedbackService.submit(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "alice", true, 50L, FeedbackAcknowledgement.UNCERTAIN));
+
+        handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+
+        verify(feedbackService, never()).claimAcknowledgementRetry(any());
+        verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
+                anyString());
+    }
+
+    @Test
+    void overviewsNameTheBotLinkTheSourceAndCarryTheCursor() {
+        org.remus.giteabot.repository.RepositoryPlatform platform =
+                org.mockito.Mockito.mock(org.remus.giteabot.repository.RepositoryPlatform.class);
+        when(platform.getCloneUrl()).thenReturn("https://github.com");
+        when(repositoryPlatformFactory.getPlatform(any())).thenReturn(platform);
+        bot.getGitIntegration().setProviderType(org.remus.giteabot.repository.RepositoryType.GITHUB);
+        when(feedbackService.list(any(), eq(true), any(), eq("CURSOR1")))
+                .thenReturn(new FeedbackService.ListPage(List.of(summary("FB31", 12L)), "CURSOR2"));
+
+        handler.tryHandle(bot, payload("@ai_bot feedback list repository page: CURSOR1"),
+                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());
+        assertThat(reply.getValue())
+                .contains("Feedback for **review-bot** in this repository")
+                .contains("[PR #12](https://github.com/acme/web/pull/12)")
+                .contains("https://github.com/acme/web/pull/12#issuecomment-777")
+                .contains("@ai_bot feedback list repository page: CURSOR2");
+    }
+
     // ------------------------------------------------------------------ fixtures
+
+    private static FeedbackService.Summary summary(String reference, Long prNumber) {
+        return new FeedbackService.Summary(1L, reference, "O1234", "O1234-F2",
+                FeedbackTargetType.FINDING, FeedbackVerdict.INCORRECT, FeedbackState.EFFECTIVE,
+                "alice", "because", prNumber, "acme", "web", null,
+                java.time.Instant.parse("2026-11-14T10:00:00Z"), "PR_COMMENT", "777");
+    }
 
     private static WebhookPayload payload(String body) {
         WebhookPayload payload = new WebhookPayload();

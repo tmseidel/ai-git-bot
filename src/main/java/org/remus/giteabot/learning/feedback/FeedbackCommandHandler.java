@@ -8,23 +8,24 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettings;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettingsResolver;
+import org.remus.giteabot.repository.DeliveryFailures;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
- * Consumes {@code @bot feedback …} commands from Git comments.
+ * Consumes {@code @bot feedback …} commands from Git comments and submitted reviews.
  *
  * <p>Every recognized command is consumed here: it either records/reads feedback or answers with a
  * short explanation. Nothing is forwarded to an AI conversation, so a malformed or unsupported
  * command can never start code review, change code, generate tests, or continue a coding session.
  * Comments that carry no feedback command return {@code false} and keep their ordinary routing.</p>
  *
- * <p>The answer is posted best-effort after the database write has committed: a failed
- * acknowledgement must not discard feedback, and a duplicate delivery must not confirm twice.</p>
+ * <p>Confirmations are posted after the database write has committed and their delivery is tracked
+ * per event: a failed confirmation never discards feedback, a redelivered webhook does not confirm
+ * twice, and a confirmation whose delivery is uncertain is not posted again.</p>
  */
 @Slf4j
 @Service
@@ -33,14 +34,29 @@ public class FeedbackCommandHandler {
 
     public static final String COMMENT_KIND_PR_COMMENT = "PR_COMMENT";
     public static final String COMMENT_KIND_INLINE = "INLINE_COMMENT";
+    /** The body of a submitted pull request review (GitHub, Gitea). */
+    public static final String COMMENT_KIND_REVIEW = "REVIEW";
 
     private final FeedbackService feedbackService;
     private final FeedbackAuthorizationService authorizationService;
     private final AgentReviewLearningSettingsResolver learningSettingsResolver;
     private final RepositoryPlatformFactory repositoryPlatformFactory;
 
+    /** The text, identity and author of whatever carried the command. */
+    private record Source(String body, String id, String author) {
+    }
+
+    /** A reply to post; {@code acknowledgementEventId} is set when its delivery is tracked. */
+    private record Reply(String body, Long acknowledgementEventId) {
+
+        static Reply untracked(String body) {
+            return new Reply(body, null);
+        }
+    }
+
     /**
-     * @param commentKind   which kind of provider comment carried the command, part of the dedupe key
+     * @param commentKind    which kind of provider comment carried the command, part of the dedupe
+     *                       key; {@link #COMMENT_KIND_REVIEW} reads the submitted review's body
      * @param effectiveAlias the mention the provider left in the comment body, or {@code null} when it
      *                       did not rewrite it. Bitbucket replaces {@code @{account_id}} with a
      *                       readable name, so the configured username alone would never match
@@ -48,13 +64,13 @@ public class FeedbackCommandHandler {
      */
     public boolean tryHandle(Bot bot, WebhookPayload payload, String commentKind,
                              String effectiveAlias) {
-        if (bot == null || payload == null || payload.getComment() == null) {
+        Source source = sourceOf(payload, commentKind);
+        if (bot == null || source == null) {
             return false;
         }
-        String body = payload.getComment().getBody();
         String configured = aliasOf(bot);
         String alias = effectiveAlias == null || effectiveAlias.isBlank() ? configured : effectiveAlias;
-        Optional<FeedbackCommand> parsed = FeedbackCommandParser.parse(body, alias, configured);
+        Optional<FeedbackCommand> parsed = FeedbackCommandParser.parse(source.body(), alias, configured);
         if (parsed.isEmpty()) {
             return false;
         }
@@ -66,14 +82,12 @@ public class FeedbackCommandHandler {
         boolean collecting = collectionEnabled(bot);
         // A bot that collects no feedback only consumes text that is unmistakably addressed to it: a
         // target (O1234-F2) or a subcommand (retract/list/show). Prose like "@bot feedback please, is
-        // this approach OK?" keeps the routing it had before feedback commands existed — a coding
-        // session, a clarification, an ordinary command.
-        if (!collecting && !FeedbackCommandParser.addressesFeedback(body, alias, configured)) {
+        // this approach OK?" keeps the routing it had before feedback commands existed.
+        if (!collecting && !FeedbackCommandParser.addressesFeedback(source.body(), alias, configured)) {
             return false;
         }
 
-        String actor = actorOf(payload);
-        String mention = alias;
+        String actor = source.author();
         if (!authorizationService.canContribute(bot, actor)) {
             // A public "not permitted" answer is an invitation: with a whitelist configured, anyone
             // could make the bot comment on demand. The command is consumed, the refusal is logged.
@@ -86,55 +100,104 @@ public class FeedbackCommandHandler {
                     bot.getName(), actor);
             return true;
         }
+        Reply reply;
         try {
-            respond(bot, payload, execute(bot, payload, commentKind, parsed.get(), actor, mention));
+            reply = execute(bot, payload, commentKind, source, parsed.get(), alias);
         } catch (FeedbackRejectedException rejected) {
-            // Written for the commenter: the suggestion to show it is the whole point of the type.
-            respond(bot, payload, FeedbackReplyRenderer.rejected(rejected));
+            reply = Reply.untracked(FeedbackReplyRenderer.rejected(rejected));
         } catch (RuntimeException e) {
             // Details stay in the log. An exception message can carry SQL, entity names or a provider
             // error body, and this reply is published on the pull request (CWE-209).
             log.error("[Bot '{}'] Feedback command failed: {}", bot.getName(), e.getMessage(), e);
-            respond(bot, payload, "The feedback command could not be completed. "
+            reply = Reply.untracked("The feedback command could not be completed. "
                     + "The details were written to the bot log.");
         }
+        deliver(bot, payload, reply);
         return true;
     }
 
-    private String execute(Bot bot, WebhookPayload payload, String commentKind,
-                           FeedbackCommand command, String actor, String mention) {
-        if (command instanceof FeedbackCommand.Help help) {
-            return FeedbackReplyRenderer.help(help.message());
+    private Reply execute(Bot bot, WebhookPayload payload, String commentKind, Source source,
+                          FeedbackCommand command, String mention) {
+        if (command instanceof FeedbackCommand.Help(String message)) {
+            return Reply.untracked(FeedbackReplyRenderer.help(message));
         }
         FeedbackScope scope = scopeOf(bot, payload);
         return switch (command) {
-            // A redelivered webhook resolves to the existing record; answering again would post a
-            // second confirmation for one comment, so the acknowledgement is skipped entirely.
-            case FeedbackCommand.Submit submit -> confirmed(
-                    feedbackService.submit(scope, sourceOf(payload, commentKind, scope),
-                            submit.target(), submit.verdict(), submit.reason(), actor),
+            case FeedbackCommand.Submit submit -> confirmation(
+                    feedbackService.submit(scope, feedbackSourceOf(payload, commentKind, source, scope),
+                            submit.target(), submit.verdict(), submit.reason(), source.author()),
                     FeedbackReplyRenderer::acknowledged);
-            case FeedbackCommand.Retract retract -> confirmed(
-                    feedbackService.retract(scope, retract.reference(), actor),
+            case FeedbackCommand.Retract retract -> confirmation(
+                    feedbackService.retract(scope, retract.reference(), source.author()),
                     FeedbackReplyRenderer::retracted);
-            case FeedbackCommand.Show show -> feedbackService.show(scope, show.reference())
-                    .map(summary -> FeedbackReplyRenderer.show(summary, mention))
-                    .orElse("No feedback " + show.reference() + " is available here.");
-            case FeedbackCommand.ListRecords list -> renderList(scope, list, mention);
-            case FeedbackCommand.Help help -> FeedbackReplyRenderer.help(help.message());
+            case FeedbackCommand.Show show -> Reply.untracked(feedbackService
+                    .show(scope, show.reference())
+                    .map(detail -> FeedbackReplyRenderer.show(detail, bot.getName(), mention,
+                            linksOf(bot, scope)))
+                    .orElse("No feedback " + show.reference() + " is available here."));
+            case FeedbackCommand.ListRecords list -> Reply.untracked(FeedbackReplyRenderer.list(
+                    list.repositoryWide(),
+                    feedbackService.list(scope, list.repositoryWide(), FeedbackService.MAX_PAGE_SIZE,
+                            list.cursor()),
+                    bot.getName(), mention, linksOf(bot, scope)));
+            default -> throw new IllegalStateException("Unexpected value: " + command);
         };
     }
 
-    private static String confirmed(FeedbackService.Recorded recorded,
-                                    java.util.function.Function<FeedbackService.Recorded, String> ack) {
-        return recorded.duplicate() ? null : ack.apply(recorded);
+    /**
+     * A new record is confirmed. A redelivery is confirmed again only when the earlier confirmation
+     * was refused by the provider — and only by the one delivery that claims the retry. A pending or
+     * uncertain confirmation may already be on the pull request, so it is left alone.
+     */
+    private Reply confirmation(FeedbackService.Recorded recorded,
+                               Function<FeedbackService.Recorded, String> render) {
+        if (!recorded.duplicate()) {
+            return new Reply(render.apply(recorded), recorded.acknowledgementEventId());
+        }
+        if (recorded.acknowledgement() == FeedbackAcknowledgement.FAILED
+                && feedbackService.claimAcknowledgementRetry(recorded.acknowledgementEventId())) {
+            return new Reply(render.apply(recorded), recorded.acknowledgementEventId());
+        }
+        return null;
     }
 
-    private String renderList(FeedbackScope scope, FeedbackCommand.ListRecords list, String mention) {
-        List<FeedbackService.Summary> rows = feedbackService.list(scope, list.repositoryWide(),
-                FeedbackService.MAX_PAGE_SIZE, list.cursor());
-        Long lastId = rows.size() < FeedbackService.MAX_PAGE_SIZE ? null : rows.getLast().id();
-        return FeedbackReplyRenderer.list(list.repositoryWide(), rows, lastId, mention);
+    private void deliver(Bot bot, WebhookPayload payload, Reply reply) {
+        if (reply == null || reply.body() == null || reply.body().isBlank()) {
+            return;
+        }
+        FeedbackAcknowledgement outcome = post(bot, payload, reply.body());
+        if (reply.acknowledgementEventId() == null) {
+            return;
+        }
+        try {
+            feedbackService.markAcknowledgement(reply.acknowledgementEventId(), outcome);
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Could not record the confirmation outcome {}: {}", bot.getName(),
+                    outcome, e.getMessage());
+        }
+    }
+
+    private FeedbackAcknowledgement post(Bot bot, WebhookPayload payload, String body) {
+        String owner = payload.getRepository().getOwner().getLogin();
+        String repo = payload.getRepository().getName();
+        Long number = PrPayloadHydrator.resolvePrNumber(payload);
+        if (number == null) {
+            log.warn("[Bot '{}'] Cannot answer the feedback command: no pull request number",
+                    bot.getName());
+            return FeedbackAcknowledgement.FAILED;
+        }
+        try {
+            RepositoryApiClient client =
+                    repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
+            client.postPullRequestComment(owner, repo, number, body);
+            return FeedbackAcknowledgement.POSTED;
+        } catch (RuntimeException e) {
+            FeedbackAcknowledgement outcome = DeliveryFailures.isDefiniteRefusal(e)
+                    ? FeedbackAcknowledgement.FAILED : FeedbackAcknowledgement.UNCERTAIN;
+            log.warn("[Bot '{}'] Feedback was handled but the reply could not be posted ({}): {}",
+                    bot.getName(), outcome, e.getMessage());
+            return outcome;
+        }
     }
 
     private boolean collectionEnabled(Bot bot) {
@@ -142,14 +205,45 @@ public class FeedbackCommandHandler {
         return settings.feedbackEnabled();
     }
 
+    private FeedbackLinks linksOf(Bot bot, FeedbackScope scope) {
+        if (bot.getGitIntegration() == null) {
+            return FeedbackLinks.NONE;
+        }
+        try {
+            return FeedbackLinks.of(bot.getGitIntegration().getProviderType(),
+                    repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getCloneUrl(),
+                    scope.repoOwner(), scope.repoName());
+        } catch (RuntimeException e) {
+            log.debug("[Bot '{}'] No links for feedback overviews: {}", bot.getName(), e.getMessage());
+            return FeedbackLinks.NONE;
+        }
+    }
+
     private static String aliasOf(Bot bot) {
         return bot.getGitIntegration() == null || bot.getGitIntegration().getUsername() == null
                 ? null : "@" + bot.getGitIntegration().getUsername();
     }
 
-    private static String actorOf(WebhookPayload payload) {
-        return payload.getComment() != null && payload.getComment().getUser() != null
-                ? payload.getComment().getUser().getLogin() : null;
+    private static Source sourceOf(WebhookPayload payload, String commentKind) {
+        if (payload == null) {
+            return null;
+        }
+        if (COMMENT_KIND_REVIEW.equals(commentKind)) {
+            WebhookPayload.Review review = payload.getReview();
+            if (review == null) {
+                return null;
+            }
+            return new Source(review.getContent(),
+                    review.getId() == null ? null : review.getId().toString(),
+                    payload.getSender() == null ? null : payload.getSender().getLogin());
+        }
+        WebhookPayload.Comment comment = payload.getComment();
+        if (comment == null) {
+            return null;
+        }
+        return new Source(comment.getBody(),
+                comment.getId() == null ? null : comment.getId().toString(),
+                comment.getUser() == null ? null : comment.getUser().getLogin());
     }
 
     private FeedbackScope scopeOf(Bot bot, WebhookPayload payload) {
@@ -165,35 +259,12 @@ public class FeedbackCommandHandler {
      * The submitting comment's identity. Feedback targets are reviews on pull requests, so the
      * subject kind is always {@code PR} here; issue-thread targets are not supported.
      */
-    private FeedbackSource sourceOf(WebhookPayload payload, String commentKind,
-                                    FeedbackScope scope) {
+    private static FeedbackSource feedbackSourceOf(WebhookPayload payload, String commentKind,
+                                                   Source source, FeedbackScope scope) {
         Long repositoryId = payload.getRepository().getId();
         return new FeedbackSource(scope.gitIntegrationId(), scope.botId(), scope.repoOwner(),
                 scope.repoName(),
                 repositoryId == null ? null : String.valueOf(repositoryId),
-                FeedbackSource.SubjectKind.PR, scope.prNumber(), commentKind,
-                payload.getComment().getId() == null ? null
-                        : payload.getComment().getId().toString());
-    }
-
-    private void respond(Bot bot, WebhookPayload payload, String body) {
-        if (body == null || body.isBlank()) {
-            return;
-        }
-        String owner = payload.getRepository().getOwner().getLogin();
-        String repo = payload.getRepository().getName();
-        Long number = PrPayloadHydrator.resolvePrNumber(payload);
-        if (number == null) {
-            log.warn("[Bot '{}'] Cannot acknowledge feedback: no pull request number", bot.getName());
-            return;
-        }
-        try {
-            RepositoryApiClient client =
-                    repositoryPlatformFactory.getApiClient(bot.getGitIntegration());
-            client.postPullRequestComment(owner, repo, number, body);
-        } catch (RuntimeException e) {
-            log.warn("[Bot '{}'] Feedback was handled but the reply could not be posted: {}",
-                    bot.getName(), e.getMessage());
-        }
+                FeedbackSource.SubjectKind.PR, scope.prNumber(), commentKind, source.id());
     }
 }

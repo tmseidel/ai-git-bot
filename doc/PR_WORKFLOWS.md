@@ -192,6 +192,8 @@ documentation workflows are opt-in. Bots with no explicit configuration inherit
 - [PR Review](PR_WORKFLOWS_REVIEW.md) — the default one-shot review.
 - [Agentic PR Review](PR_WORKFLOWS_AGENTIC_REVIEW.md) — review after the bot
   explores the codebase.
+  - [Feedback on agentic reviews](WORKFLOW_FEEDBACK.md) — judge findings with
+    `@bot feedback O1234-F2 incorrect …`; recorded without an AI call.
 - [Unit Tests](PR_WORKFLOWS_UNIT_TEST.md) — generate and run unit tests.
 - [Full-Stack QA](PR_WORKFLOWS_E2E.md) — generate and run E2E browser tests.
 - [README Sync](PR_WORKFLOWS_README_SYNC.md) — keep documentation current.

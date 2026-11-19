@@ -1,5 +1,9 @@
 package org.remus.giteabot.learning.feedback;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.Locale;
 
 /**
@@ -39,9 +43,6 @@ public record FeedbackSource(Long gitIntegrationId, Long botId, String repoOwner
         }
     }
 
-    public static final int MAX_COMMENT_KIND_CHARS = 32;
-    public static final int MAX_COMMENT_ID_CHARS = 128;
-
     /** Whether every component deduplication depends on is present. */
     public boolean isIdentifiable() {
         return gitIntegrationId != null && botId != null
@@ -54,9 +55,20 @@ public record FeedbackSource(Long gitIntegrationId, Long botId, String repoOwner
 
     /**
      * Stable, case-normalized identity of the submitting comment. Two deliveries of the same
-     * comment produce the same key; two comments never do.
+     * comment produce the same key; two comments never do. Stored as the SHA-256 hex of
+     * {@link #canonicalKey()}, so long repository names fit the fixed-width column.
      */
     public String sourceKey() {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(
+                    digest.digest(canonicalKey().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required but unavailable", e);
+        }
+    }
+
+    String canonicalKey() {
         return String.join("|",
                 String.valueOf(gitIntegrationId),
                 String.valueOf(botId),

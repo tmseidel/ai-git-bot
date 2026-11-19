@@ -135,14 +135,9 @@ public final class FeedbackCommandParser {
             repositoryWide = true;
             index = 2;
         }
-        Long cursor = null;
+        String cursor = null;
         if (parts.length == index + 2 && "page:".equalsIgnoreCase(parts[index])) {
-            try {
-                cursor = Long.parseLong(parts[index + 1]);
-            } catch (NumberFormatException e) {
-                return new FeedbackCommand.Help("`" + parts[index + 1]
-                        + "` is not a page cursor.");
-            }
+            cursor = parts[index + 1];
         } else if (parts.length != index) {
             return new FeedbackCommand.Help("Use `feedback list`, `feedback list repository`, or "
                     + "`feedback list page: <cursor>`.");

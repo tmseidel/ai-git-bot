@@ -44,6 +44,7 @@ public class FeedbackService {
     public static final int MAX_PAGE_SIZE = 20;
 
     private final WorkflowFeedbackRepository feedbackRepository;
+    private final WorkflowFeedbackEventRepository eventRepository;
     private final WorkflowOutputRepository outputRepository;
     private final ReviewRecordRepository reviewRepository;
     private final ReferenceAllocator referenceAllocator;
@@ -51,16 +52,35 @@ public class FeedbackService {
 
     /**
      * One accepted assessment. {@code duplicate} means this comment was already recorded — the
-     * caller must not confirm it twice.
+     * caller must not confirm it twice. {@code acknowledgementEventId} names the event whose
+     * confirmation the caller tracks, with its {@code acknowledgement} state at the time of the call.
      */
     public record Recorded(String reference, String targetReference, FeedbackTargetType targetType,
-                           FeedbackVerdict verdict, String actor, boolean duplicate) {
+                           FeedbackVerdict verdict, String actor, boolean duplicate,
+                           Long acknowledgementEventId, FeedbackAcknowledgement acknowledgement) {
+
+        public Recorded(String reference, String targetReference, FeedbackTargetType targetType,
+                        FeedbackVerdict verdict, String actor, boolean duplicate) {
+            this(reference, targetReference, targetType, verdict, actor, duplicate, null, null);
+        }
+    }
+
+    /** One page of a listing; {@code nextCursor} is {@code null} on the last page. */
+    public record ListPage(List<Summary> rows, String nextCursor) {
+    }
+
+    public record HistoryEntry(FeedbackEventType type, String actor, String relatedReference,
+                               Instant at) {
+    }
+
+    public record Detail(Summary summary, List<HistoryEntry> history) {
     }
 
     public record Summary(Long id, String reference, String outputReference, String targetReference,
                           FeedbackTargetType targetType, FeedbackVerdict verdict, FeedbackState state,
                           String actor, String reason, Long prNumber, String repoOwner,
-                          String repoName, String supersededBy, Instant createdAt) {
+                          String repoName, String supersededBy, Instant createdAt,
+                          String commentKind, String commentId) {
     }
 
     /**
@@ -80,12 +100,13 @@ public class FeedbackService {
             TransactionTemplate reread = new TransactionTemplate(transactionManager);
             reread.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
             reread.setReadOnly(true);
-            Optional<WorkflowFeedback> winner = reread.execute(status ->
-                    feedbackRepository.findBySourceKey(source.sourceKey()));
+            Optional<Recorded> winner = reread.execute(status -> feedbackRepository
+                    .findBySourceKey(source.sourceKey())
+                    .map(record -> replayed(record, FeedbackEventType.SUBMITTED)));
             if (winner.isEmpty()) {
                 throw concurrentDuplicate;
             }
-            return recorded(winner.get(), true);
+            return winner.get();
         }
     }
 
@@ -109,7 +130,7 @@ public class FeedbackService {
         }
         Optional<WorkflowFeedback> replay = feedbackRepository.findBySourceKey(source.sourceKey());
         if (replay.isPresent()) {
-            return recorded(replay.get(), true);
+            return replayed(replay.get(), FeedbackEventType.SUBMITTED);
         }
 
         Resolved resolved = resolve(scope, target);
@@ -142,10 +163,12 @@ public class FeedbackService {
         record.setSourceKey(source.sourceKey());
 
         feedbackRepository.saveAndFlush(record);
+        WorkflowFeedbackEvent submitted = appendEvent(record.getId(), FeedbackEventType.SUBMITTED,
+                normalizedActor, null, FeedbackAcknowledgement.PENDING);
 
         log.info("Recorded feedback {} ({}) on {} by {}", reference, verdict.token(),
                 target.reference(), normalizedActor);
-        return recorded(record, false);
+        return recorded(record, false, submitted);
     }
 
     @Transactional
@@ -157,7 +180,7 @@ public class FeedbackService {
                     "Only the author of " + record.getReference() + " can retract it.");
         }
         if (record.getState() == FeedbackState.RETRACTED) {
-            return recorded(record, true);
+            return replayed(record, FeedbackEventType.RETRACTED);
         }
         if (record.getState() == FeedbackState.SUPERSEDED) {
             throw new FeedbackRejectedException("superseded",
@@ -165,29 +188,65 @@ public class FeedbackService {
                             + "; retract that one instead.");
         }
         record.setState(FeedbackState.RETRACTED);
-        return recorded(record, false);
+        WorkflowFeedbackEvent retracted = appendEvent(record.getId(), FeedbackEventType.RETRACTED,
+                normalizedActor, null, FeedbackAcknowledgement.PENDING);
+        return recorded(record, false, retracted);
     }
 
+    /** Records how the confirmation of a pending event went. */
+    @Transactional
+    public void markAcknowledgement(Long eventId, FeedbackAcknowledgement outcome) {
+        if (eventId == null || outcome == null || outcome == FeedbackAcknowledgement.PENDING) {
+            return;
+        }
+        eventRepository.transitionAcknowledgement(eventId, FeedbackAcknowledgement.PENDING, outcome,
+                Instant.now());
+    }
+
+    /**
+     * Claims a refused confirmation for one more attempt. Only one caller wins; an uncertain or
+     * pending confirmation is never claimed, since it may already be on the pull request.
+     */
+    @Transactional
+    public boolean claimAcknowledgementRetry(Long eventId) {
+        return eventId != null && eventRepository.transitionAcknowledgement(eventId,
+                FeedbackAcknowledgement.FAILED, FeedbackAcknowledgement.PENDING, Instant.now()) == 1;
+    }
+
+    /**
+     * One page, newest first. {@code cursor} is the opaque continuation of a previous page of the
+     * same listing; a cursor of another listing is refused.
+     */
     @Transactional(readOnly = true)
-    public List<Summary> list(FeedbackScope scope, boolean repositoryWide, Integer pageSize,
-                              Long beforeId) {
-        int limit = pageSize == null ? MAX_PAGE_SIZE : Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
-        long cursor = beforeId == null ? Long.MAX_VALUE : beforeId;
-        PageRequest page = PageRequest.of(0, limit);
+    public ListPage list(FeedbackScope scope, boolean repositoryWide, Integer pageSize,
+                         String cursor) {
+        int limit = pageSize == null ? MAX_PAGE_SIZE : Math.clamp(pageSize, 1, MAX_PAGE_SIZE);
+        long beforeId = cursor == null ? Long.MAX_VALUE
+                : FeedbackCursor.decode(cursor, scope, repositoryWide);
+        PageRequest page = PageRequest.of(0, limit + 1);
         List<WorkflowFeedback> rows = repositoryWide
                 ? feedbackRepository.pageForRepository(scope.gitIntegrationId(), scope.botId(),
-                        scope.repoOwner(), scope.repoName(), cursor, page)
+                        scope.repoOwner(), scope.repoName(), beforeId, page)
                 : feedbackRepository.pageForPullRequest(scope.gitIntegrationId(), scope.botId(),
-                        scope.repoOwner(), scope.repoName(), scope.prNumber(), cursor, page);
-        return rows.stream().map(FeedbackService::toSummary).toList();
+                        scope.repoOwner(), scope.repoName(), scope.prNumber(), beforeId, page);
+        boolean more = rows.size() > limit;
+        List<Summary> summaries = rows.stream().limit(limit).map(FeedbackService::toSummary).toList();
+        String next = more
+                ? FeedbackCursor.encode(scope, repositoryWide, summaries.getLast().id()) : null;
+        return new ListPage(summaries, next);
     }
 
-    /** One stored record, readable anywhere in the same bot/repository scope. */
+    /** One stored record with its history, readable anywhere in the same bot/repository scope. */
     @Transactional(readOnly = true)
-    public Optional<Summary> show(FeedbackScope scope, String reference) {
+    public Optional<Detail> show(FeedbackScope scope, String reference) {
         return feedbackRepository.findByReference(reference)
                 .filter(record -> sameRepository(scope, record))
-                .map(FeedbackService::toSummary);
+                .map(record -> new Detail(toSummary(record),
+                        eventRepository.findByFeedbackIdOrderByIdAsc(record.getId()).stream()
+                                .map(event -> new HistoryEntry(event.getEventType(),
+                                        event.getActor(), event.getRelatedReference(),
+                                        event.getCreatedAt()))
+                                .toList()));
     }
 
     // ------------------------------------------------------------------ internals
@@ -197,7 +256,7 @@ public class FeedbackService {
 
     private Resolved resolve(FeedbackScope scope, FeedbackTarget target) {
         WorkflowOutput output = outputRepository.findByReference(target.outputReference())
-                .filter(candidate -> scope.matches(candidate))
+                .filter(scope::matches)
                 .orElseThrow(() -> unknownTarget(target));
         if (!StructuredReviewService.WORKFLOW_KEY.equals(output.getWorkflowKey())) {
             throw unknownTarget(target);
@@ -246,6 +305,7 @@ public class FeedbackService {
                 findingId, actor)) {
             previous.setState(FeedbackState.SUPERSEDED);
             previous.setSupersededBy(supersededBy);
+            appendEvent(previous.getId(), FeedbackEventType.SUPERSEDED, actor, supersededBy, null);
         }
     }
 
@@ -276,9 +336,30 @@ public class FeedbackService {
                 ? trimmed : trimmed.substring(0, FeedbackCommandParser.MAX_REASON_CHARS);
     }
 
-    private static Recorded recorded(WorkflowFeedback record, boolean duplicate) {
+    private WorkflowFeedbackEvent appendEvent(Long feedbackId, FeedbackEventType type, String actor,
+                                              String relatedReference,
+                                              FeedbackAcknowledgement acknowledgement) {
+        WorkflowFeedbackEvent event = new WorkflowFeedbackEvent();
+        event.setFeedbackId(feedbackId);
+        event.setEventType(type);
+        event.setActor(actor);
+        event.setRelatedReference(relatedReference);
+        event.setAcknowledgement(acknowledgement);
+        return eventRepository.save(event);
+    }
+
+    private Recorded replayed(WorkflowFeedback record, FeedbackEventType confirmedEvent) {
+        return recorded(record, true, eventRepository
+                .findFirstByFeedbackIdAndEventTypeOrderByIdDesc(record.getId(), confirmedEvent)
+                .orElse(null));
+    }
+
+    private static Recorded recorded(WorkflowFeedback record, boolean duplicate,
+                                     WorkflowFeedbackEvent event) {
         return new Recorded(record.getReference(), record.getTargetReference(),
-                record.getTargetType(), record.getVerdict(), record.getActor(), duplicate);
+                record.getTargetType(), record.getVerdict(), record.getActor(), duplicate,
+                event == null ? null : event.getId(),
+                event == null ? null : event.getAcknowledgement());
     }
 
     private static Summary toSummary(WorkflowFeedback record) {
@@ -287,7 +368,7 @@ public class FeedbackService {
                 record.getTargetReference(), record.getTargetType(), record.getVerdict(),
                 record.getState(), record.getActor(), record.getReason(), record.getPrNumber(),
                 record.getRepoOwner(), record.getRepoName(), record.getSupersededBy(),
-                record.getCreatedAt());
+                record.getCreatedAt(), record.getCommentKind(), record.getCommentId());
     }
 
     /**
