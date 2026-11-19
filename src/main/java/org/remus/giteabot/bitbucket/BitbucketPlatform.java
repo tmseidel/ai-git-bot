@@ -28,6 +28,6 @@ public class BitbucketPlatform extends RepositoryPlatform {
      */
     @Override
     public Optional<String> getBotMentionName() {
-        return Optional.ofNullable(bitbucketClient.getAuthenticatedAccount().name());
+        return Optional.ofNullable(getUser(null).displayName());
     }
 }

@@ -22,7 +22,8 @@ public class AzureDevopsReviewComment implements ReviewComment {
 
     private Integer line;
 
-    private String userLogin;
+    /** The author's identity GUID. */
+    private String userId;
 
     /** Azure DevOps does not send surrounding diff context with a thread. */
     @Override

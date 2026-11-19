@@ -19,5 +19,9 @@ public interface ReviewComment {
 
     Integer getLine();
 
-    String getUserLogin();
+    /**
+     * The id of the comment's author, the same as {@link RepositoryUser#id()} for the same account
+     * (Bitbucket: {@code account_id}; Azure DevOps: the identity GUID); {@code null} when unknown.
+     */
+    String getUserId();
 }

@@ -16,8 +16,10 @@ import java.util.Map;
  * so the rules are the same for every provider.
  * <p>
  * Translators may still call the provider's API or keep state when the payload alone
- * cannot tell what happened (Bitbucket resolving the bot account, Azure DevOps
- * comparing an update against the previous one).
+ * cannot tell what happened: every translator resolves the bot's account through
+ * {@link BotAccountResolver}, Azure DevOps fetches the thread of an inline comment, and
+ * Bitbucket and Azure DevOps compare an update against the previous one
+ * ({@link PullRequestStateTracker}).
  */
 public interface WebhookTranslator {
 

@@ -18,18 +18,13 @@ public class AzureDevopsReview implements Review {
     /**
      * Always {@code null} for reviewers. Azure DevOps identity ids are GUIDs and the
      * shared {@link Review} contract types this as {@code Long}, so the identity is not
-     * representable here. The one place that needs the bot's own GUID — casting a vote —
-     * resolves it from {@code _apis/connectionData} rather than from this model.
+     * representable here.
      */
     private Long id;
 
     private String body;
 
     private Integer vote;
-
-    private String uniqueName;
-
-    private String displayName;
 
     /** Maps the Azure DevOps vote scale onto the shared review state. */
     @Override
@@ -44,12 +39,6 @@ public class AzureDevopsReview implements Review {
             case -10 -> "REJECTED";
             default -> "NO_VOTE";
         };
-    }
-
-    /** Only {@code uniqueName} identifies the reviewer; {@code displayName} is user-editable. */
-    @Override
-    public String getUserLogin() {
-        return uniqueName;
     }
 
     /** The reviewers array carries no timestamp. */

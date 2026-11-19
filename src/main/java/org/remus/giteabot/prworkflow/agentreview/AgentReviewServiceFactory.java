@@ -64,7 +64,6 @@ public class AgentReviewServiceFactory {
                 platform,
                 aiClient,
                 bot.getSystemPrompt().getReviewAgentSystemPrompt(),
-                bot.getGitIntegration().getUsername(),
                 bot.getMcpConfiguration(),
                 mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),

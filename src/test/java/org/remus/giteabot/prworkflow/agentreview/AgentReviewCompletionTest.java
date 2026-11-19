@@ -134,6 +134,7 @@ class AgentReviewCompletionTest {
     @BeforeEach
     void setUp() {
         platform = TestPlatforms.of(repositoryClient);
+        lenient().when(repositoryClient.getAuthenticatedUser(any())).thenReturn(TestPlatforms.USER);
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("owner");
         WebhookPayload.Repository repository = new WebhookPayload.Repository();
@@ -237,7 +238,7 @@ class AgentReviewCompletionTest {
         bot.setGitIntegration(git);
 
         service = new AgentReviewService(
-                new AgentReviewContext(platform, aiClient, "Review the change.", "bot",
+                new AgentReviewContext(platform, aiClient, "Review the change.",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, new PackageManagerDetector(),

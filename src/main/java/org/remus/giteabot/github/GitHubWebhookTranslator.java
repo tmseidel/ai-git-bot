@@ -1,7 +1,9 @@
 package org.remus.giteabot.github;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.event.BotAccountResolver;
 import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
@@ -24,9 +26,12 @@ import java.util.Map;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class GitHubWebhookTranslator implements WebhookTranslator {
 
     static final String EVENT_HEADER = "X-GitHub-Event";
+
+    private final BotAccountResolver botAccountResolver;
 
     @Override
     public RepositoryType providerType() {
@@ -60,7 +65,10 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
             return WebhookEvent.ignored("GitHub " + eventType + " event without a pull request or issue");
         }
 
-        BotIdentity identity = BotIdentity.of(bot);
+        BotIdentity identity = botAccountResolver.resolve(bot, null).orElse(null);
+        if (identity == null) {
+            return WebhookEvent.ignored(BotAccountResolver.UNRESOLVED);
+        }
         String action = (String) payload.get("action");
         return switch (eventType) {
             case "pull_request" -> classifyPullRequest(identity, action, webhookPayload, payload);
@@ -213,11 +221,7 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
 
     @SuppressWarnings("unchecked")
     private WebhookPayload.Owner extractSender(Map<String, Object> raw) {
-        Map<String, Object> sender = (Map<String, Object>) raw.get("sender");
-        if (sender == null) return null;
-        WebhookPayload.Owner owner = new WebhookPayload.Owner();
-        owner.setLogin((String) sender.get("login"));
-        return owner;
+        return extractOwner((Map<String, Object>) raw.get("sender"));
     }
 
     @SuppressWarnings("unchecked")
@@ -228,12 +232,7 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
         repository.setId(toLong(repo.get("id")));
         repository.setName((String) repo.get("name"));
         repository.setFullName((String) repo.get("full_name"));
-        Map<String, Object> ownerMap = (Map<String, Object>) repo.get("owner");
-        if (ownerMap != null) {
-            WebhookPayload.Owner owner = new WebhookPayload.Owner();
-            owner.setLogin((String) ownerMap.get("login"));
-            repository.setOwner(owner);
-        }
+        repository.setOwner(extractOwner((Map<String, Object>) repo.get("owner")));
         return repository;
     }
 
@@ -274,12 +273,7 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
         WebhookPayload.Comment c = new WebhookPayload.Comment();
         c.setId(CommentId.NumericCommentId.of(toLong(comment.get("id"))));
         c.setBody((String) comment.get("body"));
-        Map<String, Object> user = (Map<String, Object>) comment.get("user");
-        if (user != null) {
-            WebhookPayload.Owner u = new WebhookPayload.Owner();
-            u.setLogin((String) user.get("login"));
-            c.setUser(u);
-        }
+        c.setUser(extractOwner((Map<String, Object>) comment.get("user")));
         return c;
     }
 
@@ -310,28 +304,14 @@ public class GitHubWebhookTranslator implements WebhookTranslator {
             ipr.setMerged(prLink.get("merged_at") != null ? Boolean.TRUE : null);
             i.setPullRequest(ipr);
         }
-        Map<String, Object> assignee = (Map<String, Object>) issue.get("assignee");
-        if (assignee != null) {
-            WebhookPayload.Owner a = new WebhookPayload.Owner();
-            a.setLogin((String) assignee.get("login"));
-            i.setAssignee(a);
-        }
-        List<Map<String, Object>> assignees = (List<Map<String, Object>>) issue.get("assignees");
-        if (assignees != null) {
-            i.setAssignees(assignees.stream().map(am -> {
-                WebhookPayload.Owner ao = new WebhookPayload.Owner();
-                ao.setLogin((String) am.get("login"));
-                return ao;
-            }).toList());
-        }
+        i.setAssignee(extractOwner((Map<String, Object>) issue.get("assignee")));
+        i.setAssignees(extractOwners((List<Map<String, Object>>) issue.get("assignees")));
         return i;
     }
 
     private WebhookPayload.Owner extractOwner(Map<String, Object> owner) {
         if (owner == null) return null;
-        WebhookPayload.Owner o = new WebhookPayload.Owner();
-        o.setLogin((String) owner.get("login"));
-        return o;
+        return WebhookPayload.Owner.of(owner.get("id"), (String) owner.get("login"));
     }
 
     private List<WebhookPayload.Owner> extractOwners(List<Map<String, Object>> owners) {

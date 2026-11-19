@@ -79,7 +79,6 @@ class BotWorkflowConfigurationPersistenceTest {
             git.setName("git-" + suffix);
             git.setUrl("http://localhost");
             git.setToken("token");
-            git.setUsername("dual_cfg_bot");
             gitIntegrationRepository.save(git);
 
             Bot bot = new Bot();

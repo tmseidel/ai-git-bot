@@ -3,7 +3,9 @@ package org.remus.giteabot.gitea;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.event.TestBotAccounts;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 
@@ -15,6 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * Tests how {@link GiteaWebhookTranslator} turns Gitea webhooks into {@link WebhookEvent}s.
@@ -30,11 +34,10 @@ class GiteaWebhookTranslatorTest {
 
     @BeforeEach
     void setUp() {
-        translator = new GiteaWebhookTranslator();
+        translator = new GiteaWebhookTranslator(TestBotAccounts.resolver(BOT_USERNAME));
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername(BOT_USERNAME);
         bot.setGitIntegration(gitIntegration);
     }
 
@@ -51,6 +54,28 @@ class GiteaWebhookTranslatorTest {
         assertEquals(WebhookEventKind.PR_COMMENT, event.kind());
         assertTrue(event.botMentioned());
         assertFalse(event.fromBot());
+    }
+
+    @Test
+    void unresolvableBotAccount_ignoresEvent() {
+        translator = new GiteaWebhookTranslator(TestBotAccounts.unresolvable("401 Unauthorized"));
+
+        WebhookEvent event = translate("issue_comment", buildPrCommentPayload(BOT_ALIAS + " please fix this"));
+
+        assertEquals(WebhookEventKind.IGNORED, event.kind());
+    }
+
+    @Test
+    void unhandledEventType_isIgnoredWithoutResolvingTheBotAccount() {
+        BotService botService = mock(BotService.class);
+        translator = new GiteaWebhookTranslator(TestBotAccounts.unresolvable("401 Unauthorized", botService));
+        Map<String, Object> push = new HashMap<>();
+        push.put("ref", "refs/heads/main");
+        push.put("repository", repositoryMap());
+        push.put("sender", ownerMap("tom"));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("push", push).kind());
+        verifyNoInteractions(botService);
     }
 
     @Test
@@ -162,6 +187,16 @@ class GiteaWebhookTranslatorTest {
     void prReviewRequestedFromSomeoneElse_isIgnored() {
         Map<String, Object> payload = buildPrEventPayload("review_requested");
         payload.put("requested_reviewer", ownerMap("someone_else"));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("pull_request", payload).kind());
+    }
+
+    @Test
+    void prReviewRequestedForUserWithBotLoginButOtherId_isIgnored() {
+        Map<String, Object> payload = buildPrEventPayload("review_requested");
+        Map<String, Object> impostor = ownerMap(BOT_USERNAME);
+        impostor.put("id", 999);
+        payload.put("requested_reviewer", impostor);
 
         assertEquals(WebhookEventKind.IGNORED, translate("pull_request", payload).kind());
     }
@@ -403,6 +438,7 @@ class GiteaWebhookTranslatorTest {
 
     private Map<String, Object> ownerMap(String login) {
         Map<String, Object> m = new HashMap<>();
+        m.put("id", "id-" + login);
         m.put("login", login);
         m.put("username", login);
         return m;

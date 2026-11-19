@@ -28,6 +28,7 @@ import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.review.CodeReviewService;
 import org.remus.giteabot.util.BotMention;
 import org.remus.giteabot.util.BranchFilter;
@@ -276,7 +277,7 @@ public class BotWebhookService {
      * becomes an {@code AopInvocationException} in the caller.
      *
      * @param effectiveAlias the mention the provider left in the comment, when it rewrote one;
-     *                       {@code null} keeps the configured username
+     *                       {@code null} keeps the account's username
      * @return {@code true} when the comment was a learning command and has been handled
      */
     public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind,
@@ -491,7 +492,7 @@ public class BotWebhookService {
             try {
                 if (agenticEnabled) {
                     String question = extractReviewBody(payload);
-                    if (!BotMention.isMentioned(question, BotIdentity.of(bot).alias())) {
+                    if (!BotMention.isMentioned(question, botIdentity(bot, payload).alias())) {
                         log.debug("[Bot '{}'] Submitted review does not mention the bot — ignoring (agentic-review only responds when addressed)",
                                 bot.getName());
                         return;
@@ -603,13 +604,12 @@ public class BotWebhookService {
             // Issue creation is handled by reusing the issue-assigned workflow. The
             // individual workflow implementations check that the issue is assigned to
             // the bot, so treat this creation event as a virtual assignment to this bot.
-            WebhookPayload.Issue issue = payload.getIssue();
-            if (issue != null) {
-                WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-                assignee.setLogin(bot.getGitIntegration().getUsername());
-                issue.setAssignee(assignee);
-            }
             try {
+                WebhookPayload.Issue issue = payload.getIssue();
+                if (issue != null) {
+                    RepositoryUser account = botIdentity(bot, payload).account();
+                    issue.setAssignee(WebhookPayload.Owner.of(account.id(), account.username()));
+                }
                 issueWorkflowOrchestrator.runAssigned(bot, payload);
             } catch (Exception e) {
                 // Defense-in-depth: the orchestrator already records errors per workflow.
@@ -722,7 +722,7 @@ public class BotWebhookService {
         String repo = payload.getRepository().getName();
         try {
             RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
-            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, platform));
+            String body = buildUnrecognisedCommandReply(bot, resolveMentionName(bot, platform, owner));
             platform.getClient().postPullRequestComment(owner, repo, prNumber, body);
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Failed to post unrecognised-command reply on PR #{}: {}",
@@ -732,21 +732,28 @@ public class BotWebhookService {
 
     /**
      * Name to show after {@code @} in replies: the provider's mention name if it has one,
-     * otherwise the bot username. Falls back to "bot" when the provider lookup fails, since
-     * the bot username may not identify the bot on that provider (e.g. Bitbucket).
+     * otherwise the username of the account the integration authenticates as, asked in
+     * {@code owner}. Falls back to "bot" when the provider lookup fails.
      */
-    private String resolveMentionName(Bot bot, RepositoryPlatform platform) {
+    private String resolveMentionName(Bot bot, RepositoryPlatform platform, String owner) {
         try {
-            var providerName = platform.getBotMentionName();
-            if (providerName.isPresent()) {
-                return providerName.get();
-            }
+            return platform.getBotMentionName().orElseGet(() -> platform.getUser(owner).username());
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] Could not resolve the bot's mention name from the Git provider: {}",
                     bot.getName(), e.getMessage());
             return "bot";
         }
-        return bot.getGitIntegration().getUsername();
+    }
+
+    /**
+     * The bot as the account its Git integration authenticates as, asked in the owner of the
+     * payload's repository (which only Azure DevOps needs).
+     *
+     * @throws IllegalStateException when the provider cannot be asked and nothing is cached
+     */
+    private BotIdentity botIdentity(Bot bot, WebhookPayload payload) {
+        String owner = payload.ownerLogin();
+        return new BotIdentity(repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getUser(owner));
     }
 
     private String buildUnrecognisedCommandReply(Bot bot, String mention) {

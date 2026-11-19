@@ -21,6 +21,7 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
+import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
@@ -53,7 +54,6 @@ public class WriterAgentService {
     private final AgentSessionService sessionService;
     private final WorkspaceService workspaceService;
     private final String writerAgentSystemPrompt;
-    private final String botUsername;
     private final McpToolCatalog mcpToolCatalog;
     private final AgentErrorNotificationService errorNotificationService;
     private final BranchSwitcher branchSwitcher;
@@ -75,7 +75,6 @@ public class WriterAgentService {
                               ToolCatalog toolCatalog,
                               WorkspaceService workspaceService,
                               String writerAgentSystemPrompt,
-                              String botUsername,
                               McpOrchestrationService mcpOrchestrationService,
                               McpConfiguration mcpConfiguration,
                               McpToolCatalog mcpToolCatalog,
@@ -90,7 +89,6 @@ public class WriterAgentService {
         this.sessionService = sessionService;
         this.workspaceService = workspaceService;
         this.writerAgentSystemPrompt = writerAgentSystemPrompt;
-        this.botUsername = botUsername;
         this.mcpToolCatalog = mcpToolCatalog != null ? mcpToolCatalog : McpToolCatalog.empty();
         this.toolCatalog = toolCatalog;
         this.allowedBuiltinTools = allowedBuiltinTools;
@@ -110,9 +108,10 @@ public class WriterAgentService {
         String issueBody = payload.getIssue().getBody();
         String issueRef = normalizeBranchRef(payload.getIssue().getRef());
 
-        if (!isAssignedToThisBot(payload)) {
+        BotIdentity bot = new BotIdentity(repositoryPlatform.getUser(owner));
+        if (!bot.isIssueAssignee(payload)) {
             log.debug("Ignoring writer assignment for issue #{} because assignee does not match bot '{}'",
-                    issueNumber, botUsername);
+                    issueNumber, bot.account().username());
             return;
         }
 
@@ -281,22 +280,6 @@ public class WriterAgentService {
         }
         String issueAuthor = findIssueAuthor(owner, repo, issueNumber);
         return commenter.equalsIgnoreCase(issueAuthor);
-    }
-
-    private boolean isAssignedToThisBot(WebhookPayload payload) {
-        if (botUsername == null || botUsername.isBlank() || payload.getIssue() == null) {
-            return false;
-        }
-        if (payload.getIssue().getAssignee() != null
-                && botUsername.equalsIgnoreCase(payload.getIssue().getAssignee().getLogin())) {
-            return true;
-        }
-        if (payload.getIssue().getAssignees() != null) {
-            return payload.getIssue().getAssignees().stream()
-                    .anyMatch(assignee -> assignee != null
-                            && botUsername.equalsIgnoreCase(assignee.getLogin()));
-        }
-        return false;
     }
 
     private String findIssueAuthor(String owner, String repo, Long issueNumber) {

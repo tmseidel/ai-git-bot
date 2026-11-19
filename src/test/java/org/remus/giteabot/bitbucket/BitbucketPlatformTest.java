@@ -24,6 +24,9 @@ class BitbucketPlatformTest {
                         {"type":"user","uuid":"{bot-uuid}","account_id":"557058:bot","nickname":"ai-bot",
                          "display_name":"AI Bot"}
                         """, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://api.bitbucket.org/2.0/user/emails"))
+                .andRespond(withSuccess("{\"values\":[{\"email\":\"bot@example.com\",\"is_primary\":true}]}",
+                        MediaType.APPLICATION_JSON));
         BitbucketPlatform platform = new BitbucketPlatform("https://api.bitbucket.org/2.0", "https://bitbucket.org",
                 new HttpCredentials("x-bitbucket-api-token-auth", "bb_token"), null,
                 new BitbucketApiClient(builder.build(), "https://bitbucket.org"), TestPlatforms.USER_TTL);

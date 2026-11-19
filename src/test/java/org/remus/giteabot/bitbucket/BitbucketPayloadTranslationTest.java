@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class BitbucketPayloadTranslationTest {
 
-    private final BitbucketWebhookTranslator handler = new BitbucketWebhookTranslator(null, null, null);
+    private final BitbucketWebhookTranslator handler = new BitbucketWebhookTranslator(null, null);
 
     @Test
     void translatePullRequestCreated_mapsAllFields() {

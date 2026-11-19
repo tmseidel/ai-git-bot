@@ -187,7 +187,7 @@ class BotWebhookServiceTest {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
                             repositoryApiClient, aiClient, sessionService,
-                            b.getGitIntegration().getUsername(), new ReviewConfigProperties(),
+                            repositoryPlatform::getUser, new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
                             120000, 8, 60000, "");
@@ -1380,6 +1380,27 @@ class BotWebhookServiceTest {
         }
 
         @Test
+        void unrecognisedCommandReply_withoutProviderMentionName_usesTheAccountsUsername() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            org.mockito.Mockito.doReturn(Optional.empty()).when(repositoryPlatform).getBotMentionName();
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+            // The token's account, not the integration's configured username, names the bot.
+            when(repositoryApiClient.getAuthenticatedUser(any()))
+                    .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser("id-1", "token_account", null, null));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postPullRequestComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@token_account rerun-tests`").doesNotContain("@claude_bot");
+        }
+
+        @Test
         void noAgentSession_botWithReviewWorkflow_stillRoutesToCodeReview() {
             // Sanity: an explicit configuration that DOES include review keeps the
             // existing code-review behaviour.
@@ -1749,6 +1770,22 @@ class BotWebhookServiceTest {
     }
 
     @Test
+    void issueCreated_botAccountUnresolvable_recordsErrorAndRunsNoWorkflow() {
+        Bot bot = createBot("writer", "writer_bot");
+        makeWriterBot(bot);
+        bot.setRunOnIssueCreation(true);
+        when(repositoryApiClient.getAuthenticatedUser(any())).thenThrow(new IllegalStateException("provider down"));
+        WebhookPayload payload = buildIssueCreationPayload("Test", "my-repo", 12L, "Vague issue", "Do something");
+
+        botWebhookService.handleIssueCreated(bot, payload);
+
+        // Without the bot's account there is no assignee to hand the workflows.
+        verify(botService).recordError(eq(bot), org.mockito.ArgumentMatchers.contains("provider down"));
+        verify(agentSessionService, never()).getSessionByIssue(any(), any(), any());
+        verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
+    }
+
+    @Test
     void issueCreation_publishesStartedAndCompletedEventsOnSuccess() {
         Bot bot = createBot("writer", "writer_bot");
         makeWriterBot(bot);
@@ -1917,10 +1954,12 @@ class BotWebhookServiceTest {
     }
 
     private Bot createBot(String name, String username) {
+        // The platform reports the bot's account under the same username.
+        lenient().when(repositoryApiClient.getAuthenticatedUser(any()))
+                .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser("id-" + username, username, null, null));
         Bot bot = new Bot();
         bot.setName(name);
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername(username);
         bot.setGitIntegration(gitIntegration);
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);
@@ -2094,9 +2133,8 @@ class BotWebhookServiceTest {
         issue.setNumber(issueNumber);
         issue.setTitle(title);
         issue.setBody(body);
-        WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-        assignee.setLogin("writer_bot");
-        issue.setAssignee(assignee);
+        // The id of the account createBot("…", "writer_bot") makes the platform report.
+        issue.setAssignee(WebhookPayload.Owner.of("id-writer_bot", "writer_bot"));
         payload.setIssue(issue);
 
         return payload;

@@ -1,33 +1,35 @@
 package org.remus.giteabot.event;
 
-import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.util.BotMention;
 
 /**
- * The bot as webhook payloads see it, for providers that identify users by login: Gitea,
- * GitHub, GitLab and Azure DevOps ({@code uniqueName}). Bitbucket Cloud identifies users by
- * account id instead and uses {@code BitbucketAccount}.
+ * The bot as webhook payloads see it: the account its Git integration authenticates as, see
+ * {@link BotAccountResolver}.
  * <p>
- * Logins are compared case-insensitively; the alias the bot is mentioned by is
- * {@code @<login>}.
+ * Users are matched by their {@linkplain WebhookPayload.Owner#getId() id}, which every provider
+ * puts in its payloads and its users cannot change (Bitbucket: {@code account_id}; Azure DevOps:
+ * the identity GUID). The username only gives the alias the bot is mentioned by,
+ * {@code @<username>}; Bitbucket mentions use the account id instead.
  *
- * @param login the Git integration's username
+ * @param account the account the Git integration authenticates as
  */
-public record BotIdentity(String login) {
-
-    public static BotIdentity of(Bot bot) {
-        return new BotIdentity(bot.getGitIntegration().getUsername());
-    }
+public record BotIdentity(RepositoryUser account) {
 
     /** The alias the bot is addressed by in comments, e.g. {@code @ai_bot}. */
     public String alias() {
-        return "@" + login;
+        return "@" + account.username();
     }
 
-    /** Whether {@code user} is the bot. */
+    /** Whether {@code user} is the bot, going by its id. */
     public boolean is(WebhookPayload.Owner user) {
-        return user != null && login.equalsIgnoreCase(user.getLogin());
+        return user != null && hasId(user.getId());
+    }
+
+    /** Whether {@code userId} is the bot's id. */
+    public boolean hasId(String userId) {
+        return account.id().equals(userId);
     }
 
     /**

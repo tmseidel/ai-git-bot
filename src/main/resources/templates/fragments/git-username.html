@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<td th:fragment="gitUsernameCell(gitUsername)">
+    <span th:if="${gitUsername != null}" th:text="${gitUsername}"></span>
+    <span th:unless="${gitUsername != null}" class="text-muted" th:title="#{help.git.usernameUnresolved}">&mdash;</span>
+</td>
+</body>
+</html>

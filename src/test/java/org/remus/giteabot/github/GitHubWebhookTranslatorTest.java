@@ -4,6 +4,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.event.TestBotAccounts;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -28,11 +29,10 @@ class GitHubWebhookTranslatorTest {
 
     @BeforeEach
     void setUp() {
-        translator = new GitHubWebhookTranslator();
+        translator = new GitHubWebhookTranslator(TestBotAccounts.resolver("ai_bot"));
         bot = new Bot();
         bot.setName("test-bot");
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername("ai_bot");
         bot.setGitIntegration(gitIntegration);
     }
 
@@ -50,6 +50,14 @@ class GitHubWebhookTranslatorTest {
 
         assertEquals(WebhookEventKind.ISSUE_ASSIGNED, event.kind());
         assertEquals("release/1.2", event.payload().getIssue().getRef());
+    }
+
+    @Test
+    void unresolvableBotAccount_ignoresEvent() {
+        translator = new GitHubWebhookTranslator(TestBotAccounts.unresolvable("401 Bad credentials"));
+        Map<String, Object> payload = issuePayload("assigned", issueMapWithAssigneeAndRef(42L, "ai_bot", null));
+
+        assertEquals(WebhookEventKind.IGNORED, translate("issues", payload).kind());
     }
 
     @Test
@@ -300,6 +308,7 @@ class GitHubWebhookTranslatorTest {
 
     private Map<String, Object> ownerMap(String login) {
         Map<String, Object> m = new HashMap<>();
+        m.put("id", "id-" + login);
         m.put("login", login);
         return m;
     }

@@ -21,7 +21,6 @@ public record IssueImplementationContext(
         RepositoryPlatform repositoryPlatform,
         AiClient aiClient,
         String issueAgentSystemPrompt,
-        String botUsername,
         McpOrchestrationService mcpOrchestrationService,
         McpConfiguration mcpConfiguration,
         McpToolCatalog mcpToolCatalog,
