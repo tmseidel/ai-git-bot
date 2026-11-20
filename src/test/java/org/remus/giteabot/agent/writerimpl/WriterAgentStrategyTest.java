@@ -193,6 +193,35 @@ class WriterAgentStrategyTest {
     }
 
     @Test
+    void finalAnswerOnAWriterCreatedIssue_doesNotStackTheTitlePrefix() {
+        ctx.session().setIssueTitle("AI Created Issue: AI Created Issue: build system");
+        when(repositoryClient.createIssue(eq("o"), eq("r"), anyString(), anyString())).thenReturn(42L);
+
+        strategy.step(ctx, ChatTurn.text(finalAnswer()), 1);
+
+        verify(repositoryClient).createIssue(eq("o"), eq("r"), eq("AI Created Issue: build system"),
+                contains("Revised body"));
+    }
+
+    @Test
+    void createdIssueTitle_addsThePrefixExactlyOnce() {
+        assertThat(WriterAgentStrategy.createdIssueTitle("X")).isEqualTo("AI Created Issue: X");
+        assertThat(WriterAgentStrategy.createdIssueTitle("AI Created Issue: X")).isEqualTo("AI Created Issue: X");
+        assertThat(WriterAgentStrategy.createdIssueTitle("AI Created Issue: AI Created Issue: X"))
+                .isEqualTo("AI Created Issue: X");
+    }
+
+    @Test
+    void createdIssueTitle_stripsPrefixesCaseInsensitivelyAndToleratesWhitespace() {
+        assertThat(WriterAgentStrategy.createdIssueTitle("  ai created issue:X")).isEqualTo("AI Created Issue: X");
+        assertThat(WriterAgentStrategy.createdIssueTitle("AI  Created Issue :  AI CREATED ISSUE:   X"))
+                .isEqualTo("AI Created Issue: X");
+        // Only leading prefixes are removed; the phrase inside the title is kept.
+        assertThat(WriterAgentStrategy.createdIssueTitle("Explain AI Created Issue: prefix"))
+                .isEqualTo("AI Created Issue: Explain AI Created Issue: prefix");
+    }
+
+    @Test
     void narrationWithoutJson_isNudgedForTheContractOnce() {
         StepDecision decision = strategy.step(ctx, ChatTurn.text("Let me look around first."), 1);
 
