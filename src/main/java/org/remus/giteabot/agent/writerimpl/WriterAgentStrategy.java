@@ -24,6 +24,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * {@link AgentStrategy} for the technical-writer agent.
@@ -54,8 +55,8 @@ public final class WriterAgentStrategy implements AgentStrategy {
      * surrounding whitespace). Assigning the writer to an issue it created itself must not stack the
      * prefix into {@code AI Created Issue: AI Created Issue: ...}.
      */
-    private static final java.util.regex.Pattern LEADING_TITLE_PREFIXES = java.util.regex.Pattern.compile(
-            "^(?:\\s*AI\\s+Created\\s+Issue\\s*:\\s*)+", java.util.regex.Pattern.CASE_INSENSITIVE);
+    private static final Pattern LEADING_TITLE_PREFIXES = Pattern.compile(
+            "^(?:\\s*AI\\s+Created\\s+Issue\\s*:\\s*)+", Pattern.CASE_INSENSITIVE);
 
     private final String systemPrompt;
     private final WriterPromptBuilder promptBuilder;
