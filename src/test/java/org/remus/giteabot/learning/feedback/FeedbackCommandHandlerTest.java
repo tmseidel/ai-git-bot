@@ -10,13 +10,18 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.github.GitHubApiClient;
+import org.remus.giteabot.github.GitHubPlatform;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettings;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettingsResolver;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.CommentId;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -28,6 +33,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -72,7 +78,7 @@ class FeedbackCommandHandlerTest {
     @Test
     void aCommentWithoutAFeedbackCommandKeepsItsOrdinaryRouting() {
         assertThat(handler.tryHandle(bot, payload("@ai_bot please look at this again"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isFalse();
+                PullRequestCommentKind.PR_COMMENT, null)).isFalse();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
@@ -87,7 +93,7 @@ class FeedbackCommandHandlerTest {
 
         assertThat(handler.tryHandle(bot,
                 payload("@ai_bot feedback O1234-F2 incorrect Authorization is in the filter"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         ArgumentCaptor<FeedbackSource> source = ArgumentCaptor.forClass(FeedbackSource.class);
         verify(feedbackService).submit(eq(new FeedbackScope(1L, 2L, "acme", "web", 9L)),
@@ -113,7 +119,7 @@ class FeedbackCommandHandlerTest {
                 .thenReturn(AgentReviewLearningSettings.DISABLED);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         // Consumed, so a target is never forwarded to an AI conversation — but no comment: an
         // explanation per attempt is free amplification for anyone who reads the help text.
@@ -130,7 +136,7 @@ class FeedbackCommandHandlerTest {
         // Not a target and not a subcommand: a bot without feedback must not swallow it.
         assertThat(handler.tryHandle(bot,
                 payload("@ai_bot feedback please, is this approach OK?"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isFalse();
+                PullRequestCommentKind.PR_COMMENT, null)).isFalse();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
@@ -143,7 +149,7 @@ class FeedbackCommandHandlerTest {
                 .thenReturn(AgentReviewLearningSettings.DISABLED);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback list"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
                 anyString());
@@ -154,7 +160,7 @@ class FeedbackCommandHandlerTest {
         when(authorizationService.canContribute(bot, "alice")).thenReturn(false);
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         // "not permitted" in public tells an excluded commenter exactly how to make the bot talk.
         verifyNoInteractions(feedbackService);
@@ -165,7 +171,7 @@ class FeedbackCommandHandlerTest {
     @Test
     void aMalformedCommandIsConsumedWithHelp() {
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 nonsense"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         verifyNoInteractions(feedbackService);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
@@ -179,7 +185,7 @@ class FeedbackCommandHandlerTest {
                         "No review O9999 is available here."));
 
         handler.tryHandle(bot, payload("@ai_bot feedback O9999 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L),
                 org.mockito.ArgumentMatchers.contains("No review O9999 is available here."));
@@ -192,7 +198,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", true));
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         // One comment, one confirmation: a redelivered webhook resolves to the stored record and
         // posts nothing, so a retry cannot litter the pull request.
@@ -207,7 +213,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", true));
 
         handler.tryHandle(bot, payload("@ai_bot feedback retract FB7"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
                 anyString());
@@ -222,7 +228,7 @@ class FeedbackCommandHandlerTest {
                 .postPullRequestComment(anyString(), anyString(), anyLong(), anyString());
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
     }
 
     @Test
@@ -237,7 +243,7 @@ class FeedbackCommandHandlerTest {
         when(platform.getUser(any())).thenReturn(new RepositoryUser("{bb-uuid}", "bitbucket-agent", null, null));
 
         assertThat(handler.tryHandle(bot, payload("@AI_Bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, "@AI_Bot")).isTrue();
+                PullRequestCommentKind.PR_COMMENT, "@AI_Bot")).isTrue();
 
         verify(feedbackService).submit(any(), any(), eq(FeedbackTarget.output("O1234")),
                 eq(FeedbackVerdict.USEFUL), any(), eq("alice"));
@@ -250,7 +256,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", false));
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, "@AI_Bot")).isTrue();
+                PullRequestCommentKind.PR_COMMENT, "@AI_Bot")).isTrue();
     }
 
     @Test
@@ -260,7 +266,7 @@ class FeedbackCommandHandlerTest {
                         + "workflow_feedback (reference, verdict) values ($1, $2)"));
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());
@@ -278,7 +284,7 @@ class FeedbackCommandHandlerTest {
                         "`O1234` is not a finalized review, so there is nothing to judge."));
 
         assertThat(handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null)).isTrue();
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());
@@ -293,9 +299,9 @@ class FeedbackCommandHandlerTest {
                 new FeedbackService.Detail(summary("FB31", 9L), List.of())));
 
         handler.tryHandle(bot, payload("@ai_bot feedback list"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
         handler.tryHandle(bot, payload("@ai_bot feedback show FB31"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(feedbackService, never()).submit(any(), any(), any(), any(), any(), any());
         ArgumentCaptor<String> replies = ArgumentCaptor.forClass(String.class);
@@ -321,7 +327,7 @@ class FeedbackCommandHandlerTest {
         reviewer.setLogin("bob");
         payload.setSender(reviewer);
 
-        assertThat(handler.tryHandle(bot, payload, FeedbackCommandHandler.COMMENT_KIND_REVIEW, null))
+        assertThat(handler.tryHandle(bot, payload, PullRequestCommentKind.REVIEW, null))
                 .isTrue();
 
         ArgumentCaptor<FeedbackSource> source = ArgumentCaptor.forClass(FeedbackSource.class);
@@ -341,7 +347,7 @@ class FeedbackCommandHandlerTest {
         review.setContent("@ai_bot why is this a blocker?");
         payload.setReview(review);
 
-        assertThat(handler.tryHandle(bot, payload, FeedbackCommandHandler.COMMENT_KIND_REVIEW, null))
+        assertThat(handler.tryHandle(bot, payload, PullRequestCommentKind.REVIEW, null))
                 .isFalse();
         verifyNoInteractions(feedbackService);
     }
@@ -353,7 +359,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", false, 50L, FeedbackAcknowledgement.PENDING));
 
         handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.POSTED);
     }
@@ -372,9 +378,9 @@ class FeedbackCommandHandlerTest {
                 .postPullRequestComment(anyString(), anyString(), anyLong(), anyString());
 
         handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
         handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.UNCERTAIN);
         verify(feedbackService).markAcknowledgement(50L, FeedbackAcknowledgement.FAILED);
@@ -388,9 +394,9 @@ class FeedbackCommandHandlerTest {
         when(feedbackService.claimAcknowledgementRetry(50L)).thenReturn(true, false);
 
         handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
         handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(repositoryClient, org.mockito.Mockito.times(1)).postPullRequestComment(eq("acme"),
                 eq("web"), eq(9L), org.mockito.ArgumentMatchers.contains("Recorded **FB7**"));
@@ -404,7 +410,7 @@ class FeedbackCommandHandlerTest {
                         FeedbackVerdict.USEFUL, "alice", true, 50L, FeedbackAcknowledgement.UNCERTAIN));
 
         handler.tryHandle(bot, payload("@ai_bot feedback O1234 useful"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         verify(feedbackService, never()).claimAcknowledgementRetry(any());
         verify(repositoryClient, never()).postPullRequestComment(anyString(), anyString(), anyLong(),
@@ -413,13 +419,17 @@ class FeedbackCommandHandlerTest {
 
     @Test
     void overviewsNameTheBotLinkTheSourceAndCarryTheCursor() {
-        when(platform.getCloneUrl()).thenReturn("https://github.com");
-        bot.getGitIntegration().setProviderType(org.remus.giteabot.repository.RepositoryType.GITHUB);
+        GitHubApiClient githubClient = mock(GitHubApiClient.class);
+        when(githubClient.getAuthenticatedUser(any()))
+                .thenReturn(new RepositoryUser("7", "ai_bot", null, null));
+        when(repositoryPlatformFactory.getPlatform(any())).thenReturn(new GitHubPlatform(
+                "https://api.github.com", "https://github.com", new HttpCredentials(null, "token"),
+                null, githubClient, Duration.ofMinutes(1)));
         when(feedbackService.list(any(), eq(true), any(), eq("CURSOR1")))
                 .thenReturn(new FeedbackService.ListPage(List.of(summary("FB31", 12L)), "CURSOR2"));
 
         handler.tryHandle(bot, payload("@ai_bot feedback list repository page: CURSOR1"),
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null);
+                PullRequestCommentKind.PR_COMMENT, null);
 
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
         verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());

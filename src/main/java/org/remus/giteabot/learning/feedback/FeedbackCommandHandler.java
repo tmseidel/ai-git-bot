@@ -10,6 +10,7 @@ import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettings;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettingsResolver;
 import org.remus.giteabot.repository.DeliveryFailures;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.springframework.stereotype.Service;
 
@@ -33,11 +34,6 @@ import java.util.function.Function;
 @RequiredArgsConstructor
 public class FeedbackCommandHandler {
 
-    public static final String COMMENT_KIND_PR_COMMENT = "PR_COMMENT";
-    public static final String COMMENT_KIND_INLINE = "INLINE_COMMENT";
-    /** The body of a submitted pull request review (GitHub, Gitea). */
-    public static final String COMMENT_KIND_REVIEW = "REVIEW";
-
     private final FeedbackService feedbackService;
     private final FeedbackAuthorizationService authorizationService;
     private final AgentReviewLearningSettingsResolver learningSettingsResolver;
@@ -57,13 +53,13 @@ public class FeedbackCommandHandler {
 
     /**
      * @param commentKind    which kind of provider comment carried the command, part of the dedupe
-     *                       key; {@link #COMMENT_KIND_REVIEW} reads the submitted review's body
+     *                       key; {@link PullRequestCommentKind#REVIEW} reads the submitted review's body
      * @param effectiveAlias the mention the provider left in the comment body, or {@code null} when it
      *                       did not rewrite it. Bitbucket replaces {@code @{account_id}} with a
      *                       readable name, so the account's own alias alone would never match
      * @return {@code true} when the comment was a feedback command and has been consumed
      */
-    public boolean tryHandle(Bot bot, WebhookPayload payload, String commentKind,
+    public boolean tryHandle(Bot bot, WebhookPayload payload, PullRequestCommentKind commentKind,
                              String effectiveAlias) {
         Source source = sourceOf(payload, commentKind);
         if (bot == null || source == null) {
@@ -117,7 +113,8 @@ public class FeedbackCommandHandler {
         return true;
     }
 
-    private Reply execute(Bot bot, WebhookPayload payload, String commentKind, Source source,
+    private Reply execute(Bot bot, WebhookPayload payload, PullRequestCommentKind commentKind,
+                          Source source,
                           FeedbackCommand command, String mention) {
         if (command instanceof FeedbackCommand.Help(String message)) {
             return Reply.untracked(FeedbackReplyRenderer.help(message));
@@ -211,8 +208,7 @@ public class FeedbackCommandHandler {
             return FeedbackLinks.NONE;
         }
         try {
-            return FeedbackLinks.of(bot.getGitIntegration().getProviderType(),
-                    repositoryPlatformFactory.getPlatform(bot.getGitIntegration()).getCloneUrl(),
+            return FeedbackLinks.of(repositoryPlatformFactory.getPlatform(bot.getGitIntegration()),
                     scope.repoOwner(), scope.repoName());
         } catch (RuntimeException e) {
             log.debug("[Bot '{}'] No links for feedback overviews: {}", bot.getName(), e.getMessage());
@@ -239,11 +235,11 @@ public class FeedbackCommandHandler {
         }
     }
 
-    private static Source sourceOf(WebhookPayload payload, String commentKind) {
-        if (payload == null) {
+    private static Source sourceOf(WebhookPayload payload, PullRequestCommentKind commentKind) {
+        if (payload == null || commentKind == null) {
             return null;
         }
-        if (COMMENT_KIND_REVIEW.equals(commentKind)) {
+        if (commentKind == PullRequestCommentKind.REVIEW) {
             WebhookPayload.Review review = payload.getReview();
             if (review == null) {
                 return null;
@@ -274,12 +270,13 @@ public class FeedbackCommandHandler {
      * The submitting comment's identity. Feedback targets are reviews on pull requests, so the
      * subject kind is always {@code PR} here; issue-thread targets are not supported.
      */
-    private static FeedbackSource feedbackSourceOf(WebhookPayload payload, String commentKind,
+    private static FeedbackSource feedbackSourceOf(WebhookPayload payload,
+                                                   PullRequestCommentKind commentKind,
                                                    Source source, FeedbackScope scope) {
         Long repositoryId = payload.getRepository().getId();
         return new FeedbackSource(scope.gitIntegrationId(), scope.botId(), scope.repoOwner(),
                 scope.repoName(),
                 repositoryId == null ? null : String.valueOf(repositoryId),
-                FeedbackSource.SubjectKind.PR, scope.prNumber(), commentKind, source.id());
+                FeedbackSource.SubjectKind.PR, scope.prNumber(), commentKind.name(), source.id());
     }
 }
