@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.RepositoryUser;
+import org.springframework.http.MediaType;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -24,15 +26,18 @@ public class GitIntegrationController {
     private final GitIntegrationService gitIntegrationService;
     private final GiteaSshSetupService giteaSshSetupService;
     private final RepositoryPlatformFactory repositoryPlatformFactory;
+    private final GitConnectionTestService gitConnectionTestService;
     private final MessageSource messageSource;
 
     public GitIntegrationController(GitIntegrationService gitIntegrationService,
                                     GiteaSshSetupService giteaSshSetupService,
                                     RepositoryPlatformFactory repositoryPlatformFactory,
+                                    GitConnectionTestService gitConnectionTestService,
                                     MessageSource messageSource) {
         this.gitIntegrationService = gitIntegrationService;
         this.giteaSshSetupService = giteaSshSetupService;
         this.repositoryPlatformFactory = repositoryPlatformFactory;
+        this.gitConnectionTestService = gitConnectionTestService;
         this.messageSource = messageSource;
     }
 
@@ -108,6 +113,41 @@ public class GitIntegrationController {
                     "flash.saveFailed", new Object[]{"SSH setup failed; verify the saved configuration and host fingerprints before retrying"}, LocaleContextHolder.getLocale()));
         }
         return "redirect:/git-integrations/" + id + "/edit";
+    }
+
+    /**
+     * Tests the connection with the values currently in the form, without saving them, and
+     * reports the account the token authenticates as.
+     */
+    @PostMapping(value = "/test", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public ConnectionTestResponse testConnection(@ModelAttribute GitIntegration integration,
+                                                 @RequestParam(required = false) String token,
+                                                 @RequestParam(required = false, defaultValue = "false") boolean clearToken,
+                                                 @RequestParam(required = false) String testOrganization) {
+        GitConnectionTestResult result = gitConnectionTestService.test(integration, token, clearToken, testOrganization);
+        String message = messageSource.getMessage(result.messageKey(), result.messageArgs().toArray(),
+                LocaleContextHolder.getLocale());
+        return ConnectionTestResponse.of(result, message);
+    }
+
+    /**
+     * JSON answer of {@link #testConnection}. {@code organizationRequired} asks the form for an Azure DevOps
+     * organization the URL does not name; {@code email} is {@code null} when the token may not read it.
+     */
+    public record ConnectionTestResponse(boolean success, boolean organizationRequired, String message,
+                                         String detail, String username, String displayName, String email) {
+
+        static ConnectionTestResponse of(GitConnectionTestResult result, String message) {
+            RepositoryUser user = result.user();
+            if (user == null) {
+                return new ConnectionTestResponse(false, result.organizationRequired(), message, result.detail(),
+                        null, null, null);
+            }
+            String email = RepositoryUser.FALLBACK_EMAIL.equals(user.email()) ? null : user.email();
+            return new ConnectionTestResponse(true, false, message, result.detail(),
+                    user.username(), user.displayName(), email);
+        }
     }
 
     @PostMapping("/save")

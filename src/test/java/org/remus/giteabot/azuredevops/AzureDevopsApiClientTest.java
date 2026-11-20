@@ -1,5 +1,6 @@
 package org.remus.giteabot.azuredevops;
 
+import org.remus.giteabot.repository.OwnerRequiredException;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryUser;
 
@@ -736,7 +737,7 @@ class AzureDevopsApiClientTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
 
-        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(null));
+        assertThrows(OwnerRequiredException.class, () -> client.getAuthenticatedUser(null));
         server.verify();
     }
 
@@ -791,7 +792,7 @@ class AzureDevopsApiClientTest {
     void getAuthenticatedUser_failsWithoutAnOrganization() {
         AzureDevopsApiClient client = new AzureDevopsApiClient(null, URL, null);
 
-        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(null));
-        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(" "));
+        assertThrows(OwnerRequiredException.class, () -> client.getAuthenticatedUser(null));
+        assertThrows(OwnerRequiredException.class, () -> client.getAuthenticatedUser(" "));
     }
 }

@@ -37,7 +37,8 @@ public interface RepositoryApiClient {
      * Fetches the account this client's token authenticates as. The account is the same for every
      * owner; {@code owner} only says where to ask. Only Azure DevOps needs that: an integration on
      * {@code https://dev.azure.com} serves many organizations, and a token scoped to some of them can
-     * only be identified inside one of those. Every other provider ignores {@code owner}. Callers
+     * only be identified inside one of those; a blank {@code owner} falls back to the organization the
+     * URL names, or throws {@link OwnerRequiredException}. Every other provider ignores {@code owner}. Callers
      * should go through {@link RepositoryPlatform#getUser(String)}, which caches the result for a
      * limited time.
      */
