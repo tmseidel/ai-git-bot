@@ -8,7 +8,27 @@ import java.util.List;
 
 public class WriterPromptBuilder {
 
-    public String buildInitialPrompt(Long issueNumber, String issueTitle, String issueBody, String treeContext) {
+    /**
+     * A human comment on the originating issue, as passed to the writer's initial prompt.
+     *
+     * @param author    the commenter's username, or {@code null} when the provider did not name one
+     * @param body      the comment text
+     * @param timestamp the provider's creation timestamp, or {@code null}
+     */
+    public record DiscussionComment(String author, String body, String timestamp) {
+    }
+
+    /**
+     * Initial prompt for an assignment run.
+     *
+     * @param discussionContext the {@code ## Discussion} section from
+     *                          {@link #buildDiscussionContext(List, int, int)}, or {@code null}/blank
+     *                          when the issue has no human comments
+     */
+    public String buildInitialPrompt(Long issueNumber, String issueTitle, String issueBody, String treeContext,
+                                     String discussionContext) {
+        String discussion = discussionContext != null && !discussionContext.isBlank()
+                ? discussionContext.strip() + "\n\n" : "";
         return String.format("""
                 ## Originating issue
                 Number: #%d
@@ -17,11 +37,63 @@ public class WriterPromptBuilder {
                 Body:
                 %s
                 
-                ## Repository files
+                %s## Repository files
                 %s
                 
                 Improve this issue or ask the minimum critical follow-up questions.
-                """, issueNumber, issueTitle, issueBody != null ? issueBody : "(empty)", treeContext);
+                """, issueNumber, issueTitle, issueBody != null ? issueBody : "(empty)", discussion, treeContext);
+    }
+
+    /**
+     * Renders the human comments on the originating issue as a {@code ## Discussion} section.
+     * The comments must be in chronological order. When they do not fit into {@code maxTotalChars},
+     * the oldest are dropped and the section says so; a single comment is cut at
+     * {@code maxSingleCommentChars}.
+     *
+     * @return the section, or an empty string when there is nothing to show
+     */
+    public String buildDiscussionContext(List<DiscussionComment> comments, int maxTotalChars,
+                                         int maxSingleCommentChars) {
+        if (comments == null || comments.isEmpty()) {
+            return "";
+        }
+        // Walk newest to oldest so the most recent answers survive the size limit.
+        java.util.Deque<String> entries = new java.util.ArrayDeque<>();
+        int totalChars = 0;
+        for (int i = comments.size() - 1; i >= 0; i--) {
+            DiscussionComment comment = comments.get(i);
+            String body = comment.body().strip();
+            if (body.length() > maxSingleCommentChars) {
+                body = body.substring(0, maxSingleCommentChars) + "\n...(comment truncated)";
+            }
+            String author = comment.author() != null && !comment.author().isBlank()
+                    ? "@" + comment.author() : "unknown user";
+            String timestamp = comment.timestamp() != null && !comment.timestamp().isBlank()
+                    ? " at " + comment.timestamp() : "";
+            String entry = "### " + author + timestamp + "\n" + body + "\n\n";
+            if (totalChars + entry.length() > maxTotalChars) {
+                break;
+            }
+            entries.addFirst(entry);
+            totalChars += entry.length();
+        }
+        int omitted = comments.size() - entries.size();
+
+        StringBuilder sb = new StringBuilder("""
+                ## Discussion
+                
+                Comments posted on the originating issue, oldest first. They may answer the open questions or \
+                confirm or correct the assumptions in the body above. Fold those answers into \
+                "revisedIssueDraft" and do not repeat an answered question in "clarifyingQuestions" or \
+                "openQuestions". Only ask about what is still unanswered.
+                
+                """);
+        if (omitted > 0) {
+            sb.append("(Truncated: the ").append(omitted).append(" oldest comment")
+                    .append(omitted == 1 ? " was" : "s were").append(" omitted to fit the size limit.)\n\n");
+        }
+        entries.forEach(sb::append);
+        return sb.toString().strip();
     }
 
     public String buildContinuationPrompt(String commentBody) {
