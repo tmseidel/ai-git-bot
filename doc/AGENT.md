@@ -13,7 +13,7 @@ Issue agents require issue webhooks and assignment events. They are supported fo
 
 Use the **coding agent** when the issue already describes a clear implementation, acceptance criteria, and expected tests. It can edit files, run validation, push a branch, and open a PR.
 
-Use the **writer agent** when an issue is ambiguous, contradictory, too broad, or missing testable outcomes. It reads repository and issue context, asks the original author follow-up questions when needed, and creates a linked issue titled `AI Created Issue: <original title>` when the draft is ready.
+Use the **writer agent** when an issue is ambiguous, contradictory, too broad, or missing testable outcomes. It reads repository and issue context, asks follow-up questions when needed, and creates a linked issue titled `AI Created Issue: <original title>` when the draft is ready.
 
 Writer bots do not mutate repositories. If a coding-agent session already exists for an issue, the writer bot will not start a competing workflow on the same issue.
 
@@ -242,7 +242,7 @@ For Anthropic **AI Integrations**, **Enable prompt caching** is on by default. A
 - Coding works best for focused issues. Broad refactors and multi-system changes may be incomplete.
 - Validation can retry only within configured budgets. If retries are exhausted, the bot reports the failure instead of silently continuing.
 - The coding agent can edit dependency files, but it cannot guarantee external package availability or credentials.
-- Writer sessions that need missing business context wait for the original issue author; comments from other users do not continue that waiting step.
+- Writer sessions that need missing business context wait for an answer. Any user on the bot's **User Whitelist** may answer — not only the issue author, which matters on an issue the writer created itself, whose author is the bot. Without a whitelist, every user may answer; the bot's own comments never count.
 
 ## Ollama Limitations
 

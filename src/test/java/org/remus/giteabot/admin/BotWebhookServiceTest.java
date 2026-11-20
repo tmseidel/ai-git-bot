@@ -775,6 +775,8 @@ class BotWebhookServiceTest {
         session.setIssueAuthorUsername("tom");
 
         when(aiClientFactory.getClient(any())).thenReturn(aiClient);
+        // No whitelist: every commenter may answer the writer.
+        when(botService.isUsernameInSet(any(), eq("tom"))).thenReturn(true);
         when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.of(session));
         when(agentSessionService.claimSessionForUpdate("Test", "my-repo", 12L,
                 AgentSession.AgentSessionType.WRITER)).thenReturn(Optional.empty());
@@ -1035,6 +1037,8 @@ class BotWebhookServiceTest {
         session.setIssueAuthorUsername("tom");
 
         when(aiClientFactory.getClient(any())).thenReturn(aiClient);
+        // No whitelist: every commenter may answer the writer.
+        when(botService.isUsernameInSet(any(), eq("tom"))).thenReturn(true);
         when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.of(session));
         when(agentSessionService.claimSessionForUpdate("Test", "my-repo", 12L,
                 AgentSession.AgentSessionType.WRITER)).thenReturn(Optional.of(session));

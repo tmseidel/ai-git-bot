@@ -73,8 +73,9 @@ public class WriterAgentService {
     private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler();
     private final int contextWindowTokens;
     /**
-     * The bot's user whitelist: whose issue comments the writer takes into account. Accepts
-     * everyone when the whitelist is empty.
+     * The bot's user whitelist: whose issue comments the writer takes into account, both in the
+     * discussion of an assignment run and as follow-up answers. Accepts everyone when the
+     * whitelist is empty.
      */
     private final Predicate<String> commenterAllowed;
 
@@ -209,8 +210,8 @@ public class WriterAgentService {
             log.debug("Writer session already failed for #{}", issueNumber);
             return;
         }
-        if (!isIssueAuthor(owner, repo, issueNumber, payload)) {
-            log.debug("Ignoring non-author writer follow-up on issue #{} in {}/{}", issueNumber, owner, repo);
+        String commenter = acceptedCommenter(owner, payload);
+        if (commenter == null) {
             return;
         }
         Optional<AgentSession> claimedSession = sessionService.claimSessionForUpdate(
@@ -240,7 +241,7 @@ public class WriterAgentService {
             }
             try (Workspace workspace = wsResult.workspace()) {
                 runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
-                        promptBuilder.buildContinuationPrompt(payload.getComment().getBody()));
+                        promptBuilder.buildContinuationPrompt(commenter, payload.getComment().getBody()));
             }
         } catch (Exception e) {
             log.error("Writer failed while handling follow-up for issue #{} in {}/{}: {}",
@@ -286,18 +287,31 @@ public class WriterAgentService {
 
 
 
-    private boolean isIssueAuthor(String owner, String repo, Long issueNumber, WebhookPayload payload) {
-        String commenter = payload.getComment() != null && payload.getComment().getUser() != null
-                ? payload.getComment().getUser().getLogin() : null;
+    /**
+     * The username of the commenter whose follow-up continues the writer session, or
+     * {@code null} when the comment is ignored. Anyone on the bot's user whitelist may answer
+     * the writer's questions (everyone when the whitelist is empty), not only the issue author:
+     * on an issue the writer created itself the author is the bot. The bot's own comments
+     * (its status messages and questions) never count as an answer.
+     */
+    private String acceptedCommenter(String owner, WebhookPayload payload) {
+        WebhookPayload.Owner user = payload.getComment() != null ? payload.getComment().getUser() : null;
+        String commenter = user != null ? user.getLogin() : null;
         if (commenter == null || commenter.isBlank()) {
-            return false;
+            log.debug("Ignoring writer follow-up without a commenter on issue #{}", payload.getIssue().getNumber());
+            return null;
         }
-        Optional<AgentSession> sessionOpt = sessionService.getSessionByIssue(owner, repo, issueNumber);
-        if (sessionOpt.isPresent() && sessionOpt.get().getIssueAuthorUsername() != null) {
-            return commenter.equalsIgnoreCase(sessionOpt.get().getIssueAuthorUsername());
+        BotIdentity bot = new BotIdentity(repositoryPlatform.getUser(owner));
+        if (bot.is(user) || commenter.equalsIgnoreCase(bot.account().username())) {
+            log.debug("Ignoring the bot's own comment on writer issue #{}", payload.getIssue().getNumber());
+            return null;
         }
-        String issueAuthor = findIssueAuthor(owner, repo, issueNumber);
-        return commenter.equalsIgnoreCase(issueAuthor);
+        if (!commenterAllowed.test(commenter)) {
+            log.debug("Ignoring writer follow-up from '{}' on issue #{}: not on the bot's user whitelist",
+                    commenter, payload.getIssue().getNumber());
+            return null;
+        }
+        return commenter;
     }
 
     private String findIssueAuthor(String owner, String repo, Long issueNumber) {
