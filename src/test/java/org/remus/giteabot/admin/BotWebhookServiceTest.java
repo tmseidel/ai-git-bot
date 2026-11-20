@@ -7,17 +7,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
-import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiAuditContext;
+import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.config.ReviewChunkingProperties;
@@ -26,6 +27,10 @@ import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
+import org.remus.giteabot.prworkflow.PrWorkflowContext;
+import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
+import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
@@ -43,11 +48,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.mockito.ArgumentCaptor;
-import org.remus.giteabot.prworkflow.PrWorkflowContext;
-import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
-import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,7 +57,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -1921,35 +1920,35 @@ class BotWebhookServiceTest {
         @Test
         void handledCommandIsReportedAsConsumed() {
             WebhookPayload payload = feedbackPayload();
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(true);
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(true);
 
             assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"), payload,
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT,
+                    PullRequestCommentKind.PR_COMMENT,
                     "@AI_Bot"));
 
             verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
-                    eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT),
+                    eq(PullRequestCommentKind.PR_COMMENT),
                     eq("@AI_Bot"));
         }
 
         @Test
         void ordinaryCommentIsNotConsumed() {
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(false);
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
 
             assertFalse(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
                     feedbackPayload(),
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null));
+                    PullRequestCommentKind.PR_COMMENT, null));
         }
 
         @Test
         void aFailingLearningCommandIsStillConsumed() {
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any()))
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any()))
                     .thenThrow(new IllegalStateException("feedback store unavailable"));
 
             // Falling through would forward feedback text into an AI conversation.
             assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
                     feedbackPayload(),
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null));
+                    PullRequestCommentKind.PR_COMMENT, null));
         }
     }
 

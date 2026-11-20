@@ -2,12 +2,14 @@ package org.remus.giteabot.learning.feedback;
 
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Locale;
 
 /**
  * Renders the bot's answers to feedback commands. Everything here is a deterministic function of
  * persisted records — no model is involved, so the same command always produces the same text.
+ *
+ * <p>Overviews name the bot they belong to: several bots may share one Git account and so answer the
+ * same mention, and each one lists only its own records.</p>
  */
 public final class FeedbackReplyRenderer {
 
@@ -32,18 +34,16 @@ public final class FeedbackReplyRenderer {
     }
 
     public static String acknowledged(FeedbackService.Recorded recorded) {
-        String verb = recorded.duplicate() ? "Already recorded" : "Recorded";
         return """
-                %s **%s** — `%s` is **%s** (by %s).
+                Recorded **%s** — `%s` is **%s** (by %s).
 
-                %s""".formatted(verb, recorded.reference(), recorded.targetReference(),
+                %s""".formatted(recorded.reference(), recorded.targetReference(),
                 recorded.verdict().token(), recorded.actor(), footer());
     }
 
     public static String retracted(FeedbackService.Recorded recorded) {
-        String verb = recorded.duplicate() ? "Already retracted" : "Retracted";
-        return "%s **%s** — the assessment of `%s` no longer counts.\n\n%s"
-                .formatted(verb, recorded.reference(), recorded.targetReference(), footer());
+        return "Retracted **%s** — the assessment of `%s` no longer counts.\n\n%s"
+                .formatted(recorded.reference(), recorded.targetReference(), footer());
     }
 
     /** A recognized command that cannot be carried out: explain and stop. */
@@ -55,14 +55,15 @@ public final class FeedbackReplyRenderer {
         return "%s\n\n%s".formatted(message, footer());
     }
 
-    public static String list(boolean repositoryWide, List<FeedbackService.Summary> rows,
-                              Long lastId, String mention) {
+    public static String list(boolean repositoryWide, FeedbackService.ListPage page, String botName,
+                              String mention, FeedbackLinks links) {
         String scope = repositoryWide ? "in this repository" : "on this pull request";
-        if (rows.isEmpty()) {
-            return "No feedback %s yet.\n\n%s".formatted(scope, footer());
+        String header = "Feedback for **%s** %s".formatted(botName, scope);
+        if (page.rows().isEmpty()) {
+            return "%s: none yet.\n\n%s".formatted(header, footer());
         }
-        StringBuilder sb = new StringBuilder("Feedback ").append(scope).append(":\n\n");
-        for (FeedbackService.Summary row : rows) {
+        StringBuilder sb = new StringBuilder(header).append(":\n\n");
+        for (FeedbackService.Summary row : page.rows()) {
             sb.append("- **").append(row.reference()).append("** `")
                     .append(row.targetReference()).append("` **")
                     .append(row.verdict().token()).append("** — ")
@@ -75,40 +76,64 @@ public final class FeedbackReplyRenderer {
                 sb.append(")_");
             }
             if (repositoryWide) {
-                sb.append(" · PR #").append(row.prNumber());
+                sb.append(" · ").append(link("PR #" + row.prNumber(),
+                        links.pullRequest(row.prNumber())));
             }
-            sb.append(" · ").append(TIMESTAMP.format(row.createdAt())).append('\n');
+            sb.append(" · ").append(link(TIMESTAMP.format(row.createdAt()),
+                    links.comment(row.prNumber(), row.commentKind(), row.commentId())))
+                    .append('\n');
             if (row.reason() != null && !row.reason().isBlank()) {
                 sb.append("  > ").append(firstLine(row.reason())).append('\n');
             }
         }
-        if (lastId != null && lastId > 0) {
+        if (page.nextCursor() != null) {
             sb.append("\nNext page: `").append(mention).append(" feedback list")
                     .append(repositoryWide ? " repository" : "")
-                    .append(" page: ").append(lastId).append("`\n");
+                    .append(" page: ").append(page.nextCursor()).append("`\n");
         }
         return sb.toString().trim();
     }
 
-    public static String show(FeedbackService.Summary row, String mention) {
+    public static String show(FeedbackService.Detail detail, String botName, String mention,
+                              FeedbackLinks links) {
+        FeedbackService.Summary row = detail.summary();
         StringBuilder sb = new StringBuilder();
         sb.append("**").append(row.reference()).append("** — `").append(row.targetReference())
                 .append("` is **").append(row.verdict().token()).append("** (by ")
                 .append(row.actor()).append(", ").append(row.state().name().toLowerCase(Locale.ROOT))
-                .append(")\n\n");
-        sb.append("Review `").append(row.outputReference()).append("` on PR #")
-                .append(row.prNumber()).append(" in ").append(row.repoOwner()).append('/')
-                .append(row.repoName()).append(" · ").append(TIMESTAMP.format(row.createdAt()))
-                .append('\n');
+                .append(") · bot **").append(botName).append("**\n\n");
+        sb.append("Review `").append(row.outputReference()).append("` on ")
+                .append(link("PR #" + row.prNumber(), links.pullRequest(row.prNumber())))
+                .append(" in ").append(row.repoOwner()).append('/').append(row.repoName())
+                .append(" · ")
+                .append(link("source comment",
+                        links.comment(row.prNumber(), row.commentKind(), row.commentId())))
+                .append(" · ").append(TIMESTAMP.format(row.createdAt())).append('\n');
         if (row.supersededBy() != null) {
             sb.append("Replaced by ").append(row.supersededBy()).append('\n');
         }
         if (row.reason() != null && !row.reason().isBlank()) {
             sb.append("\n> ").append(row.reason().replace("\n", "\n> ")).append('\n');
         }
+        if (!detail.history().isEmpty()) {
+            sb.append("\nHistory:\n");
+            for (FeedbackService.HistoryEntry entry : detail.history()) {
+                sb.append("- ").append(TIMESTAMP.format(entry.at())).append(" · ")
+                        .append(entry.type().name().toLowerCase(Locale.ROOT))
+                        .append(" by ").append(entry.actor());
+                if (entry.relatedReference() != null) {
+                    sb.append(" (").append(entry.relatedReference()).append(')');
+                }
+                sb.append('\n');
+            }
+        }
         sb.append("\nReply `").append(mention).append(" feedback list")
                 .append("` to see the current assessments.");
         return sb.toString();
+    }
+
+    private static String link(String text, String url) {
+        return url == null ? text : "[" + text + "](" + url + ")";
     }
 
     private static String firstLine(String text) {

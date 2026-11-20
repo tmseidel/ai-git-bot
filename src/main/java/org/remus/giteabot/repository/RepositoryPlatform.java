@@ -168,6 +168,63 @@ public abstract class RepositoryPlatform {
     }
 
     /**
+     * The browser URL of pull request {@code number}. Empty when the provider's pull request
+     * page is not known or the repository's web address cannot be resolved; a wrong link is
+     * worse than none.
+     */
+    public Optional<String> getPullRequestWebUrl(String owner, String repo, @Nullable Long number) {
+        return Optional.empty();
+    }
+
+    /**
+     * The browser URL of one comment on pull request {@code number}: the
+     * {@linkplain #getPullRequestWebUrl pull request page} anchored to the comment. Empty
+     * when the provider's anchor for this kind of comment is not known.
+     *
+     * @param commentId the comment's id as the provider's webhook reported it
+     */
+    public final Optional<String> getCommentWebUrl(String owner, String repo, @Nullable Long number,
+                                                   @Nullable PullRequestCommentKind kind,
+                                                   @Nullable String commentId) {
+        if (kind == null || commentId == null || commentId.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<String> anchor = commentAnchor(kind, commentId);
+        return anchor.flatMap(s -> getPullRequestWebUrl(owner, repo, number).map(url -> url + s));
+    }
+
+    /**
+     * The fragment, including {@code #}, addressing a comment on the pull request page, or
+     * empty when the provider's anchor for this kind of comment is not known.
+     *
+     * @param commentId never blank
+     */
+    protected Optional<String> commentAnchor(PullRequestCommentKind kind, String commentId) {
+        return Optional.empty();
+    }
+
+    /**
+     * The browser URL of the repository, {@code {cloneUrl}/{owner}/{repo}} by default. Empty
+     * when owner or repo is missing or the clone base URL is not a credential-free HTTP(S)
+     * URL, see {@link #validatedCloneBaseUrl}.
+     */
+    protected Optional<String> repositoryWebUrl(String owner, String repo) {
+        if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(validatedCloneBaseUrl(cloneUrl) + "/" + owner + "/" + repo);
+        } catch (IllegalStateException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** Whether {@code value} is a non-empty run of ASCII digits, as numeric comment ids are. */
+    protected static boolean isNumericId(@Nullable String value) {
+        return value != null && !value.isEmpty() && value.chars().allMatch(c -> c >= '0' && c <= '9');
+    }
+
+    /**
      * Returns the exception {@link #getRepositoryRemote} throws for a transport this provider
      * resolves no remote for. Without it, Git would be handed SSH credentials together with an
      * HTTP remote and fail with an unrelated authentication error.

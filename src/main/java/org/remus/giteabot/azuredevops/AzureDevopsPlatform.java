@@ -2,6 +2,7 @@ package org.remus.giteabot.azuredevops;
 
 import org.jspecify.annotations.Nullable;
 import org.remus.giteabot.repository.GitTransport;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.SshCredentials;
@@ -62,6 +63,45 @@ public class AzureDevopsPlatform extends RepositoryPlatform {
         if (revision == null || revision.isBlank() || path == null || path.isBlank()) {
             return Optional.empty();
         }
+        return repositoryWebUrl(owner, repo).map(repository -> {
+            StringBuilder url = new StringBuilder(repository)
+                    .append("?path=").append(encodeQueryPath(path.startsWith("/") ? path : "/" + path))
+                    .append("&version=GC").append(encodeQueryValue(revision));
+            if (startLine != null) {
+                int last = endLine != null && endLine > startLine ? endLine : startLine;
+                url.append("&line=").append(startLine)
+                        .append("&lineEnd=").append(last + 1)
+                        .append("&lineStartColumn=1&lineEndColumn=1&lineStyle=plain");
+            }
+            return url.append("&_a=contents").toString();
+        });
+    }
+
+    /** Pull requests live below the repository's {@code /_git/} page. */
+    @Override
+    public Optional<String> getPullRequestWebUrl(String owner, String repo, @Nullable Long number) {
+        return number == null ? Optional.empty()
+                : repositoryWebUrl(owner, repo).map(base -> base + "/pullrequest/" + number);
+    }
+
+    /**
+     * Every comment is addressed by {@code #} and the id of its thread. Comment ids are only
+     * unique within their thread, so the webhook reports them as {@code {threadId}/{commentId}}.
+     */
+    @Override
+    protected Optional<String> commentAnchor(PullRequestCommentKind kind, String commentId) {
+        int separator = commentId.indexOf('/');
+        String threadId = separator < 0 ? commentId : commentId.substring(0, separator);
+        return isNumericId(threadId) ? Optional.of("#" + threadId) : Optional.empty();
+    }
+
+    /**
+     * The repository's {@code {base}/{org}/{project}/_git/{name}} page, with the same
+     * organization-scoping rule as {@link #getRepositoryRemote}. An unresolvable address
+     * yields no URL rather than a guessed one.
+     */
+    @Override
+    protected Optional<String> repositoryWebUrl(String owner, String repo) {
         AzureDevopsAddress addr;
         String base;
         try {
@@ -72,18 +112,8 @@ public class AzureDevopsPlatform extends RepositoryPlatform {
         }
         String organizationSegment = addr.isOrganizationScopedBy(base)
                 ? "" : "/" + encodeSegment(addr.organization());
-        StringBuilder url = new StringBuilder(base).append(organizationSegment)
-                .append('/').append(encodeSegment(addr.project()))
-                .append("/_git/").append(encodeSegment(addr.name()))
-                .append("?path=").append(encodeQueryPath(path.startsWith("/") ? path : "/" + path))
-                .append("&version=GC").append(encodeQueryValue(revision));
-        if (startLine != null) {
-            int last = endLine != null && endLine > startLine ? endLine : startLine;
-            url.append("&line=").append(startLine)
-                    .append("&lineEnd=").append(last + 1)
-                    .append("&lineStartColumn=1&lineEndColumn=1&lineStyle=plain");
-        }
-        return Optional.of(url.append("&_a=contents").toString());
+        return Optional.of(base + organizationSegment + "/" + encodeSegment(addr.project())
+                + "/_git/" + encodeSegment(addr.name()));
     }
 
     private static String encodeSegment(String value) {
