@@ -96,8 +96,15 @@ public class WriterPromptBuilder {
         return sb.toString().strip();
     }
 
-    public String buildContinuationPrompt(String commentBody) {
-        return "The issue author answered:\n\n" + (commentBody != null ? commentBody : "");
+    /**
+     * Prompt for a follow-up run.
+     *
+     * @param commenter   the username of whoever answered; not necessarily the issue author
+     * @param commentBody the answer
+     */
+    public String buildContinuationPrompt(String commenter, String commentBody) {
+        String who = commenter != null && !commenter.isBlank() ? "@" + commenter : "A user";
+        return who + " answered:\n\n" + (commentBody != null ? commentBody : "");
     }
 
     public String buildToolFeedback(List<ImplementationPlan.ToolRequest> requests, List<ToolResult> results) {

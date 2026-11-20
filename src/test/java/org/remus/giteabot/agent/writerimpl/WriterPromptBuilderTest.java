@@ -54,4 +54,15 @@ class WriterPromptBuilderTest {
 
         assertThat(prompt).doesNotContain("## Discussion").contains("Body:\nBody\n\n## Repository files");
     }
+
+    @Test
+    void continuation_namesTheCommenterInsteadOfTheIssueAuthor() {
+        assertThat(builder.buildContinuationPrompt("alice", "We use Maven."))
+                .isEqualTo("@alice answered:\n\nWe use Maven.");
+    }
+
+    @Test
+    void continuation_fallsBackWhenTheCommenterIsUnknown() {
+        assertThat(builder.buildContinuationPrompt(null, "Yes")).isEqualTo("A user answered:\n\nYes");
+    }
 }
