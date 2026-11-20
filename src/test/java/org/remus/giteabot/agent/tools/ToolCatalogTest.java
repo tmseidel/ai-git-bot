@@ -343,4 +343,41 @@ class ToolCatalogTest {
                 .contains("cat", "branch-switcher", "get-issue", "search-issues", "execute-code")
                 .doesNotContain("write-file", "mvn", "pr-test-write");
     }
+
+    @Test
+    void fileTransferToolsAreClassified() {
+        assertThat(catalog.kindOf("download-file")).isEqualTo(ToolKind.FILE);
+        assertThat(catalog.kindOf("upload-file")).isEqualTo(ToolKind.FILE);
+        assertThat(catalog.kindOf("file-info")).isEqualTo(ToolKind.CONTEXT);
+        assertThat(catalog.reviewToolNames(Set.of("download-file", "upload-file", "file-info")))
+                .containsExactly("file-info");
+        assertThat(catalog.builtinToolNames(ToolCatalog.Role.WRITER))
+                .contains("file-info").doesNotContain("download-file", "upload-file");
+    }
+
+    @Test
+    void uploadIsTheOneFileToolThatDoesNotMutateTheWorkspace() {
+        assertThat(catalog.mutatesWorkspace("download-file")).isTrue();
+        assertThat(catalog.mutatesWorkspace("write-file")).isTrue();
+        assertThat(catalog.mutatesWorkspace("upload-file")).isFalse();
+        assertThat(catalog.mutatesWorkspace("file-info")).isFalse();
+        assertThat(catalog.mutatesWorkspace("mvn")).isFalse();
+    }
+
+    @Test
+    void fileTransferToolsReportTheEmptyAllowlist() {
+        assertThat(catalog.missingConfiguration("download-file"))
+                .contains("agent.file-transfer.download.allowed-hosts");
+        assertThat(catalog.missingConfiguration("upload-file"))
+                .contains("agent.file-transfer.upload.allowed-hosts");
+        assertThat(catalog.missingConfiguration("write-file")).isEmpty();
+
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.getFileTransfer().getDownload().setAllowedHosts(List.of("files.example.com"));
+        config.getFileTransfer().getUpload().setAllowedHosts(List.of("up.example.com"));
+        ToolCatalog configured = new ToolCatalog(config);
+        assertThat(configured.missingConfiguration("download-file")).isEmpty();
+        assertThat(configured.missingConfiguration("upload-file"))
+                .contains("agent.file-transfer.upload.allowed-paths");
+    }
 }

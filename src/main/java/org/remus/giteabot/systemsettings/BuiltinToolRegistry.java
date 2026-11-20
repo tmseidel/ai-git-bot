@@ -65,6 +65,12 @@ public class BuiltinToolRegistry {
             } catch (org.springframework.context.NoSuchMessageException e) {
                 description = english;
             }
+            String missing = toolCatalog.missingConfiguration(normalized).orElse(null);
+            if (missing != null) {
+                description = description + " " + messageSource.getMessage("tool.notConfigured",
+                        new Object[]{missing}, "Disabled until " + missing + " is configured.",
+                        LocaleContextHolder.getLocale());
+            }
             sink.put(normalized, new BuiltinTool(normalized, kind, description));
         }
     }

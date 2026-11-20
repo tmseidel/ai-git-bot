@@ -400,7 +400,7 @@ public final class CodingAgentStrategy implements AgentStrategy {
      * the tool-execution path instead of the context-fetch path.
      */
     private boolean isMutationOrValidation(ImplementationPlan.ToolRequest req) {
-        return catalog.isFile(req.getTool()) || catalog.isValidation(req.getTool());
+        return catalog.mutatesWorkspace(req.getTool()) || catalog.isValidation(req.getTool());
     }
 
     /**
@@ -408,10 +408,11 @@ public final class CodingAgentStrategy implements AgentStrategy {
      *
      * <p>Validation runs are deliberately excluded: "run the tests and tell me whether
      * they pass" is a read-only request, so a {@code mvn}/test call must not close the
-     * answer exit. A file write that leaves no diff still counts as an attempt.</p>
+     * answer exit. A file write that leaves no diff still counts as an attempt. Uploads are
+     * excluded for the same reason: they read the workspace, they do not change it.</p>
      */
     private boolean isMutation(ImplementationPlan.ToolRequest req) {
-        return catalog.isFile(req.getTool());
+        return catalog.mutatesWorkspace(req.getTool());
     }
 
     /**
