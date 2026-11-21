@@ -30,9 +30,15 @@ import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.systemsettings.McpConfiguration;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 @Slf4j
 public class WriterAgentService {
@@ -45,6 +51,8 @@ public class WriterAgentService {
      */
     private static final int DEFAULT_MAX_TOOL_ROUNDS = 5;
     private static final int DEFAULT_MAX_INITIAL_TREE_FILES = 100;
+    private static final int DEFAULT_MAX_DISCUSSION_CHARS = 20_000;
+    private static final int DEFAULT_MAX_SINGLE_DISCUSSION_COMMENT_CHARS = 4_000;
 
     private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
@@ -64,7 +72,12 @@ public class WriterAgentService {
     private final WriterResponseParser responseParser = new WriterResponseParser();
     private final SystemPromptAssembler systemPromptAssembler = new SystemPromptAssembler();
     private final int contextWindowTokens;
-
+    /**
+     * The bot's user whitelist: whose issue comments the writer takes into account, both in the
+     * discussion of an assignment run and as follow-up answers. Accepts everyone when the
+     * whitelist is empty.
+     */
+    private final Predicate<String> commenterAllowed;
 
     public WriterAgentService(RepositoryPlatform repositoryPlatform,
                               AiClient aiClient,
@@ -80,7 +93,8 @@ public class WriterAgentService {
                               McpToolCatalog mcpToolCatalog,
                               java.util.Set<String> allowedBuiltinTools,
                               int contextWindowTokens,
-                              PythonExecutionService pythonExecution) {
+                              PythonExecutionService pythonExecution,
+                              Predicate<String> commenterAllowed) {
         this.repositoryPlatform = repositoryPlatform;
         this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = aiClient;
@@ -98,6 +112,7 @@ public class WriterAgentService {
                 mcpConfiguration, this.mcpToolCatalog, this.repositoryClient, allowedBuiltinTools,
                 pythonExecution);
         this.contextWindowTokens = contextWindowTokens;
+        this.commenterAllowed = commenterAllowed != null ? commenterAllowed : username -> true;
     }
 
     public void handleIssueAssigned(WebhookPayload payload) {
@@ -150,8 +165,12 @@ public class WriterAgentService {
             try (Workspace workspace = wsResult.workspace()) {
                 String treeContext = promptBuilder.buildTreeContext(
                         repositoryClient.getRepositoryTree(owner, repo, baseBranch), maxInitialTreeFiles());
+                String discussionContext = promptBuilder.buildDiscussionContext(
+                        fetchDiscussion(owner, repo, issueNumber, bot),
+                        maxDiscussionChars(), maxSingleDiscussionCommentChars());
                 runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
-                        promptBuilder.buildInitialPrompt(issueNumber, issueTitle, issueBody, treeContext));
+                        promptBuilder.buildInitialPrompt(issueNumber, issueTitle, issueBody, treeContext,
+                                discussionContext));
             }
         } catch (DataIntegrityViolationException e) {
             log.info("Writer session was created concurrently for issue #{} in {}/{}", issueNumber, owner, repo);
@@ -191,8 +210,8 @@ public class WriterAgentService {
             log.debug("Writer session already failed for #{}", issueNumber);
             return;
         }
-        if (!isIssueAuthor(owner, repo, issueNumber, payload)) {
-            log.debug("Ignoring non-author writer follow-up on issue #{} in {}/{}", issueNumber, owner, repo);
+        String commenter = acceptedCommenter(owner, payload);
+        if (commenter == null) {
             return;
         }
         Optional<AgentSession> claimedSession = sessionService.claimSessionForUpdate(
@@ -222,7 +241,7 @@ public class WriterAgentService {
             }
             try (Workspace workspace = wsResult.workspace()) {
                 runWriterLoop(session, owner, repo, issueNumber, workspace, baseBranch,
-                        promptBuilder.buildContinuationPrompt(payload.getComment().getBody()));
+                        promptBuilder.buildContinuationPrompt(commenter, payload.getComment().getBody()));
             }
         } catch (Exception e) {
             log.error("Writer failed while handling follow-up for issue #{} in {}/{}: {}",
@@ -268,18 +287,31 @@ public class WriterAgentService {
 
 
 
-    private boolean isIssueAuthor(String owner, String repo, Long issueNumber, WebhookPayload payload) {
-        String commenter = payload.getComment() != null && payload.getComment().getUser() != null
-                ? payload.getComment().getUser().getLogin() : null;
+    /**
+     * The username of the commenter whose follow-up continues the writer session, or
+     * {@code null} when the comment is ignored. Anyone on the bot's user whitelist may answer
+     * the writer's questions (everyone when the whitelist is empty), not only the issue author:
+     * on an issue the writer created itself the author is the bot. The bot's own comments
+     * (its status messages and questions) never count as an answer.
+     */
+    private String acceptedCommenter(String owner, WebhookPayload payload) {
+        WebhookPayload.Owner user = payload.getComment() != null ? payload.getComment().getUser() : null;
+        String commenter = user != null ? user.getLogin() : null;
         if (commenter == null || commenter.isBlank()) {
-            return false;
+            log.debug("Ignoring writer follow-up without a commenter on issue #{}", payload.getIssue().getNumber());
+            return null;
         }
-        Optional<AgentSession> sessionOpt = sessionService.getSessionByIssue(owner, repo, issueNumber);
-        if (sessionOpt.isPresent() && sessionOpt.get().getIssueAuthorUsername() != null) {
-            return commenter.equalsIgnoreCase(sessionOpt.get().getIssueAuthorUsername());
+        BotIdentity bot = new BotIdentity(repositoryPlatform.getUser(owner));
+        if (bot.is(user) || commenter.equalsIgnoreCase(bot.account().username())) {
+            log.debug("Ignoring the bot's own comment on writer issue #{}", payload.getIssue().getNumber());
+            return null;
         }
-        String issueAuthor = findIssueAuthor(owner, repo, issueNumber);
-        return commenter.equalsIgnoreCase(issueAuthor);
+        if (!commenterAllowed.test(commenter)) {
+            log.debug("Ignoring writer follow-up from '{}' on issue #{}: not on the bot's user whitelist",
+                    commenter, payload.getIssue().getNumber());
+            return null;
+        }
+        return commenter;
     }
 
     private String findIssueAuthor(String owner, String repo, Long issueNumber) {
@@ -306,6 +338,150 @@ public class WriterAgentService {
         return null;
     }
 
+    /**
+     * The human discussion on the issue, oldest first, for the assignment prompt: skips the bot's
+     * own comments (its status messages and questions), comments from users outside the bot's
+     * whitelist, GitLab system notes and empty comments. Best effort: a provider that cannot
+     * list comments leaves the discussion out instead of failing the run.
+     */
+    private List<WriterPromptBuilder.DiscussionComment> fetchDiscussion(String owner, String repo, Long issueNumber,
+                                                                        BotIdentity bot) {
+        List<Map<String, Object>> comments;
+        try {
+            comments = repositoryClient.getIssueComments(owner, repo, issueNumber);
+        } catch (Exception e) {
+            log.warn("Failed to fetch comments of issue #{} in {}/{} for the writer prompt, continuing without them: {}",
+                    issueNumber, owner, repo, e.getMessage());
+            return List.of();
+        }
+        if (comments == null || comments.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> kept = new ArrayList<>();
+        int skippedBot = 0;
+        int skippedNotWhitelisted = 0;
+        for (Map<String, Object> comment : comments) {
+            if (comment == null || Boolean.TRUE.equals(comment.get("system"))
+                    || extractCommentBody(comment).isBlank()) {
+                continue;
+            }
+            Map<?, ?> actor = commentActor(comment);
+            if (isBot(actor, bot)) {
+                skippedBot++;
+                continue;
+            }
+            if (!commenterAllowed.test(actor != null ? extractCommenterName(actor) : null)) {
+                skippedNotWhitelisted++;
+                continue;
+            }
+            kept.add(comment);
+        }
+        log.info("Writer discussion for issue #{} in {}/{}: {} of {} comments kept ({} by the bot, {} not whitelisted)",
+                issueNumber, owner, repo, kept.size(), comments.size(), skippedBot, skippedNotWhitelisted);
+        return sortChronologically(kept).stream()
+                .map(comment -> {
+                    Map<?, ?> actor = commentActor(comment);
+                    return new WriterPromptBuilder.DiscussionComment(
+                            actor != null ? extractCommenterName(actor) : null,
+                            extractCommentBody(comment),
+                            extractCommentTimestamp(comment));
+                })
+                .toList();
+    }
+
+    /**
+     * Sorts by creation time. Providers differ in the order they list comments (GitLab returns
+     * notes newest first), so the timestamps decide; when one cannot be parsed, the provider's
+     * order is kept.
+     */
+    private List<Map<String, Object>> sortChronologically(List<Map<String, Object>> comments) {
+        List<Instant> instants = new ArrayList<>();
+        for (Map<String, Object> comment : comments) {
+            Instant instant = parseInstant(extractCommentTimestamp(comment));
+            if (instant == null) {
+                return comments;
+            }
+            instants.add(instant);
+        }
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < comments.size(); i++) {
+            order.add(i);
+        }
+        order.sort(Comparator.comparing(instants::get));
+        return order.stream().map(comments::get).toList();
+    }
+
+    private static Instant parseInstant(String timestamp) {
+        if (timestamp == null) {
+            return null;
+        }
+        try {
+            return OffsetDateTime.parse(timestamp).toInstant();
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
+    /** The author of a comment: {@code user} on Gitea, GitHub and Bitbucket, {@code author} on GitLab. */
+    private static Map<?, ?> commentActor(Map<String, Object> comment) {
+        for (String key : List.of("user", "author")) {
+            if (comment.get(key) instanceof Map<?, ?> actor) {
+                return actor;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether the bot wrote the comment: matched by id ({@code account_id} on Bitbucket) and, for
+     * providers whose comment payloads carry no id, by username.
+     */
+    private static boolean isBot(Map<?, ?> actor, BotIdentity bot) {
+        if (actor == null) {
+            return false;
+        }
+        for (String key : List.of("account_id", "id")) {
+            String id = WebhookPayload.Owner.of(actor.get(key), null).getId();
+            if (id != null) {
+                return bot.hasId(id);
+            }
+        }
+        String name = extractCommenterName(actor);
+        return name != null && name.equalsIgnoreCase(bot.account().username());
+    }
+
+    /**
+     * The commenter's username as the whitelist knows it: {@code login} (Gitea, GitHub),
+     * {@code username} (GitLab) or {@code nickname} (Bitbucket).
+     */
+    private static String extractCommenterName(Map<?, ?> actor) {
+        for (String key : List.of("login", "username", "nickname")) {
+            Object value = actor.get(key);
+            if (value instanceof String text && !text.isBlank()) {
+                return text;
+            }
+        }
+        return null;
+    }
+
+    private static String extractCommentBody(Map<String, Object> comment) {
+        if (comment.get("body") instanceof String text) {
+            return text;
+        }
+        if (comment.get("content") instanceof Map<?, ?> content && content.get("raw") instanceof String raw) {
+            return raw;
+        }
+        return "";
+    }
+
+    private static String extractCommentTimestamp(Map<String, Object> comment) {
+        for (String key : List.of("created_at", "created_on")) {
+            if (comment.get(key) instanceof String text && !text.isBlank()) {
+                return text;
+            }
+        }
+        return null;
+    }
 
     private String resolveBaseBranch(String owner, String repo, WebhookPayload payload, AgentSession session) {
         if (session.getBranchName() != null && !session.getBranchName().isBlank()) {
@@ -393,5 +569,19 @@ public class WriterAgentService {
         }
         int configured = agentConfig.getWriter().getMaxInitialTreeFiles();
         return configured > 0 ? configured : DEFAULT_MAX_INITIAL_TREE_FILES;
+    }
+
+    /** Size cap of the discussion section, shared with the coding agent's {@code agent.context.max-issue-comments-chars}. */
+    private int maxDiscussionChars() {
+        AgentConfigProperties.ContextConfig context = agentConfig != null ? agentConfig.getContext() : null;
+        int configured = context != null ? context.getMaxIssueCommentsChars() : 0;
+        return configured > 0 ? configured : DEFAULT_MAX_DISCUSSION_CHARS;
+    }
+
+    /** Per-comment cap, shared with the coding agent's {@code agent.context.max-single-issue-comment-chars}. */
+    private int maxSingleDiscussionCommentChars() {
+        AgentConfigProperties.ContextConfig context = agentConfig != null ? agentConfig.getContext() : null;
+        int configured = context != null ? context.getMaxSingleIssueCommentChars() : 0;
+        return configured > 0 ? configured : DEFAULT_MAX_SINGLE_DISCUSSION_COMMENT_CHARS;
     }
 }

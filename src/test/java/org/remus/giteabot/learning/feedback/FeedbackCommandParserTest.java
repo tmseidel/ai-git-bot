@@ -43,8 +43,8 @@ class FeedbackCommandParserTest {
                 .isEqualTo(new FeedbackCommand.ListRecords(false, null));
         assertThat(parse("@ai_bot feedback list repository"))
                 .isEqualTo(new FeedbackCommand.ListRecords(true, null));
-        assertThat(parse("@ai_bot feedback list repository page: 42"))
-                .isEqualTo(new FeedbackCommand.ListRecords(true, 42L));
+        assertThat(parse("@ai_bot feedback list repository page: MTIuYWJj"))
+                .isEqualTo(new FeedbackCommand.ListRecords(true, "MTIuYWJj"));
     }
 
     @Test
@@ -110,7 +110,10 @@ class FeedbackCommandParserTest {
                 .isInstanceOf(FeedbackCommand.Submit.class);
         assertThat(parse("@ai_bot feedback retract nope")).isInstanceOf(FeedbackCommand.Help.class);
         assertThat(parse("@ai_bot feedback list everything")).isInstanceOf(FeedbackCommand.Help.class);
-        assertThat(parse("@ai_bot feedback list page: abc")).isInstanceOf(FeedbackCommand.Help.class);
+        assertThat(parse("@ai_bot feedback list page:")).isInstanceOf(FeedbackCommand.Help.class);
+        assertThat(parse("@ai_bot feedback list page: abc"))
+                .as("cursors are opaque; the service checks them against the caller's listing")
+                .isEqualTo(new FeedbackCommand.ListRecords(false, "abc"));
     }
 
     @Test

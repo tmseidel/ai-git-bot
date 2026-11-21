@@ -74,8 +74,7 @@ public class GitIntegrationService {
         if (existing != null && existing.hasManagedSshKeyTracking()
                 && (integration.getTransport() != GitTransport.SSH || clearSshCredentials || clearToken
                     || !isBlank(integration.getToken()) || !isBlank(integration.getSshPrivateKey())
-                    || existing.getProviderType() != integration.getProviderType()
-                    || !Objects.equals(existing.getUrl(), integration.getUrl()))) {
+                    || endpointChanged(existing, integration))) {
             throw new IllegalStateException("Remove the managed SSH key before changing its credentials");
         }
 
@@ -325,9 +324,7 @@ public class GitIntegrationService {
                 ? GitTransport.HTTP : integration.getTransport();
         boolean hasNewPrivateKey = !isBlank(integration.getSshPrivateKey());
         boolean hasNewKnownHosts = !isBlank(integration.getSshKnownHosts());
-        boolean endpointChanged = existing != null
-                && (existing.getProviderType() != integration.getProviderType()
-                    || !Objects.equals(existing.getUrl(), integration.getUrl()));
+        boolean endpointChanged = existing != null && endpointChanged(existing, integration);
         if (endpointChanged && isBlank(integration.getToken())) {
             throw new IllegalArgumentException("A new API token is required when changing the provider or URL");
         }
@@ -370,7 +367,24 @@ public class GitIntegrationService {
         return value == null || value.isBlank();
     }
 
-    private void applyProviderDefaults(GitIntegration integration) {
+    /**
+     * Whether {@code submitted} points at another provider or URL than {@code existing} was saved
+     * for. A stored token is never sent to a changed endpoint, so such a change needs a new token.
+     */
+    static boolean endpointChanged(GitIntegration existing, GitIntegration submitted) {
+        return existing.getProviderType() != submitted.getProviderType()
+                || !Objects.equals(existing.getUrl(), submitted.getUrl());
+    }
+
+    /**
+     * Normalizes form input the way a save stores it: trimmed URL, fixed URL for
+     * cloud-only providers. The connection test applies it too, so it tests what a save stores.
+     */
+    void applyProviderDefaults(GitIntegration integration) {
+        // A pasted URL often carries a trailing space or newline, which would make every API call fail.
+        if (integration.getUrl() != null) {
+            integration.setUrl(integration.getUrl().trim());
+        }
         if (integration.getProviderType() == RepositoryType.GITHUB) {
             integration.setUrl("https://github.com");
         } else if (integration.getProviderType() == RepositoryType.BITBUCKET) {

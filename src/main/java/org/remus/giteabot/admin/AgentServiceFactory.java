@@ -20,6 +20,8 @@ import org.remus.giteabot.systemsettings.BotToolSelectionService;
 import org.remus.giteabot.systemsettings.McpToolSelectionService;
 import org.springframework.stereotype.Component;
 
+import java.util.Set;
+
 /**
  * Creates the per-bot agent services ({@link IssueImplementationService} and
  * {@link WriterAgentService}) from a {@link Bot}'s AI and Git integrations.
@@ -48,6 +50,7 @@ public class AgentServiceFactory {
     private final McpToolSelectionService mcpToolSelectionService;
     private final BotToolSelectionService botToolSelectionService;
     private final PythonExecutionService pythonExecution;
+    private final BotService botService;
 
     /**
      * Creates a per-bot {@link IssueImplementationService} using the bot's AI and Git integrations.
@@ -82,12 +85,14 @@ public class AgentServiceFactory {
         RepositoryPlatform platform = repositoryPlatformFactory.getPlatform(bot.getGitIntegration());
         McpToolCatalog mcpToolCatalog = discoverMcpToolCatalog(bot);
         requireSystemPrompt(bot);
+        Set<String> allowedUsernames = botService.getAllowedUsernames(bot);
         return new WriterAgentService(platform, aiClient, promptService, agentConfig,
                 agentSessionService, toolExecutionService, toolCatalog, workspaceService,
                 bot.getSystemPrompt().getWriterAgentSystemPrompt(),
                 mcpOrchestrationService, bot.getMcpConfiguration(), mcpToolCatalog,
                 botToolSelectionService.allowedBuiltinTools(bot.getToolConfiguration()),
-                getContextWindowTokens(bot), pythonExecution);
+                getContextWindowTokens(bot), pythonExecution,
+                username -> botService.isUsernameInSet(allowedUsernames, username));
     }
 
     private McpToolCatalog discoverMcpToolCatalog(Bot bot) {

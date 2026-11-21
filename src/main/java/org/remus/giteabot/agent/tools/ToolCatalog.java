@@ -124,6 +124,30 @@ public class ToolCatalog {
                     "Delete a file. Returns a warning if the file does not exist.",
                     objectSchema(prop("path", "string", "Repository-relative path to the file to delete."),
                             required("path"))),
+            entry("download-file", ToolKind.FILE, EnumSet.of(Role.CODING),
+                    "Download a file from an HTTPS URL into the workspace. The server fetches the bytes and "
+                            + "writes them itself, so binary files (images, PDFs, audio, fonts) arrive intact "
+                            + "and never pass through you. Only operator-allowed hosts and paths are accepted. "
+                            + "Returns the path, size, detected MIME type and SHA-256; the commit records the "
+                            + "source automatically. Like any file change it needs a validation tool afterwards.",
+                    objectSchema(
+                            prop("url",       "string",  "HTTPS URL to fetch."),
+                            prop("path",      "string",  "Repository-relative target path. Parent directories are created."),
+                            prop("overwrite", "boolean", "Overwrite an existing file. Default false."),
+                            required("url", "path")))
+                .withHint("**Bring a binary file into the repository** (an image, PDF or other asset an MCP tool returned as a URL): `download-file` stores it without the bytes passing through you — never try to write binary content with `write-file`."),
+            entry("upload-file", ToolKind.FILE, EnumSet.of(Role.CODING),
+                    "Send a workspace file to an HTTPS upload URL, typically a pre-signed URL an MCP tool "
+                            + "prepared. The server sends the bytes; they never pass through you. Only "
+                            + "operator-allowed hosts and paths are accepted, and files ignored by .gitignore "
+                            + "are refused. Does not change the workspace. Returns the HTTP status and size sent.",
+                    objectSchema(
+                            prop("path",        "string", "Repository-relative path of the file to send."),
+                            prop("url",         "string", "HTTPS upload URL."),
+                            prop("method",      "string", "PUT (default) or POST."),
+                            prop("contentType", "string", "Content-Type header. Defaults to the detected MIME type."),
+                            required("path", "url")))
+                .withHint("**Hand a repository file to an external service**: `upload-file` sends it to the upload URL the service gave you; `file-info` gives the size such a service may ask for first."),
 
             // ---- repository exploration (coding + writer; read-only entries opt in to review) ----
             entry("branch-switcher", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER),
@@ -199,6 +223,13 @@ public class ToolCatalog {
                     objectSchema(
                             arrayProp("paths", "Repository-relative paths of changed files, up to 8."),
                             required("paths"))),
+
+            entry("file-info", ToolKind.CONTEXT, EnumSet.of(Role.CODING, Role.WRITER, Role.REVIEW),
+                    "Return the size in bytes, MIME type (detected from the content) and SHA-256 of a "
+                            + "workspace file. Use it for binary files instead of `cat`.",
+                    objectSchema(
+                            prop("path", "string", "Repository-relative path to the file."),
+                            required("path"))),
 
             // Additional context aliases (silent at runtime — never advertised to the LLM
             // to avoid duplicate descriptors with conflicting docs).
@@ -613,6 +644,24 @@ public class ToolCatalog {
         return Optional.ofNullable(entry != null ? entry.schema() : null);
     }
 
+    /** The still-empty property a file-transfer tool needs before it can do anything. */
+    public Optional<String> missingConfiguration(String tool) {
+        var transfer = agentConfig.getFileTransfer();
+        return switch (normalize(tool)) {
+            case "download-file" -> isEmpty(transfer.getDownload().getAllowedHosts())
+                    ? Optional.of("agent.file-transfer.download.allowed-hosts") : Optional.empty();
+            case "upload-file" -> isEmpty(transfer.getUpload().getAllowedHosts())
+                    ? Optional.of("agent.file-transfer.upload.allowed-hosts")
+                    : isEmpty(transfer.getUpload().getAllowedPaths())
+                    ? Optional.of("agent.file-transfer.upload.allowed-paths") : Optional.empty();
+            default -> Optional.empty();
+        };
+    }
+
+    private static boolean isEmpty(List<String> values) {
+        return values == null || values.stream().allMatch(v -> v == null || v.isBlank());
+    }
+
     // ---------------------------------------------------------------- queries
 
     /** Classifies the tool by its <em>declared</em> kind. MCP detection is name-prefix based. */
@@ -638,6 +687,11 @@ public class ToolCatalog {
     public boolean isFile(String tool)       { return kindOf(tool) == ToolKind.FILE; }
     public boolean isValidation(String tool) { return kindOf(tool) == ToolKind.VALIDATION; }
     public boolean isMcp(String tool)        { return kindOf(tool) == ToolKind.MCP; }
+
+    /** Every {@link ToolKind#FILE} tool except {@code upload-file}, which only reads. */
+    public boolean mutatesWorkspace(String tool) {
+        return isFile(tool) && !"upload-file".equals(normalize(tool));
+    }
 
     /**
      * Whether the tool's output should be hidden from public issue/PR comments.

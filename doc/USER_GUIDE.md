@@ -269,7 +269,10 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For Azure DevOps: `https://dev.azure.com` (Services, every organization the token can access), `https://dev.azure.com/yourorg` (Services, one organization), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.
-3. Click **Save**
+3. Optionally click **Test connection**. It checks the values in the form without saving them: the bot asks the provider which account the token belongs to and shows its username, name and e-mail. On failure it shows the provider's answer (HTTP status and response body) or the connection error, e.g. an untrusted TLS certificate or an unknown host. Token scopes are not checked.
+    - When editing, a blank token field tests with the stored token, but only while provider and URL are unchanged; after changing either, enter the token again.
+    - Azure DevOps identifies a token per organization. If the URL names none (`https://dev.azure.com`), the test asks for an organization or collection the token can access. It is only used for the test and is not saved.
+4. Click **Save**
 
 The bot acts as the account the token belongs to. Its username is read from the provider with the token and cached for 5 minutes (`giteabot.git-user.cache-ttl`), so renaming the account on the provider is picked up without editing the integration. It is used as the mention alias (e.g. `@ai_bot`); the bot recognises itself as reviewer, assignee or author by the account's id. If the account cannot be read, webhook events are ignored and the failure is shown as the bot's **Last Error**. Saving the integration reads it right away. The username is shown in the Git integration and bot lists and on the dashboard; it is read for every integration at startup, and a dash means it has not been resolved yet.
 

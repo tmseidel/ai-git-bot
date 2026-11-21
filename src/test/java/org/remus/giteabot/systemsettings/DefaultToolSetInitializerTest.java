@@ -44,7 +44,7 @@ class DefaultToolSetInitializerTest {
                 .filter(name -> !BotToolConfigurationService.OPT_IN_TOOLS.contains(name))
                 .toList();
         assertThat(selected).containsAll(expected);
-        assertThat(selected).doesNotContain("execute-code");
+        assertThat(selected).doesNotContain("execute-code", "download-file", "upload-file");
     }
 
     @Test

@@ -6,6 +6,7 @@ import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.util.UrlRedaction;
 
 import java.util.EnumMap;
 import java.util.List;
@@ -179,7 +180,7 @@ public class IssueNotificationService {
                     ? " `[" + toolRequest.getId() + "]`" : "";
             comment.append("🔧 **Tool Execution**").append(id).append(": `").append(toolRequest.getTool());
             if (toolRequest.getArgs() != null && !toolRequest.getArgs().isEmpty()) {
-                comment.append(" ").append(String.join(" ", toolRequest.getArgs()));
+                comment.append(" ").append(UrlRedaction.redactAll(String.join(" ", toolRequest.getArgs())));
             }
             comment.append("`\n\n");
 
@@ -293,7 +294,9 @@ public class IssueNotificationService {
         if (toolReq.getArgs() != null && !toolReq.getArgs().isEmpty()) {
             comment.append(" ");
             // Truncate individual args to avoid dumping large content in comments
+            // Pre-signed URLs carry credentials in the query string.
             comment.append(toolReq.getArgs().stream()
+                    .map(UrlRedaction::redactAll)
                     .map(a -> a.length() > MAX_ARG_DISPLAY_CHARS
                             ? a.substring(0, MAX_ARG_DISPLAY_CHARS) + "…" : a)
                     .reduce((a, b) -> a + " " + b)

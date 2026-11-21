@@ -26,6 +26,7 @@ import org.remus.giteabot.prworkflow.readmesync.ReadmeSyncSlashCommandHandler;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
 import org.remus.giteabot.prworkflow.unittest.UnitTestSlashCommandHandler;
 import org.remus.giteabot.prworkflow.unittest.UnitTestWorkflow;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.RepositoryUser;
@@ -280,7 +281,8 @@ public class BotWebhookService {
      *                       {@code null} keeps the account's username
      * @return {@code true} when the comment was a learning command and has been handled
      */
-    public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload, String commentKind,
+    public boolean tryHandleLearningCommand(Bot bot, WebhookPayload payload,
+                                           PullRequestCommentKind commentKind,
                                            String effectiveAlias) {
         try {
             return feedbackCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias);
