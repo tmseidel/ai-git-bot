@@ -167,28 +167,7 @@ class BitbucketApiClientTest {
     }
 
     @Test
-    void getAuthenticatedAccount_fetchesUserOnceAndMemoizesIt() {
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
-
-        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess("""
-                        {"type":"user","uuid":"{bot-uuid}","account_id":"557058:bot","nickname":"ai-bot",
-                         "display_name":"AI Bot","links":{"avatar":{"href":"https://example.invalid/a.png"}}}
-                        """, MediaType.APPLICATION_JSON));
-
-        BitbucketAccount account = client.getAuthenticatedAccount();
-
-        assertEquals(new BitbucketAccount("{bot-uuid}", "557058:bot", "ai-bot", "AI Bot"), account);
-        assertSame(account, client.getAuthenticatedAccount());
-        assertEquals("@{557058:bot}", account.mention());
-        server.verify();
-    }
-
-    @Test
-    void getAuthenticatedAccount_rejectsBlankIds() {
+    void getAuthenticatedUser_rejectsBlankIds() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);

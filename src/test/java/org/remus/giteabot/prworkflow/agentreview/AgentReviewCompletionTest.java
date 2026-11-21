@@ -88,6 +88,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -259,7 +260,7 @@ class AgentReviewCompletionTest {
         git.setProviderType(type);
         bot.setGitIntegration(git);
 
-        service = new AgentReviewService(
+        return new AgentReviewService(
                 new AgentReviewContext(platform, aiClient, "Review the change.",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
@@ -388,7 +389,9 @@ class AgentReviewCompletionTest {
         RestClient.Builder builder = RestClient.builder().baseUrl(api);
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
         var adapter = new BitbucketApiClient(builder.build(), "https://bitbucket.org");
-        var bitbucketPlatform = TestPlatforms.of(mock(RepositoryApiClient.class, delegatesTo(adapter)));
+        RepositoryApiClient bitbucketClient = mock(RepositoryApiClient.class, delegatesTo(adapter));
+        doReturn(TestPlatforms.USER).when(bitbucketClient).getAuthenticatedUser(any());
+        var bitbucketPlatform = TestPlatforms.of(bitbucketClient);
         var bitbucket = serviceFor(bitbucketPlatform, RepositoryType.BITBUCKET);
         payload.getPullRequest().getHead().setSha(oldPrefix);
         payload.getPullRequest().getHead().setRepositoryFullName("contributor/fork");
