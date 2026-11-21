@@ -94,9 +94,9 @@ class OpenRouterProviderTest {
 
             assertThat(registry.getSuggestedModels().get(AiProviderType.OPENROUTER)).containsExactly(
                     "openrouter/auto",
-                    "deepseek/deepseek-v4.1-flash",
-                    "z-ai/glm-5.3-flash",
-                    "xiaomi/mimo-v2.6-flash");
+                    "tencent/hy4-flash",
+                    "deepseek/deepseek-v4.1-flash-1017",
+                    "z-ai/glm-5.3-flash");
         }
     }
 

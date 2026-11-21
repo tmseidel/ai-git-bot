@@ -22,9 +22,8 @@ public class AnthropicProviderMetadata implements AiProviderMetadata {
     public static final AiProviderType PROVIDER_TYPE = AiProviderType.ANTHROPIC;
     public static final String DEFAULT_API_URL = "https://api.anthropic.com";
     public static final String DEFAULT_API_VERSION = "2023-06-01";
-    // Current models checked against Anthropic's model list on 2026-10-18.
     public static final List<String> SUGGESTED_MODELS = List.of(
-            "claude-fable-5-1",
+            "claude-fable-5-2",
             "claude-opus-5-5",
             "claude-sonnet-5-5",
             "claude-haiku-5-5"
