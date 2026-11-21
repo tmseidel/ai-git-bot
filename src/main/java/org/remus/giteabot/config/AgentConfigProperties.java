@@ -52,6 +52,9 @@ public class AgentConfigProperties {
      */
     private CodeExecutionConfig codeExecution = new CodeExecutionConfig();
 
+    /** The {@code download-file} / {@code upload-file} tools; see doc/FILE_TRANSFER.md. */
+    private FileTransferConfig fileTransfer = new FileTransferConfig();
+
     /**
      * Context-size settings for prompts built during issue implementation.
      */
@@ -152,6 +155,34 @@ public class AgentConfigProperties {
          */
         private String sudoBinary = "/usr/bin/sudo";
     }
+    /** Empty host allowlists, and an empty upload path allowlist, disable the tools. */
+    @Data
+    public static class FileTransferConfig {
+
+        private DownloadConfig download = new DownloadConfig();
+
+        private UploadConfig upload = new UploadConfig();
+
+        private int maxRedirects = 3;
+
+        private boolean allowPrivateAddresses = false;
+
+        @Data
+        public static class DownloadConfig {
+            private List<String> allowedHosts = List.of();
+            private List<String> allowedPaths = List.of("**");
+            private DataSize maxFileSize = DataSize.ofMegabytes(25);
+            private List<String> allowedContentTypes = List.of();
+        }
+
+        @Data
+        public static class UploadConfig {
+            private List<String> allowedHosts = List.of();
+            private List<String> allowedPaths = List.of();
+            private DataSize maxFileSize = DataSize.ofMegabytes(25);
+        }
+    }
+
     @Data
     public static class SchemaConfig {
         /**

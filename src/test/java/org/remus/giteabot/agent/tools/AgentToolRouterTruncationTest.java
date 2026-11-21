@@ -95,7 +95,7 @@ class AgentToolRouterTruncationTest {
     private ToolResult executeCode(AgentConfigProperties config, String code) {
         ToolCatalog catalog = new ToolCatalog(config);
         ToolExecutionService tools = new ToolExecutionService(config, catalog,
-                new PackageManagerDetector(), new YarnCommandBuilder(config));
+                new PackageManagerDetector(), new YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config));
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, Set.of("execute-code", "cat"), new ProcessPythonExecutionService(config));
         ToolCallContext context = new ToolCallContext("owner", "repo", 1L, Workspace.unmanaged(workspace),

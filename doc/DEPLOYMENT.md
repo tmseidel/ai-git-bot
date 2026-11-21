@@ -211,6 +211,24 @@ These variables control how much repository and issue context is sent to the age
 
 See [Agent Documentation](AGENT.md) for full details.
 
+### File Transfer (Optional)
+
+Allowlists and limits of the opt-in `download-file` and `upload-file` agent tools. They are global; whether a bot may use the tools is decided by selecting them in its tool configuration. An empty host allowlist disables the tool, and `upload-file` also stays disabled until `AGENT_FILE_TRANSFER_UPLOAD_ALLOWED_PATHS` is set. List values are comma-separated. Timeouts reuse `AGENT_VALIDATION_TOOL_TIMEOUT_SECONDS`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_FILE_TRANSFER_DOWNLOAD_ALLOWED_HOSTS` |  | Hosts `download-file` may fetch from: exact host (`files.example.com`) or suffix wildcard (`*.example.com`, any subdomain). Empty disables the tool. |
+| `AGENT_FILE_TRANSFER_DOWNLOAD_ALLOWED_PATHS` | `**` | Repository-relative globs a download may be written to (e.g. `assets/**`). |
+| `AGENT_FILE_TRANSFER_DOWNLOAD_MAX_FILE_SIZE` | `25MB` | Largest file a download may produce; enforced while streaming. |
+| `AGENT_FILE_TRANSFER_DOWNLOAD_ALLOWED_CONTENT_TYPES` |  | MIME types a download may have, detected from the file's bytes (e.g. `image/png,image/jpeg`). Empty accepts any type. |
+| `AGENT_FILE_TRANSFER_UPLOAD_ALLOWED_HOSTS` |  | Hosts `upload-file` may send to; same pattern syntax. Empty disables the tool. |
+| `AGENT_FILE_TRANSFER_UPLOAD_ALLOWED_PATHS` |  | Repository-relative globs of files that may be uploaded (e.g. `inputs/**`). Empty disables the tool; there is deliberately no default. |
+| `AGENT_FILE_TRANSFER_UPLOAD_MAX_FILE_SIZE` | `25MB` | Largest file that may be uploaded. |
+| `AGENT_FILE_TRANSFER_MAX_REDIRECTS` | `3` | Redirects one transfer may follow; every hop is checked like the first URL. |
+| `AGENT_FILE_TRANSFER_ALLOW_PRIVATE_ADDRESSES` | `false` | Permit loopback, private, link-local (cloud metadata) and other internal addresses. Leave `false` in production. |
+
+See [Binary Assets](FILE_TRANSFER.md) for the security model and the `Asset-Source` commit trailers.
+
 ### Workspaces (Optional)
 
 | Variable | Default | Description |

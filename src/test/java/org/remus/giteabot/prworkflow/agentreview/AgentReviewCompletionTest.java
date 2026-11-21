@@ -242,7 +242,7 @@ class AgentReviewCompletionTest {
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, new PackageManagerDetector(),
-                        new YarnCommandBuilder(config)), catalog, workspaceService,
+                        new YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config)), catalog, workspaceService,
                 config, null, bot, eventHooks, null, reviewService, submissionExecutor, snapshotService,
                 new org.remus.giteabot.review.structured.ReviewLookupToolExecutor(
                         new org.remus.giteabot.review.structured.PublishedReviewLookup(

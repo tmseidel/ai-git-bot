@@ -1,6 +1,7 @@
 package org.remus.giteabot.agent.validation;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.filetransfer.BinaryFiles;
 import org.remus.giteabot.repository.SshEndpoint;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryCredentials;
@@ -22,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -61,6 +63,9 @@ public class Workspace implements AutoCloseable {
     private RepositoryCredentials repositoryCredentials;
     private boolean usesAuthorizationHeader;
     private volatile boolean closed;
+    private final Map<String, AssetSource> assetSources = new LinkedHashMap<>();
+
+    record AssetSource(String path, String url, String sha256) { }
 
     /**
      * @param root           the private temporary parent, which contains the repository directory
@@ -136,6 +141,8 @@ public class Workspace implements AutoCloseable {
             return false;
         }
 
+        commitMessage = withAssetSourceTrailers(commitMessage);
+
         // The identity is passed only to this commit: the environment overrides any
         // user.*, author.* or committer.* entry the workspace's .git/config may contain.
         CommandResult commitResult = GitCommandRunner.run(directory.toFile(),
@@ -165,6 +172,38 @@ public class Workspace implements AutoCloseable {
 
         log.info("Successfully committed and pushed to branch '{}'", branchName);
         return true;
+    }
+
+    public synchronized void recordAssetSource(String path, String url, String sha256) {
+        assetSources.remove(path);
+        assetSources.put(path, new AssetSource(path, url, sha256));
+    }
+
+    /** One {@code Asset-Source} trailer per recorded download whose file is present and unchanged. */
+    public synchronized String withAssetSourceTrailers(String commitMessage) {
+        List<String> trailers = new ArrayList<>();
+        for (AssetSource source : List.copyOf(assetSources.values())) {
+            Path file = directory.resolve(source.path());
+            try {
+                if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                        && source.sha256().equals(BinaryFiles.sha256(file))) {
+                    trailers.add("Asset-Source: " + source.path() + " " + source.url() + " sha256:" + source.sha256());
+                }
+            } catch (IOException e) {
+                log.warn("Could not hash downloaded file {}: {}", source.path(), e.getMessage());
+            }
+        }
+        if (trailers.isEmpty()) {
+            return commitMessage;
+        }
+        return commitMessage.stripTrailing() + "\n\n" + String.join("\n", trailers);
+    }
+
+    /** Fails closed: when Git cannot answer, the path counts as ignored. */
+    public boolean isIgnored(String relativePath) {
+        CommandResult result = git(10, "check-ignore", "--verbose", "--non-matching", "--", relativePath);
+        // --non-matching prints "::\t<path>" for a path no pattern matches.
+        return result.output() == null || !result.output().strip().startsWith("::");
     }
 
     /**

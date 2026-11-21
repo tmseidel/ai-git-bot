@@ -15,6 +15,7 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.McpConfiguration;
+import org.remus.giteabot.util.UrlRedaction;
 import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
@@ -132,10 +133,10 @@ public class AgentToolRouter {
             return denied;
         }
         if (origin == null) {
-            log.debug("Executing tool: {} {}", tool, String.join(" ", context.args()));
+            log.debug("Executing tool: {} {}", tool, UrlRedaction.redactAll(String.join(" ", context.args())));
         } else {
             log.debug("Executing nested tool (from {}): {} {}", origin, tool,
-                    String.join(" ", context.args()));
+                    UrlRedaction.redactAll(String.join(" ", context.args())));
         }
         try {
             if (catalog.kindOf(tool) == ToolKind.AGENT_CONTROL) {

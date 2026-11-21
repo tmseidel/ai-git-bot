@@ -122,7 +122,7 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("Main.java"), "class Main {}\n");
         ToolExecutionService tools =
                 new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
-                        new YarnCommandBuilder(CONFIG));
+                        new YarnCommandBuilder(CONFIG), new org.remus.giteabot.agent.filetransfer.FileTransferService(CONFIG));
         Program program = new Program("cat", "{\"path\": \"Main.java\"}");
 
         ToolResult result = router(tools, botWithExecuteCode(), program)
@@ -157,6 +157,21 @@ class AgentToolRouterExecuteCodeTest {
 
         assertThat(program.nested.success()).isFalse();
         assertThat(program.nested.error()).contains("cannot be called from a program");
+        verifyNoInteractions(tools);
+    }
+
+    @Test
+    void aProgramCannotTransferFiles() throws IOException {
+        Path workspace = Files.createTempDirectory("router-transfer");
+        ToolExecutionService tools = mock(ToolExecutionService.class);
+        Program program = new Program("upload-file", "{\"path\": \"a.png\", \"url\": \"https://h/u\"}");
+
+        router(tools, Set.of("execute-code", "upload-file", "download-file", "file-info"), program)
+                .execute(AgentToolRouter.Mode.CODING, context(workspace, "print(1)"));
+
+        assertThat(program.nested.error()).contains("cannot be called from a program");
+        assertThat(program.advertised).extracting("name")
+                .contains("file-info").doesNotContain("upload-file", "download-file");
         verifyNoInteractions(tools);
     }
 
@@ -241,7 +256,7 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("Main.java"), "class Main {}\n");
         ToolExecutionService tools =
                 new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
-                        new YarnCommandBuilder(CONFIG));
+                        new YarnCommandBuilder(CONFIG), new org.remus.giteabot.agent.filetransfer.FileTransferService(CONFIG));
         String program = """
                 import ai_git_bot
 
@@ -299,7 +314,7 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("SWREQ.md"), "one\ntwo\nthree\n");
         ToolExecutionService tools =
                 new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
-                        new YarnCommandBuilder(CONFIG));
+                        new YarnCommandBuilder(CONFIG), new org.remus.giteabot.agent.filetransfer.FileTransferService(CONFIG));
         String program = """
                 import ai_git_bot
 
@@ -331,7 +346,7 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("items/mdeg_110100-11_SWREQ_2.md"), "# Two\ncharlie\n");
         ToolExecutionService tools =
                 new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
-                        new YarnCommandBuilder(CONFIG));
+                        new YarnCommandBuilder(CONFIG), new org.remus.giteabot.agent.filetransfer.FileTransferService(CONFIG));
         // `tools` bare, no import: that is the form the tool description gives the model.
         String program = """
                 found = tools.call("find", {"args": ["items/mdeg_*_SWREQ_*.md"]})["output"]
@@ -364,7 +379,7 @@ class AgentToolRouterExecuteCodeTest {
         Files.writeString(workspace.resolve("README.md"), "readable\n");
         ToolExecutionService tools =
                 new ToolExecutionService(CONFIG, new ToolCatalog(CONFIG), new PackageManagerDetector(),
-                        new YarnCommandBuilder(CONFIG));
+                        new YarnCommandBuilder(CONFIG), new org.remus.giteabot.agent.filetransfer.FileTransferService(CONFIG));
         String program = """
                 written = tools.call("write-file", {"path": "generated.txt", "content": "x"})
                 print("write success:", written["success"])
