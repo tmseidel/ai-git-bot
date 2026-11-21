@@ -50,9 +50,15 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
     }
 
     @Override
+    public void canonicalize(AiIntegration integration) {
+        if (integration.getOpenRouterRegion() != null) {
+            integration.setApiUrl(integration.getOpenRouterRegion().getApiRoot());
+        }
+    }
+
+    @Override
     public void validateConfiguration(AiIntegration integration, String apiKey) {
         validateSettings(integration);
-        integration.setApiUrl(integration.getOpenRouterRegion().getApiRoot());
         if (apiKey == null || apiKey.isBlank()) {
             if (integration.getId() == null || integration.getApiKey() == null || integration.getApiKey().isBlank()) {
                 throw new IllegalArgumentException("OpenRouter requires an inference API key");

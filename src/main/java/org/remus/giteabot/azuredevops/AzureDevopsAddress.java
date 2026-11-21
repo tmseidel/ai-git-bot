@@ -73,6 +73,43 @@ public record AzureDevopsAddress(String organization, String project, String nam
     }
 
     /**
+     * Returns the organization (on Azure DevOps Server, the collection) that {@code url} names
+     * itself: the host label of a legacy {@code {organization}.visualstudio.com} URL, else the
+     * last path segment. Returns {@code null} when the URL names none, as bare
+     * {@code https://dev.azure.com} does. This is the organization
+     * {@link #isOrganizationScopedBy(String, String)} recognises as already scoped.
+     */
+    public static String organizationOf(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        String host = uri.getHost();
+        if (host != null && host.toLowerCase(Locale.ROOT).endsWith(".visualstudio.com")) {
+            int firstDot = host.indexOf('.');
+            if (firstDot > 0) {
+                return host.substring(0, firstDot);
+            }
+        }
+        String path = uri.getPath();
+        if (path == null) {
+            return null;
+        }
+        String[] segments = path.split("/");
+        for (int i = segments.length - 1; i >= 0; i--) {
+            if (!segments[i].isBlank()) {
+                return segments[i];
+            }
+        }
+        return null;
+    }
+
+    /**
      * Whether {@code url} already scopes {@code organization}, for callers holding only an
      * organization rather than a full address. See {@link #isOrganizationScopedBy(String)}.
      */

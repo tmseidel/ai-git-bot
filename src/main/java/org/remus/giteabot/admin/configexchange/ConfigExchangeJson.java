@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin.configexchange;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.remus.giteabot.admin.AdminUser;
 import org.remus.giteabot.admin.AiIntegration;
 import org.remus.giteabot.admin.Bot;
@@ -132,7 +133,11 @@ public final class ConfigExchangeJson {
         abstract String getWebhookPath();
     }
 
-    /** Hides the derived SSH-tracking predicate. */
+    /**
+     * Hides the derived SSH-tracking predicate, and accepts the {@code username} that documents
+     * exported before the bot's account was resolved from its token still carry.
+     */
+    @JsonIgnoreProperties({"username"})
     abstract static class GitIntegrationMixin {
         @JsonIgnore
         abstract boolean hasManagedSshKeyTracking();

@@ -9,6 +9,7 @@ import org.remus.giteabot.agent.tools.ToolCatalog;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.config.AgentConfigProperties;
+import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.mcp.McpOrchestrationService;
@@ -153,7 +154,7 @@ public class AgentReviewService {
                             () -> Thread.currentThread().isInterrupted(),
                             learningSettings.feedbackEnabled()
                                     ? org.remus.giteabot.learning.feedback.FeedbackHint.forReview(
-                                            mention(), result.reference())
+                                            mention(owner), result.reference())
                                     : null));
             return switch (publication.outcome()) {
                 case PUBLISHED -> ReviewResult.POSTED;
@@ -188,10 +189,17 @@ public class AgentReviewService {
                 repositoryPlatform, owner, repo, reviewedHeadSha);
     }
 
-    /** The bot's provider mention, or {@code null} when the integration has no username. */
-    private String mention() {
-        return bot.getGitIntegration() == null || bot.getGitIntegration().getUsername() == null
-                ? null : "@" + bot.getGitIntegration().getUsername();
+    /**
+     * The alias of the account the bot's token authenticates as, or {@code null} when that account
+     * cannot be resolved; the feedback hint then goes without a mention.
+     */
+    private String mention(String owner) {
+        try {
+            return new BotIdentity(repositoryPlatform.getUser(owner)).alias();
+        } catch (IllegalStateException e) {
+            log.debug("Bot account unavailable for the feedback hint: {}", e.getMessage());
+            return null;
+        }
     }
 
     private String providerName() {

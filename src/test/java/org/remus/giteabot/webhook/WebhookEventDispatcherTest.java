@@ -14,7 +14,7 @@ import org.remus.giteabot.admin.BotWebhookService;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
-import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.springframework.http.ResponseEntity;
 
 import java.util.concurrent.CompletableFuture;
@@ -423,7 +423,7 @@ class WebhookEventDispatcherTest {
     void feedbackComment_isConsumedBeforeTheReviewAgainCheck() {
         comment(BOT_ALIAS + " feedback O12-F1 incorrect, please review again");
         when(botWebhookService.tryHandleLearningCommand(bot, payload,
-                FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, BOT_ALIAS)).thenReturn(true);
+                PullRequestCommentKind.PR_COMMENT, BOT_ALIAS)).thenReturn(true);
 
         ResponseEntity<String> response = dispatcher.dispatch(bot,
                 eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
@@ -437,13 +437,58 @@ class WebhookEventDispatcherTest {
     void inlineFeedbackComment_isConsumedWithTheInlineKind() {
         comment(BOT_ALIAS + " feedback O12-A needs-improvement");
         when(botWebhookService.tryHandleLearningCommand(bot, payload,
-                FeedbackCommandHandler.COMMENT_KIND_INLINE, BOT_ALIAS)).thenReturn(true);
+                PullRequestCommentKind.INLINE_COMMENT, BOT_ALIAS)).thenReturn(true);
 
         ResponseEntity<String> response = dispatcher.dispatch(bot,
                 eventBuilder(WebhookEventKind.PR_INLINE_COMMENT).botMentioned(true).build());
 
         assertEquals("feedback recorded", response.getBody());
         verify(botWebhookService, never()).handleInlineComment(any(), any());
+    }
+
+    @Test
+    void feedbackInASubmittedReview_isConsumedBeforeTheClarification() {
+        WebhookPayload.Review review = new WebhookPayload.Review();
+        review.setId(7L);
+        review.setContent(BOT_ALIAS + " feedback O12 useful");
+        payload.setReview(review);
+        payload.setSender(sender("maintainer"));
+        when(botWebhookService.tryHandleLearningCommand(bot, payload,
+                PullRequestCommentKind.REVIEW, BOT_ALIAS)).thenReturn(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                event(WebhookEventKind.PR_REVIEW_SUBMITTED));
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).handleReviewSubmitted(any(), any());
+    }
+
+    @Test
+    void submittedReviewWithoutFeedback_keepsItsRouting() {
+        WebhookPayload.Review review = new WebhookPayload.Review();
+        review.setContent(BOT_ALIAS + " why is this a blocker?");
+        payload.setReview(review);
+        when(botWebhookService.tryHandleLearningCommand(bot, payload,
+                PullRequestCommentKind.REVIEW, BOT_ALIAS)).thenReturn(false);
+
+        dispatcher.dispatch(bot, event(WebhookEventKind.PR_REVIEW_SUBMITTED));
+
+        verify(botWebhookService).handleReviewSubmitted(bot, payload);
+    }
+
+    @Test
+    void feedbackOnAClosedPullRequest_isStillConsumed() {
+        payload.getPullRequest().setState("closed");
+        payload.getPullRequest().setMerged(true);
+        comment(BOT_ALIAS + " feedback O12-F1 useful");
+        when(botWebhookService.tryHandleLearningCommand(bot, payload,
+                PullRequestCommentKind.PR_COMMENT, BOT_ALIAS)).thenReturn(true);
+
+        ResponseEntity<String> response = dispatcher.dispatch(bot,
+                eventBuilder(WebhookEventKind.PR_COMMENT).botMentioned(true).build());
+
+        assertEquals("feedback recorded", response.getBody());
+        verify(botWebhookService, never()).handlePrComment(any(), any());
     }
 
     @Test

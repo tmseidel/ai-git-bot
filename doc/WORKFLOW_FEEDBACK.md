@@ -51,7 +51,13 @@ Mention the bot, the word `feedback`, the target, a verdict and a reason:
 
 Verdicts are `useful`, `incorrect`, `irrelevant` and `needs-improvement`. Only the first
 line is the command; everything after it is the reason (up to 4 000 characters), so
-pasting an explanation, a log snippet or a longer argument works.
+pasting an explanation, a log snippet or a longer argument works. Commands inside quoted
+lines (`> …`) and fenced code blocks are ignored, so quoting an example does not record it.
+
+The command works in a pull-request conversation comment, an inline (diff) comment, and the
+body of a submitted review on GitHub and Gitea. A submitted review is only recorded when the
+provider identifies it: Gitea's review webhook carries no review id, so feedback written there
+is refused with a message — post it as a comment instead.
 
 The bot answers with a `FB…` reference for the record it created, so the feedback can be
 quoted later:
@@ -100,16 +106,32 @@ superseded is refused with a pointer to the record that replaced it.
 
 Answers are rendered from the database — target, verdict, author, state, reason and
 timestamp — with no model involved, so the same question always produces the same answer.
+Each overview names the bot it belongs to: bots sharing one Git account answer the same
+mention, and each lists only its own records. Where the provider's URL scheme is known
+(Gitea, GitHub, GitLab, Bitbucket), entries link to their pull request and to the comment
+that submitted them; Azure DevOps entries are plain text.
+
+`feedback show` adds the record's history: when it was submitted, superseded (and by
+which record) or retracted, and by whom.
+
 Repository-wide listing shows records from other pull requests but stays inside the same
-bot and repository. Long lists are paginated and continue with a `page:` cursor line.
+bot and repository. Lists show 20 entries, newest first, and end with a line such as
+`@bot feedback list page: MjAuNGU3…` when more exist. The cursor is opaque and belongs to
+the listing that produced it: using it on another pull request, repository or bot, or
+switching between `list` and `list repository`, is refused.
 
 ## Known limits
 
 - **Only newly created comments are commands.** Editing an old comment does not re-run it,
   and deleting one does not retract it. Post a new comment instead.
 - **One comment is one record.** Webhook redelivery of the same comment resolves to the
-  stored record instead of creating a second one; a redelivered command does not produce a
-  second confirmation.
+  stored record instead of creating a second one, including when two deliveries arrive at
+  the same moment.
+- **Confirmations are tracked, not guaranteed.** The bot records whether each confirmation
+  (`Recorded FB…`, `Retracted FB…`) was posted. A redelivery posts it again only when the
+  provider definitely refused the first one (a 4xx answer). After a timeout, a dropped
+  connection or a server error the comment may already be on the pull request, so it is not
+  repeated; the feedback itself is stored either way — check with `feedback show`.
 - **A reference is not a permission.** `O1234-F2` resolves only inside the bot, Git host,
   repository and pull request it was created in. The same-looking reference from another
   repository is reported as unknown.

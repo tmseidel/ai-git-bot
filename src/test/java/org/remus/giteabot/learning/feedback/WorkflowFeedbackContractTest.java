@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -99,10 +100,104 @@ class WorkflowFeedbackContractTest {
         feedbackService.submit(scope(repo), source(repo, "4"),
                 FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.IRRELEVANT, "", "alice");
 
-        assertEquals(1, feedbackService.list(scope(repo), true, 20, null).size());
-        assertEquals(1, feedbackService.list(scope(repo), false, 20, null).size());
+        assertEquals(1, feedbackService.list(scope(repo), true, 20, null).rows().size());
+        assertEquals(1, feedbackService.list(scope(repo), false, 20, null).rows().size());
         assertTrue(feedbackService.list(new FeedbackScope(1L, 2L, "other-org", repo, 1L), true, 20,
-                null).isEmpty());
+                null).rows().isEmpty());
+    }
+
+    @Test
+    void simultaneousDeliveriesOfOneCommentRecordOneAssessment() throws Exception {
+        String repo = "web-" + UUID.randomUUID();
+        long reviewId = finalizedReview(repo);
+        FeedbackSource source = source(repo, "race");
+        int deliveries = 6;
+        java.util.concurrent.ExecutorService pool =
+                java.util.concurrent.Executors.newFixedThreadPool(deliveries);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            List<java.util.concurrent.Future<FeedbackService.Recorded>> results =
+                    new java.util.ArrayList<>();
+            for (int i = 0; i < deliveries; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return feedbackService.submit(scope(repo), source,
+                            FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.USEFUL,
+                            "Same comment.", "alice");
+                }));
+            }
+            start.countDown();
+            List<FeedbackService.Recorded> recorded = new java.util.ArrayList<>();
+            for (var result : results) {
+                recorded.add(result.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            }
+
+            assertEquals(1, recorded.stream().filter(r -> !r.duplicate()).count(),
+                    "exactly one delivery creates the record");
+            assertEquals(1, recorded.stream().map(FeedbackService.Recorded::reference).distinct().count());
+            assertEquals(1, feedbackService.list(scope(repo), false, 20, null).rows().size());
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void conflictingActorsKeepTheirOwnAssessments() {
+        String repo = "web-" + UUID.randomUUID();
+        long reviewId = finalizedReview(repo);
+        String finding = referenceOf(reviewId);
+
+        feedbackService.submit(scope(repo), source(repo, "a"), FeedbackTarget.finding(finding, 1),
+                FeedbackVerdict.USEFUL, "", "alice");
+        feedbackService.submit(scope(repo), source(repo, "b"), FeedbackTarget.finding(finding, 1),
+                FeedbackVerdict.INCORRECT, "", "bob");
+
+        assertEquals(2, feedbackService.list(scope(repo), false, 20, null).rows().stream()
+                .filter(row -> row.state() == FeedbackState.EFFECTIVE).count());
+    }
+
+    @Test
+    void aLongRepositoryNameWithoutProviderIdIsStored() {
+        String repo = "a-repository-whose-name-is-long-enough-to-overflow-" + UUID.randomUUID();
+        long reviewId = finalizedReview(repo);
+        FeedbackSource source = new FeedbackSource(1L, 2L, "acme", repo, null,
+                FeedbackSource.SubjectKind.PR, 1L, "INLINE_COMMENT", "123456789012");
+
+        FeedbackService.Recorded recorded = feedbackService.submit(scope(repo), source,
+                FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.USEFUL, "", "alice");
+
+        assertTrue(feedbackService.submit(scope(repo), source,
+                FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.USEFUL, "", "alice")
+                .duplicate());
+        assertEquals(recorded.reference(),
+                feedbackRepository.findBySourceKey(source.sourceKey()).orElseThrow().getReference());
+    }
+
+    @Test
+    void historyAndConfirmationsFollowTheRecord() {
+        String repo = "web-" + UUID.randomUUID();
+        long reviewId = finalizedReview(repo);
+        FeedbackService.Recorded first = feedbackService.submit(scope(repo), source(repo, "h1"),
+                FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.USEFUL, "", "alice");
+        feedbackService.markAcknowledgement(first.acknowledgementEventId(),
+                FeedbackAcknowledgement.FAILED);
+
+        FeedbackService.Recorded replay = feedbackService.submit(scope(repo), source(repo, "h1"),
+                FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.USEFUL, "", "alice");
+        assertEquals(FeedbackAcknowledgement.FAILED, replay.acknowledgement());
+        assertTrue(feedbackService.claimAcknowledgementRetry(replay.acknowledgementEventId()));
+        assertFalse(feedbackService.claimAcknowledgementRetry(replay.acknowledgementEventId()), "a claimed retry cannot be claimed twice");
+
+        FeedbackService.Recorded second = feedbackService.submit(scope(repo), source(repo, "h2"),
+                FeedbackTarget.output(referenceOf(reviewId)), FeedbackVerdict.INCORRECT, "", "alice");
+        feedbackService.retract(scope(repo), second.reference(), "alice");
+
+        assertEquals(List.of(FeedbackEventType.SUBMITTED, FeedbackEventType.SUPERSEDED),
+                feedbackService.show(scope(repo), first.reference()).orElseThrow().history().stream()
+                        .map(FeedbackService.HistoryEntry::type).toList());
+        assertEquals(List.of(FeedbackEventType.SUBMITTED, FeedbackEventType.RETRACTED),
+                feedbackService.show(scope(repo), second.reference()).orElseThrow().history().stream()
+                        .map(FeedbackService.HistoryEntry::type).toList());
     }
 
     // ------------------------------------------------------------------ fixtures

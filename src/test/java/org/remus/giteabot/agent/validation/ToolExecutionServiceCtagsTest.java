@@ -27,7 +27,7 @@ class ToolExecutionServiceCtagsTest {
         service = new ToolExecutionService(config,
                 new org.remus.giteabot.agent.tools.ToolCatalog(config),
                 new org.remus.giteabot.agent.packagemanager.PackageManagerDetector(),
-                new org.remus.giteabot.agent.packagemanager.YarnCommandBuilder(config));
+                new org.remus.giteabot.agent.packagemanager.YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config));
     }
 
     // ---------------------------------------------------------------

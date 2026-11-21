@@ -145,6 +145,7 @@ class AgentReviewCompletionTest {
     @BeforeEach
     void setUp() {
         platform = TestPlatforms.of(repositoryClient);
+        lenient().when(repositoryClient.getAuthenticatedUser(any())).thenReturn(TestPlatforms.USER);
         WebhookPayload.Owner owner = new WebhookPayload.Owner();
         owner.setLogin("owner");
         WebhookPayload.Repository repository = new WebhookPayload.Repository();
@@ -258,12 +259,12 @@ class AgentReviewCompletionTest {
         git.setProviderType(type);
         bot.setGitIntegration(git);
 
-        return new AgentReviewService(
-                new AgentReviewContext(platform, aiClient, "Review the change.", "bot",
+        service = new AgentReviewService(
+                new AgentReviewContext(platform, aiClient, "Review the change.",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
                 new ToolExecutionService(config, catalog, new PackageManagerDetector(),
-                        new YarnCommandBuilder(config)), catalog, workspaceService,
+                        new YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config)), catalog, workspaceService,
                 config, null, bot, eventHooks, null, reviewService, submissionExecutor, snapshotService,
                 new org.remus.giteabot.review.structured.ReviewLookupToolExecutor(
                         new org.remus.giteabot.review.structured.PublishedReviewLookup(

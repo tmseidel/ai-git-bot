@@ -1,6 +1,7 @@
 package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.bitbucket.model.BitbucketAccount;
 import org.remus.giteabot.bitbucket.model.BitbucketCommit;
 import org.remus.giteabot.bitbucket.model.BitbucketEmail;
 import org.remus.giteabot.bitbucket.model.BitbucketReviewComment;
@@ -49,7 +50,6 @@ public class BitbucketApiClient implements RepositoryApiClient {
     private static final Pattern REPOSITORY_PATH = Pattern.compile("[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+");
     private final RestClient restClient;
     private final String cloneUrl;
-    private volatile BitbucketAccount authenticatedAccount;
 
     /**
      * Creates a BitbucketApiClient with the given RestClient and clone URL.
@@ -60,21 +60,6 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public BitbucketApiClient(RestClient restClient, String cloneUrl) {
         this.restClient = restClient;
         this.cloneUrl = cloneUrl;
-    }
-
-    /**
-     * Returns the Bitbucket account behind the configured e-mail/API-token pair.
-     * The result is memoized; clients are re-created whenever the integration changes.
-     *
-     * @throws IllegalStateException when Bitbucket returns neither an account id nor a uuid
-     */
-    public BitbucketAccount getAuthenticatedAccount() {
-        BitbucketAccount account = authenticatedAccount;
-        if (account == null) {
-            account = fetchAuthenticatedAccount();
-            authenticatedAccount = account;
-        }
-        return account;
     }
 
     /**
@@ -89,7 +74,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
         BitbucketAccount account = fetchAuthenticatedAccount();
         String email = fetchPrimaryEmail();
         String username = email != null ? email : account.accountId();
-        return new RepositoryUser(account.accountId(), username, account.displayName(), email);
+        return new RepositoryUser(account.accountId(), username, account.name(), email);
     }
 
     private BitbucketAccount fetchAuthenticatedAccount() {

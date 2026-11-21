@@ -11,9 +11,13 @@ import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
 import org.remus.giteabot.admin.GitIntegration;
 import org.remus.giteabot.admin.RepositoryPlatformFactory;
+import org.remus.giteabot.bitbucket.model.BitbucketAccount;
+import org.remus.giteabot.event.BotAccountResolver;
 import org.remus.giteabot.event.PullRequestStateTracker;
 import org.remus.giteabot.event.WebhookEvent;
 import org.remus.giteabot.event.WebhookEventKind;
+import org.remus.giteabot.repository.RepositoryPlatform;
+import org.remus.giteabot.repository.model.RepositoryUser;
 
 import java.util.HashMap;
 import java.util.List;
@@ -41,7 +45,7 @@ class BitbucketWebhookTranslatorTest {
     @Mock
     private RepositoryPlatformFactory repositoryPlatformFactory;
     @Mock
-    private BitbucketApiClient bitbucketClient;
+    private RepositoryPlatform platform;
     @Mock
     private BotService botService;
 
@@ -50,16 +54,16 @@ class BitbucketWebhookTranslatorTest {
 
     @BeforeEach
     void setUp() {
-        translator = new BitbucketWebhookTranslator(repositoryPlatformFactory, botService, new PullRequestStateTracker());
+        translator = new BitbucketWebhookTranslator(new BotAccountResolver(repositoryPlatformFactory, botService),
+                new PullRequestStateTracker());
         GitIntegration integration = new GitIntegration();
-        integration.setUsername("bot@example.com");
         bot = new Bot();
         bot.setName("test-bot");
         bot.setGitIntegration(integration);
 
-        lenient().when(repositoryPlatformFactory.getApiClient(integration)).thenReturn(bitbucketClient);
-        lenient().when(bitbucketClient.getAuthenticatedAccount())
-                .thenReturn(new BitbucketAccount("{uuid-ai_bot}", "acc-ai_bot", "ai_bot", "AI Bot"));
+        lenient().when(repositoryPlatformFactory.getPlatform(integration)).thenReturn(platform);
+        lenient().when(platform.getUser(null))
+                .thenReturn(new RepositoryUser("acc-ai_bot", "bot@example.com", "AI Bot", "bot@example.com"));
     }
 
     private WebhookEvent translate(String eventKey, Map<String, Object> raw) {
@@ -77,14 +81,6 @@ class BitbucketWebhookTranslatorTest {
     }
 
     @Test
-    void reviewerMatchedByUuidWhenAccountIdMissing_isTheBotAsReviewer() {
-        WebhookEvent event = translate("pullrequest:created",
-                pullRequestPayload(List.of(Map.of("uuid", "{uuid-ai_bot}")), null));
-
-        assertTrue(event.botIsReviewer());
-    }
-
-    @Test
     void reviewerWithBotUsernameButOtherAccount_isNotTheBot() {
         Map<String, Object> impostor = Map.of("nickname", "unrelated-bot-name", "account_id", "acc-other");
 
@@ -95,7 +91,7 @@ class BitbucketWebhookTranslatorTest {
 
     @Test
     void unresolvableBotAccount_ignoresEventAndRecordsBotError() {
-        when(bitbucketClient.getAuthenticatedAccount()).thenThrow(new IllegalStateException("401"));
+        when(platform.getUser(null)).thenThrow(new IllegalStateException("401"));
 
         WebhookEvent event = translate("pullrequest:created", pullRequestPayload(List.of(user("ai_bot")), null));
 
@@ -104,20 +100,9 @@ class BitbucketWebhookTranslatorTest {
     }
 
     @Test
-    void missingAccountEmail_ignoresEventAndRecordsBotError() {
-        when(repositoryPlatformFactory.getApiClient(bot.getGitIntegration()))
-                .thenThrow(new IllegalStateException("no Atlassian account e-mail configured"));
-
-        WebhookEvent event = translate("pullrequest:created", pullRequestPayload(List.of(user("ai_bot")), null));
-
-        assertEquals(WebhookEventKind.IGNORED, event.kind());
-        verify(botService).recordError(eq(bot), contains("no Atlassian account e-mail configured"));
-    }
-
-    @Test
     void readableMention_fallsBackToRawMentionWithoutName() {
-        assertEquals("@{acc}", new BitbucketAccount("{u}", "acc", null, null).readableMention());
-        assertEquals("@ai-bot", new BitbucketAccount("{u}", "acc", "ai-bot", null).readableMention());
+        assertEquals("@{acc}", new BitbucketAccount("acc", null, null).readableMention());
+        assertEquals("@ai-bot", new BitbucketAccount("acc", "ai-bot", null).readableMention());
     }
 
     // ---- Pull request lifecycle ----

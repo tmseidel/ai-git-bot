@@ -47,7 +47,7 @@ class ReviewToolTruncationTest {
         AgentConfigProperties config = new AgentConfigProperties();
         ToolCatalog catalog = new ToolCatalog(config);
         ToolExecutionService tools = new ToolExecutionService(config, catalog,
-                new PackageManagerDetector(), new YarnCommandBuilder(config));
+                new PackageManagerDetector(), new YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config));
         Set<String> allowed = Set.of("cat");
         AgentToolRouter router = new AgentToolRouter(tools, catalog, null, null, McpToolCatalog.empty(),
                 null, allowed, null);

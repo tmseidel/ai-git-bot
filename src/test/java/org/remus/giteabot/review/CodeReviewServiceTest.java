@@ -19,6 +19,7 @@ import org.remus.giteabot.session.SessionService;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,6 +33,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -52,12 +54,16 @@ class CodeReviewServiceTest {
     private static final String TEST_PROMPT = "test prompt";
     private static final String SESSION_PROMPT_KEY = "system-prompt:1";
 
+    /** The account the bot's integration authenticates as, whatever the owner. */
+    private static final java.util.function.Function<String, org.remus.giteabot.repository.model.RepositoryUser> BOT_ACCOUNT =
+            owner -> new org.remus.giteabot.repository.model.RepositoryUser("1", "ai_bot", null, null);
+
     private CodeReviewService codeReviewService;
 
     @BeforeEach
     void setUp() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                sessionService, BOT_ACCOUNT, new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
                 120000, 8, 60000, "");
     }
 
@@ -84,7 +90,7 @@ class CodeReviewServiceTest {
     @Test
     void reviewPullRequest_excludedFilePatterns_stripsMatchingFilesFromDiff() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                sessionService, BOT_ACCOUNT, new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
                 120000, 8, 60000, "package-lock.json, *.min.js");
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
@@ -147,7 +153,7 @@ class CodeReviewServiceTest {
     @Test
     void reviewPullRequest_withConfiguredSystemPrompt_usesBotPrompt() {
         codeReviewService = new CodeReviewService(repositoryClient, aiClient,
-                sessionService, "ai_bot", new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt",
+                sessionService, BOT_ACCOUNT, new ReviewConfigProperties(), SESSION_PROMPT_KEY, "Configured review prompt",
                 120000, 8, 60000, "");
         WebhookPayload payload = createTestPayload();
         ReviewSession session = new ReviewSession("testowner", "testrepo", 1L, null);
@@ -603,7 +609,14 @@ class CodeReviewServiceTest {
     @Test
     void handleReviewSubmitted_botOwnComments_filtered() {
         WebhookPayload payload = createReviewSubmittedPayload();
-
+        // Everything an unfiltered comment would get answered with, so only the filter can
+        // keep the AI from being asked; lenient because the filter returns before using it.
+        ReviewSession session = new ReviewSession("testowner", "testrepo", 2L, null);
+        lenient().when(sessionService.getOrCreateSession("testowner", "testrepo", 2L, SESSION_PROMPT_KEY))
+                .thenReturn(session);
+        lenient().when(sessionService.addMessage(any(), anyString(), anyString())).thenReturn(session);
+        lenient().when(sessionService.toAiMessages(session)).thenReturn(List.of());
+        lenient().when(aiClient.chat(anyList(), anyString(), anyString(), any())).thenReturn("answer");
 
         GiteaReview review = new GiteaReview();
         review.setId(10L);
@@ -616,8 +629,10 @@ class CodeReviewServiceTest {
         botOwnComment.setBody("## 🤖 Bot Response\n\nSome answer mentioning @ai_bot");
         botOwnComment.setPath("src/main/java/Foo.java");
         botOwnComment.setLine(10);
+        // Recognised by the id of BOT_ACCOUNT, not by the login.
         GiteaReview.GiteaUser botUser = new GiteaReview.GiteaUser();
-        botUser.setLogin("ai_bot");
+        botUser.setId(1L);
+        botUser.setLogin("renamed_bot");
         botOwnComment.setUser(botUser);
 
         when(repositoryClient.getReviewComments("testowner", "testrepo", 2L, 10L))
@@ -628,6 +643,30 @@ class CodeReviewServiceTest {
         // Bot's own comment should be filtered out — no AI call, no reaction
         verify(aiClient, never()).chat(anyList(), anyString(), anyString(), anyString());
         verify(repositoryClient, never()).addReaction(anyString(), anyString(), any(CommentId.class), anyString());
+    }
+
+    @Test
+    void handleReviewSubmitted_botAccountUnresolvable_answersNothingAndDoesNotThrow() {
+        // Without the bot's account its own comments cannot be told apart, so none is answered.
+        codeReviewService = new CodeReviewService(repositoryClient, aiClient,
+                sessionService, owner -> {
+                    throw new IllegalStateException("provider down");
+                }, new ReviewConfigProperties(), SESSION_PROMPT_KEY, TEST_PROMPT,
+                120000, 8, 60000, "");
+        WebhookPayload payload = createReviewSubmittedPayload();
+        GiteaReview review = new GiteaReview();
+        review.setId(10L);
+        when(repositoryClient.getReviews("testowner", "testrepo", 2L)).thenReturn(List.of(review));
+        GiteaReviewComment humanComment = new GiteaReviewComment();
+        humanComment.setId(CommentId.NumericCommentId.of(201L));
+        humanComment.setBody("@ai_bot why is this needed?");
+        when(repositoryClient.getReviewComments("testowner", "testrepo", 2L, 10L))
+                .thenReturn(List.of(humanComment));
+
+        assertDoesNotThrow(() -> codeReviewService.handleReviewSubmitted(payload, null));
+
+        verify(sessionService, never()).getOrCreateSession(any(), any(), any(), any());
+        verify(aiClient, never()).chat(anyList(), anyString(), anyString(), any());
     }
 
     private WebhookPayload createTestPayload() {

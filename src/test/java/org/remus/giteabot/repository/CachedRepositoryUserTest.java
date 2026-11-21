@@ -109,6 +109,19 @@ class CachedRepositoryUserTest {
         verify(client, times(1)).getAuthenticatedUser(anyString());
     }
 
+    @Test
+    void peek_returnsTheCachedUserWithoutAskingEvenAfterItExpired() {
+        assertEquals(java.util.Optional.empty(), user.peek());
+        verifyNoInteractions(client);
+
+        when(client.getAuthenticatedUser("owner")).thenReturn(BOT);
+        user.get("owner");
+        clock.advance(Duration.ofHours(1));
+
+        assertEquals(java.util.Optional.of(BOT), user.peek());
+        verify(client, times(1)).getAuthenticatedUser("owner");
+    }
+
     private static final class MutableClock extends Clock {
         private Instant now;
 

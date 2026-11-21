@@ -7,17 +7,18 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
-import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiAuditContext;
+import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
 import org.remus.giteabot.config.ReviewChunkingProperties;
@@ -26,6 +27,10 @@ import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
+import org.remus.giteabot.prworkflow.PrWorkflowContext;
+import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
+import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
+import org.remus.giteabot.repository.PullRequestCommentKind;
 import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.RepositoryPlatform;
@@ -43,11 +48,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.mockito.ArgumentCaptor;
-import org.remus.giteabot.prworkflow.PrWorkflowContext;
-import org.remus.giteabot.prworkflow.agentreview.AgentReviewWorkflow;
-import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,7 +57,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -125,7 +124,7 @@ class BotWebhookServiceTest {
         AgentServiceFactory agentServiceFactory = new AgentServiceFactory(aiClientFactory,
                 repositoryPlatformFactory, promptService, agentConfig, agentSessionService,
                 toolExecutionService, toolCatalog, workspaceService,
-                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService, null);
+                mcpOrchestrationService, mcpToolSelectionService, botToolSelectionService, null, botService);
         org.remus.giteabot.issueworkflow.IssueWorkflowRegistry issueWorkflowRegistry =
                 new org.remus.giteabot.issueworkflow.IssueWorkflowRegistry(java.util.List.of(
                         new org.remus.giteabot.issueworkflow.coding.CodingIssueWorkflow(agentServiceFactory),
@@ -187,7 +186,7 @@ class BotWebhookServiceTest {
                     Bot b = invocation.getArgument(0);
                     return new org.remus.giteabot.review.CodeReviewService(
                             repositoryApiClient, aiClient, sessionService,
-                            b.getGitIntegration().getUsername(), new ReviewConfigProperties(),
+                            repositoryPlatform::getUser, new ReviewConfigProperties(),
                             "system-prompt:" + b.getSystemPrompt().getId(),
                             b.getSystemPrompt().getReviewSystemPrompt(),
                             120000, 8, 60000, "");
@@ -776,6 +775,8 @@ class BotWebhookServiceTest {
         session.setIssueAuthorUsername("tom");
 
         when(aiClientFactory.getClient(any())).thenReturn(aiClient);
+        // No whitelist: every commenter may answer the writer.
+        when(botService.isUsernameInSet(any(), eq("tom"))).thenReturn(true);
         when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.of(session));
         when(agentSessionService.claimSessionForUpdate("Test", "my-repo", 12L,
                 AgentSession.AgentSessionType.WRITER)).thenReturn(Optional.empty());
@@ -1036,6 +1037,8 @@ class BotWebhookServiceTest {
         session.setIssueAuthorUsername("tom");
 
         when(aiClientFactory.getClient(any())).thenReturn(aiClient);
+        // No whitelist: every commenter may answer the writer.
+        when(botService.isUsernameInSet(any(), eq("tom"))).thenReturn(true);
         when(agentSessionService.getSessionByIssue("Test", "my-repo", 12L)).thenReturn(Optional.of(session));
         when(agentSessionService.claimSessionForUpdate("Test", "my-repo", 12L,
                 AgentSession.AgentSessionType.WRITER)).thenReturn(Optional.of(session));
@@ -1377,6 +1380,27 @@ class BotWebhookServiceTest {
             org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
             verify(repositoryApiClient).postPullRequestComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
             assertThat(body.getValue()).contains("`@bot rerun-tests`").doesNotContain("@claude_bot");
+        }
+
+        @Test
+        void unrecognisedCommandReply_withoutProviderMentionName_usesTheAccountsUsername() {
+            when(agentSessionService.getSessionByIssue(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            when(agentSessionService.getSessionByPr(OWNER, REPO, PR_NUMBER))
+                    .thenReturn(Optional.empty());
+            org.mockito.Mockito.doReturn(Optional.empty()).when(repositoryPlatform).getBotMentionName();
+
+            Bot bot = createBotWithWorkflows("e2e-bot", "claude_bot",
+                    java.util.List.of("e2e-test"));
+            // The token's account, not the integration's configured username, names the bot.
+            when(repositoryApiClient.getAuthenticatedUser(any()))
+                    .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser("id-1", "token_account", null, null));
+
+            botWebhookService.handlePrComment(bot, prCommentPayload);
+
+            org.mockito.ArgumentCaptor<String> body = org.mockito.ArgumentCaptor.forClass(String.class);
+            verify(repositoryApiClient).postPullRequestComment(eq(OWNER), eq(REPO), eq(PR_NUMBER), body.capture());
+            assertThat(body.getValue()).contains("`@token_account rerun-tests`").doesNotContain("@claude_bot");
         }
 
         @Test
@@ -1749,6 +1773,22 @@ class BotWebhookServiceTest {
     }
 
     @Test
+    void issueCreated_botAccountUnresolvable_recordsErrorAndRunsNoWorkflow() {
+        Bot bot = createBot("writer", "writer_bot");
+        makeWriterBot(bot);
+        bot.setRunOnIssueCreation(true);
+        when(repositoryApiClient.getAuthenticatedUser(any())).thenThrow(new IllegalStateException("provider down"));
+        WebhookPayload payload = buildIssueCreationPayload("Test", "my-repo", 12L, "Vague issue", "Do something");
+
+        botWebhookService.handleIssueCreated(bot, payload);
+
+        // Without the bot's account there is no assignee to hand the workflows.
+        verify(botService).recordError(eq(bot), org.mockito.ArgumentMatchers.contains("provider down"));
+        verify(agentSessionService, never()).getSessionByIssue(any(), any(), any());
+        verify(repositoryApiClient, never()).createIssue(any(), any(), any(), any());
+    }
+
+    @Test
     void issueCreation_publishesStartedAndCompletedEventsOnSuccess() {
         Bot bot = createBot("writer", "writer_bot");
         makeWriterBot(bot);
@@ -1884,43 +1924,45 @@ class BotWebhookServiceTest {
         @Test
         void handledCommandIsReportedAsConsumed() {
             WebhookPayload payload = feedbackPayload();
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(true);
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(true);
 
             assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"), payload,
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT,
+                    PullRequestCommentKind.PR_COMMENT,
                     "@AI_Bot"));
 
             verify(feedbackCommandHandler).tryHandle(any(), eq(payload),
-                    eq(org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT),
+                    eq(PullRequestCommentKind.PR_COMMENT),
                     eq("@AI_Bot"));
         }
 
         @Test
         void ordinaryCommentIsNotConsumed() {
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any())).thenReturn(false);
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
 
             assertFalse(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
                     feedbackPayload(),
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null));
+                    PullRequestCommentKind.PR_COMMENT, null));
         }
 
         @Test
         void aFailingLearningCommandIsStillConsumed() {
-            when(feedbackCommandHandler.tryHandle(any(), any(), anyString(), any()))
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any()))
                     .thenThrow(new IllegalStateException("feedback store unavailable"));
 
             // Falling through would forward feedback text into an AI conversation.
             assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
                     feedbackPayload(),
-                    org.remus.giteabot.learning.feedback.FeedbackCommandHandler.COMMENT_KIND_PR_COMMENT, null));
+                    PullRequestCommentKind.PR_COMMENT, null));
         }
     }
 
     private Bot createBot(String name, String username) {
+        // The platform reports the bot's account under the same username.
+        lenient().when(repositoryApiClient.getAuthenticatedUser(any()))
+                .thenReturn(new org.remus.giteabot.repository.model.RepositoryUser("id-" + username, username, null, null));
         Bot bot = new Bot();
         bot.setName(name);
         GitIntegration gitIntegration = new GitIntegration();
-        gitIntegration.setUsername(username);
         bot.setGitIntegration(gitIntegration);
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);
@@ -2094,9 +2136,8 @@ class BotWebhookServiceTest {
         issue.setNumber(issueNumber);
         issue.setTitle(title);
         issue.setBody(body);
-        WebhookPayload.Owner assignee = new WebhookPayload.Owner();
-        assignee.setLogin("writer_bot");
-        issue.setAssignee(assignee);
+        // The id of the account createBot("…", "writer_bot") makes the platform report.
+        issue.setAssignee(WebhookPayload.Owner.of("id-writer_bot", "writer_bot"));
         payload.setIssue(issue);
 
         return payload;

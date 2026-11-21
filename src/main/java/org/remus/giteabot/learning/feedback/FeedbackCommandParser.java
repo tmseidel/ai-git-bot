@@ -32,7 +32,7 @@ public final class FeedbackCommandParser {
     /**
      * @param mentionAliases every mention the command may use — a provider can rewrite the mention it
      *                       received (Bitbucket turns {@code @{account_id}} into a readable name), so
-     *                       the effective alias and the configured username are both acceptable
+     *                       the effective alias and the account's username are both acceptable
      * @return the command, or empty when the comment carries no {@code feedback} command for one of
      *         these mentions — in that case the comment must keep its ordinary routing.
      */
@@ -135,14 +135,9 @@ public final class FeedbackCommandParser {
             repositoryWide = true;
             index = 2;
         }
-        Long cursor = null;
+        String cursor = null;
         if (parts.length == index + 2 && "page:".equalsIgnoreCase(parts[index])) {
-            try {
-                cursor = Long.parseLong(parts[index + 1]);
-            } catch (NumberFormatException e) {
-                return new FeedbackCommand.Help("`" + parts[index + 1]
-                        + "` is not a page cursor.");
-            }
+            cursor = parts[index + 1];
         } else if (parts.length != index) {
             return new FeedbackCommand.Help("Use `feedback list`, `feedback list repository`, or "
                     + "`feedback list page: <cursor>`.");

@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.filetransfer.FileTransferService;
 import org.remus.giteabot.agent.packagemanager.PackageManagerDetection;
 import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
 import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
@@ -60,6 +61,7 @@ public class ToolExecutionService {
     private final ToolCatalog catalog;
     private final PackageManagerDetector packageManagerDetector;
     private final YarnCommandBuilder yarnCommandBuilder;
+    private final FileTransferService fileTransferService;
 
     /**
      * Executes a configured validation tool in the given workspace:
@@ -266,6 +268,7 @@ public class ToolExecutionService {
             case "branch-switcher" -> executeBranchSwitcherTool(workspace, arguments);
             case "ctags-signatures" -> executeCtagsSignaturesTool(workspaceDir, arguments);
             case "ctags-deps"       -> executeCtagsDepsTool(workspaceDir, arguments);
+            case "file-info"        -> fileTransferService.fileInfo(workspaceDir, arguments);
             default -> new ToolResult(false, -1, "",
                     "Repository tool '" + tool + "' is not implemented");
         };
@@ -342,7 +345,7 @@ public class ToolExecutionService {
     }
 
     /**
-     * Executes a file-modification tool (write-file, patch-file, mkdir, delete-file)
+     * Executes a file tool (write-file, patch-file, mkdir, delete-file, download-file, upload-file)
      * in the given workspace.  Results are passed back to the AI but never posted as
      * public issue comments.
      *
@@ -364,6 +367,8 @@ public class ToolExecutionService {
             case "patch-file" -> executePatchFileTool(workspaceDir, arguments);
             case "mkdir"      -> executeMkdirTool(workspaceDir, arguments);
             case "delete-file" -> executeDeleteFileTool(workspaceDir, arguments);
+            case "download-file" -> fileTransferService.download(workspace, arguments);
+            case "upload-file"   -> fileTransferService.upload(workspace, arguments);
             default -> new ToolResult(false, -1, "", "File tool '" + tool + "' is not implemented");
         };
     }
@@ -1651,7 +1656,7 @@ public class ToolExecutionService {
             }
         }
         // an unclosed "{" would leave an invalid group: close it, matching what was written
-        regex.append(")".repeat(braceDepth));
+        regex.repeat(")", braceDepth);
         regex.append('$');
         return regex.toString();
     }

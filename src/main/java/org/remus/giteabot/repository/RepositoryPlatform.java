@@ -77,6 +77,15 @@ public abstract class RepositoryPlatform {
         return user.get(owner);
     }
 
+    /**
+     * Returns the account the token authenticates as if it has been resolved before, without
+     * asking the provider; an expired account is still returned. For display only: use
+     * {@link #getUser(String)} to act as the bot.
+     */
+    public Optional<RepositoryUser> findCachedUser() {
+        return user.peek();
+    }
+
     /** Returns the transport Git commands use. */
     public GitTransport getTransport() {
         return sshCredentials != null ? GitTransport.SSH : GitTransport.HTTP;
@@ -118,9 +127,9 @@ public abstract class RepositoryPlatform {
     }
 
     /**
-     * Returns the name users type after {@code @} to address the bot, for providers that
-     * derive the bot's identity from the integration credentials rather than from the
-     * bot's configured username (e.g. Bitbucket). Empty means "use the bot username".
+     * Returns the name users type after {@code @} to address the bot, for providers whose
+     * mentions do not use the account's username (e.g. Bitbucket). Empty means "use the
+     * username of the account the token authenticates as".
      */
     public Optional<String> getBotMentionName() {
         return Optional.empty();
@@ -156,6 +165,63 @@ public abstract class RepositoryPlatform {
     public Optional<String> getFileWebUrl(String owner, String repo, String revision, String path,
                                           @Nullable Integer startLine, @Nullable Integer endLine) {
         return Optional.empty();
+    }
+
+    /**
+     * The browser URL of pull request {@code number}. Empty when the provider's pull request
+     * page is not known or the repository's web address cannot be resolved; a wrong link is
+     * worse than none.
+     */
+    public Optional<String> getPullRequestWebUrl(String owner, String repo, @Nullable Long number) {
+        return Optional.empty();
+    }
+
+    /**
+     * The browser URL of one comment on pull request {@code number}: the
+     * {@linkplain #getPullRequestWebUrl pull request page} anchored to the comment. Empty
+     * when the provider's anchor for this kind of comment is not known.
+     *
+     * @param commentId the comment's id as the provider's webhook reported it
+     */
+    public final Optional<String> getCommentWebUrl(String owner, String repo, @Nullable Long number,
+                                                   @Nullable PullRequestCommentKind kind,
+                                                   @Nullable String commentId) {
+        if (kind == null || commentId == null || commentId.isBlank()) {
+            return Optional.empty();
+        }
+        Optional<String> anchor = commentAnchor(kind, commentId);
+        return anchor.flatMap(s -> getPullRequestWebUrl(owner, repo, number).map(url -> url + s));
+    }
+
+    /**
+     * The fragment, including {@code #}, addressing a comment on the pull request page, or
+     * empty when the provider's anchor for this kind of comment is not known.
+     *
+     * @param commentId never blank
+     */
+    protected Optional<String> commentAnchor(PullRequestCommentKind kind, String commentId) {
+        return Optional.empty();
+    }
+
+    /**
+     * The browser URL of the repository, {@code {cloneUrl}/{owner}/{repo}} by default. Empty
+     * when owner or repo is missing or the clone base URL is not a credential-free HTTP(S)
+     * URL, see {@link #validatedCloneBaseUrl}.
+     */
+    protected Optional<String> repositoryWebUrl(String owner, String repo) {
+        if (owner == null || owner.isBlank() || repo == null || repo.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(validatedCloneBaseUrl(cloneUrl) + "/" + owner + "/" + repo);
+        } catch (IllegalStateException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** Whether {@code value} is a non-empty run of ASCII digits, as numeric comment ids are. */
+    protected static boolean isNumericId(@Nullable String value) {
+        return value != null && !value.isEmpty() && value.chars().allMatch(c -> c >= '0' && c <= '9');
     }
 
     /**

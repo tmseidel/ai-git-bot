@@ -95,7 +95,6 @@ class ConfigExchangeJsonTest {
         GitIntegration git = new GitIntegration();
         git.setId(2L);
         git.setName("Trial Git");
-        git.setUsername("ai_bot");
 
         WorkflowSelection selection = new WorkflowSelection();
         selection.setWorkflowKey("review");

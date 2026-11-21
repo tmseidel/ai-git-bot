@@ -9,7 +9,7 @@ bug reports that don't say what the expected behavior is. Someone has to ask
 questions, chase down details, and restructure the issue so it's actually
 implementable — work that bounces between triager and reporter, stretching a
 fast fix into a multi-day discussion. **Writer Agent** takes on that refinement:
-it reads the issue, asks the original author clarifying questions when needed,
+it reads the issue, asks clarifying questions when needed,
 and creates a structured, actionable replacement issue.
 
 ## What it does
@@ -29,7 +29,7 @@ and creates a structured, actionable replacement issue.
    - Acceptance criteria
    - Implementation notes
 5. When the issue needs more input, posts clarifying questions as a comment
-   addressed to the original author and waits for a reply.
+   and waits for a reply.
 6. Posts visible progress and completion comments on the original issue.
 
 The writer bot is **read-only for the repository**: it can explore code and
@@ -74,8 +74,11 @@ complete configuration reference.
 - **Automatically** when a writer bot is assigned to an issue.
 - The bot posts a confirmation comment, then either asks clarifying questions or
   creates the improved issue.
-- When the bot is waiting for the author to answer questions, only the original
-  reporter's reply continues the workflow — comments from other users do not
+- When the bot is waiting for answers to its questions, a reply from any user on
+  the bot's **User Whitelist** continues the workflow — not only the original
+  reporter. This matters on an issue the writer created itself, whose author is
+  the bot account. Without a whitelist, any user's reply continues it. Comments
+  from users outside a non-empty whitelist, and the bot's own comments, never
   advance it.
 - A stuck session can often be resumed by commenting `try again`, `please
   retry`, or `redo` on the issue.
@@ -101,8 +104,9 @@ The bot begins work the next time someone assigns it to an issue.
 
 ## Limitations
 
-- Writer sessions that need missing business context wait for the original issue
-  author; the bot cannot proceed until it has enough information.
+- Writer sessions that need missing business context wait for an answer from a
+  whitelisted user (anyone, without a whitelist); the bot cannot proceed until it
+  has enough information.
 - Large repositories or long issue discussions may exceed the model context
   window; the bot sends bounded context.
 - Small or heavily quantized local/ollama models may ask low-quality questions

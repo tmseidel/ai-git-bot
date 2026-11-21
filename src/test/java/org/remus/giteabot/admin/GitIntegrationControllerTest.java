@@ -8,7 +8,9 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
+import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -38,6 +40,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
@@ -67,6 +70,12 @@ class GitIntegrationControllerTest {
 
     @MockitoBean
     private AdminUserRepository adminUserRepository;
+
+    @MockitoBean
+    private RepositoryPlatformFactory repositoryPlatformFactory;
+
+    @MockitoBean
+    private GitConnectionTestService gitConnectionTestService;
 
     @Test
     void newForm_showsProviderTypes() throws Exception {
@@ -153,6 +162,78 @@ class GitIntegrationControllerTest {
     }
 
     @Test
+    void save_resolvesTheAccountSoTheListShowsIt() throws Exception {
+        GitIntegration saved = new GitIntegration();
+        saved.setId(7L);
+        when(gitIntegrationService.save(any(), anyBoolean(), anyBoolean())).thenReturn(saved);
+        RepositoryPlatform platform = mock(RepositoryPlatform.class);
+        when(repositoryPlatformFactory.getPlatform(saved)).thenReturn(platform);
+        when(platform.getUser(null)).thenReturn(new RepositoryUser("1", "ai_bot", null, null));
+
+        mockMvc.perform(post("/git-integrations/save")
+                        .with(user("admin").roles("ADMIN"))
+                        .with(csrf())
+                        .param("name", "My Gitea")
+                        .param("providerType", "GITEA")
+                        .param("url", "https://gitea.example.com")
+                        .param("token", "gitea-token")
+                        .param("postReviewAction", "NONE"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(flash().attributeExists("success"))
+                .andExpect(flash().attributeCount(1));
+
+        verify(platform).getUser(null);
+    }
+
+    @Test
+    void save_succeedsWithoutTheProviderMessageWhenTheTokenIdentifiesNoAccount(CapturedOutput output) throws Exception {
+        String sentinel = "test-only-response-token-sentinel";
+        GitIntegration saved = new GitIntegration();
+        saved.setId(7L);
+        when(gitIntegrationService.save(any(), anyBoolean(), anyBoolean())).thenReturn(saved);
+        RepositoryPlatform platform = mock(RepositoryPlatform.class);
+        when(repositoryPlatformFactory.getPlatform(saved)).thenReturn(platform);
+        when(platform.getUser(null)).thenThrow(new IllegalStateException("401 Unauthorized: " + sentinel));
+
+        var result = mockMvc.perform(post("/git-integrations/save")
+                        .with(user("admin").roles("ADMIN"))
+                        .with(csrf())
+                        .param("name", "My Gitea")
+                        .param("providerType", "GITEA")
+                        .param("url", "https://gitea.example.com")
+                        .param("token", "gitea-token")
+                        .param("postReviewAction", "NONE"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(flash().attributeExists("success"))
+                .andExpect(flash().attributeCount(1))
+                .andReturn();
+
+        // The integration is saved either way; the provider's message may quote the response body.
+        org.junit.jupiter.api.Assertions.assertFalse(result.getFlashMap().toString().contains(sentinel));
+        org.junit.jupiter.api.Assertions.assertFalse(output.getAll().contains(sentinel));
+    }
+
+    @Test
+    void list_showsTheCachedUsernameAndADashOtherwise() throws Exception {
+        GitIntegration resolved = new GitIntegration();
+        resolved.setId(1L);
+        resolved.setName("Resolved");
+        resolved.setProviderType(RepositoryType.GITEA);
+        GitIntegration unresolved = new GitIntegration();
+        unresolved.setId(2L);
+        unresolved.setName("Unresolved");
+        unresolved.setProviderType(RepositoryType.GITHUB);
+        when(gitIntegrationService.findAll()).thenReturn(List.of(resolved, unresolved));
+        when(repositoryPlatformFactory.findCachedUsernames(List.of(resolved, unresolved)))
+                .thenReturn(java.util.Map.of(1L, "ai_bot"));
+
+        mockMvc.perform(get("/git-integrations").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("ai_bot")))
+                .andExpect(content().string(containsString("&mdash;")));
+    }
+
+    @Test
     void save_blankTokenForwardsClearFlag() throws Exception {
         mockMvc.perform(post("/git-integrations/save")
                         .with(user("admin").roles("ADMIN"))
@@ -227,7 +308,6 @@ class GitIntegrationControllerTest {
                         .param("name", "My Gitea")
                         .param("providerType", "GITEA")
                         .param("url", "https://gitea.example.com")
-                        .param("username", "ai_bot")
                         .param("transport", "SSH")
                         .param("token", "")
                         .param("sshPrivateKey", "replacement-private-key")
@@ -491,6 +571,73 @@ class GitIntegrationControllerTest {
                 .andExpect(status().is3xxRedirection()).andExpect(flash().attributeExists("error")).andReturn();
         org.junit.jupiter.api.Assertions.assertFalse(result.getFlashMap().toString().contains(sentinel));
         org.junit.jupiter.api.Assertions.assertFalse(output.getAll().contains(sentinel));
+    }
+
+    @Test
+    void newForm_offersAConnectionTest() throws Exception {
+        mockMvc.perform(get("/git-integrations/new").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"testConnectionBtn\"")))
+                .andExpect(content().string(containsString("id=\"testConnectionResult\"")))
+                .andExpect(content().string(containsString("id=\"testOrganizationModal\"")))
+                .andExpect(content().string(containsString("\\/git-integrations\\/test")));
+    }
+
+    @Test
+    void testConnection_returnsTheAccountAsJson() throws Exception {
+        when(gitConnectionTestService.test(any(), eq("secret"), eq(false), eq("contoso")))
+                .thenReturn(GitConnectionTestResult.success(
+                        new org.remus.giteabot.repository.model.RepositoryUser("42", "ai_bot", "AI Bot", null)));
+
+        mockMvc.perform(post("/git-integrations/test").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "AZURE_DEVOPS")
+                        .param("url", "https://dev.azure.com")
+                        .param("token", "secret")
+                        .param("testOrganization", "contoso"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.username").value("ai_bot"))
+                .andExpect(jsonPath("$.displayName").value("AI Bot"))
+                .andExpect(jsonPath("$.email").doesNotExist())
+                .andExpect(jsonPath("$.message").value(messageSource.getMessage(
+                        "test.git.success", null, java.util.Locale.ENGLISH)));
+        verify(gitConnectionTestService).test(argThat(integration ->
+                        integration.getProviderType() == RepositoryType.AZURE_DEVOPS
+                                && "https://dev.azure.com".equals(integration.getUrl())),
+                eq("secret"), eq(false), eq("contoso"));
+    }
+
+    @Test
+    void testConnection_localizesTheFailureAndKeepsTheDetail() throws Exception {
+        when(gitConnectionTestService.test(any(), any(), anyBoolean(), any()))
+                .thenReturn(GitConnectionTestResult.failure("test.git.unauthorized", "HTTP 401 Unauthorized", 401));
+
+        mockMvc.perform(post("/git-integrations/test").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "GITEA").param("url", "https://gitea.example.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.organizationRequired").value(false))
+                .andExpect(jsonPath("$.message").value(containsString("HTTP 401")))
+                .andExpect(jsonPath("$.detail").value("HTTP 401 Unauthorized"));
+    }
+
+    @Test
+    void testConnection_asksForAnAzureDevopsOrganizationTheUrlDoesNotName() throws Exception {
+        when(gitConnectionTestService.test(any(), any(), anyBoolean(), any()))
+                .thenReturn(GitConnectionTestResult.failure(GitConnectionTestResult.ORGANIZATION_REQUIRED, null));
+
+        mockMvc.perform(post("/git-integrations/test").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "AZURE_DEVOPS").param("url", "https://dev.azure.com"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.organizationRequired").value(true));
+    }
+
+    @Test
+    void testConnection_requiresAnAdmin() throws Exception {
+        mockMvc.perform(post("/git-integrations/test").with(csrf()).param("providerType", "GITEA"))
+                .andExpect(status().is3xxRedirection());
+        verify(gitConnectionTestService, org.mockito.Mockito.never()).test(any(), any(), anyBoolean(), any());
     }
 
     private GitIntegration managedIntegration() {

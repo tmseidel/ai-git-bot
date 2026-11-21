@@ -50,14 +50,6 @@ public class GitLabReview implements Review {
     }
 
     @Override
-    public String getUserLogin() {
-        if (notes != null && !notes.isEmpty()) {
-            return notes.getFirst().getUserLogin();
-        }
-        return null;
-    }
-
-    @Override
     public String getSubmittedAt() {
         if (notes != null && !notes.isEmpty()) {
             return notes.getFirst().getCreatedAt();
@@ -81,10 +73,6 @@ public class GitLabReview implements Review {
         private String createdAt;
 
         private GitLabUser author;
-
-        public String getUserLogin() {
-            return author != null ? author.getUsername() : null;
-        }
     }
 
     @Data

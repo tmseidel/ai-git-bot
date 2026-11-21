@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class AzureDevopsPayloadTranslationTest {
 
-    private final AzureDevopsWebhookTranslator handler = new AzureDevopsWebhookTranslator(null, null);
+    private final AzureDevopsWebhookTranslator handler = new AzureDevopsWebhookTranslator(null, null, null);
 
     @Test
     void translatePullRequestCreated_mapsAllFields() {

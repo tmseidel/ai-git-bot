@@ -6,6 +6,7 @@ import org.remus.giteabot.repository.model.RepositoryUser;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.function.Function;
 
 /**
@@ -59,6 +60,15 @@ final class CachedRepositoryUser {
             }
             throw new IllegalStateException("Could not determine the Git user: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Returns the cached account without asking the provider, even when it has expired, or
+     * empty when it has never been resolved.
+     */
+    Optional<RepositoryUser> peek() {
+        Entry cached = entry;
+        return cached == null ? Optional.empty() : Optional.of(cached.user());
     }
 
     private record Entry(RepositoryUser user, Instant expiresAt) {

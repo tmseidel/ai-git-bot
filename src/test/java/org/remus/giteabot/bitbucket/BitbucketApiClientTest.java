@@ -198,7 +198,7 @@ class BitbucketApiClientTest {
                         {"uuid":" ","account_id":"","display_name":"AI Bot"}
                         """, MediaType.APPLICATION_JSON));
 
-        assertThrows(IllegalStateException.class, client::getAuthenticatedAccount);
+        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser("owner"));
         server.verify();
     }
 

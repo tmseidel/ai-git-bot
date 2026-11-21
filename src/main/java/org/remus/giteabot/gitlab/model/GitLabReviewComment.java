@@ -43,8 +43,8 @@ public class GitLabReviewComment implements ReviewComment {
     }
 
     @Override
-    public String getUserLogin() {
-        return author != null ? author.getUsername() : null;
+    public String getUserId() {
+        return author != null && author.getId() != null ? author.getId().toString() : null;
     }
 
     @Data

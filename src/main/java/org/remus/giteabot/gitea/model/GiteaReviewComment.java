@@ -35,8 +35,8 @@ public class GiteaReviewComment implements ReviewComment {
     private GiteaReview.GiteaUser user;
 
     @Override
-    public String getUserLogin() {
-        return user != null ? user.getLogin() : null;
+    public String getUserId() {
+        return user != null && user.getId() != null ? user.getId().toString() : null;
     }
 }
 

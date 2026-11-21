@@ -635,13 +635,14 @@ public class AgentSessionService {
     }
 
     /**
-     * True for the tools that change the workspace. Mirrors the {@code ToolKind.FILE}
-     * entries of {@code ToolCatalog} — a new file tool has to be added in both places,
-     * since this runs on persisted history without a catalog in hand.
+     * True for the tools that change the workspace. Mirrors {@code ToolCatalog.mutatesWorkspace}
+     * — a new file tool has to be added in both places, since this runs on persisted history
+     * without a catalog in hand. {@code upload-file} is a file tool that changes nothing.
      */
     private static boolean isFileTool(String name) {
         return "write-file".equals(name) || "patch-file".equals(name)
-                || "delete-file".equals(name) || "mkdir".equals(name);
+                || "delete-file".equals(name) || "mkdir".equals(name)
+                || "download-file".equals(name);
     }
 
     /**

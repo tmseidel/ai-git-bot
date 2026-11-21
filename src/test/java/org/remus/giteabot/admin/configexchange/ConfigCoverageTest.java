@@ -22,6 +22,7 @@ import org.remus.giteabot.review.structured.ReviewAssessment;
 import org.remus.giteabot.review.structured.ReviewFinding;
 import org.remus.giteabot.review.structured.ReviewFindingLocation;
 import org.remus.giteabot.learning.feedback.WorkflowFeedback;
+import org.remus.giteabot.learning.feedback.WorkflowFeedbackEvent;
 import org.remus.giteabot.review.structured.ReviewPublication;
 import org.remus.giteabot.review.structured.ReviewRecord;
 import org.remus.giteabot.review.structured.ReviewToolOperation;
@@ -92,6 +93,7 @@ class ConfigCoverageTest {
         NOT_A_TABLE.put(ReviewPublication.class, "review publication log");
         NOT_A_TABLE.put(WorkflowOutputSnapshot.class, "supplemental learning evidence");
         NOT_A_TABLE.put(WorkflowFeedback.class, "runtime feedback records");
+        NOT_A_TABLE.put(WorkflowFeedbackEvent.class, "runtime feedback history");
         NOT_A_TABLE.put(ReferenceSequence.class, "runtime reference counters");
     }
 

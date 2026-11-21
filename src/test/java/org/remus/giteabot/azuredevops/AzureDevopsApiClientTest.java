@@ -1,5 +1,6 @@
 package org.remus.giteabot.azuredevops;
 
+import org.remus.giteabot.repository.OwnerRequiredException;
 import org.remus.giteabot.repository.model.HttpCredentials;
 import org.remus.giteabot.repository.model.RepositoryUser;
 
@@ -23,12 +24,13 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.springframework.test.web.client.ExpectedCount.manyTimes;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.*;
-import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
@@ -147,28 +149,6 @@ class AzureDevopsApiClientTest {
 
         new AzureDevopsApiClient(builder.build(), base, null)
                 .postPullRequestComment("contoso", "MyProject/my-service", 7L, "hi");
-
-        server.verify();
-    }
-
-    @Test
-    void connectionData_followsTheSameOrganizationScoping() {
-        String base = "https://contoso.visualstudio.com";
-        RestClient.Builder builder = RestClient.builder().baseUrl(base);
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder)
-                .ignoreExpectOrder(true).build();
-        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
-                .andExpect(method(HttpMethod.GET))
-                .andRespond(withSuccess("{\"authenticatedUser\":{\"id\":\"guid-1\"}}",
-                        MediaType.APPLICATION_JSON));
-        server.expect(requestTo(base + "/MyProject/_apis/git/repositories/my-service"
-                        + "/pullRequests/7/reviewers/guid-1?api-version=6.0"))
-                .andExpect(method(HttpMethod.PUT))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        new AzureDevopsApiClient(builder.build(), base, null)
-                .postReviewAction("contoso", "MyProject/my-service", 7L,
-                        PostReviewAction.APPROVE);
 
         server.verify();
     }
@@ -416,7 +396,7 @@ class AzureDevopsApiClientTest {
                           {"threadContext":{"filePath":"/src/Foo.java",
                                             "rightFileStart":{"line":12}},
                            "comments":[{"id":1,"content":"first",
-                                        "author":{"uniqueName":"dev@contoso.com"}},
+                                        "author":{"id":"guid-dev","uniqueName":"dev@contoso.com"}},
                                        {"id":2,"content":"second","author":{"displayName":"Dev"}}]},
                           {"comments":[{"id":3,"content":"top level"}]}
                         ]}""", MediaType.APPLICATION_JSON));
@@ -427,11 +407,11 @@ class AzureDevopsApiClientTest {
         assertEquals(3, comments.size());
         assertEquals("src/Foo.java", comments.get(0).getPath());
         assertEquals(12, comments.get(0).getLine());
-        assertEquals("dev@contoso.com", comments.get(0).getUserLogin());
+        assertEquals("guid-dev", comments.get(0).getUserId());
         // Every comment of a thread inherits the thread's anchor.
         assertEquals("src/Foo.java", comments.get(1).getPath());
         // displayName is user-editable and never stands in for the author's identity.
-        assertNull(comments.get(1).getUserLogin());
+        assertNull(comments.get(1).getUserId());
         // A thread without a threadContext is a top-level conversation comment.
         assertNull(comments.get(2).getPath());
         assertNull(comments.get(2).getLine());
@@ -517,7 +497,6 @@ class AzureDevopsApiClientTest {
 
         assertEquals(2, reviews.size());
         assertEquals("APPROVED", reviews.get(0).getState());
-        assertEquals("a@contoso.com", reviews.get(0).getUserLogin());
         assertEquals("REJECTED", reviews.get(1).getState());
         server.verify();
     }
@@ -568,28 +547,9 @@ class AzureDevopsApiClientTest {
     }
 
     @Test
-    void postReviewAction_skipsSilentlyWhenIdentityUnresolved() {
+    void postReviewAction_castsApproveVoteAsTheBotsIdentity() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        // connectionData answers without an identity, so there is nobody to vote as and
-        // no PUT may follow — a second queued request would fail the mock.
-        server.expect(method(HttpMethod.GET))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        assertDoesNotThrow(() -> new AzureDevopsApiClient(builder.build(), URL, null)
-                .postReviewAction("contoso", "MyProject/my-service", 42L,
-                        PostReviewAction.APPROVE));
-
-        server.verify();
-    }
-
-    @Test
-    void postReviewAction_castsApproveVoteWhenIdentityResolved() {
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        server.expect(method(HttpMethod.GET))
-                .andRespond(withSuccess("{\"authenticatedUser\":{\"id\":\"reviewer-guid-1\"}}",
-                        MediaType.APPLICATION_JSON));
         server.expect(requestTo(
                         "https://dev.azure.com/contoso/MyProject/_apis/git/repositories/my-service"
                                 + "/pullRequests/42/reviewers/reviewer-guid-1?api-version=6.0"))
@@ -597,101 +557,8 @@ class AzureDevopsApiClientTest {
                 .andExpect(jsonPath("$.vote").value(10))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), URL, null)
-                .postReviewAction("contoso", "MyProject/my-service", 42L,
-                        PostReviewAction.APPROVE);
-
-        server.verify();
-    }
-
-    @Test
-    void postReviewAction_resolvesTheIdentityPerOrganization() {
-        // One integration on dev.azure.com serves many organizations, and an Azure DevOps
-        // identity id is issued per organization. Caching a single GUID for the client
-        // would send fabrikam the identity contoso answered with, which addresses no
-        // reviewer there.
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder)
-                .ignoreExpectOrder(true).build();
-        server.expect(requestTo("https://dev.azure.com/contoso/_apis/connectionData?api-version=6.0-preview.1"))
-                .andRespond(withSuccess("{\"authenticatedUser\":{\"id\":\"guid-contoso\"}}",
-                        MediaType.APPLICATION_JSON));
-        server.expect(requestTo("https://dev.azure.com/fabrikam/_apis/connectionData?api-version=6.0-preview.1"))
-                .andRespond(withSuccess("{\"authenticatedUser\":{\"id\":\"guid-fabrikam\"}}",
-                        MediaType.APPLICATION_JSON));
-        server.expect(requestTo(
-                        "https://dev.azure.com/contoso/MyProject/_apis/git/repositories/my-service"
-                                + "/pullRequests/42/reviewers/guid-contoso?api-version=6.0"))
-                .andExpect(method(HttpMethod.PUT))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-        server.expect(requestTo(
-                        "https://dev.azure.com/fabrikam/OtherProject/_apis/git/repositories/other-service"
-                                + "/pullRequests/7/reviewers/guid-fabrikam?api-version=6.0"))
-                .andExpect(method(HttpMethod.PUT))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
-        client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
-        client.postReviewAction("fabrikam", "OtherProject/other-service", 7L,
-                PostReviewAction.APPROVE);
-
-        server.verify();
-    }
-
-    @Test
-    void postReviewAction_doesNotRepeatADefinitivelyFailedIdentityLookup() {
-        // An answered-but-empty connectionData is an answer, not an outage. Only one
-        // lookup is queued; a repeat on the second vote would fail the mock.
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        server.expect(requestTo("https://dev.azure.com/contoso/_apis/connectionData"
-                        + "?api-version=6.0-preview.1"))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
-        client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
-        client.postReviewAction("contoso", "MyProject/my-service", 43L, PostReviewAction.APPROVE);
-
-        server.verify();
-    }
-
-    @Test
-    void postReviewAction_retriesTheIdentityLookupAfterATransportFailure() {
-        // A 503 says nothing about whether the token has an identity here, so the next
-        // vote must look again rather than reuse a cached "no identity".
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder)
-                .ignoreExpectOrder(true).build();
-        AtomicInteger connectionDataCalls = new AtomicInteger();
-        server.expect(manyTimes(), anything()).andRespond(request -> {
-            connectionDataCalls.incrementAndGet();
-            return withServerError().createResponse(request);
-        });
-
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
-        client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
-        client.postReviewAction("contoso", "MyProject/my-service", 43L, PostReviewAction.APPROVE);
-
-        assertEquals(2, connectionDataCalls.get(),
-                "a transport failure must not be cached as 'no identity'");
-    }
-
-    @Test
-    void postReviewAction_resolvesTheIdentityOnlyOncePerOrganization() {
-        // The second vote in the same organization must reuse the cached GUID: only one
-        // connectionData lookup is expected, and a third request would fail the mock.
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
-        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        server.expect(requestTo("https://dev.azure.com/contoso/_apis/connectionData?api-version=6.0-preview.1"))
-                .andRespond(withSuccess("{\"authenticatedUser\":{\"id\":\"guid-contoso\"}}",
-                        MediaType.APPLICATION_JSON));
-        server.expect(method(HttpMethod.PUT)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-        server.expect(method(HttpMethod.PUT)).andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-
-        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
-        client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
-        client.postReviewAction("Contoso", "MyProject/my-service", 43L,
-                PostReviewAction.REQUEST_CHANGES);
+        clientVotingAs(builder, "reviewer-guid-1")
+                .postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE);
 
         server.verify();
     }
@@ -700,18 +567,56 @@ class AzureDevopsApiClientTest {
     void postReviewAction_castsWaitingForAuthorVoteForRequestChanges() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        server.expect(method(HttpMethod.GET))
-                .andRespond(withSuccess("{\"authenticatedUser\":{\"id\":\"reviewer-guid-1\"}}",
-                        MediaType.APPLICATION_JSON));
         server.expect(method(HttpMethod.PUT))
                 .andExpect(jsonPath("$.vote").value(-5))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        new AzureDevopsApiClient(builder.build(), URL, null)
-                .postReviewAction("contoso", "MyProject/my-service", 42L,
-                        PostReviewAction.REQUEST_CHANGES);
+        clientVotingAs(builder, "reviewer-guid-1")
+                .postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.REQUEST_CHANGES);
 
         server.verify();
+    }
+
+    @Test
+    void postReviewAction_unresolvableIdentity_skipsTheVoteWithoutThrowing() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AzureDevopsPlatform platform = mock(AzureDevopsPlatform.class);
+        when(platform.getUser(anyString())).thenThrow(new IllegalStateException("connectionData failed"));
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
+        client.bindPlatform(platform);
+
+        assertDoesNotThrow(() ->
+                client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.APPROVE));
+
+        server.verify();
+    }
+
+    @Test
+    void postReviewAction_noneNeitherAsksForTheIdentityNorVotes() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://dev.azure.com");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AzureDevopsPlatform platform = mock(AzureDevopsPlatform.class);
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
+        client.bindPlatform(platform);
+
+        client.postReviewAction("contoso", "MyProject/my-service", 42L, PostReviewAction.NONE);
+
+        verifyNoInteractions(platform);
+        server.verify();
+    }
+
+    /**
+     * A client bound to a platform whose bot identity in the organization {@code contoso} has the
+     * id {@code identityId}. Asked in any other organization it has none, so the vote is skipped
+     * and the expected request never arrives.
+     */
+    private static AzureDevopsApiClient clientVotingAs(RestClient.Builder builder, String identityId) {
+        AzureDevopsPlatform platform = mock(AzureDevopsPlatform.class);
+        when(platform.getUser("contoso")).thenReturn(new RepositoryUser(identityId, "bot@contoso.com", null, null));
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
+        client.bindPlatform(platform);
+        return client;
     }
 
     private static final String IDENTITY = "{\"authenticatedUser\":{\"id\":\"guid-1\","
@@ -809,6 +714,34 @@ class AzureDevopsApiClientTest {
     }
 
     @Test
+    void getAuthenticatedUser_withoutOwner_asksTheOrganizationNamedInTheUrl() {
+        // At startup and on save there is no event, so the integration URL names the organization.
+        String base = "https://dev.azure.com/contoso";
+        RestClient.Builder builder = RestClient.builder().baseUrl(base);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        server.expect(requestTo(base + "/_apis/connectionData?api-version=6.0-preview.1"))
+                .andRespond(withSuccess(IDENTITY, MediaType.APPLICATION_JSON));
+        server.expect(requestTo("https://vssps.dev.azure.com/contoso/_apis/identities"
+                        + "?identityIds=guid-1&queryMembership=None&api-version=6.0"))
+                .andRespond(withSuccess(IDENTITIES, MediaType.APPLICATION_JSON));
+
+        RepositoryUser user = new AzureDevopsApiClient(builder.build(), base, null).getAuthenticatedUser(null);
+
+        assertEquals("guid-1", user.id());
+        server.verify();
+    }
+
+    @Test
+    void getAuthenticatedUser_withoutOwnerOnBareDevAzureCom_failsWithoutAsking() {
+        RestClient.Builder builder = RestClient.builder().baseUrl(URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        AzureDevopsApiClient client = new AzureDevopsApiClient(builder.build(), URL, null);
+
+        assertThrows(OwnerRequiredException.class, () -> client.getAuthenticatedUser(null));
+        server.verify();
+    }
+
+    @Test
     void getAuthenticatedUser_fallsBackWhenTheTokenMayNotReadTheEmail() {
         String base = "https://dev.azure.com/contoso";
         RestClient.Builder builder = RestClient.builder().baseUrl(base);
@@ -859,7 +792,7 @@ class AzureDevopsApiClientTest {
     void getAuthenticatedUser_failsWithoutAnOrganization() {
         AzureDevopsApiClient client = new AzureDevopsApiClient(null, URL, null);
 
-        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(null));
-        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser(" "));
+        assertThrows(OwnerRequiredException.class, () -> client.getAuthenticatedUser(null));
+        assertThrows(OwnerRequiredException.class, () -> client.getAuthenticatedUser(" "));
     }
 }

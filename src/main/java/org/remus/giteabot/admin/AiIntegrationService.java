@@ -52,28 +52,49 @@ public class AiIntegrationService {
     public AiIntegration save(AiIntegration integration, boolean clearApiKey) {
         String apiKey = integration.getApiKey();
         boolean newKey = apiKey != null && !apiKey.isBlank();
-        String retainedCiphertext = null;
         String validationKey = newKey ? apiKey : null;
         AiProviderMetadata provider = providerRegistry.getProviderOrThrow(integration.getProviderType());
-        if (!newKey && !clearApiKey && integration.getId() != null) {
-            AiIntegration existing = aiIntegrationRepository.findById(integration.getId())
-                    .orElseThrow(() -> new IllegalArgumentException("AI integration not found"));
-            if (!Objects.equals(existing.getProviderType(), integration.getProviderType())) {
-                throw new IllegalArgumentException("Enter a new API key or explicitly clear the stored key when changing providers");
-            }
-            retainedCiphertext = existing.getApiKey();
-            if (provider.requiresRetainedKeyValidation(existing, integration)) {
-                validationKey = decryptApiKey(existing);
-                if (validationKey == null || validationKey.isBlank()) {
-                    throw new IllegalArgumentException("Enter an API key to change provider settings");
-                }
+        AiIntegration existing = newKey ? null : findRetainedKeyOwner(integration, clearApiKey).orElse(null);
+        String retainedCiphertext = existing != null ? existing.getApiKey() : null;
+        if (existing != null && provider.requiresRetainedKeyValidation(existing, integration)) {
+            validationKey = decryptApiKey(existing);
+            if (validationKey == null || validationKey.isBlank()) {
+                throw new IllegalArgumentException("Enter an API key to change provider settings");
             }
         }
         // Keep ciphertext available to provider validation without decrypting it on an ordinary edit.
         integration.setApiKey(newKey ? apiKey : retainedCiphertext);
+        provider.canonicalize(integration);
         provider.validateConfiguration(integration, validationKey);
         integration.setApiKey(newKey ? encryptionService.encrypt(apiKey) : retainedCiphertext);
         return aiIntegrationRepository.save(integration);
+    }
+
+    /**
+     * The stored integration whose key a blank key field keeps: empty for a new
+     * integration or when {@code clearApiKey} asks to remove the key. Callers
+     * handle a newly entered key themselves.
+     *
+     * @throws IllegalArgumentException if the integration no longer exists
+     * @throws ProviderChangedException if the provider changed, because a key never carries over to another provider
+     */
+    public Optional<AiIntegration> findRetainedKeyOwner(AiIntegration integration, boolean clearApiKey) {
+        if (clearApiKey || integration.getId() == null) {
+            return Optional.empty();
+        }
+        AiIntegration existing = findById(integration.getId())
+                .orElseThrow(() -> new IllegalArgumentException("AI integration not found"));
+        if (!Objects.equals(existing.getProviderType(), integration.getProviderType())) {
+            throw new ProviderChangedException();
+        }
+        return Optional.of(existing);
+    }
+
+    /** A blank key field cannot keep the stored key once the provider changed. */
+    public static final class ProviderChangedException extends IllegalArgumentException {
+        ProviderChangedException() {
+            super("Enter a new API key or explicitly clear the stored key when changing providers");
+        }
     }
 
     public void deleteById(Long id) {
