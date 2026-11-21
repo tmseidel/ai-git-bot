@@ -8,7 +8,6 @@ import org.remus.giteabot.ai.AiAuditRecorder;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.AiProviderRegistry;
-import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.AuditingAiClient;
 import org.remus.giteabot.ai.ProviderRetryNotifier;
 import org.remus.giteabot.ai.RetryAiClient;
@@ -16,7 +15,6 @@ import org.remus.giteabot.aiusage.AiUsageService;
 import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestClient;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -61,16 +59,18 @@ public class AiClientFactory {
     }
 
 
+    /**
+     * The provider's own client for a plaintext key, without the retry and
+     * audit wrappers {@link #getClient} adds and without caching.
+     */
+    public AiClient createUnwrappedClient(AiProviderMetadata provider, AiIntegration integration, String apiKey) {
+        return provider.createClient(provider.buildRestClient(integration, apiKey), integration);
+    }
+
     private AiClient buildClient(AiIntegration integration) {
-        AiProviderType providerType = integration.getProviderType();
-        AiProviderMetadata provider = providerRegistry.getProviderOrThrow(providerType);
-
-        String decryptedApiKey = provider.requiresApiKey()
-                ? aiIntegrationService.decryptApiKey(integration)
-                : null;
-
-        RestClient restClient = provider.buildRestClient(integration, decryptedApiKey);
-        AiClient client = provider.createClient(restClient, integration);
+        AiProviderMetadata provider = providerRegistry.getProviderOrThrow(integration.getProviderType());
+        String decryptedApiKey = provider.requiresApiKey() ? aiIntegrationService.decryptApiKey(integration) : null;
+        AiClient client = createUnwrappedClient(provider, integration, decryptedApiKey);
 
         AiAuditRecorder recorder = new IntegrationAuditRecorder(integration.getName(), aiUsageService);
         if (client instanceof AbstractAiClient abstractClient) {

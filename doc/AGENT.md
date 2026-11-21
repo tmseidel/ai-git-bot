@@ -191,7 +191,7 @@ Build/test workflows can auto-detect common project types from files such as `po
 
 ## Tool-calling mode
 
-For **AI Integrations**, **Enable native tool calling** is on by default and recommended for frontier models. Turn it off only when a provider/model behaves poorly in agentic workflows; this forces the legacy JSON-in-prompt fallback. llama.cpp always uses legacy mode. See [TOOL_CALLING.md](TOOL_CALLING.md) for the troubleshooting playbook.
+For **AI Integrations**, **Enable native tool calling** is on by default and recommended for frontier models. Turn it off only when a provider/model behaves poorly in agentic workflows; this forces the legacy JSON-in-prompt fallback. llama.cpp always uses legacy mode. **Test connection** on the form checks both the connection and, when native tool calling is on, whether the model actually calls a tool. See [TOOL_CALLING.md](TOOL_CALLING.md) for the troubleshooting playbook.
 
 ## Model flavors
 

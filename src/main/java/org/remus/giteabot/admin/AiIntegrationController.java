@@ -14,7 +14,10 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 
@@ -27,6 +30,7 @@ public class AiIntegrationController {
     private final AiIntegrationService aiIntegrationService;
     private final AiProviderRegistry providerRegistry;
     private final MessageSource messageSource;
+    private final AiConnectionTestService connectionTestService;
 
     @GetMapping
     public String list(Model model) {
@@ -85,10 +89,8 @@ public class AiIntegrationController {
         // The form limits the value in the browser; this stops a hand-made POST
         // from storing a value the limiter would read as "unlimited".
         if (bindingResult.hasErrors()) {
-            String messageKey = bindingResult.getErrorCount() == bindingResult.getFieldErrorCount("parallelWorkerLimit")
-                    ? "flash.aiWorkerLimitOutOfRange" : "flash.aiNumericFieldsInvalid";
             redirectAttributes.addFlashAttribute("error", messageSource.getMessage(
-                    messageKey, null, LocaleContextHolder.getLocale()));
+                    bindingErrorMessageKey(bindingResult), null, LocaleContextHolder.getLocale()));
             return "redirect:/ai-integrations";
         }
         try {
@@ -106,6 +108,40 @@ public class AiIntegrationController {
             redirectAttributes.addFlashAttribute("error", messageSource.getMessage("flash.saveFailed", new Object[]{e.getMessage()}, LocaleContextHolder.getLocale()));
         }
         return "redirect:/ai-integrations";
+    }
+
+    /**
+     * Tests the integration as currently entered in the form, without saving
+     * it. Returns the localized outcome of each probe as JSON.
+     */
+    @PostMapping("/test-connection")
+    @ResponseBody
+    public Map<String, Object> testConnection(@ModelAttribute AiIntegration integration,
+                                              BindingResult bindingResult,
+                                              @RequestParam(required = false) String apiKey,
+                                              @RequestParam(required = false, defaultValue = "false") boolean clearApiKey) {
+        Locale locale = LocaleContextHolder.getLocale();
+        AiConnectionTestService.Result result = bindingResult.hasErrors()
+                ? AiConnectionTestService.Result.configurationFailure(bindingErrorMessageKey(bindingResult))
+                : connectionTestService.test(integration, apiKey, clearApiKey);
+        List<Map<String, String>> steps = result.steps().stream()
+                .map(step -> {
+                    Map<String, String> json = new LinkedHashMap<>();
+                    json.put("title", messageSource.getMessage("aiTest.step." + step.name(), null, locale));
+                    json.put("status", step.status().name());
+                    json.put("message", messageSource.getMessage(step.messageKey(), step.args().toArray(), locale));
+                    if (step.detail() != null) {
+                        json.put("detail", step.detail());
+                    }
+                    return json;
+                })
+                .toList();
+        return Map.of("steps", steps);
+    }
+
+    private static String bindingErrorMessageKey(BindingResult bindingResult) {
+        return bindingResult.getErrorCount() == bindingResult.getFieldErrorCount("parallelWorkerLimit")
+                ? "flash.aiWorkerLimitOutOfRange" : "flash.aiNumericFieldsInvalid";
     }
 
     @PostMapping("/{id}/delete")

@@ -13,6 +13,8 @@ Native function/tool calling is the default for new AI integrations and is recom
 
 Legacy mode uses more tokens, but it is the most battle-tested fallback across providers, model versions, and self-hosted backends.
 
+Before a run, **Test connection** on the AI integration form checks the values entered there without saving them. It sends a one-word prompt, which confirms DNS, proxies, firewalls, TLS, the API key and the model name. When native tool calling is on, it then offers the model one trivial tool and checks that the model calls it. A model that answers with text instead, or a server that rejects the request with tools, is a sign to turn native tool calling off for that integration.
+
 ## Why providers differ
 
 Every provider defines tool calling differently: request format, response format, schema support, name restrictions, and how tool results are replayed in conversation history all vary. AI-Git-Bot translates its tool catalogue into the provider-specific shape and translates model responses back into executable tool requests.
