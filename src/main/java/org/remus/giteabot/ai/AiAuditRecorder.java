@@ -1,9 +1,9 @@
 package org.remus.giteabot.ai;
 
 /**
- * Callback used by AI clients to report token usage and errors of individual
- * provider interactions. Implementations persist the data so it can be shown
- * on the admin "Usage" page.
+ * Callback used by AI clients to report each request to the provider (an attempt): its start,
+ * its token usage and its outcome. Implementations persist the data so it can be shown
+ * on the admin "Workflow runs" page.
  *
  * <p>The recorder is attached to a client by the {@code AiClientFactory} after
  * construction; clients must tolerate a missing recorder (no-op).</p>
@@ -15,7 +15,7 @@ public interface AiAuditRecorder {
      * with the raw request/response payloads sent to and received from the
      * provider.
      *
-     * <p>This legacy audit format has no counter-availability fields: unknown
+     * <p>The audit log has no counter-availability fields: unknown
      * usage is stored as 0, which cannot be distinguished from a reported zero.
      * A stored zero is therefore not proof that the interaction used no tokens.
      * {@link ChatTurn}'s reported flags remain the separate in-memory contract;
@@ -34,9 +34,22 @@ public interface AiAuditRecorder {
                      String rawRequest, String rawResponse);
 
     /**
-     * Records a failed AI interaction (e.g. an HTTP 401 response).
-     *
-     * @param error the exception raised by the provider call
+     * A request to the provider is about to be sent. Called by {@link RetryAiClient}
+     * before every attempt, so the interaction's start time and duration are known.
      */
-    void recordError(Throwable error);
+    default void attemptStarted() {
+    }
+
+    /**
+     * The current attempt returned normally.
+     *
+     * @param stopReason why the model stopped, or {@code null} for text-only calls that do not
+     *                   expose it
+     */
+    default void attemptSucceeded(StopReason stopReason) {
+    }
+
+    /** The current attempt threw {@code error} (e.g. an HTTP 401 response). */
+    default void attemptFailed(Throwable error) {
+    }
 }

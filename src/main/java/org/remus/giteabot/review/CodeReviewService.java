@@ -651,7 +651,6 @@ public class CodeReviewService {
             } catch (Exception e) {
                 failedChunks++;
                 lastException = e;
-                aiClient.reportError(e);
                 log.warn("Review failed for chunk {}/{}: {}", chunkNumber, totalChunks, e.getMessage());
                 if (totalChunks > 1) {
                     reviews.add("### Diff chunk " + chunkNumber + "/" + totalChunks

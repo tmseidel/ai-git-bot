@@ -352,10 +352,11 @@ public class ProcessPythonExecutionService implements PythonExecutionService {
      * that outlives the window is reported instead of waited on, and the workspace is removed
      * underneath it — which is why the warning is not decoration.</p>
      *
-     * <p>Nested calls run on {@code execute-code-bridge}, not on the agent's thread. Nothing depends on
-     * that difference today — the only {@link ThreadLocal}s in the codebase are the AI audit and retry
-     * contexts, and tool dispatch does not read them — but an executor that starts to will need its
-     * context handed over here.</p>
+     * <p>Nested calls run on {@code execute-code-bridge}, not on the agent's thread, so they do not see
+     * the agent thread's {@link ThreadLocal}s (the AI audit and retry contexts). Tool dispatch reads the
+     * audit context to record tool calls ({@link org.remus.giteabot.ai.ToolCallAudit}); because it is not
+     * handed over, a program's nested calls are not recorded individually — the {@code execute-code} call
+     * itself is, with their time included. Recording them would need the current run handed over here.</p>
      */
     private void awaitServing(Thread serving) {
         long bound = NESTED_TEARDOWN_WAIT.toMillis();

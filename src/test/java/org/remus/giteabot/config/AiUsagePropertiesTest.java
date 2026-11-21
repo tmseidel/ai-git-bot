@@ -32,4 +32,18 @@ class AiUsagePropertiesTest {
 
         assertThat(output).doesNotContain("AI usage raw payloads are stored in full");
     }
+
+    @Test
+    void zeroOrNegativeMaxLengthMeansNoTruncation() {
+        AiUsageProperties properties = new AiUsageProperties();
+        assertThat(properties.getEffectiveMaxRawPayloadLength()).isEqualTo(65535);
+
+        properties.setMaxRawPayloadLength(0);
+        assertThat(properties.getEffectiveMaxRawPayloadLength()).isEqualTo(Integer.MAX_VALUE);
+        properties.setMaxRawPayloadLength(-1);
+        assertThat(properties.getEffectiveMaxRawPayloadLength()).isEqualTo(Integer.MAX_VALUE);
+        // the old 65535 cap is gone: the columns are TEXT
+        properties.setMaxRawPayloadLength(500_000);
+        assertThat(properties.getEffectiveMaxRawPayloadLength()).isEqualTo(500_000);
+    }
 }

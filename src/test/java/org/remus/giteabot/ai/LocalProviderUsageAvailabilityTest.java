@@ -44,9 +44,6 @@ class LocalProviderUsageAvailabilityTest {
                 legacyUsageRows.add(List.of(inputTokens, outputTokens));
             }
 
-            @Override
-            public void recordError(Throwable error) {
-            }
         });
 
         ChatTurn turn = client.chatWithTools(List.of(), "Question", List.of(), "System", null, null);
@@ -321,9 +318,6 @@ class LocalProviderUsageAvailabilityTest {
                 usageRows.add(List.of(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens));
             }
 
-            @Override
-            public void recordError(Throwable error) {
-            }
         });
         return new Fixture(client, server, usageRows);
     }

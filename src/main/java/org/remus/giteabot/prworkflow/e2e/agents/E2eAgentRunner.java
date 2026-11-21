@@ -194,13 +194,10 @@ public final class E2eAgentRunner {
         for (int round = 1; round <= maxRounds; round++) {
             ChatTurn turn;
             try {
-                AiAuditContext.setRound(round);
                 turn = callAiWithRetry(history, currentMessage, mode, maxTokens);
             } catch (RuntimeException e) {
                 log.warn("[{}] AI call failed in round {}: {}", agentLabel, round, e.getMessage(), e);
                 return new Result(lastAssistantText, invocations, round - 1, true);
-            } finally {
-                AiAuditContext.clearRound();
             }
             lastAssistantText = turn.assistantText() == null ? "" : turn.assistantText();
             log.debug("[{}] round {}/{}: assistantTextLen={} toolCalls={} stopReason={}",
@@ -269,6 +266,7 @@ public final class E2eAgentRunner {
         }
 
         log.warn("[{}] exhausted {} rounds without a terminal text turn", agentLabel, maxRounds);
+        AiAuditContext.markRoundLimitReached();
         return new Result(lastAssistantText, invocations, maxRounds, true);
     }
 
@@ -406,6 +404,10 @@ public final class E2eAgentRunner {
         int maxRetries = 2;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
             try {
+                if (attempt > 1) {
+                    // A retry repeats the round's AI call; the audit log keeps its round number.
+                    AiAuditContext.markRetry();
+                }
                 if (mode == ToolingMode.NATIVE) {
                     return aiClient.chatWithTools(history, currentMessage, toolDescriptors,
                             systemPrompt, null, maxTokens);

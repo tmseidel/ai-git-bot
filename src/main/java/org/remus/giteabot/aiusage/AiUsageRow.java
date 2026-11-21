@@ -3,7 +3,7 @@ package org.remus.giteabot.aiusage;
 import java.time.Instant;
 
 /**
- * One row of the Usage table: an {@link AiUsageLog} without its raw payloads. Raw payloads can be
+ * One row of the Usage table: a successful {@link AiInteraction} without its raw payloads. Raw payloads can be
  * large (whole conversations), so the list query never loads them; the Details modal fetches them
  * per entry from {@code /usage/{id}/raw}.
  */

@@ -136,13 +136,8 @@ class UsageControllerTest {
     void usage_rendersUsageAndErrorSections() throws Exception {
         AiUsageRow usage = row(1, null);
 
-        AiErrorLog error = new AiErrorLog();
-        error.setId(2L);
-        error.setTimestamp(Instant.parse("2026-06-02T11:00:00Z"));
-        error.setAiIntegrationName("my-anthropic");
-        error.setSessionId("owner/repo#7");
-        error.setErrorMessage("401 Unauthorized");
-        error.setStackTrace("org.example.SomeException: 401 Unauthorized");
+        AiErrorRow error = new AiErrorRow(2L, Instant.parse("2026-06-02T11:00:00Z"), "my-anthropic",
+                "owner/repo#7", "401 Unauthorized", "org.example.SomeException: 401 Unauthorized");
 
         when(aiUsageService.findUsage(any(), any(), anyInt(), anyInt(), anyString(), anyBoolean()))
                 .thenReturn(new PageImpl<>(List.of(usage), PageRequest.of(0, 20), 1));

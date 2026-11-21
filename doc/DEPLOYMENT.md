@@ -551,7 +551,7 @@ Included metrics:
 | `giteabot_findings` | gauge | Total findings posted (v1: one per completed review) |
 | `giteabot_ai_usage_input_tokens{integration}` | gauge | Total input tokens per AI integration |
 | `giteabot_ai_usage_output_tokens{integration}` | gauge | Total output tokens per AI integration |
-| `giteabot_ai_errors` | gauge | Total AI provider errors |
+| `giteabot_ai_errors` | gauge | Total failed AI calls: the last failed attempt of a round (a failed attempt a retry recovered from does not count) |
 | `giteabot_audit_tool_calls` | gauge | Total tool calls recorded in the audit trail |
 | `giteabot_agent_sessions{status}` | gauge | Coding-agent sessions per status — terminal statuses (`answered`, `failed`, `completed`, …) only grow, so alert on `answered` to catch runs that answered instead of changing code |
 | `prworkflow.run_total` | counter | PR workflow runs by workflow and status |

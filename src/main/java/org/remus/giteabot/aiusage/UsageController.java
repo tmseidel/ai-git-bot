@@ -57,7 +57,7 @@ public class UsageController {
         // PageRequest is 0-based, so subtract 1 (and never go below 0).
         Page<AiUsageRow> usage = aiUsageService.findUsage(fromInstant, toInstant,
                 Math.max(0, usagePage - 1), usageSize, usageSort, "asc".equalsIgnoreCase(usageDir));
-        Page<AiErrorLog> errors = aiUsageService.findErrors(fromInstant, toInstant,
+        Page<AiErrorRow> errors = aiUsageService.findErrors(fromInstant, toInstant,
                 Math.max(0, errorPage - 1), errorSize, errorSort, "asc".equalsIgnoreCase(errorDir));
 
         model.addAttribute("usagePage", usage);

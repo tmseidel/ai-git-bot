@@ -139,6 +139,7 @@ class PrWorkflowOrchestratorTest {
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
 
         PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 1), "test-wf");
@@ -156,6 +157,7 @@ class PrWorkflowOrchestratorTest {
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(skippedWorkflow());
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
 
         PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 2), "test-wf");
@@ -172,6 +174,7 @@ class PrWorkflowOrchestratorTest {
         PrWorkflowOrchestrator orchestrator = newOrchestrator(
                 throwingWorkflow(new IllegalStateException("boom")));
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
 
         assertThrows(IllegalStateException.class, () ->
@@ -200,6 +203,7 @@ class PrWorkflowOrchestratorTest {
         };
         PrWorkflowOrchestrator orchestrator = newOrchestrator(capturing);
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
 
         orchestrator.run(bot, payloadFor("o", "r", 7), "test-wf");
@@ -220,6 +224,7 @@ class PrWorkflowOrchestratorTest {
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
 
         assertThrows(IllegalStateException.class, () ->
@@ -232,6 +237,7 @@ class PrWorkflowOrchestratorTest {
     void runThrowsOnUnknownWorkflow() {
         PrWorkflowOrchestrator orchestrator = newOrchestrator();
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         assertThrows(IllegalArgumentException.class, () ->
                 orchestrator.run(bot, payloadFor("o", "r", 1), "nonexistent"));
@@ -241,6 +247,7 @@ class PrWorkflowOrchestratorTest {
     void runThrowsWhenPayloadMissesRepositoryIdentity() {
         PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         assertThrows(IllegalArgumentException.class, () ->
                 orchestrator.run(bot, new WebhookPayload(), "test-wf"));
@@ -266,6 +273,7 @@ class PrWorkflowOrchestratorTest {
         };
         PrWorkflowOrchestrator orchestrator = newOrchestrator(slowWf);
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         Thread t1 = new Thread(() -> orchestrator.run(bot, payloadFor("o", "r", 5), "test-wf"));
         t1.start();
@@ -290,6 +298,7 @@ class PrWorkflowOrchestratorTest {
         PrWorkflowOrchestrator orchestrator = newOrchestrator(
                 throwingWorkflow(new WorkflowCancelledException("superseded")));
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 6), "test-wf");
 
@@ -305,6 +314,7 @@ class PrWorkflowOrchestratorTest {
         PrWorkflowOrchestrator orchestrator = newOrchestrator(
                 throwingWorkflow(new WorkflowCancelledException("superseded")));
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         PrWorkflowRun result = orchestrator.run(bot, payloadFor("o", "r", 7), "test-wf");
 
@@ -320,6 +330,7 @@ class PrWorkflowOrchestratorTest {
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         bot.setName("test-bot");
 
@@ -346,6 +357,7 @@ class PrWorkflowOrchestratorTest {
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(successWorkflow());
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         bot.setName("test-bot");
 
@@ -372,6 +384,7 @@ class PrWorkflowOrchestratorTest {
 
         PrWorkflowOrchestrator orchestrator = newOrchestrator(throwingWorkflow(new RuntimeException("boom")));
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         bot.setName("test-bot");
 
@@ -409,6 +422,7 @@ class PrWorkflowOrchestratorTest {
         };
         PrWorkflowOrchestrator orchestrator = newOrchestrator(tracked);
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         AiIntegration integration = new AiIntegration();
         integration.setId(9L);
@@ -448,6 +462,7 @@ class PrWorkflowOrchestratorTest {
         };
         PrWorkflowOrchestrator orchestrator = newOrchestrator(blocking);
         Bot bot = new Bot();
+        withIntegrations(bot);
         bot.setId(1L);
         AiIntegration integration = new AiIntegration();
         integration.setId(9L);
@@ -490,5 +505,15 @@ class PrWorkflowOrchestratorTest {
         PrWorkflowRun run = runWithId(id);
         run.setStatus(status);
         return run;
+    }
+
+    /** A bot always has an AI and a Git integration (not nullable); the audit trigger reads their names. */
+    private static void withIntegrations(Bot bot) {
+        org.remus.giteabot.admin.AiIntegration ai = new org.remus.giteabot.admin.AiIntegration();
+        ai.setName("test-ai");
+        bot.setAiIntegration(ai);
+        org.remus.giteabot.admin.GitIntegration git = new org.remus.giteabot.admin.GitIntegration();
+        git.setName("test-git");
+        bot.setGitIntegration(git);
     }
 }

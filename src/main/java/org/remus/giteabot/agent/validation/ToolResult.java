@@ -17,6 +17,14 @@ public record ToolResult(
     public ToolResult(boolean success, int exitCode, String output, String error) {
         this(success, exitCode, output, error, false);
     }
+
+    /** Why the call failed, for the audit log: the error, else the exit code; {@code null} on success. */
+    public String failureMessage() {
+        if (success) {
+            return null;
+        }
+        return error != null && !error.isBlank() ? error : "Exit code " + exitCode;
+    }
     /**
      * Formats the result for sending to the AI.
      */

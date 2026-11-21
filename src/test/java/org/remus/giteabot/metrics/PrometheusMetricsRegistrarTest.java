@@ -7,11 +7,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionRepository;
-import org.remus.giteabot.aiusage.AiErrorLogRepository;
-import org.remus.giteabot.aiusage.AiUsageLogRepository;
+import org.remus.giteabot.aiusage.AiInteractionRepository;
 import org.remus.giteabot.audit.AuditEventType;
 import org.remus.giteabot.audit.PrAuditEventRepository;
 
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,8 +22,7 @@ class PrometheusMetricsRegistrarTest {
 
     private MeterRegistry registry;
     private PrAuditEventRepository auditRepository;
-    private AiUsageLogRepository usageRepository;
-    private AiErrorLogRepository errorRepository;
+    private AiInteractionRepository usageRepository;
     private AgentSessionRepository sessionRepository;
     private PrometheusMetricsRegistrar registrar;
 
@@ -31,10 +30,9 @@ class PrometheusMetricsRegistrarTest {
     void setUp() {
         registry = new SimpleMeterRegistry();
         auditRepository = mock(PrAuditEventRepository.class);
-        usageRepository = mock(AiUsageLogRepository.class);
-        errorRepository = mock(AiErrorLogRepository.class);
+        usageRepository = mock(AiInteractionRepository.class);
         sessionRepository = mock(AgentSessionRepository.class);
-        registrar = new PrometheusMetricsRegistrar(registry, auditRepository, usageRepository, errorRepository,
+        registrar = new PrometheusMetricsRegistrar(registry, auditRepository, usageRepository,
                 sessionRepository);
     }
 
@@ -43,7 +41,7 @@ class PrometheusMetricsRegistrarTest {
         when(auditRepository.countByEventType(AuditEventType.REVIEW_COMPLETED)).thenReturn(7L);
         when(auditRepository.countByEventType(AuditEventType.FINDING_POSTED)).thenReturn(5L);
         when(usageRepository.findDistinctAiIntegrationNames()).thenReturn(List.of());
-        when(errorRepository.count()).thenReturn(0L);
+        when(usageRepository.countFailedCallsStartedAfter(Instant.EPOCH)).thenReturn(0L);
 
         registrar.registerGauges();
 
@@ -60,7 +58,7 @@ class PrometheusMetricsRegistrarTest {
         when(usageRepository.sumOutputTokensByAiIntegrationName("OpenAI")).thenReturn(400L);
         when(usageRepository.sumInputTokensByAiIntegrationName("anthropic")).thenReturn(800L);
         when(usageRepository.sumOutputTokensByAiIntegrationName("anthropic")).thenReturn(200L);
-        when(errorRepository.count()).thenReturn(0L);
+        when(usageRepository.countFailedCallsStartedAfter(Instant.EPOCH)).thenReturn(0L);
 
         registrar.registerGauges();
 
@@ -75,7 +73,7 @@ class PrometheusMetricsRegistrarTest {
         when(auditRepository.countByEventType(AuditEventType.REVIEW_COMPLETED)).thenReturn(0L);
         when(auditRepository.countByEventType(AuditEventType.FINDING_POSTED)).thenReturn(0L);
         when(usageRepository.findDistinctAiIntegrationNames()).thenReturn(List.of());
-        when(errorRepository.count()).thenReturn(0L);
+        when(usageRepository.countFailedCallsStartedAfter(Instant.EPOCH)).thenReturn(0L);
 
         registrar.registerGauges();
 
@@ -88,7 +86,7 @@ class PrometheusMetricsRegistrarTest {
         when(auditRepository.countByEventType(AuditEventType.REVIEW_COMPLETED)).thenReturn(0L);
         when(auditRepository.countByEventType(AuditEventType.FINDING_POSTED)).thenReturn(0L);
         when(usageRepository.findDistinctAiIntegrationNames()).thenReturn(List.of());
-        when(errorRepository.count()).thenReturn(11L);
+        when(usageRepository.countFailedCallsStartedAfter(Instant.EPOCH)).thenReturn(11L);
 
         registrar.registerGauges();
 
@@ -101,7 +99,7 @@ class PrometheusMetricsRegistrarTest {
         when(auditRepository.countByEventType(AuditEventType.FINDING_POSTED)).thenReturn(0L);
         when(auditRepository.countByEventType(AuditEventType.TOOL_CALL_EXECUTED)).thenReturn(42L);
         when(usageRepository.findDistinctAiIntegrationNames()).thenReturn(List.of());
-        when(errorRepository.count()).thenReturn(0L);
+        when(usageRepository.countFailedCallsStartedAfter(Instant.EPOCH)).thenReturn(0L);
 
         registrar.registerGauges();
 
@@ -113,7 +111,7 @@ class PrometheusMetricsRegistrarTest {
         when(auditRepository.countByEventType(AuditEventType.REVIEW_COMPLETED)).thenReturn(0L);
         when(auditRepository.countByEventType(AuditEventType.FINDING_POSTED)).thenReturn(0L);
         when(usageRepository.findDistinctAiIntegrationNames()).thenReturn(List.of());
-        when(errorRepository.count()).thenReturn(0L);
+        when(usageRepository.countFailedCallsStartedAfter(Instant.EPOCH)).thenReturn(0L);
         // An answer-only run ends as ANSWERED, not FAILED — the gauge is the signal
         // operators alert on instead of the (deliberately neutral) issue comment.
         when(sessionRepository.countByStatus(AgentSession.AgentSessionStatus.ANSWERED)).thenReturn(3L);

@@ -111,10 +111,6 @@ class AnthropicAiClientTest {
                 recordedRaw[1] = rawResponse;
             }
 
-            @Override
-            public void recordError(Throwable error) {
-                // not under test
-            }
         });
 
         ObjectNode schema = new ObjectMapper().createObjectNode();

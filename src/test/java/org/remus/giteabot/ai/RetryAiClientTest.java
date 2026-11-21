@@ -60,10 +60,6 @@ class RetryAiClientTest {
         }
 
         @Override
-        public void reportError(Throwable error) {
-        }
-
-        @Override
         public String getModel() {
             return "test-model";
         }
@@ -93,16 +89,45 @@ class RetryAiClientTest {
         }
     }
 
+    /** Records the audit callbacks in the order the client makes them. */
+    private static final class AuditEvents implements AiAuditRecorder {
+        final List<String> events = new ArrayList<>();
+
+        @Override
+        public void recordUsage(long inputTokens, long outputTokens, long cacheCreationInputTokens,
+                                long cacheReadInputTokens, String rawRequest, String rawResponse) {
+            events.add("usage");
+        }
+
+        @Override
+        public void attemptStarted() {
+            AuditRun run = AiAuditContext.currentRun();
+            events.add("started" + (run != null ? " round " + run.getRound() : ""));
+        }
+
+        @Override
+        public void attemptSucceeded(StopReason stopReason) {
+            events.add("succeeded:" + stopReason);
+        }
+
+        @Override
+        public void attemptFailed(Throwable error) {
+            events.add("failed");
+        }
+    }
+
     private final List<Long> sleeps = new ArrayList<>();
+    private final AuditEvents audit = new AuditEvents();
 
     @AfterEach
     void clearContext() {
         AiRetryContext.clear();
+        AiAuditContext.clear();
     }
 
     private RetryAiClient clientFor(ScriptedAiClient delegate, AiRetryProperties properties,
                                     ProviderRetryNotifier notifier) {
-        return new RetryAiClient(delegate, properties, notifier, sleeps::add, new Random(42));
+        return new RetryAiClient(delegate, properties, notifier, audit, sleeps::add, new Random(42));
     }
 
     private static AiRetryProperties properties() {
@@ -246,7 +271,7 @@ class RetryAiClientTest {
         RetryAiClient.Sleeper interrupting = millis -> {
             throw new InterruptedException("stop");
         };
-        RetryAiClient client = new RetryAiClient(delegate, properties(), notifier, interrupting,
+        RetryAiClient client = new RetryAiClient(delegate, properties(), notifier, audit, interrupting,
                 new Random(42));
 
         try {
@@ -295,5 +320,48 @@ class RetryAiClientTest {
         assertEquals(1, delegate.calls);
         assertTrue(sleeps.isEmpty());
         assertTrue(notifier.scheduled.isEmpty());
+    }
+
+    @Test
+    void everyRequestIsReportedAsAnAttemptOfTheSameRound() {
+        ScriptedAiClient delegate = new ScriptedAiClient("review text", highDemand());
+
+        try (AuditRun run = AiAuditContext.openRun("review", null)) {
+            clientFor(delegate, properties(), new RecordingNotifier()).chat(List.of(), "review this", "system", null);
+
+            assertEquals(1, run.getRound());
+        }
+        assertEquals(List.of("started round 1", "failed", "started round 1", "succeeded:null"), audit.events);
+    }
+
+    @Test
+    void everyLogicalCallStartsTheNextRoundAndToolTurnsReportTheirStopReason() {
+        ScriptedAiClient delegate = new ScriptedAiClient("answer");
+        RetryAiClient client = clientFor(delegate, properties(), new RecordingNotifier());
+
+        try (AuditRun run = AiAuditContext.openRun("review", null)) {
+            client.submitReviewPrompt("sys", null, "diff");
+            client.chatWithTools(List.of(), "hi", List.of(), null, null, null);
+
+            assertEquals(2, run.getRound());
+        }
+        assertEquals(List.of("started round 1", "succeeded:null", "started round 2", "succeeded:END_TURN"),
+                audit.events);
+    }
+
+    @Test
+    void announcedRetryKeepsTheRound() {
+        ScriptedAiClient delegate = new ScriptedAiClient("answer",
+                new HttpClientErrorException(HttpStatus.UNAUTHORIZED));
+        RetryAiClient client = clientFor(delegate, properties(), new RecordingNotifier());
+
+        try (AuditRun run = AiAuditContext.openRun("review", null)) {
+            assertThrows(HttpClientErrorException.class, () -> client.chat(List.of(), "hi", null, null));
+            run.markRetry();
+            client.chat(List.of(), "hi", null, null);
+
+            assertEquals(1, run.getRound());
+        }
+        assertEquals(List.of("started round 1", "failed", "started round 1", "succeeded:null"), audit.events);
     }
 }

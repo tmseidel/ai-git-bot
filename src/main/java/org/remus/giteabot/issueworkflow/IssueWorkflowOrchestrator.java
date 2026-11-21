@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiIntegrationConcurrencyLimiter;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotService;
+import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiRetryContext;
+import org.remus.giteabot.ai.AuditRun;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -14,6 +16,7 @@ import org.remus.giteabot.notification.WorkflowRetryNotices;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
+import org.remus.giteabot.workflowrun.WorkflowRunTriggers;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -67,6 +70,7 @@ public class IssueWorkflowOrchestrator {
     public void runAssigned(Bot bot, WebhookPayload payload) {
         IssueRef issue = issueRef(payload);
         for (IssueWorkflow workflow : resolveWorkflows(bot)) {
+            AuditRun auditRun = AiAuditContext.openRun(workflow.key(), WorkflowRunTriggers.of(bot, payload));
             try {
                 retryNotices.installForIssue(bot, workflow.key(), issue.owner(), issue.repo(), issue.number());
                 // The slot is taken before the STARTED event goes out, so a job that has
@@ -77,9 +81,11 @@ public class IssueWorkflowOrchestrator {
                 });
                 publishIssueEvent(EventHookEventType.ISSUE_ASSIGNMENT_COMPLETED, bot, payload, null, false);
             } catch (WorkflowCancelledException cancelled) {
+                auditRun.fail("Cancelled: " + cancelled.getMessage());
                 log.info("[Bot '{}'] Issue workflow '{}' cancelled: {}",
                         bot.getName(), workflow.key(), cancelled.getMessage());
             } catch (Exception e) {
+                auditRun.fail(e.getMessage());
                 log.error("[Bot '{}'] Issue workflow '{}' failed on issue assignment: {}",
                         bot.getName(), workflow.key(), e.getMessage(), e);
                 botService.recordError(bot, e.getMessage());
@@ -87,6 +93,7 @@ public class IssueWorkflowOrchestrator {
                         e.getMessage(), false);
             } finally {
                 AiRetryContext.clear();
+                auditRun.close();
             }
         }
     }
@@ -121,6 +128,7 @@ public class IssueWorkflowOrchestrator {
         commentAcknowledgement.acknowledge(bot, payload);
         IssueRef issue = issueRef(payload);
         for (IssueWorkflow workflow : workflows) {
+            AuditRun auditRun = AiAuditContext.openRun(workflow.key(), WorkflowRunTriggers.of(bot, payload));
             try {
                 // Installed inside the guarded region (see runAssigned): clearing it in the
                 // finally below is what keeps the notice off the next task on this thread.
@@ -128,14 +136,17 @@ public class IssueWorkflowOrchestrator {
                 concurrencyLimiter.runWithPermit(bot.getAiIntegration(),
                         () -> workflow.onIssueComment(context(bot, payload, workflow.key())));
             } catch (WorkflowCancelledException cancelled) {
+                auditRun.fail("Cancelled: " + cancelled.getMessage());
                 log.info("[Bot '{}'] Issue workflow '{}' cancelled: {}",
                         bot.getName(), workflow.key(), cancelled.getMessage());
             } catch (Exception e) {
+                auditRun.fail(e.getMessage());
                 log.error("[Bot '{}'] Issue workflow '{}' failed on issue comment: {}",
                         bot.getName(), workflow.key(), e.getMessage(), e);
                 botService.recordError(bot, e.getMessage());
             } finally {
                 AiRetryContext.clear();
+                auditRun.close();
             }
         }
     }

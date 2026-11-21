@@ -103,21 +103,6 @@ public abstract class AbstractAiClient implements AiClient {
     }
 
     /**
-     * Reports a failed provider interaction to the attached audit recorder
-     * (no-op when no recorder is attached).
-     */
-    public void reportError(Throwable error) {
-        if (auditRecorder == null) {
-            return;
-        }
-        try {
-            auditRecorder.recordError(error);
-        } catch (Exception e) {
-            log.warn("Failed to record AI error: {}", e.getMessage());
-        }
-    }
-
-    /**
      * Sends a single review request to the AI provider.
      *
      * @return the review text
