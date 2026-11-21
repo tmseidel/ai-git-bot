@@ -27,6 +27,11 @@ public class AuditingAiClient implements AiClient {
     private final AiAuditRecorder recorder;
 
     @Override
+    public ReviewProviderContract reviewProviderContract() {
+        return delegate.reviewProviderContract();
+    }
+
+    @Override
     public String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage) {
         return audited(() -> delegate.submitReviewPrompt(systemPrompt, modelOverride, userMessage));
     }
