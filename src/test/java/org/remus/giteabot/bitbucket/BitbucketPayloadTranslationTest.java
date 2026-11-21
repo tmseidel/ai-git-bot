@@ -33,7 +33,9 @@ class BitbucketPayloadTranslationTest {
         assertEquals(42L, payload.getPullRequest().getNumber());
         assertEquals("Add feature", payload.getPullRequest().getTitle());
         assertEquals("feature-branch", payload.getPullRequest().getHead().getRef());
+        assertEquals("developer/fork", payload.getPullRequest().getHead().getRepositoryFullName());
         assertEquals("main", payload.getPullRequest().getBase().getRef());
+        assertEquals("workspace/myrepo", payload.getPullRequest().getBase().getRepositoryFullName());
     }
 
     @Test
@@ -189,10 +191,12 @@ class BitbucketPayloadTranslationTest {
         Map<String, Object> source = new HashMap<>();
         source.put("branch", Map.of("name", "feature-branch"));
         source.put("commit", Map.of("hash", "abc123"));
+        source.put("repository", Map.of("full_name", "developer/fork"));
 
         Map<String, Object> destination = new HashMap<>();
         destination.put("branch", Map.of("name", "main"));
         destination.put("commit", Map.of("hash", "def456"));
+        destination.put("repository", Map.of("full_name", "workspace/myrepo"));
 
         Map<String, Object> pullrequest = new HashMap<>();
         pullrequest.put("id", 42);

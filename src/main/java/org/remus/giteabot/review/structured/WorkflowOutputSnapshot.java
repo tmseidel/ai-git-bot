@@ -24,11 +24,8 @@ import java.time.Instant;
  * marked incomplete instead of being silently shortened. The structured review record exists and
  * works whether or not this row does.</p>
  *
- * <p>Fork provenance is deliberately not a column: the webhook payload models only the head ref and
- * sha, so the source repository of a forked pull request would have to be threaded through every
- * provider's pull-request DTO. Replay re-fetches the pull request by number anyway, which yields the
- * fork identity from the provider, so storing a second copy would only create a value that can
- * disagree with the provider's.</p>
+ * <p>Fork provenance is not persisted here. Bitbucket can provide a source repository to resolve an
+ * abbreviated SHA during review; this does not establish historical fork identity for replay.</p>
  */
 @Data
 @NoArgsConstructor

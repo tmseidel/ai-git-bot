@@ -124,7 +124,7 @@ public class AgentReviewService {
             return switch (result.outcome()) {
                 case NO_DIFF -> ReviewResult.NO_DIFF;
                 case FAILED -> ReviewResult.FAILED;
-                case FINALIZED -> publish(payload, owner, repo, prNumber, result,
+                case FINALIZED -> publish(owner, repo, prNumber, result,
                         enableFormalDecision, severityThresholds, learningSettings);
             };
         } catch (WorkflowCancelledException e) {
@@ -140,7 +140,7 @@ public class AgentReviewService {
         }
     }
 
-    private ReviewResult publish(WebhookPayload payload, String owner, String repo, Long prNumber,
+    private ReviewResult publish(String owner, String repo, Long prNumber,
                                  AgentReviewExecution.Result result, boolean enableFormalDecision,
                                  SeverityThresholds thresholds,
                                  AgentReviewLearningSettings learningSettings) {
@@ -148,8 +148,8 @@ public class AgentReviewService {
             ReviewPublisher.Publication publication = publisher.publish(
                     new ReviewPublisher.PublicationRequest(
                             repositoryClient, bot, owner, repo, prNumber, result.reference(),
-                            enableFormalDecision, thresholds, linkStyle(payload, owner, repo),
-                            providerName(), "pull_request_review", expectedHeadSha(payload),
+                             enableFormalDecision, thresholds, linkStyle(owner, repo, result.reviewedHeadSha()),
+                             providerName(), "pull_request_review", result.reviewedHeadSha(),
                             () -> currentHeadSha(owner, repo, prNumber),
                             () -> Thread.currentThread().isInterrupted(),
                             learningSettings.feedbackEnabled()
@@ -183,10 +183,10 @@ public class AgentReviewService {
      * Source links for the published comment, when the provider addresses a line anchor. A missing
      * head sha or an unsupported provider degrades to plain paths, never to a guessed URL.
      */
-    private ReviewLinkStyle linkStyle(WebhookPayload payload, String owner, String repo) {
+    private ReviewLinkStyle linkStyle(String owner, String repo, String reviewedHeadSha) {
         return ReviewLinkStyles.forProvider(
                 bot.getGitIntegration() != null ? bot.getGitIntegration().getProviderType() : null,
-                repositoryPlatform, owner, repo, expectedHeadSha(payload));
+                repositoryPlatform, owner, repo, reviewedHeadSha);
     }
 
     /**
@@ -205,12 +205,6 @@ public class AgentReviewService {
     private String providerName() {
         return bot.getGitIntegration() != null
                 ? bot.getGitIntegration().getProviderType().name() : "UNKNOWN";
-    }
-
-    /** The revision the review describes, as the webhook reported it. */
-    private static String expectedHeadSha(WebhookPayload payload) {
-        return payload.getPullRequest().getHead() != null
-                ? payload.getPullRequest().getHead().getSha() : null;
     }
 
     /**

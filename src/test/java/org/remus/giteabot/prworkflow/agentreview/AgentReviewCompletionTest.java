@@ -28,6 +28,7 @@ import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.ChatTurn;
 import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.ai.ToolCall;
+import org.remus.giteabot.bitbucket.BitbucketApiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.eventhook.EventHookEventType;
@@ -48,6 +49,7 @@ import org.remus.giteabot.review.structured.ReferenceNamespace;
 import org.remus.giteabot.review.structured.ReviewCommentRenderer;
 import org.remus.giteabot.review.structured.ReviewRecord;
 import org.remus.giteabot.review.structured.ReviewRecordRepository;
+import org.remus.giteabot.review.structured.ReviewPublicationState;
 import org.remus.giteabot.review.structured.ReviewState;
 import org.remus.giteabot.review.structured.ReviewSubmissionToolExecutor;
 import org.remus.giteabot.review.structured.ReviewToolOperation;
@@ -55,6 +57,11 @@ import org.remus.giteabot.review.structured.ReviewToolOperationRepository;
 import org.remus.giteabot.review.structured.ReviewToolOperationService;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 import org.remus.giteabot.review.structured.WorkflowOutputRepository;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.ExpectedCount;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -67,6 +74,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -80,11 +88,15 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
  * The agentic review is published from the recorded draft, never from model prose. These tests
@@ -153,7 +165,6 @@ class AgentReviewCompletionTest {
 
         config = new AgentConfigProperties();
         config.getBudget().setMaxRounds(12);
-        ToolCatalog catalog = new ToolCatalog(config);
 
         reviewService = new StructuredReviewService(outputRepository, reviewRepository, referenceAllocator);
         lenient().when(outputRepository.save(any())).thenAnswer(invocation -> {
@@ -219,6 +230,18 @@ class AgentReviewCompletionTest {
                 anyLong(), anyString(), any())).thenReturn(java.util.List.of());
         lenient().when(snapshotRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
+        service = serviceFor(platform, RepositoryType.GITEA);
+        lenient().when(repositoryClient.resolveCommitSha(any(), any())).thenCallRealMethod();
+        lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
+        lenient().when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
+        lenient().when(workspaceService.preparePullRequestWorkspace(platform, "owner", "repo",
+                        "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
+                .thenReturn(WorkspaceResult.success(workspace));
+        lenient().when(workspace.path()).thenReturn(WORKSPACE);
+    }
+
+    private AgentReviewService serviceFor(RepositoryPlatform platform, RepositoryType type) {
+        ToolCatalog catalog = new ToolCatalog(config);
         ReviewSubmissionToolExecutor submissionExecutor = new ReviewSubmissionToolExecutor(
                 reviewService, new ReviewToolOperationService(operationRepository));
         org.remus.giteabot.review.structured.ReviewPublicationService publicationService =
@@ -234,10 +257,10 @@ class AgentReviewCompletionTest {
         bot.setId(3L);
         GitIntegration git = new GitIntegration();
         git.setId(7L);
-        git.setProviderType(RepositoryType.GITEA);
+        git.setProviderType(type);
         bot.setGitIntegration(git);
 
-        service = new AgentReviewService(
+        return new AgentReviewService(
                 new AgentReviewContext(platform, aiClient, "Review the change.",
                         null, null, Set.of("pr-diff"), 200_000),
                 new AgentSessionService(mock(AgentSessionRepository.class)),
@@ -249,13 +272,6 @@ class AgentReviewCompletionTest {
                                 outputRepository, reviewRepository)),
                 commentProperties,
                 publisher);
-
-        lenient().when(aiClient.supportsNativeTools()).thenReturn(true);
-        lenient().when(repositoryClient.getPullRequestDiff("owner", "repo", 1L)).thenReturn(DIFF);
-        lenient().when(workspaceService.preparePullRequestWorkspace(platform, "owner", "repo",
-                        "feature", 1L, PullRequestWorkspaceMode.READ_ONLY))
-                .thenReturn(WorkspaceResult.success(workspace));
-        lenient().when(workspace.path()).thenReturn(WORKSPACE);
     }
 
     // ------------------------------------------------------------------ structured publication
@@ -355,6 +371,80 @@ class AgentReviewCompletionTest {
         verify(repositoryClient).updatePullRequestComment(eq("owner"), eq("repo"), eq(1L),
                 eq(CommentId.NumericCommentId.of(42L)),
                 argThat(body -> body.contains("- Latest activity: Completed")));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false, false", "true, false", "true, true"})
+    void comparesBitbucketWebhookAndApiHeadsAfterResolvingForkCommits(boolean moved, boolean abbreviatedCurrent) {
+        String oldPrefix = "abc123456789";
+        String oldSha = oldPrefix + "a".repeat(28);
+        String newPrefix = "def123456789";
+        // A full current SHA can share the old prefix without being the reviewed commit.
+        String newSha = (abbreviatedCurrent ? newPrefix : oldPrefix) + "b".repeat(28);
+        String basePrefix = "789abc123456";
+        String baseSha = basePrefix + "c".repeat(28);
+        String api = "https://api.bitbucket.org/2.0";
+        String pr = api + "/repositories/owner/repo/pullrequests/1";
+        String forkCommits = api + "/repositories/contributor/fork/commit/";
+        RestClient.Builder builder = RestClient.builder().baseUrl(api);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
+        var adapter = new BitbucketApiClient(builder.build(), "https://bitbucket.org");
+        RepositoryApiClient bitbucketClient = mock(RepositoryApiClient.class, delegatesTo(adapter));
+        doReturn(TestPlatforms.USER).when(bitbucketClient).getAuthenticatedUser(any());
+        var bitbucketPlatform = TestPlatforms.of(bitbucketClient);
+        var bitbucket = serviceFor(bitbucketPlatform, RepositoryType.BITBUCKET);
+        payload.getPullRequest().getHead().setSha(oldPrefix);
+        payload.getPullRequest().getHead().setRepositoryFullName("contributor/fork");
+        var base = new WebhookPayload.Head();
+        base.setRef("main");
+        base.setSha(basePrefix);
+        base.setRepositoryFullName("owner/repo");
+        payload.getPullRequest().setBase(base);
+        server.expect(requestTo(forkCommits + oldPrefix)).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(bitbucketCommit(oldSha, "contributor/fork"), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(api + "/repositories/owner/repo/commit/" + basePrefix))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(bitbucketCommit(baseSha, "owner/repo"), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(pr + "/diff")).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(DIFF, MediaType.TEXT_PLAIN));
+        server.expect(ExpectedCount.times(2), requestTo(pr)).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"state":"OPEN","source":{"branch":{"name":"feature"},"commit":{"hash":"%s"},
+                         "repository":{"full_name":"contributor/fork"}},
+                         "destination":{"branch":{"name":"main"},"commit":{"hash":"%s"},
+                         "repository":{"full_name":"owner/repo"}}}
+                        """.formatted(abbreviatedCurrent ? newPrefix : (moved ? newSha : oldSha), basePrefix),
+                        MediaType.APPLICATION_JSON));
+        if (abbreviatedCurrent) {
+            server.expect(ExpectedCount.times(2), requestTo(forkCommits + newPrefix)).andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess(bitbucketCommit(newSha, "contributor/fork"), MediaType.APPLICATION_JSON));
+        }
+        if (!moved) {
+            server.expect(requestTo(pr + "/comments")).andExpect(method(HttpMethod.POST))
+                    .andRespond(withSuccess());
+        }
+        when(workspaceService.preparePullRequestWorkspace(bitbucketPlatform, "owner", "repo",
+                "feature", 1L, PullRequestWorkspaceMode.READ_ONLY)).thenReturn(WorkspaceResult.success(workspace));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThat(bitbucket.reviewPullRequest(payload, 12, false, null, 1L, null, false,
+                new AgentReviewLearningSettings(true)))
+                .isEqualTo(moved ? AgentReviewService.ReviewResult.SUPPRESSED : AgentReviewService.ReviewResult.POSTED);
+        assertThat(publications.get(1L).getState())
+                .isEqualTo(moved ? ReviewPublicationState.SUPPRESSED : ReviewPublicationState.PUBLISHED);
+        assertThat(storedReviews.get(1L).getBaseSha()).isEqualTo(baseSha);
+        verify(snapshotRepository).save(argThat(snapshot -> oldSha.equals(snapshot.getHeadSha())
+                && baseSha.equals(snapshot.getBaseSha())
+                && (snapshot.getIncompleteReason() != null
+                && snapshot.getIncompleteReason().contains("head moved")) == moved));
+        server.verify();
+    }
+
+    private static String bitbucketCommit(String sha, String repository) {
+        return """
+                {"type":"commit","hash":"%s","repository":{"full_name":"%s"}}
+                """.formatted(sha, repository);
     }
 
     @Test

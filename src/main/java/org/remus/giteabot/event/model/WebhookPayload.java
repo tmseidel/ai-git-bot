@@ -62,6 +62,8 @@ public class WebhookPayload {
     public static class Head {
         private String ref;
         private String sha;
+        /** Repository owning this ref; the source of a fork PR is not necessarily the PR's target repository. */
+        private String repositoryFullName;
     }
 
     @Data
