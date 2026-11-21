@@ -25,10 +25,10 @@ public class OpenAiProviderMetadata implements AiProviderMetadata {
 
     public static final AiProviderType PROVIDER_TYPE = AiProviderType.OPENAI;
     public static final String DEFAULT_API_URL = "https://api.openai.com";
-    // Recommended models checked at https://developers.openai.com/api/docs/models on 2026-10-18.
     public static final List<String> SUGGESTED_MODELS = List.of(
-            "gpt-6-astra",
-            "gpt-6.1-sol",
+            "gpt-6.2-astra",
+            "gpt-6.2-sol",
+            "gpt-6.1-terra",
             "gpt-6-luna"
     );
 

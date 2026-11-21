@@ -24,9 +24,9 @@ public class OpenRouterProviderMetadata implements AiProviderMetadata {
     // Popular model suggestions checked at https://openrouter.ai/models?order=most-popular on 2026-10-05.
     public static final List<String> SUGGESTED_MODELS = List.of(
             "openrouter/auto",
-            "deepseek/deepseek-v4.1-flash",
-            "z-ai/glm-5.3-flash",
-            "xiaomi/mimo-v2.6-flash"
+            "tencent/hy4-flash",
+            "deepseek/deepseek-v4.1-flash-1017",
+            "z-ai/glm-5.3-flash"
     );
     private final RestClient.Builder restClientBuilder;
     private final ApplicationName applicationName;

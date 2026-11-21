@@ -20,14 +20,11 @@ public class GoogleAiProviderMetadata implements AiProviderMetadata {
 
     public static final AiProviderType PROVIDER_TYPE = AiProviderType.GOOGLE;
     public static final String DEFAULT_API_URL = "https://generativelanguage.googleapis.com";
-    // Stable models checked at https://ai.google.dev/gemini-api/docs/models on 2026-10-18.
     public static final List<String> SUGGESTED_MODELS = List.of(
             "gemini-4-carbon",
             "gemini-4-neon",
             "gemini-4-hydrogen",
-            "gemini-4-argon",
-            "gemini-3.8-flash",
-            "gemini-3.5-flash-lite"
+            "gemini-4-argon"
     );
     private final ObjectProvider<RestClient.Builder> restClientBuilder;
 
