@@ -13,6 +13,10 @@
                 <p class="mb-2">
                     <span th:text="#{label.configuration}">Configuration</span>: <strong th:text="${mcpConfiguration.name}"></strong>
                 </p>
+
+                <p class="text-secondary mb-4" th:text="#{help.mcpReviewReadOnlyApproval}">
+                    Explicit ADMIN read-only approval for the new review protocol only. LEGACY0 remains unchanged.
+                </p>
                 <p class="text-secondary mb-4">
                     <span th:text="#{help.selectTools}">Select only the tools you want to expose to prompts. Unselected tools stay hidden.</span>
                 </p>
@@ -61,6 +65,7 @@
                                 <button type="button" class="btn btn-link p-0 text-decoration-none" data-sort="title"><span th:text="#{label.title}">Title</span></button>
                             </th>
                             <th th:text="#{label.description}">Description</th>
+                            <th th:text="#{label.mcpReviewReadOnlyApproval}">Read-only approval (new review protocol)</th>
                         </tr>
                         </thead>
                         <tbody id="toolRows"></tbody>
@@ -77,6 +82,7 @@
 
                 <form id="selectionForm" th:action="@{/system-settings/mcp-configurations/{id}/tools/save(id=${mcpConfiguration.id})}" method="post">
                     <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+                    <input type="hidden" name="approvalFormToken" th:value="${approvalFormToken}"/>
                     <div id="selectionInputs"></div>
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-check-lg"></i> <span th:text="#{button.saveSelection}">Save selection</span>
@@ -94,9 +100,14 @@
             const i18nNoToolsFound = /*[[#{message.noToolsFound}]]*/ 'No tools found for current filter.';
             const i18nZeroTools = /*[[#{message.zeroTools}]]*/ '0 tools';
             const i18nToolPageInfo = /*[[#{message.toolPageInfo}]]*/ '{0}-{1} of {2} tools';
+            const i18nReviewApproval = /*[[#{label.mcpReviewReadOnlyApproval}]]*/ 'Read-only approval (new review protocol)';
+            const i18nSelected = /*[[#{label.selected}]]*/ 'Selected';
 
             document.addEventListener('DOMContentLoaded', function() {
                 const selected = new Set(allTools.filter(t => t.selected).map(t => t.qualifiedName));
+                const approved = new Set(allTools.filter(t => t.selected && t.reviewReadOnlyApproved).map(t => t.qualifiedName));
+                const granted = new Set();
+                const revoked = new Set();
                 const filterInput = document.getElementById('toolFilter');
                 const serverFilter = document.getElementById('serverFilter');
                 const pageSizeSelect = document.getElementById('pageSize');
@@ -179,6 +190,20 @@
                         input.value = name;
                         selectionInputs.appendChild(input);
                     });
+                    Array.from(granted).filter(name => selected.has(name)).sort().forEach(name => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'reviewReadOnlyApprovedQualifiedNames';
+                        input.value = name;
+                        selectionInputs.appendChild(input);
+                    });
+                    Array.from(revoked).sort().forEach(name => {
+                        const input = document.createElement('input');
+                        input.type = 'hidden';
+                        input.name = 'reviewReadOnlyRevokedQualifiedNames';
+                        input.value = name;
+                        selectionInputs.appendChild(input);
+                    });
                 }
 
                 function updateSelectedCount() {
@@ -193,7 +218,7 @@
                     if (page.rows.length === 0) {
                         const tr = document.createElement('tr');
                         const td = document.createElement('td');
-                        td.colSpan = 5;
+                        td.colSpan = 6;
                         td.className = 'text-center text-secondary py-4';
                         td.textContent = i18nNoToolsFound;
                         tr.appendChild(td);
@@ -205,7 +230,7 @@
                                 const groupTr = document.createElement('tr');
                                 groupTr.className = 'table-group-divider border-top-0';
                                 const groupTd = document.createElement('td');
-                                groupTd.colSpan = 5;
+                                groupTd.colSpan = 6;
                                 const strong = document.createElement('strong');
                                 strong.textContent = tool.serverName;
                                 groupTd.appendChild(strong);
@@ -220,15 +245,21 @@
                             const checkbox = document.createElement('input');
                             checkbox.type = 'checkbox';
                             checkbox.className = 'form-check-input';
+                            checkbox.setAttribute('aria-label', i18nSelected + ': ' + tool.qualifiedName);
                             checkbox.checked = selected.has(tool.qualifiedName);
                             checkbox.addEventListener('change', function() {
                                 if (checkbox.checked) {
                                     selected.add(tool.qualifiedName);
                                 } else {
                                     selected.delete(tool.qualifiedName);
+                                    approved.delete(tool.qualifiedName);
+                                    granted.delete(tool.qualifiedName);
+                                    revoked.add(tool.qualifiedName);
                                 }
                                 updateSelectedCount();
                                 renderSelectionInputs();
+                                approval.disabled = !checkbox.checked;
+                                approval.checked = approved.has(tool.qualifiedName);
                                 syncSelectAllVisible(page.rows);
                             });
                             selectTd.appendChild(checkbox);
@@ -249,6 +280,28 @@
                             const descriptionTd = document.createElement('td');
                             descriptionTd.textContent = tool.description || '-';
                             tr.appendChild(descriptionTd);
+
+                            const approvalTd = document.createElement('td');
+                            const approval = document.createElement('input');
+                            approval.type = 'checkbox';
+                            approval.className = 'form-check-input';
+                            approval.setAttribute('aria-label', i18nReviewApproval + ': ' + tool.qualifiedName);
+                            approval.disabled = !selected.has(tool.qualifiedName);
+                            approval.checked = approved.has(tool.qualifiedName);
+                            approval.addEventListener('change', function() {
+                                if (approval.checked && selected.has(tool.qualifiedName)) {
+                                    approved.add(tool.qualifiedName);
+                                    granted.add(tool.qualifiedName);
+                                    revoked.delete(tool.qualifiedName);
+                                } else {
+                                    approved.delete(tool.qualifiedName);
+                                    granted.delete(tool.qualifiedName);
+                                    revoked.add(tool.qualifiedName);
+                                }
+                                renderSelectionInputs();
+                            });
+                            approvalTd.appendChild(approval);
+                            tr.appendChild(approvalTd);
 
                             rowsBody.appendChild(tr);
                         });
@@ -319,6 +372,9 @@
                             selected.add(tool.qualifiedName);
                         } else {
                             selected.delete(tool.qualifiedName);
+                            approved.delete(tool.qualifiedName);
+                            granted.delete(tool.qualifiedName);
+                            revoked.add(tool.qualifiedName);
                         }
                     });
                     updateSelectedCount();
@@ -336,5 +392,3 @@
     </div>
 </body>
 </html>
-
-

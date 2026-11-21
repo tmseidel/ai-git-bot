@@ -2,10 +2,13 @@ package org.remus.giteabot.systemsettings;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.servlet.http.HttpSession;
 import org.remus.giteabot.prworkflow.config.DeploymentTargetService;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationKind;
 import org.remus.giteabot.prworkflow.config.WorkflowConfigurationService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -19,6 +22,7 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 
@@ -36,6 +40,20 @@ public class SystemSettingsController {
     private final WorkflowConfigurationService workflowConfigurationService;
     private final DeploymentTargetService deploymentTargetService;
     private final MessageSource messageSource;
+
+    private record McpApprovalForm(String token, Map<String, McpToolSelectionService.ReviewReadOnlyApproval> evidence) {
+    }
+
+    private static String approvalFormKey(Long id) {
+        return "mcpReviewApprovalForm:" + id;
+    }
+
+    private static void requireAdmin(Authentication authentication) {
+        if (authentication == null || authentication.getAuthorities().stream()
+                .noneMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()))) {
+            throw new AccessDeniedException("MCP review approval requires ADMIN");
+        }
+    }
 
     @GetMapping
     public String list(Model model) {
@@ -91,12 +109,18 @@ public class SystemSettingsController {
     }
 
     @GetMapping("/mcp-configurations/{id}/tools")
-    public String mcpToolSelection(@PathVariable Long id, Model model, RedirectAttributes redirectAttributes) {
+    public String mcpToolSelection(@PathVariable Long id, Model model, HttpSession session,
+                                   Authentication authentication, RedirectAttributes redirectAttributes) {
+        requireAdmin(authentication);
         return mcpConfigurationService.findById(id)
                 .map(configuration -> {
-                    List<McpToolSelectionRow> tools = mcpToolSelectionService.loadAvailableTools(id);
+                    McpToolSelectionService.SelectionSnapshot snapshot = mcpToolSelectionService.loadSelectionSnapshot(id);
                     model.addAttribute("mcpConfiguration", configuration);
-                    model.addAttribute("tools", tools);
+                    model.addAttribute("tools", snapshot.tools());
+                    McpApprovalForm form = new McpApprovalForm(UUID.randomUUID().toString(),
+                            snapshot.approvalCandidates());
+                    session.setAttribute(approvalFormKey(id), form);
+                    model.addAttribute("approvalFormToken", form.token());
                     model.addAttribute("activeNav", "system-settings");
                     return "system-settings/mcp-tool-selection";
                 })
@@ -110,9 +134,27 @@ public class SystemSettingsController {
     public String saveMcpToolSelection(@PathVariable Long id,
                                        @RequestParam(name = "selectedQualifiedNames", required = false)
                                        List<String> selectedQualifiedNames,
+                                       @RequestParam(name = "reviewReadOnlyApprovedQualifiedNames", required = false)
+                                       List<String> approvedQualifiedNames,
+                                       @RequestParam(name = "reviewReadOnlyRevokedQualifiedNames", required = false)
+                                       List<String> revokedQualifiedNames,
+                                       @RequestParam(name = "approvalFormToken", required = false) String approvalFormToken,
+                                       HttpSession session, Authentication authentication,
                                        RedirectAttributes redirectAttributes) {
+        requireAdmin(authentication);
         try {
-            mcpToolSelectionService.saveSelection(id, selectedQualifiedNames);
+            if (approvalFormToken == null && (approvedQualifiedNames == null || approvedQualifiedNames.isEmpty())
+                    && (revokedQualifiedNames == null || revokedQualifiedNames.isEmpty())) {
+                mcpToolSelectionService.saveSelection(id, selectedQualifiedNames);
+            } else {
+                Object savedForm = session.getAttribute(approvalFormKey(id));
+                if (!(savedForm instanceof McpApprovalForm form) || !form.token().equals(approvalFormToken)) {
+                    throw new IllegalArgumentException("Reload the MCP tool form before changing read-only approvals");
+                }
+                session.removeAttribute(approvalFormKey(id));
+                mcpToolSelectionService.saveSelection(id, selectedQualifiedNames, approvedQualifiedNames,
+                        revokedQualifiedNames, form.evidence());
+            }
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.mcpToolSelectionSaved", null, LocaleContextHolder.getLocale()));
             return "redirect:/system-settings";
         } catch (Exception e) {
