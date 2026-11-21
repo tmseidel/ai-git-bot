@@ -7,6 +7,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.admin.Bot;
+import org.remus.giteabot.prworkflow.PrWorkflowRunRepository;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -25,6 +26,8 @@ class EventHookPublisherTest {
     private EventHookDeliveryRepository deliveryRepository;
     @Mock
     private EventHookDeliveryWorker deliveryWorker;
+    @Mock
+    private PrWorkflowRunRepository runRepository;
 
     private EventHookProperties properties;
     private EventHookPublisher publisher;
@@ -33,7 +36,7 @@ class EventHookPublisherTest {
     void setUp() {
         properties = new EventHookProperties();
         publisher = new EventHookPublisher(properties, endpointRepository, deliveryRepository,
-                deliveryWorker, new ObjectMapper());
+                deliveryWorker, new ObjectMapper(), runRepository);
         lenient().when(deliveryRepository.save(any(EventHookDelivery.class))).thenAnswer(inv -> {
             EventHookDelivery d = inv.getArgument(0);
             d.setId(42L);

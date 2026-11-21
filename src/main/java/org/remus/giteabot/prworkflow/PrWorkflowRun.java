@@ -67,6 +67,10 @@ public class PrWorkflowRun {
     @Column(length = 2048)
     private String summary;
 
+    /** Generic required-completion receipt retained with the run, independently of audit/outbox retention. */
+    @Column(name = "required_completion_hash", length = 64)
+    private String requiredCompletionHash;
+
     @Column(name = "started_at", nullable = false)
     private Instant startedAt;
 
@@ -127,4 +131,3 @@ public class PrWorkflowRun {
         }
     }
 }
-
