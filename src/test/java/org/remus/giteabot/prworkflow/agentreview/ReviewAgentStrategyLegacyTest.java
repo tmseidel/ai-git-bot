@@ -77,7 +77,7 @@ class ReviewAgentStrategyLegacyTest {
                 new AiResponseParser(),
                 new BranchSwitcher(toolExecutionService),
                 (owner, repo, ref, files) -> "FILE-CONTENT",
-                5);
+                5, 5, 5, null, null);
     }
 
     private AgentRunContext ctx() {
@@ -117,7 +117,7 @@ class ReviewAgentStrategyLegacyTest {
         ReviewAgentStrategy.FileFetcher fetcher = mock(ReviewAgentStrategy.FileFetcher.class);
         ReviewAgentStrategy strategy = new ReviewAgentStrategy("system", toolRouter,
                 new ToolCatalog(new AgentConfigProperties()), null, null, parser,
-                new BranchSwitcher(toolExecutionService), fetcher, 5);
+                new BranchSwitcher(toolExecutionService), fetcher, 5, 5, 5, null, null);
         AgentSession session = new AgentSession("octo", "repo", 1L, "Review example");
         AgentRunContext context = AgentRunContext.forPullRequest(session, "octo", "repo", 1L,
                 Workspace.unmanaged(Path.of("/tmp/ws")), "main");
@@ -186,14 +186,12 @@ class ReviewAgentStrategyLegacyTest {
                     StopReason.TOOL_USE, 100, 10);
             assertInstanceOf(StepDecision.ContinueWithToolResults.class, strategy().step(context, turn, 2));
             assertEquals(List.of(
-                    new AgentRunContext.ProgressUpdate(2, "Inspecting repository: cat", 0),
-                    new AgentRunContext.ProgressUpdate(2, "Repository inspection completed", 1)), activities);
+                    new AgentRunContext.ProgressUpdate(2, "inspected repository: cat", 1)), activities);
         } else {
             String request = "{\"requestTools\":[{\"tool\":\"cat\",\"args\":[\"README.md\"]}]}";
             assertInstanceOf(StepDecision.Continue.class, strategy().stepLegacy(context, ChatTurn.text(request), 2));
             assertEquals(List.of(
-                    new AgentRunContext.ProgressUpdate(2, "Gathering repository context", 0),
-                    new AgentRunContext.ProgressUpdate(2, "Repository context gathered", 1)), activities);
+                    new AgentRunContext.ProgressUpdate(2, "inspected repository: cat", 1)), activities);
         }
         verify(toolRouter).execute(eq(AgentToolRouter.Mode.REVIEW), any());
     }

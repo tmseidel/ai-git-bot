@@ -35,14 +35,16 @@ In the bot's admin UI, create a new Git Integration:
 
 1. Select **Provider Type**: `AZURE_DEVOPS`
 2. Enter the **URL** — see the table below for your deployment
-3. Enter the **Username** of the account that owns the PAT — see below
-4. Enter the **Personal Access Token** you created in Step 1
+3. Enter the **Personal Access Token** you created in Step 1
 
-The **Username** is the account's Azure DevOps `uniqueName`: usually the sign-in email on
-Azure DevOps Services (e.g. `ai-bot@yourcompany.com`) and `DOMAIN\user` on Azure DevOps
-Server. The bot compares this value with the PR's reviewers and with the author of each
-event, so with any other value it neither recognizes itself as a requested reviewer nor
-ignores its own comments.
+The bot identifies itself as the account that owns the PAT. It reads the account from
+`_apis/connectionData`, asked inside the organization of each event, and recognises itself
+by the account's identity id among the PR's reviewers and as the author of an event. Its
+mention alias is `@` followed by the account's `Account` property: the sign-in name on
+Azure DevOps Services (e.g. `@ai-bot@yourcompany.com`), the account name without domain on
+Azure DevOps Server. When you save the integration, or at startup, the bot asks the
+organization or collection the URL names; on bare `https://dev.azure.com` it learns the
+account with the first webhook event.
 
 ### Which URL to enter
 
@@ -166,6 +168,8 @@ Service Hook subscription's configuration (and the URL/secret combination) as se
 
 ## Review Workflow
 
+See [Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for every trigger per provider.
+
 - First review: create the pull request with the bot already listed as a reviewer, or add
   the bot as a reviewer after opening the PR. Both work without **Run on PR creation** or
   **Run on PR update**; adding the bot as a reviewer is an explicit request for a review,
@@ -179,10 +183,19 @@ Service Hook subscription's configuration (and the URL/secret combination) as se
   @ai_bot - Review the Pull-Request again
   ```
 
-- **Only the pull request author's comments trigger a re-review.** A comment from anyone
-  else that mentions the bot and asks for a re-review is silently ignored — the bot still
-  responds to other bot commands and @-mentions from any user, but the "review again"
-  request specifically is author-restricted.
+- **Anyone may ask for a re-review**, like for any other comment that mentions the bot.
+  With a **User Whitelist** on the bot, the commenter must be listed.
+- **Public repositories:** without a **User Whitelist**, anyone who can comment can make
+  the bot run its PR workflows (a "review again" request, slash commands) and spend AI
+  tokens. Set a whitelist on bots that serve repositories where people you don't trust can
+  comment. See [User Whitelist](USER_GUIDE.md#per-bot-user-whitelist-token-spend-guard).
+- **User Whitelist and automatic reviews**: Azure DevOps pull request events do not say
+  who made the change. For reviews started by an event (PR created, bot added as
+  reviewer, new commits, reactivation) the whitelist is therefore checked against the
+  **pull request's author**, not against whoever added the bot or pushed. A pull request
+  opened by someone who is not listed is never reviewed automatically; a listed user can
+  still ask for a review with a "review again" comment, which is checked against the
+  commenter.
 
 ### Post-review action and votes
 

@@ -406,4 +406,35 @@ class WorkspaceTest {
         int exitCode = process.waitFor();
         assertThat(exitCode).isZero();
     }
+
+    @Test
+    void assetSourceTrailersCoverOnlyPresentAndUnchangedDownloads() throws IOException {
+        Path directory = Files.createDirectories(tempDir.resolve("assets-repo"));
+        Workspace workspace = Workspace.unmanaged(directory);
+        Files.writeString(directory.resolve("kept.png"), "kept");
+        Files.writeString(directory.resolve("changed.png"), "changed later");
+        workspace.recordAssetSource("kept.png", "https://cdn.example/old.png", sha256("old"));
+        workspace.recordAssetSource("kept.png", "https://cdn.example/kept.png", sha256("kept"));
+        workspace.recordAssetSource("changed.png", "https://cdn.example/changed.png", sha256("original"));
+        workspace.recordAssetSource("deleted.png", "https://cdn.example/deleted.png", sha256("gone"));
+
+        String message = workspace.withAssetSourceTrailers("feat: add assets\n");
+
+        assertThat(message).isEqualTo("feat: add assets\n\n"
+                + "Asset-Source: kept.png https://cdn.example/kept.png sha256:" + sha256("kept"));
+    }
+
+    @Test
+    void commitMessageIsUnchangedWithoutDownloads() {
+        assertThat(Workspace.unmanaged(tempDir).withAssetSourceTrailers("fix: x")).isEqualTo("fix: x");
+    }
+
+    private static String sha256(String content) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 }

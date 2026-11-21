@@ -41,6 +41,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
@@ -66,6 +67,9 @@ class AiIntegrationControllerTest {
 
     @MockitoBean
     private AdminUserRepository adminUserRepository;
+
+    @MockitoBean
+    private AiConnectionTestService connectionTestService;
 
     @Test
     void newForm_showsGoogleAiProviderAndSetupHints() throws Exception {
@@ -103,9 +107,9 @@ class AiIntegrationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString(">OpenRouter</option>")))
                 .andExpect(content().string(containsString("openrouter\\/auto")))
-                .andExpect(content().string(containsString("deepseek\\/deepseek-v4.1-flash")))
+                .andExpect(content().string(containsString("deepseek\\/deepseek-v4.1-flash-1017")))
                 .andExpect(content().string(containsString("z-ai\\/glm-5.3-flash")))
-                .andExpect(content().string(containsString("xiaomi\\/mimo-v2.6-flash")))
+                .andExpect(content().string(containsString("tencent\\/hy4-flash")))
                 .andExpect(content().string(containsString("class=\"form-control-plaintext\"")))
                 .andExpect(content().string(containsString("readonly=\"readonly\"")))
                 .andExpect(content().string(containsString("id=\"openRouterRegion\"")))
@@ -326,5 +330,50 @@ class AiIntegrationControllerTest {
                     .andExpect(flash().attribute("error", "The parallel worker limit must be between 0 and 20."));
         }
         verify(aiIntegrationService, never()).save(any(AiIntegration.class), anyBoolean());
+    }
+
+    @Test
+    void testConnection_returnsLocalizedStepsWithoutSaving() throws Exception {
+        when(connectionTestService.test(any(), eq("sk-new"), eq(false))).thenReturn(
+                new AiConnectionTestService.Result(List.of(
+                        new AiConnectionTestService.Step("connection", AiConnectionTestService.Status.OK,
+                                "aiTest.connection.ok", List.of("yes")),
+                        new AiConnectionTestService.Step("toolCalling", AiConnectionTestService.Status.FAILED,
+                                "aiTest.tools.rejected", List.of(400), "tools are not supported"))));
+
+        mockMvc.perform(post("/ai-integrations/test-connection")
+                        .with(user("admin").roles("ADMIN")).with(csrf())
+                        .locale(Locale.ENGLISH)
+                        .param("name", "Test")
+                        .param("providerType", "OPENAI")
+                        .param("apiUrl", "https://api.openai.com")
+                        .param("model", "gpt-test")
+                        .param("maxTokens", "16000")
+                        .param("apiKey", "sk-new"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.steps[0].title").value("Connection"))
+                .andExpect(jsonPath("$.steps[0].status").value("OK"))
+                .andExpect(jsonPath("$.steps[0].message").value("The model replied: \"yes\""))
+                .andExpect(jsonPath("$.steps[1].status").value("FAILED"))
+                .andExpect(jsonPath("$.steps[0].detail").doesNotExist())
+                .andExpect(jsonPath("$.steps[1].message").value(containsString("HTTP 400")))
+                .andExpect(jsonPath("$.steps[1].detail").value("tools are not supported"));
+
+        verify(connectionTestService).test(argThat(integration -> "gpt-test".equals(integration.getModel())
+                && integration.getProviderType() == AiProviderType.OPENAI), eq("sk-new"), eq(false));
+        verify(aiIntegrationService, never()).save(any(), anyBoolean());
+    }
+
+    @Test
+    void testConnection_reportsInvalidNumbersWithoutCallingTheProvider() throws Exception {
+        mockMvc.perform(post("/ai-integrations/test-connection")
+                        .with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "OPENAI")
+                        .param("model", "gpt-test")
+                        .param("maxTokens", "lots"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.steps[0].status").value("FAILED"));
+
+        verifyNoInteractions(connectionTestService);
     }
 }

@@ -66,7 +66,10 @@ public class SystemPromptAssembler {
         README_SYNC_AGENT("readme-sync", ToolCatalog.Role.PR_WORKFLOW),
         I18N_COVERAGE_AGENT("i18n-coverage", ToolCatalog.Role.PR_WORKFLOW),
         UNIT_TEST_AUTHOR_AGENT("unit-test-author", ToolCatalog.Role.PR_WORKFLOW),
-        AGENT_REVIEW_AGENT("agentic-review", ToolCatalog.Role.WRITER);
+        /** Structured agentic review: findings/assessment are recorded through the review tools. */
+        AGENT_REVIEW_AGENT("agentic-review", ToolCatalog.Role.WRITER),
+        /** Clarification/Q&A about a reviewed pull request: a plain answer, no review tools. */
+        AGENT_REVIEW_QA("agentic-review-qa", ToolCatalog.Role.WRITER);
 
         private final String fileBase;
         private final ToolCatalog.Role role;
@@ -240,7 +243,8 @@ public class SystemPromptAssembler {
         }
         return switch (kind) {
             case ISSUE_AGENT -> legacyRenderer.renderIssueAgent(toolCatalog, allowedBuiltinTools);
-            case WRITER_AGENT, TRIAGE_AGENT, AGENT_REVIEW_AGENT ->
+            case AGENT_REVIEW_AGENT -> legacyRenderer.renderReviewAgent(toolCatalog, allowedBuiltinTools);
+            case WRITER_AGENT, TRIAGE_AGENT, AGENT_REVIEW_QA ->
                     legacyRenderer.renderWriterAgent(toolCatalog, allowedBuiltinTools);
             case E2E_TEST_AUTHOR, E2E_TEST_RUNNER, README_SYNC_AGENT,
                  I18N_COVERAGE_AGENT, UNIT_TEST_AUTHOR_AGENT ->

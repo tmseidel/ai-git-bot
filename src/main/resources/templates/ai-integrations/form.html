@@ -243,7 +243,15 @@
                         <a th:href="@{/ai-integrations}" class="btn btn-secondary ms-2">
                             <i class="bi bi-x-lg"></i> <span th:text="#{button.cancel}">Cancel</span>
                         </a>
+                        <button type="button" class="btn btn-outline-primary ms-2" id="testConnectionBtn"
+                                th:attr="data-test-url=@{/ai-integrations/test-connection}">
+                            <i class="bi bi-plug"></i> <span th:text="#{button.testConnection}">Test connection</span>
+                        </button>
+                        <div class="form-text" th:text="#{aiTest.hint}">
+                            Tests the values entered above. Nothing is saved, and the test does not count towards usage statistics.
+                        </div>
                     </div>
+                    <div class="mt-3" id="testConnectionResult" aria-live="polite" hidden></div>
                 </form>
             </div>
         </div>
@@ -272,6 +280,9 @@
             const tLlamaCppModel = /*[[#{help.ai.llamacppModel}]]*/ 'Single-model mode ignores this value. In router mode, enter the exact model ID from GET /v1/models; it selects the model for each request.';
             const tApiKeyWillBeRemoved = /*[[#{help.ai.apiKeyWillBeRemoved}]]*/ 'API key will be removed on save';
             const tEnterApiKey = /*[[#{placeholder.enterApiKey}]]*/ 'Enter API key';
+            const tTestRunning = /*[[#{aiTest.running}]]*/ 'Testing the connection…';
+            const tTestHeading = /*[[#{aiTest.heading}]]*/ 'Checks';
+            const tTestRequestFailed = /*[[#{aiTest.requestFailed}]]*/ 'The test could not be run (HTTP {0}).';
 
             document.addEventListener('DOMContentLoaded', function() {
                 const providerSelect = document.getElementById('providerType');
@@ -465,6 +476,94 @@
                     if (apiKeyInput.value.trim() !== '') {
                         setApiKeyClearPending(false);
                     }
+                });
+
+                // ---- Connection test: posts the unsaved form values and lists
+                // the outcome of each probe. Built with textContent only, since
+                // the messages can contain the model's own reply. ----
+                const testConnectionBtn = document.getElementById('testConnectionBtn');
+                const testConnectionResult = document.getElementById('testConnectionResult');
+                const testStatusStyles = {
+                    OK: { icon: 'bi-check-circle-fill', color: 'text-success' },
+                    WARNING: { icon: 'bi-exclamation-triangle-fill', color: 'text-warning' },
+                    FAILED: { icon: 'bi-x-circle-fill', color: 'text-danger' },
+                    SKIPPED: { icon: 'bi-dash-circle', color: 'text-secondary' }
+                };
+
+                function showTestMessage(alertClass, text, withSpinner) {
+                    testConnectionResult.replaceChildren();
+                    const alert = document.createElement('div');
+                    alert.className = 'alert ' + alertClass + ' mb-0';
+                    if (withSpinner) {
+                        const spinner = document.createElement('span');
+                        spinner.className = 'spinner-border spinner-border-sm me-2';
+                        spinner.setAttribute('role', 'status');
+                        alert.appendChild(spinner);
+                    }
+                    alert.appendChild(document.createTextNode(text));
+                    testConnectionResult.appendChild(alert);
+                    testConnectionResult.hidden = false;
+                }
+
+                function showTestSteps(result) {
+                    testConnectionResult.replaceChildren();
+                    const list = document.createElement('ul');
+                    list.className = 'list-group';
+                    result.steps.forEach(function(step) {
+                        const style = testStatusStyles[step.status];
+                        const item = document.createElement('li');
+                        item.className = 'list-group-item d-flex align-items-start';
+                        const icon = document.createElement('i');
+                        icon.className = 'bi ' + style.icon + ' ' + style.color + ' me-2 mt-1';
+                        const body = document.createElement('div');
+                        const title = document.createElement('div');
+                        title.className = 'fw-semibold';
+                        title.textContent = step.title;
+                        const message = document.createElement('div');
+                        message.className = 'small';
+                        message.textContent = step.message;
+                        body.append(title, message);
+                        if (step.detail) {
+                            // The provider's own error text, shown as sent (untranslated).
+                            const detail = document.createElement('div');
+                            detail.className = 'small text-body-secondary font-monospace text-break mt-1';
+                            detail.textContent = step.detail;
+                            body.appendChild(detail);
+                        }
+                        item.append(icon, body);
+                        list.appendChild(item);
+                    });
+                    const heading = document.createElement('h6');
+                    heading.className = 'mb-2';
+                    heading.textContent = tTestHeading;
+                    testConnectionResult.append(heading, list);
+                    testConnectionResult.hidden = false;
+                }
+
+                testConnectionBtn.addEventListener('click', function() {
+                    const form = testConnectionBtn.closest('form');
+                    testConnectionBtn.disabled = true;
+                    showTestMessage('alert-info', tTestRunning, true);
+                    fetch(testConnectionBtn.dataset.testUrl, {
+                        method: 'POST',
+                        body: new URLSearchParams(new FormData(form)),
+                        headers: { 'Accept': 'application/json' }
+                    })
+                        .then(function(response) {
+                            // An expired session redirects to the HTML login page.
+                            const contentType = response.headers.get('Content-Type') || '';
+                            if (!response.ok || !contentType.includes('json')) {
+                                throw new Error(tTestRequestFailed.replace('{0}', response.status));
+                            }
+                            return response.json();
+                        })
+                        .then(showTestSteps)
+                        .catch(function(error) {
+                            showTestMessage('alert-danger', error.message, false);
+                        })
+                        .finally(function() {
+                            testConnectionBtn.disabled = false;
+                        });
                 });
 
                 // Step 6: enable Bootstrap popover for the tool-calling explanation

@@ -13,9 +13,11 @@ Issue agents require issue webhooks and assignment events. They are supported fo
 
 Use the **coding agent** when the issue already describes a clear implementation, acceptance criteria, and expected tests. It can edit files, run validation, push a branch, and open a PR.
 
-Use the **writer agent** when an issue is ambiguous, contradictory, too broad, or missing testable outcomes. It reads repository and issue context, asks the original author follow-up questions when needed, and creates a linked issue titled `AI Created Issue: <original title>` when the draft is ready.
+Use the **writer agent** when an issue is ambiguous, contradictory, too broad, or missing testable outcomes. It reads repository and issue context, asks follow-up questions when needed, and creates a linked issue titled `AI Created Issue: <original title>` when the draft is ready.
 
 Writer bots do not mutate repositories. If a coding-agent session already exists for an issue, the writer bot will not start a competing workflow on the same issue.
+
+When the writer is assigned, it also reads the comments already on the issue. Answers to open questions or assumptions in the issue body — for example on an issue the writer drafted earlier — are folded into the new draft instead of being asked again. The bot's own comments are left out, and so are comments from users outside the bot's **User Whitelist** (without a whitelist, every commenter counts). Long discussions are cut to `agent.context.max-issue-comments-chars` (oldest comments first) and single comments to `agent.context.max-single-issue-comment-chars`.
 
 ## What operators and users see
 
@@ -32,7 +34,7 @@ flowchart LR
 
 Both agents post visible progress, error, and completion comments on the issue. Repository context gathering is not posted publicly. For the coding agent, build/test output may be posted when validation fails so users can understand why the bot is retrying.
 
-Treat the model's text in those comments as unreviewed output: an answer is published verbatim, so a model that read a file (a `.env`, a config with credentials) can quote it, and any `@name` it writes lands in a public comment. The bot ignores webhook events from its own user (`BotWebhookService#isBotUser`, checked in every platform handler), so a self-mention cannot make it respond to its own comment.
+Treat the model's text in those comments as unreviewed output: an answer is published verbatim, so a model that read a file (a `.env`, a config with credentials) can quote it, and any `@name` it writes lands in a public comment. The bot ignores webhook events from its own user (`BotIdentity#triggered`, set by every provider's webhook translator and enforced once in `WebhookEventDispatcher`), so a self-mention cannot make it respond to its own comment.
 
 ## How a coding run ends
 
@@ -123,6 +125,8 @@ GitHub issue webhooks normally do not include a branch ref. Coding-agent work st
 
 For public repositories, use the bot form's **User Whitelist** to restrict who can trigger AI-spending interactions.
 
+Without a whitelist, anyone who can comment can steer the coding agent. A comment that mentions the bot, on the issue or on the pull request the agent opened, starts a follow-up run that changes the code and pushes it to the agent's branch, whoever wrote the comment. Review the agent's pull requests before merging them, and set a whitelist wherever untrusted users can comment. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions).
+
 ## Configuration reference
 
 Common issue-agent settings can be set as environment variables or Spring properties:
@@ -187,7 +191,7 @@ Build/test workflows can auto-detect common project types from files such as `po
 
 ## Tool-calling mode
 
-For **AI Integrations**, **Enable native tool calling** is on by default and recommended for frontier models. Turn it off only when a provider/model behaves poorly in agentic workflows; this forces the legacy JSON-in-prompt fallback. llama.cpp always uses legacy mode. See [TOOL_CALLING.md](TOOL_CALLING.md) for the troubleshooting playbook.
+For **AI Integrations**, **Enable native tool calling** is on by default and recommended for frontier models. Turn it off only when a provider/model behaves poorly in agentic workflows; this forces the legacy JSON-in-prompt fallback. llama.cpp always uses legacy mode. **Test connection** on the form checks both the connection and, when native tool calling is on, whether the model actually calls a tool. See [TOOL_CALLING.md](TOOL_CALLING.md) for the troubleshooting playbook.
 
 ## Model flavors
 
@@ -238,7 +242,7 @@ For Anthropic **AI Integrations**, **Enable prompt caching** is on by default. A
 - Coding works best for focused issues. Broad refactors and multi-system changes may be incomplete.
 - Validation can retry only within configured budgets. If retries are exhausted, the bot reports the failure instead of silently continuing.
 - The coding agent can edit dependency files, but it cannot guarantee external package availability or credentials.
-- Writer sessions that need missing business context wait for the original issue author; comments from other users do not continue that waiting step.
+- Writer sessions that need missing business context wait for an answer. Any user on the bot's **User Whitelist** may answer — not only the issue author, which matters on an issue the writer created itself, whose author is the bot. Without a whitelist, every user may answer; the bot's own comments never count.
 
 ## Ollama Limitations
 

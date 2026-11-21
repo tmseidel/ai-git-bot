@@ -33,6 +33,16 @@ class AzureDevopsProviderMetadataTest {
     }
 
     @Test
+    void httpCredentials_carryTheTokenWithoutUsername() {
+        GitIntegration integration = new GitIntegration();
+
+        HttpCredentials credentials = metadata.createHttpCredentials(integration, "pat");
+
+        assertFalse(credentials.hasUsername());
+        assertEquals("pat", credentials.password());
+    }
+
+    @Test
     void providerType_isAzureDevops() {
         assertEquals(RepositoryType.AZURE_DEVOPS, metadata.getProviderType());
     }

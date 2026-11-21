@@ -66,4 +66,33 @@ class AgentSessionServicePlanPersistenceTest {
         assertThat(managed.getLastPlanSummary()).isEqualTo("second");
         assertThat(managed.getLastPlanJson()).isEqualTo("{\"v\":2}");
     }
+
+    /**
+     * The native prose paths pass the model's whole assistant turn as the summary.
+     * A 2655-char answer used to reach {@code last_plan_summary VARCHAR(2048)} and fail
+     * the commit, which discarded the round's work.
+     */
+    @Test
+    void recordPlanCapsALongProseSummaryToFitTheColumn() {
+        AgentSession managed = new AgentSession("o", "r", 1L, "title");
+        managed.setId(42L);
+        when(repository.getReferenceById(42L)).thenReturn(managed);
+
+        AgentSessionService svc = new AgentSessionService(repository);
+        AgentSession session = new AgentSession("o", "r", 1L, "title");
+        session.setId(42L);
+
+        String prose = ("## Summary\n\nI changed the parser.\n\n").repeat(75);
+        assertThat(prose.length()).isGreaterThan(2048);
+
+        svc.recordPlan(session, prose, prose);
+
+        String stored = managed.getLastPlanSummary();
+        assertThat(stored).hasSizeLessThanOrEqualTo(2001);
+        assertThat(stored.length()).isLessThan(prose.length());
+        assertThat(stored).doesNotContain("\n");
+        assertThat(stored).startsWith("## Summary I changed the parser.").endsWith("…");
+        // The raw column is TEXT and keeps the full turn.
+        assertThat(managed.getLastPlanJson()).isEqualTo(prose);
+    }
 }

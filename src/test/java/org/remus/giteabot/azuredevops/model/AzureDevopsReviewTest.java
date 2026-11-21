@@ -23,24 +23,6 @@ class AzureDevopsReviewTest {
     }
 
     @Test
-    void userLoginPrefersUniqueName() {
-        AzureDevopsReview review = new AzureDevopsReview();
-        review.setUniqueName("bot@contoso.com");
-        review.setDisplayName("AI Bot");
-
-        assertEquals("bot@contoso.com", review.getUserLogin());
-    }
-
-    @Test
-    void userLoginIgnoresDisplayName() {
-        // displayName is user-editable, so it must never stand in for the identity.
-        AzureDevopsReview review = new AzureDevopsReview();
-        review.setDisplayName("AI Bot");
-
-        assertNull(review.getUserLogin());
-    }
-
-    @Test
     void unsupportedFieldsAreNull() {
         AzureDevopsReview review = new AzureDevopsReview();
 
@@ -55,13 +37,13 @@ class AzureDevopsReviewTest {
         comment.setBody("please rename");
         comment.setPath("/src/Foo.java");
         comment.setLine(12);
-        comment.setUserLogin("reviewer@contoso.com");
+        comment.setUserId("guid-reviewer");
 
         assertEquals(CommentId.NumericCommentId.of(7L), comment.getId());
         assertEquals("please rename", comment.getBody());
         assertEquals("/src/Foo.java", comment.getPath());
         assertEquals(12, comment.getLine());
-        assertEquals("reviewer@contoso.com", comment.getUserLogin());
+        assertEquals("guid-reviewer", comment.getUserId());
         assertNull(comment.getDiffHunk(), "Azure DevOps sends no diff context with threads");
     }
 

@@ -24,6 +24,7 @@ import org.remus.giteabot.repository.RepositoryApiClient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * {@link AgentStrategy} for the technical-writer agent.
@@ -46,6 +47,16 @@ import java.util.List;
 @RequiredArgsConstructor
 public final class WriterAgentStrategy implements AgentStrategy {
 
+    /** Title prefix of every issue the writer creates. */
+    static final String CREATED_ISSUE_TITLE_PREFIX = "AI Created Issue: ";
+
+    /**
+     * Leading repetitions of {@link #CREATED_ISSUE_TITLE_PREFIX} (case-insensitive, tolerant of
+     * surrounding whitespace). Assigning the writer to an issue it created itself must not stack the
+     * prefix into {@code AI Created Issue: AI Created Issue: ...}.
+     */
+    private static final Pattern LEADING_TITLE_PREFIXES = Pattern.compile(
+            "^(?:\\s*AI\\s+Created\\s+Issue\\s*:\\s*)+", Pattern.CASE_INSENSITIVE);
 
     private final String systemPrompt;
     private final WriterPromptBuilder promptBuilder;
@@ -216,7 +227,7 @@ public final class WriterAgentStrategy implements AgentStrategy {
         }
 
         Long createdIssueNumber = repositoryClient.createIssue(ctx.owner(), ctx.repo(),
-                "AI Created Issue: " + ctx.session().getIssueTitle(),
+                createdIssueTitle(ctx.session().getIssueTitle()),
                 promptBuilder.buildIssueBody(ctx.issueNumber(), plan));
         if (createdIssueNumber == null) {
             sessionService.setStatus(ctx.session(), AgentSession.AgentSessionStatus.FAILED);
@@ -252,6 +263,16 @@ public final class WriterAgentStrategy implements AgentStrategy {
                 "⚠️ **AI Technical Writer**: I need more context before I can continue. "
                         + "Please add more details and mention me again.");
         return LoopOutcome.success(ctx.baseBranch(), null);
+    }
+
+    /**
+     * Prefixes {@code sourceTitle} with {@link #CREATED_ISSUE_TITLE_PREFIX} exactly once, stripping any
+     * prefixes the title already carries (e.g. when the source is itself a writer-created issue).
+     */
+    static String createdIssueTitle(String sourceTitle) {
+        String base = sourceTitle == null ? "" : sourceTitle.strip();
+        base = LEADING_TITLE_PREFIXES.matcher(base).replaceFirst("");
+        return CREATED_ISSUE_TITLE_PREFIX + base;
     }
 
     private List<ImplementationPlan.ToolRequest> buildContextRequests(WriterPlan plan) {

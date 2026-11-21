@@ -13,7 +13,7 @@ This guide explains how to configure AI-Git-Bot to work with Bitbucket Cloud.
 
 ## Step 1: Create an API Token
 
-> **Note**: Only **Atlassian account API tokens** (created at id.atlassian.com, used together with the account's email) are supported for now. Workspace, project and repository **access tokens** and the deprecated **App Passwords** are not supported.
+> **Note**: Only **Atlassian account API tokens** (created at id.atlassian.com) are supported for now. Workspace, project and repository **access tokens** and the deprecated **App Passwords** are not supported.
 
 1. Sign in as the bot's Atlassian account and open https://id.atlassian.com/manage-profile/security/api-tokens
 2. Click **Create API token with scopes**
@@ -28,8 +28,7 @@ This guide explains how to configure AI-Git-Bot to work with Bitbucket Cloud.
 In the bot's admin UI, create a new Git Integration:
 
 1. Select **Provider Type**: `BITBUCKET`
-2. Enter the **Atlassian Account Email** of the account that created the token
-3. Enter the **API Token** you created in Step 1
+2. Enter the **API Token** you created in Step 1
 
 How the credentials are used:
 
@@ -38,7 +37,7 @@ How the credentials are used:
 | Bitbucket REST API | Bearer with the API token |
 | Git over HTTPS (clone, fetch, push) | HTTP Basic with the fixed username `x-bitbucket-api-token-auth` and the API token |
 
-The configured email also defines the bot's **identity** on Bitbucket: the bot resolves the account behind the email/token pair and uses it to recognise when it is requested as a reviewer, when it is mentioned, and to ignore its own comments.
+The token also defines the bot's **identity** on Bitbucket: the bot resolves the account behind the token and uses it to recognise when it is requested as a reviewer, when it is mentioned, and to ignore its own comments.
 
 > **Note**: The URL is set automatically to `https://bitbucket.org` — you don't need to configure it.
 
@@ -48,7 +47,7 @@ Create a new Bot in the admin UI and link it to:
 - Your Bitbucket Git Integration
 - Your AI Integration (e.g., Anthropic)
 
-> **Note**: For Bitbucket, the Git Integration's **Username** is the Atlassian account email, and the bot's identity is the account behind it (resolved via the API). Entries in the bot's **User whitelist** must be Bitbucket nicknames.
+> **Note**: For Bitbucket, the bot's identity is the Atlassian account the API token belongs to (resolved via the API). Entries in the bot's **User whitelist** must be Bitbucket nicknames.
 
 Note the **Webhook Secret** that is generated — you'll need this for the next step.
 
@@ -63,14 +62,17 @@ Note the **Webhook Secret** that is generated — you'll need this for the next 
      - Replace `{webhook_secret}` with your bot's webhook secret
    - **Triggers**: Select the following:
      - Pull request: Created
-     - Pull request: Updated (for reviewer-list changes only; pushes alone are ignored)
+     - Pull request: Updated (the bot being added as a reviewer; new commits, when **Run workflow when PR head is updated** is enabled)
+     - Pull request: Merged and Declined (ends the bot's session for the pull request)
      - Pull request: Comment created (for bot commands and comment-based re-review)
 5. Click **Save**
 
 ## Review Workflow
 
+See [Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for every trigger per provider.
+
 - First review: create the pull request with the bot already listed as a reviewer, or add the bot as a reviewer after opening the PR.
-- Re-review: Bitbucket Cloud does not provide the same reviewer re-request workflow as GitHub/Gitea. The PR author can request another review by adding a PR comment that mentions the bot and asks for another review, for example:
+- Re-review: Bitbucket Cloud does not provide the same reviewer re-request workflow as GitHub/Gitea. Anyone can request another review (with a **User Whitelist**, only listed users) by adding a PR comment that mentions the bot and asks for another review, for example:
 
   ```text
   @AI Bot - Review the Pull-Request again
@@ -78,8 +80,10 @@ Note the **Webhook Secret** that is generated — you'll need this for the next 
 
 - Mentions must be created with Bitbucket's `@` autocomplete, so that Bitbucket stores them as an account mention (`@{account_id}` in the comment's raw markup). Plain text such as `@ai_bot` that was not picked from the autocomplete is not recognised.
 
-- New commits: pushing to the PR does not run another review. Add the comment above when you want a fresh review.
-- PR and inline comments that mention the bot are handled only when they are written by the pull request author.
+- New commits: pushing to the PR runs another review only when **Run workflow when PR head is updated** is enabled on the bot. Otherwise add the comment above when you want a fresh review.
+- Comments: a PR comment or inline code comment that mentions the bot is answered whoever wrote it, a "review again" request included. With a **User Whitelist** on the bot, the commenter must be listed.
+- **Public repositories:** without a **User Whitelist**, anyone who can comment can make the bot run its PR workflows (a "review again" request, slash commands) and spend AI tokens. Set a whitelist on bots that serve repositories where people you don't trust can comment. See [User Whitelist](USER_GUIDE.md#per-bot-user-whitelist-token-spend-guard).
+- Reviewer added by someone outside the **User Whitelist**: the request is ignored, and it is not picked up later when someone who is listed edits the PR. To ask for a review, remove the bot as reviewer and add it again, or comment `@AI Bot review again`.
 
 ## Step 5: Test the Integration
 
@@ -110,8 +114,8 @@ The bot reviews pull requests when explicitly requested and posts AI-generated f
 - The API token is missing a scope; compare it with [Required Scopes](#required-scopes)
 
 ### Bot ignores every event / Last Error shows "Could not resolve the Bitbucket account"
-- The bot calls `GET /2.0/user` to resolve its own account. Check that the Git Integration has an Atlassian account email configured, that the token has the `read:user:bitbucket` scope and that the email/token pair is valid. Events are ignored until the account can be resolved, so the bot never reacts to its own comments. The failure is shown as the bot's **Last Error** in the admin UI.
-- Integrations created before API-token support still contain a Bitbucket username (and possibly an App Password). Replace the username with the Atlassian account email and the token with an account API token.
+- The bot calls `GET /2.0/user` to resolve its own account. Check that the token has the `read:user:bitbucket` scope and is valid. Events are ignored until the account can be resolved, so the bot never reacts to its own comments. The failure is shown as the bot's **Last Error** in the admin UI.
+- Integrations created before API-token support may still hold an App Password. Replace it with an Atlassian account API token.
 
 ### Error: "Webhook ignored"
 - Check that the webhook URL includes the correct webhook secret

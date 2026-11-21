@@ -199,7 +199,8 @@ class SystemPromptAssemblerTest {
                 Map.entry(PromptKind.README_SYNC_AGENT, "### Updating the documentation"),
                 Map.entry(PromptKind.I18N_COVERAGE_AGENT, "### Updating the locale files"),
                 Map.entry(PromptKind.UNIT_TEST_AUTHOR_AGENT, "production code is off-limits"),
-                Map.entry(PromptKind.AGENT_REVIEW_AGENT, "### Review, do not change"));
+                Map.entry(PromptKind.AGENT_REVIEW_AGENT, "## Recording the review"),
+                Map.entry(PromptKind.AGENT_REVIEW_QA, "### Answering a follow-up question"));
 
         for (Map.Entry<PromptKind, String> stage : marker.entrySet()) {
             String out = new SystemPromptAssembler().assemble(CLEAN_BASE, toolCatalog, null,

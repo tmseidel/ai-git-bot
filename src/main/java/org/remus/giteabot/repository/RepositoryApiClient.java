@@ -37,7 +37,8 @@ public interface RepositoryApiClient {
      * Fetches the account this client's token authenticates as. The account is the same for every
      * owner; {@code owner} only says where to ask. Only Azure DevOps needs that: an integration on
      * {@code https://dev.azure.com} serves many organizations, and a token scoped to some of them can
-     * only be identified inside one of those. Every other provider ignores {@code owner}. Callers
+     * only be identified inside one of those; a blank {@code owner} falls back to the organization the
+     * URL names, or throws {@link OwnerRequiredException}. Every other provider ignores {@code owner}. Callers
      * should go through {@link RepositoryPlatform#getUser(String)}, which caches the result for a
      * limited time.
      */
@@ -221,6 +222,22 @@ public interface RepositoryApiClient {
      */
     default Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
         return Optional.empty();
+    }
+
+    /**
+     * Fetches the current PR head SHA, or {@code null} if it cannot be determined.
+     * Providers may override this to avoid fetching unrelated PR details.
+     */
+    default String getPullRequestHeadSha(String owner, String repo, Long pullNumber) {
+        return getPullRequestDetails(owner, repo, pullNumber).map(PullRequestDetails::headSha).orElse(null);
+    }
+
+    /**
+     * Returns the reported commit SHA. Providers that abbreviate IDs resolve them in the named
+     * repository, returning {@code null} if they cannot confirm the full ID.
+     */
+    default String resolveCommitSha(String repositoryFullName, String sha) {
+        return sha;
     }
 
     /**

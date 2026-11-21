@@ -39,7 +39,7 @@
                                     onchange="updateFormFields()">
                                 <option value="" th:text="#{message.selectProvider}">Select a provider...</option>
                                 <option th:each="type : ${providerTypes}"
-                                        th:value="${type}" th:text="${type}"></option>
+                                        th:value="${type}" th:text="${type.displayName}"></option>
                             </select>
                             <div class="form-text" th:text="#{help.gitProvider}">The Git hosting platform you want to connect to.</div>
                         </div>
@@ -85,20 +85,6 @@
                             <div class="form-text mb-3" th:if="${integration.hasManagedSshKeyTracking()}"
                                  th:text="#{help.git.sshManagedKey}">
                                 This integration tracks a managed Gitea key. Credential changes remove it first.
-                            </div>
-                        </div>
-
-                        <!--
-                            Username field - always shown.
-                            For Bitbucket this is the e-mail address of the Atlassian account the bot acts as,
-                            so label, placeholder, input type and hint are switched in updateFormFields().
-                        -->
-                        <div class="col-md-6" id="usernameField">
-                            <label for="username" class="form-label" id="usernameLabel" th:text="#{label.username}">Username</label>
-                            <input type="text" class="form-control" id="username" th:field="*{username}" autocomplete="off"
-                                   th:placeholder="#{placeholder.gitUsername}" placeholder="e.g. ai_bot" required/>
-                            <div class="form-text" id="usernameDescription" th:text="#{help.git.username}">
-                                The username of the account the bot acts as on the Git platform.
                             </div>
                         </div>
 
@@ -191,6 +177,8 @@
                         </div>
                     </div>
 
+                    <div class="mt-4" id="testConnectionResult" aria-live="polite"></div>
+
                     <div class="mt-4">
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-check-lg"></i> <span th:text="#{button.save}">Save</span>
@@ -198,12 +186,47 @@
                         <a th:href="@{/git-integrations}" class="btn btn-secondary ms-2">
                             <i class="bi bi-x-lg"></i> <span th:text="#{button.cancel}">Cancel</span>
                         </a>
+                        <button type="button" class="btn btn-outline-primary ms-2" id="testConnectionBtn"
+                                th:title="#{help.git.testConnection}">
+                            <i class="bi bi-plug"></i> <span th:text="#{button.testConnection}">Test connection</span>
+                        </button>
                     </div>
                 </form>
             </div>
         </div>
 
-        <th:block th:unless="${integration.deletionPending}">
+        <!--
+            Asked only when an Azure DevOps URL names no organization (e.g. https://dev.azure.com):
+            the token is identified inside one. Outside the form, so it is never saved and Enter
+            cannot submit the form.
+        -->
+        <div class="modal fade" id="testOrganizationModal" tabindex="-1"
+             aria-labelledby="testOrganizationModalLabel" aria-hidden="true"
+             th:unless="${integration.deletionPending}">
+            <div class="modal-dialog">
+                <form class="modal-content" id="testOrganizationForm">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="testOrganizationModalLabel" th:text="#{button.testConnection}">Test connection</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{button.cancel}" aria-label="Cancel"></button>
+                    </div>
+                    <div class="modal-body">
+                        <label for="testOrganization" class="form-label" th:text="#{label.testOrganization}">Organization to test with</label>
+                        <input type="text" class="form-control" id="testOrganization" autocomplete="off" required/>
+                        <div class="form-text" th:text="#{help.git.testOrganization}">
+                            The URL names no organization, and Azure DevOps identifies a token per organization. Enter an organization (or collection) the token can access.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" th:text="#{button.cancel}">Cancel</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-plug"></i> <span th:text="#{button.testConnection}">Test connection</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <th:block th:unless="${integration.deletionPending}" th:with="testTimeoutSeconds=60">
         <script th:inline="javascript">
             /*<![CDATA[*/
             const isEditMode = /*[[${integration.id != null}]]*/ false;
@@ -246,9 +269,6 @@
                 const urlField = document.getElementById('urlField');
                 const urlInput = document.getElementById('url');
                 const urlDescription = document.getElementById('urlDescription');
-                const usernameLabel = document.getElementById('usernameLabel');
-                const usernameInput = document.getElementById('username');
-                const usernameDescription = document.getElementById('usernameDescription');
                 const tokenLabel = document.getElementById('tokenLabel');
                 const tokenDescription = document.getElementById('tokenDescription');
                 const reviewTriggerNotice = document.getElementById('reviewTriggerNotice');
@@ -290,7 +310,7 @@
                     reviewTriggerNotice.style.display = 'block';
                     postReviewActionField.style.display = 'block';
                 } else if (providerType === 'BITBUCKET') {
-                    // Bitbucket: account e-mail + Atlassian API token
+                    // Bitbucket: Atlassian API token (URL is fixed)
                     urlField.style.display = 'none';
                     urlInput.required = false;
                     tokenLabel.textContent = /*[[#{label.apiToken}]]*/ 'API Token';
@@ -315,19 +335,6 @@
                     tokenDescription.textContent = /*[[#{help.git.tokenDescription}]]*/ 'The access token for API authentication.';
                 }
 
-                // Bitbucket identifies the bot by the Atlassian account e-mail; all other providers by the username.
-                if (providerType === 'BITBUCKET') {
-                    usernameLabel.textContent = /*[[#{label.bitbucketEmail}]]*/ 'Atlassian Account Email';
-                    usernameInput.type = 'email';
-                    usernameInput.placeholder = /*[[#{placeholder.bitbucketEmail}]]*/ 'e.g. bot@example.com';
-                    usernameDescription.textContent = /*[[#{help.git.bitbucketEmail}]]*/ 'Email address of the Atlassian account the bot acts as.';
-                } else {
-                    usernameLabel.textContent = /*[[#{label.username}]]*/ 'Username';
-                    usernameInput.type = 'text';
-                    usernameInput.placeholder = /*[[#{placeholder.gitUsername}]]*/ 'e.g. ai_bot';
-                    usernameDescription.textContent = /*[[#{help.git.username}]]*/ 'The username of the account the bot acts as on the Git platform.';
-                }
-
                 if (providerType !== 'GITEA') {
                     transportInput.value = 'HTTP';
                 } else {
@@ -335,6 +342,135 @@
                 }
                 updateSshFields();
             }
+
+            // ---- Connection test: checks the form's current values without saving them ----
+            const testConnectionUrl = /*[[@{/git-integrations/test}]]*/ '/git-integrations/test';
+            // Gives up on a server that accepts the connection but never answers; the bot's HTTP connect timeout catches the rest.
+            const testConnectionTimeoutSeconds = /*[[${testTimeoutSeconds}]]*/ 60;
+            const testMessages = {
+                running: /*[[#{test.git.running}]]*/ 'Testing connection…',
+                username: /*[[#{test.git.username}]]*/ 'Username',
+                displayName: /*[[#{test.git.displayName}]]*/ 'Name',
+                email: /*[[#{test.git.email}]]*/ 'E-mail',
+                emailHidden: /*[[#{test.git.emailHidden}]]*/ 'Not readable with this token',
+                details: /*[[#{test.git.details}]]*/ 'Details',
+                requestFailed: /*[[#{test.git.requestFailed}]]*/ 'The test could not be run. Reload the page and try again.',
+                clientTimeout: /*[[#{test.git.clientTimeout(${testTimeoutSeconds})}]]*/ 'The bot did not answer within 60 seconds.'
+            };
+
+            function renderTestResult(result) {
+                const container = document.getElementById('testConnectionResult');
+                container.replaceChildren();
+                const alert = document.createElement('div');
+                alert.className = 'alert mb-0 ' + (result.success ? 'alert-success' : 'alert-danger');
+                const message = document.createElement('div');
+                message.textContent = result.message;
+                alert.appendChild(message);
+
+                if (result.success) {
+                    const list = document.createElement('dl');
+                    list.className = 'row mb-0 mt-2';
+                    // Not written as a nested array literal: Thymeleaf's JavaScript inlining reads double brackets as an expression.
+                    function addEntry(label, text, muted) {
+                        const term = document.createElement('dt');
+                        term.className = 'col-sm-3';
+                        term.textContent = label;
+                        const value = document.createElement('dd');
+                        value.className = 'col-sm-9 mb-1' + (muted ? ' fst-italic' : '');
+                        value.textContent = text;
+                        list.append(term, value);
+                    }
+                    addEntry(testMessages.username, result.username, false);
+                    addEntry(testMessages.displayName, result.displayName, false);
+                    addEntry(testMessages.email, result.email || testMessages.emailHidden, !result.email);
+                    alert.appendChild(list);
+                }
+
+                if (result.detail) {
+                    const details = document.createElement('details');
+                    details.className = 'mt-2';
+                    const summary = document.createElement('summary');
+                    summary.textContent = testMessages.details;
+                    const pre = document.createElement('pre');
+                    pre.className = 'mb-0 mt-2 small text-wrap text-break';
+                    pre.textContent = result.detail;
+                    details.append(summary, pre);
+                    alert.appendChild(details);
+                }
+                container.appendChild(alert);
+            }
+
+            function runConnectionTest(organization) {
+                const button = document.getElementById('testConnectionBtn');
+                const form = button.closest('form');
+                const body = new FormData(form);
+                if (organization) body.set('testOrganization', organization);
+                const container = document.getElementById('testConnectionResult');
+                const controller = new AbortController();
+                const timer = setTimeout(function() { controller.abort(); }, testConnectionTimeoutSeconds * 1000);
+
+                button.disabled = true;
+                container.replaceChildren();
+                const running = document.createElement('div');
+                running.className = 'text-muted';
+                const spinner = document.createElement('span');
+                spinner.className = 'spinner-border spinner-border-sm me-2';
+                spinner.setAttribute('role', 'status');
+                running.append(spinner, document.createTextNode(testMessages.running));
+                container.appendChild(running);
+
+                fetch(testConnectionUrl, {
+                    method: 'POST',
+                    body: body,
+                    headers: {'Accept': 'application/json'},
+                    signal: controller.signal
+                })
+                    .then(function(response) {
+                        if (!response.ok) throw new Error('HTTP ' + response.status);
+                        return response.json();
+                    })
+                    .then(function(result) {
+                        if (result.organizationRequired) {
+                            container.replaceChildren();
+                            bootstrap.Modal.getOrCreateInstance(document.getElementById('testOrganizationModal')).show();
+                        } else {
+                            renderTestResult(result);
+                        }
+                    })
+                    .catch(function(error) {
+                        const timedOut = error.name === 'AbortError';
+                        renderTestResult({
+                            success: false,
+                            message: timedOut ? testMessages.clientTimeout : testMessages.requestFailed,
+                            detail: timedOut ? null : String(error.message || error)
+                        });
+                    })
+                    .finally(function() {
+                        clearTimeout(timer);
+                        button.disabled = false;
+                    });
+            }
+
+            document.addEventListener('DOMContentLoaded', function() {
+                document.getElementById('testConnectionBtn').addEventListener('click', function() {
+                    runConnectionTest(null);
+                });
+
+                const modalElement = document.getElementById('testOrganizationModal');
+                const organizationInput = document.getElementById('testOrganization');
+                modalElement.addEventListener('shown.bs.modal', function() {
+                    organizationInput.focus();
+                    organizationInput.select();
+                });
+                // The entered value stays in the field, so a repeated test offers it again.
+                document.getElementById('testOrganizationForm').addEventListener('submit', function(event) {
+                    event.preventDefault();
+                    const organization = organizationInput.value.trim();
+                    if (!organization) return;
+                    bootstrap.Modal.getOrCreateInstance(modalElement).hide();
+                    runConnectionTest(organization);
+                });
+            });
 
             // Initialize on page load
             document.addEventListener('DOMContentLoaded', function() {

@@ -43,7 +43,7 @@ public class EnvSecretSource implements SecretSource {
 
         if (!blacklisted.isEmpty()) {
             throw new IllegalStateException("""
-                    giteabot.secret.env.whitelist must not contain environment variables the application
+                    giteabot.secret.env.whitelist must not contain environment variables the application \
                     itself uses: %s. Put these secrets in a differently named variable.""".formatted(blacklisted));
         }
 

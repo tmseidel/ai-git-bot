@@ -5,9 +5,14 @@ import org.springframework.http.HttpStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
@@ -89,28 +94,80 @@ class BitbucketApiClientTest {
     }
 
     @Test
-    void getAuthenticatedAccount_fetchesUserOnceAndMemoizesIt() {
+    void getPullRequestDetails_expandsEachCommitInItsOwnRepository() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
+        String headSha = "abc123456789" + "a".repeat(28);
+        String baseSha = "def123456789" + "b".repeat(28);
 
-        server.expect(requestTo("https://api.bitbucket.org/2.0/user"))
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/workspace/repo/pullrequests/7"))
                 .andExpect(method(HttpMethod.GET))
                 .andRespond(withSuccess("""
-                        {"type":"user","uuid":"{bot-uuid}","account_id":"557058:bot","nickname":"ai-bot",
-                         "display_name":"AI Bot","links":{"avatar":{"href":"https://example.invalid/a.png"}}}
+                        {"title":"Fix bug","description":"Details","state":"OPEN",
+                         "source":{"branch":{"name":"feature/fix"},"commit":{"hash":"abc123456789"},
+                                   "repository":{"full_name":"contributor/fork"}},
+                         "destination":{"branch":{"name":"main"},"commit":{"hash":"def123456789"},
+                                        "repository":{"full_name":"workspace/repo"}}}
                         """, MediaType.APPLICATION_JSON));
+        expectCommitLookup(server, "contributor/fork", "abc123456789", headSha, "contributor/fork");
+        expectCommitLookup(server, "workspace/repo", "def123456789", baseSha, "workspace/repo");
 
-        BitbucketAccount account = client.getAuthenticatedAccount();
+        assertEquals(new PullRequestDetails("Fix bug", "Details", PullRequestState.OPEN,
+                        "feature/fix", headSha, "main", baseSha),
+                client.getPullRequestDetails("workspace", "repo", 7L).orElseThrow());
+        server.verify();
+    }
 
-        assertEquals(new BitbucketAccount("{bot-uuid}", "557058:bot", "ai-bot", "AI Bot"), account);
-        assertSame(account, client.getAuthenticatedAccount());
-        assertEquals("@{557058:bot}", account.mention());
+    @ParameterizedTest
+    @CsvSource({"other/fork, abc123456789, 40", "contributor/fork, bad123456789, 40",
+            "contributor/fork, abc123456789, 12"})
+    void resolveCommitSha_rejectsResponsesThatDoNotConfirmTheRequestedCommit(
+            String repository, String prefix, int length) {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
+        expectCommitLookup(server, "contributor/fork", "abc123456789",
+                prefix + "a".repeat(length - prefix.length()), repository);
+
+        assertNull(client.resolveCommitSha("contributor/fork", "abc123456789"));
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {302, 400, 403, 404, 429})
+    void resolveCommitSha_doesNotUseFailedLookups(int status) {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/contributor/fork/commit/abc123456789"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withStatus(HttpStatus.valueOf(status)));
+
+        assertNull(client.resolveCommitSha("contributor/fork", "abc123456789"));
         server.verify();
     }
 
     @Test
-    void getAuthenticatedAccount_rejectsBlankIds() {
+    void resolveCommitSha_doesNotGuessTheRepositoryOrRequestANonCommitRef() {
+        BitbucketApiClient client = new BitbucketApiClient(null, CLONE_URL);
+        assertNull(client.resolveCommitSha(null, "abc123456789"));
+        assertNull(client.resolveCommitSha("workspace/..", "abc123456789"));
+        assertNull(client.resolveCommitSha("workspace/repo", "main"));
+        assertEquals("a".repeat(40), client.resolveCommitSha(null, "a".repeat(40)));
+    }
+
+    private static void expectCommitLookup(MockRestServiceServer server, String repository, String hash,
+                                           String resolvedSha, String resolvedRepository) {
+        server.expect(requestTo("https://api.bitbucket.org/2.0/repositories/" + repository + "/commit/" + hash))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"type":"commit","hash":"%s","repository":{"full_name":"%s"}}
+                        """.formatted(resolvedSha, resolvedRepository), MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    void getAuthenticatedUser_rejectsBlankIds() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.bitbucket.org/2.0");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         BitbucketApiClient client = new BitbucketApiClient(builder.build(), CLONE_URL);
@@ -120,7 +177,7 @@ class BitbucketApiClientTest {
                         {"uuid":" ","account_id":"","display_name":"AI Bot"}
                         """, MediaType.APPLICATION_JSON));
 
-        assertThrows(IllegalStateException.class, client::getAuthenticatedAccount);
+        assertThrows(IllegalStateException.class, () -> client.getAuthenticatedUser("owner"));
         server.verify();
     }
 

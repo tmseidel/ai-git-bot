@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class AzureDevopsPayloadTranslationTest {
 
-    private final AzureDevopsWebhookHandler handler = new AzureDevopsWebhookHandler(null, null);
+    private final AzureDevopsWebhookTranslator handler = new AzureDevopsWebhookTranslator(null, null, null);
 
     @Test
     void translatePullRequestCreated_mapsAllFields() {
@@ -28,7 +28,6 @@ class AzureDevopsPayloadTranslationTest {
                 "git.pullrequest.created", pullRequestPayload());
 
         assertNotNull(payload);
-        assertEquals("opened", payload.getAction());
         assertEquals("dev@contoso.com", payload.getSender().getLogin());
         // Every consumer reads getName() to build the repo argument passed into
         // RepositoryApiClient, so it must carry the "Project/Repository" form —
@@ -54,28 +53,21 @@ class AzureDevopsPayloadTranslationTest {
         assertEquals("base-sha", payload.getPullRequest().getBase().getSha());
         assertEquals(1, payload.getPullRequest().getRequestedReviewers().size());
         assertEquals("bot@contoso.com",
-                payload.getPullRequest().getRequestedReviewers().get(0).getLogin());
+                payload.getPullRequest().getRequestedReviewers().getFirst().getLogin());
     }
 
     @Test
-    void translatePullRequestUpdated_whileActive_mapsToSynchronized() {
-        // pullRequestPayload() has status "active"
-        assertEquals("synchronized", handler.translatePayload(
-                "git.pullrequest.updated", pullRequestPayload()).getAction());
-    }
-
-    @Test
-    void translatePullRequestUpdated_whenCompletedOrAbandoned_mapsToClosed() {
+    void translatePullRequestUpdated_whenCompletedOrAbandoned_carriesTheStatus() {
         // Completion arrives as an "updated" event with status completed — this is the
         // only close signal Azure DevOps sends.
         WebhookPayload completed = handler.translatePayload(
                 "git.pullrequest.updated", withResource(pullRequestPayload(), "status", "completed"));
-        assertEquals("closed", completed.getAction());
+        assertEquals("completed", completed.getPullRequest().getState());
         assertTrue(completed.getPullRequest().getMerged());
 
         WebhookPayload abandoned = handler.translatePayload(
                 "git.pullrequest.updated", withResource(pullRequestPayload(), "status", "abandoned"));
-        assertEquals("closed", abandoned.getAction());
+        assertEquals("abandoned", abandoned.getPullRequest().getState());
         assertFalse(abandoned.getPullRequest().getMerged());
     }
 
@@ -83,7 +75,7 @@ class AzureDevopsPayloadTranslationTest {
     void translatePullRequestUpdated_leavesSenderUnsetBecauseCreatedByIsTheAuthor() {
         // resource.createdBy is the pull request's author; Azure DevOps sends no actor
         // on pull request events. Carrying the author over as the sender would make
-        // BotWebhookService#isBotUser drop every update on a pull request the bot itself
+        // BotIdentity#triggered drop every update on a pull request the bot itself
         // opened, so a human pushing to the bot's own PR would never get a re-review.
         // The PR author is still available on pullRequest.user, where it belongs.
         WebhookPayload updated = handler.translatePayload(
@@ -98,13 +90,11 @@ class AzureDevopsPayloadTranslationTest {
                 "ms.vss-code.git-pullrequest-comment-event", commentPayload());
 
         assertNotNull(payload);
-        assertEquals("created", payload.getAction());
         assertEquals(ThreadCommentId.of(5L, 7L), payload.getComment().getId());
         assertEquals("@bot please review", payload.getComment().getBody());
         assertEquals(42L, payload.getPullRequest().getNumber());
-        assertNotNull(payload.getIssue(), "comment events need a synthetic issue");
-        assertEquals(42L, payload.getIssue().getNumber());
-        assertNotNull(payload.getIssue().getPullRequest());
+        // Only what Azure DevOps sent: the issue half is added by the dispatcher.
+        assertNull(payload.getIssue());
         // The repository lives under resource.pullRequest here, but the organization
         // still comes from the envelope, so both event families agree on the address.
         assertAddress(payload, "contoso", "MyProject", "my-service");
@@ -179,7 +169,7 @@ class AzureDevopsPayloadTranslationTest {
         assertNotNull(payload);
         assertNull(payload.getSender().getLogin());
         assertNull(payload.getPullRequest().getUser().getLogin());
-        assertNull(payload.getPullRequest().getRequestedReviewers().get(0).getLogin());
+        assertNull(payload.getPullRequest().getRequestedReviewers().getFirst().getLogin());
     }
 
     @Test

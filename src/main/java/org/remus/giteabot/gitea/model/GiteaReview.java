@@ -20,18 +20,11 @@ public class GiteaReview implements Review {
 
     private String state;
 
-    private GiteaUser user;
-
     @JsonProperty("submitted_at")
     private String submittedAt;
 
     @JsonProperty("comments_count")
     private Integer commentsCount;
-
-    @Override
-    public String getUserLogin() {
-        return user != null ? user.getLogin() : null;
-    }
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)

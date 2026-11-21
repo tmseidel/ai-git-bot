@@ -10,6 +10,7 @@ import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.mcp.McpToolDefinition;
+import tools.jackson.databind.JsonNode;
 
 import java.util.List;
 import java.util.Map;
@@ -294,6 +295,38 @@ class ToolCatalogTest {
     }
 
     @Test
+    void reviewOutputToolsAreAProtocolSurfaceOfTheirOwn() {
+        assertThat(catalog.reviewOutputToolNames()).containsExactly(
+                "review-upsert-finding", "review-remove-finding", "review-get-draft",
+                "review-set-assessment", "review-complete");
+        for (String name : catalog.reviewOutputToolNames()) {
+            assertThat(catalog.kindOf(name)).as(name).isEqualTo(ToolKind.REVIEW_OUTPUT);
+            assertThat(catalog.isSilent(name)).as(name).isTrue();
+        }
+        // Not a repository capability an operator can grant or revoke: no other role sees them.
+        for (ToolCatalog.Role role : ToolCatalog.Role.values()) {
+            if (role == ToolCatalog.Role.REVIEW_OUTPUT) {
+                continue;
+            }
+            assertThat(catalog.builtinToolNames(role)).as(role.name())
+                    .doesNotContainAnyElementsOf(catalog.reviewOutputToolNames());
+        }
+        List<ToolDescriptor> descriptors = catalog.reviewOutputDescriptors();
+        assertThat(descriptors).extracting(ToolDescriptor::name)
+                .containsExactlyInAnyOrderElementsOf(catalog.reviewOutputToolNames());
+
+        // Evidence stays a typed array of objects: flattening it into strings would lose the
+        // path/side/line structure the persisted finding needs.
+        JsonNode evidence = descriptors.stream()
+                .filter(descriptor -> descriptor.name().equals("review-upsert-finding"))
+                .findFirst().orElseThrow()
+                .jsonSchema().get("properties").get("evidence");
+        assertThat(evidence.get("type").asString()).isEqualTo("array");
+        assertThat(evidence.get("items").get("properties").get("side").get("enum").toString())
+                .contains("BASE", "HEAD");
+    }
+
+    @Test
     void builtinToolNamesGroupsTheCatalogByRole() {
         assertThat(catalog.builtinToolNames(ToolCatalog.Role.CODING))
                 .contains("write-file", "cat", "execute-code", "mvn")
@@ -309,5 +342,42 @@ class ToolCatalogTest {
         assertThat(catalog.builtinToolNames(ToolCatalog.Role.WRITER))
                 .contains("cat", "branch-switcher", "get-issue", "search-issues", "execute-code")
                 .doesNotContain("write-file", "mvn", "pr-test-write");
+    }
+
+    @Test
+    void fileTransferToolsAreClassified() {
+        assertThat(catalog.kindOf("download-file")).isEqualTo(ToolKind.FILE);
+        assertThat(catalog.kindOf("upload-file")).isEqualTo(ToolKind.FILE);
+        assertThat(catalog.kindOf("file-info")).isEqualTo(ToolKind.CONTEXT);
+        assertThat(catalog.reviewToolNames(Set.of("download-file", "upload-file", "file-info")))
+                .containsExactly("file-info");
+        assertThat(catalog.builtinToolNames(ToolCatalog.Role.WRITER))
+                .contains("file-info").doesNotContain("download-file", "upload-file");
+    }
+
+    @Test
+    void uploadIsTheOneFileToolThatDoesNotMutateTheWorkspace() {
+        assertThat(catalog.mutatesWorkspace("download-file")).isTrue();
+        assertThat(catalog.mutatesWorkspace("write-file")).isTrue();
+        assertThat(catalog.mutatesWorkspace("upload-file")).isFalse();
+        assertThat(catalog.mutatesWorkspace("file-info")).isFalse();
+        assertThat(catalog.mutatesWorkspace("mvn")).isFalse();
+    }
+
+    @Test
+    void fileTransferToolsReportTheEmptyAllowlist() {
+        assertThat(catalog.missingConfiguration("download-file"))
+                .contains("agent.file-transfer.download.allowed-hosts");
+        assertThat(catalog.missingConfiguration("upload-file"))
+                .contains("agent.file-transfer.upload.allowed-hosts");
+        assertThat(catalog.missingConfiguration("write-file")).isEmpty();
+
+        AgentConfigProperties config = new AgentConfigProperties();
+        config.getFileTransfer().getDownload().setAllowedHosts(List.of("files.example.com"));
+        config.getFileTransfer().getUpload().setAllowedHosts(List.of("up.example.com"));
+        ToolCatalog configured = new ToolCatalog(config);
+        assertThat(configured.missingConfiguration("download-file")).isEmpty();
+        assertThat(configured.missingConfiguration("upload-file"))
+                .contains("agent.file-transfer.upload.allowed-paths");
     }
 }

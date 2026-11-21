@@ -5,9 +5,11 @@ import org.jspecify.annotations.NonNull;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.config.ReviewConfigProperties;
+import org.remus.giteabot.event.BotIdentity;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.CommentId;
+import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
 import org.remus.giteabot.repository.model.ReviewComment;
 import org.remus.giteabot.review.enrichment.PrContextEnricher;
@@ -18,6 +20,7 @@ import org.springframework.web.client.HttpClientErrorException;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Core code-review business logic.  Not a Spring-managed singleton — instances
@@ -32,7 +35,8 @@ public class CodeReviewService {
     private final RepositoryApiClient repositoryClient;
     private final AiClient aiClient;
     private final SessionService sessionService;
-    private final String botUsername;
+    /** The account the bot's Git integration authenticates as, by repository owner. */
+    private final Function<String, RepositoryUser> botAccount;
     private final String sessionPromptKey;
     private final String reviewSystemPrompt;
     private final PrContextEnricher contextEnricher;
@@ -42,7 +46,8 @@ public class CodeReviewService {
     private final List<String> excludedFilePatterns;
 
     public CodeReviewService(RepositoryApiClient repositoryClient, AiClient aiClient,
-                             SessionService sessionService, String botUsername, ReviewConfigProperties reviewConfig,
+                             SessionService sessionService, Function<String, RepositoryUser> botAccount,
+                             ReviewConfigProperties reviewConfig,
                              String sessionPromptKey, String reviewSystemPrompt,
                              int maxDiffCharsPerChunk, int maxDiffChunks, int retryTruncatedChunkChars,
                              String excludedFilePatterns) {
@@ -55,7 +60,7 @@ public class CodeReviewService {
         this.repositoryClient = repositoryClient;
         this.aiClient = aiClient;
         this.sessionService = sessionService;
-        this.botUsername = botUsername;
+        this.botAccount = botAccount;
         this.sessionPromptKey = sessionPromptKey;
         this.reviewSystemPrompt = reviewSystemPrompt;
         this.contextEnricher = new PrContextEnricher(repositoryClient, reviewConfig);
@@ -421,10 +426,10 @@ public class CodeReviewService {
                     owner, repo, prNumber, latestReview.getId());
 
             // Filter for comments that mention the bot, excluding the bot's own comments
-            String botAlias = (botUsername != null && !botUsername.isBlank()) ? "@" + botUsername : "";
+            BotIdentity bot = new BotIdentity(botAccount.apply(owner));
             List<ReviewComment> botMentionComments = comments.stream()
-                    .filter(c -> BotMention.isMentioned(c.getBody(), botAlias))
-                    .filter(c -> !isBotComment(c, botUsername))
+                    .filter(c -> BotMention.isMentioned(c.getBody(), bot.alias()))
+                    .filter(c -> !bot.hasId(c.getUserId()))
                     .toList();
 
             if (botMentionComments.isEmpty()) {
@@ -578,18 +583,6 @@ public class CodeReviewService {
             return payload.getPullRequest().getNumber();
         }
         return null;
-    }
-
-    /**
-     * Checks whether a review comment was written by the bot itself.
-     * Prevents the bot from responding to its own comments in review-submitted events.
-     */
-    private boolean isBotComment(ReviewComment comment, String botUsername) {
-        if (botUsername == null || botUsername.isBlank()) {
-            return false;
-        }
-        return comment.getUserLogin() != null
-                && botUsername.equalsIgnoreCase(comment.getUserLogin());
     }
 
     /**

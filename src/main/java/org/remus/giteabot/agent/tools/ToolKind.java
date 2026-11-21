@@ -58,6 +58,24 @@ public enum ToolKind {
     AGENT_CONTROL,
 
     /**
+     * The agentic-review submission protocol: {@code review-upsert-finding},
+     * {@code review-remove-finding}, {@code review-get-draft}, {@code review-set-assessment}
+     * and {@code review-complete}. These tools mutate only the current review draft through
+     * {@code ReviewSubmissionToolExecutor}; they never touch the workspace, so the generic
+     * repository router must refuse rather than execute them. Silent.
+     */
+    REVIEW_OUTPUT,
+
+    /**
+     * Read-only access to the reviews this bot already published on the pull request:
+     * {@code review-lookup}. A follow-up runs in a fresh session, so without this an agent cannot
+     * resolve a reference the user cites ({@code O3-F1}) or find the finding they describe. It reads
+     * only stored records inside the run's own scope and never touches the workspace, so the generic
+     * repository router must refuse it. Silent.
+     */
+    REVIEW_CONTEXT,
+
+    /**
      * Tool name is not configured for the current agent role.
      */
     UNKNOWN

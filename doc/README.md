@@ -25,7 +25,7 @@ You run the software, connect it to your Git hosts and AI providers, and configu
 | [Deployment](DEPLOYMENT.md) | Docker Compose deployment, environment variables, production setup |
 | [Secret References](SECRET_REFERENCES.md) | Keeping credentials out of configuration with `${env:NAME}` references: syntax, resolution, whitelist and reserved names |
 | [Admin Guide](USER_GUIDE.md) | The admin web UI: creating bots, AI integrations, Git integrations, workflow configurations, interface language |
-| [Migration 1.0 → 1.1](MIGRATION_1.0_TO_1.1.md) · [Migration 1.6 → 1.7](MIGRATION_1.6_TO_1.7.md) · [Migration 1.12 → 1.13](MIGRATION_1.12_TO_1.13.md) | Upgrade notes between releases |
+| [Migration 1.0 → 1.1](MIGRATION_1.0_TO_1.1.md) · [Migration 1.6 → 1.7](MIGRATION_1.6_TO_1.7.md) · [Migration 1.12 → 1.13](MIGRATION_1.12_TO_1.13.md) · [Migration 1.31 → 1.32](MIGRATION_1.31_TO_1.32.md) | Upgrade notes between releases |
 
 ### Connect a Git provider
 
@@ -54,6 +54,7 @@ Cloud providers (Anthropic, OpenAI, Google AI / Gemini) only need an API key —
 | [PR Workflows](PR_WORKFLOWS.md) | **Start here.** What each workflow solves and the shared setup: workflow configurations, triggers, running workflows |
 | [PR Review](PR_WORKFLOWS_REVIEW.md) | The default, always-on AI code review |
 | [Agentic PR Review](PR_WORKFLOWS_AGENTIC_REVIEW.md) | A deeper review where the bot explores the codebase first; optional approve / request-changes |
+| [Feedback on agentic reviews](WORKFLOW_FEEDBACK.md) | Reviewers judge findings and assessments through Git comments; no AI call, no re-run |
 | [Unit Tests](PR_WORKFLOWS_UNIT_TEST.md) | Auto-generated unit tests for the PR diff, run with your project's own toolchain |
 | [Full-Stack QA](PR_WORKFLOWS_E2E.md) | Generated Playwright tests run against a per-PR preview |
 | [README Sync](PR_WORKFLOWS_README_SYNC.md) | Keeps README and Markdown docs in sync with code changes |

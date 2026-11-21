@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.session.AgentSessionService;
 import org.remus.giteabot.agent.session.PendingMessage;
 import org.remus.giteabot.agent.shared.AgentMetricsHolder;
+import org.remus.giteabot.util.Throwables;
 import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiMessage;
@@ -422,44 +423,30 @@ public final class AgentLoop {
     }
 
     static boolean isTransientNetworkFailure(Throwable error) {
-        Throwable current = error;
-        while (current != null) {
-            // Streaming transport failures surface as ResourceAccessException
-            // (read timeout / mid-stream drop / malformed line — see
-            // StreamingLineReader); a retry is the intended recovery, so treat
-            // the whole family as transient rather than matching the message.
-            switch (current) {
-                case HttpClientErrorException clientError
-                        when clientError.getStatusCode().value() == HttpStatus.REQUEST_TIMEOUT.value() -> {
-                    return true;
-                }
-                case ResourceAccessException resourceAccessException -> {
-                    return true;
-                }
-                case SocketTimeoutException socketTimeoutException -> {
-                    return true;
-                }
-                case SocketException socketException -> {
-                    String message = current.getMessage();
-                    if (message != null) {
-                        String normalized = message.toLowerCase(Locale.ROOT);
-                        if (normalized.contains("broken pipe")
-                                || normalized.contains("connection reset")
-                                || normalized.contains("connection aborted")) {
-                            return true;
-                        }
-                    }
-                }
-                default -> {
-                }
-            }
+        return Throwables.hasCause(error, AgentLoop::isTransientNetworkCause);
+    }
 
-            Throwable cause = current.getCause();
-            if (cause == current) {
-                break;
+    private static boolean isTransientNetworkCause(Throwable cause) {
+        // Streaming transport failures surface as ResourceAccessException
+        // (read timeout / mid-stream drop / malformed line — see
+        // StreamingLineReader); a retry is the intended recovery, so treat
+        // the whole family as transient rather than matching the message.
+        return switch (cause) {
+            case HttpClientErrorException clientError ->
+                    clientError.getStatusCode().value() == HttpStatus.REQUEST_TIMEOUT.value();
+            case ResourceAccessException resourceAccessException -> true;
+            case SocketTimeoutException socketTimeoutException -> true;
+            case SocketException socketException -> {
+                String message = socketException.getMessage();
+                if (message == null) {
+                    yield false;
+                }
+                String normalized = message.toLowerCase(Locale.ROOT);
+                yield normalized.contains("broken pipe")
+                        || normalized.contains("connection reset")
+                        || normalized.contains("connection aborted");
             }
-            current = cause;
-        }
-        return false;
+            default -> false;
+        };
     }
 }

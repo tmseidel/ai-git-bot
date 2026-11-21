@@ -258,7 +258,7 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      | `gitea` | `https://gitea.example.com` | API Token |
      | `github` | `https://github.com` | Personal Access Token (PAT) |
      | `gitlab` | `https://gitlab.com` | Personal Access Token (PAT) |
-     | `bitbucket` | `https://bitbucket.org` | Atlassian account email + API token |
+     | `bitbucket` | `https://bitbucket.org` | Atlassian account API token |
      | `azure_devops` | `https://dev.azure.com` | Personal Access Token (PAT) |
      
     - **URL**: The Git server URL:
@@ -267,10 +267,14 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
      - For GitLab: `https://gitlab.com` or `https://gitlab.yourdomain.com` (self-managed)
      - For Bitbucket: `https://bitbucket.org`
      - For Azure DevOps: `https://dev.azure.com` (Services, every organization the token can access), `https://dev.azure.com/yourorg` (Services, one organization), `https://yourorg.visualstudio.com` (legacy) or `https://tfs.yourdomain.com/tfs` (Server; appending the collection, e.g. `/tfs/DefaultCollection`, is optional and pins the integration to that one collection)
-    - **Username**: The username of the Git account the bot acts as (e.g. `ai_bot`) — not an e-mail address or display name. It is used to detect and ignore the bot's own actions, to recognise the bot as reviewer or assignee, and as the mention alias (e.g. `@ai_bot`). It applies to every bot that uses this integration. For Bitbucket Cloud, enter the **Atlassian account email** instead (see below).
     - **Token**: Your Git API token (encrypted at rest when `APP_ENCRYPTION_KEY` is configured)
     - **Post-review Action**: defaults to **None**. Currently GitLab and Azure DevOps can use it to approve the pull/merge request or post a request-changes vote or note after each bot review.
-3. Click **Save**
+3. Optionally click **Test connection**. It checks the values in the form without saving them: the bot asks the provider which account the token belongs to and shows its username, name and e-mail. On failure it shows the provider's answer (HTTP status and response body) or the connection error, e.g. an untrusted TLS certificate or an unknown host. Token scopes are not checked.
+    - When editing, a blank token field tests with the stored token, but only while provider and URL are unchanged; after changing either, enter the token again.
+    - Azure DevOps identifies a token per organization. If the URL names none (`https://dev.azure.com`), the test asks for an organization or collection the token can access. It is only used for the test and is not saved.
+4. Click **Save**
+
+The bot acts as the account the token belongs to. Its username is read from the provider with the token and cached for 5 minutes (`giteabot.git-user.cache-ttl`), so renaming the account on the provider is picked up without editing the integration. It is used as the mention alias (e.g. `@ai_bot`); the bot recognises itself as reviewer, assignee or author by the account's id. If the account cannot be read, webhook events are ignored and the failure is shown as the bot's **Last Error**. Saving the integration reads it right away. The username is shown in the Git integration and bot lists and on the dashboard; it is read for every integration at startup, and a dash means it has not been resolved yet.
 
 ### Provider-Specific Notes
 
@@ -305,9 +309,9 @@ Git Integrations define connections to Git providers. Navigate to **Git Integrat
 
 #### Bitbucket Cloud
 
-- API calls use Basic authentication with the Atlassian account email and an API token (`email:api_token`); Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
+- API calls use Bearer authentication with an Atlassian account API token; Git over HTTPS uses the fixed username `x-bitbucket-api-token-auth` with the same token.
 - Only Atlassian account API tokens are supported for now; workspace/project/repository access tokens are not.
-- The bot's identity (reviewer requests, mentions, own comments) is the account behind the configured email, resolved via the API. Use a dedicated Atlassian account: all events created by that account are ignored
+- The bot's identity (reviewer requests, mentions, own comments) is the account the API token belongs to, resolved via the API. Use a dedicated Atlassian account: all events created by that account are ignored
 - API endpoint is at `api.bitbucket.org/2.0`
 - Issue-based agent workflows (coding and writer) are not available
 - See [Bitbucket Setup](BITBUCKET_SETUP.md) for token creation instructions
@@ -342,10 +346,11 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **Workflow Configuration** *(optional)*: Select which PR workflows should run for this bot. Leave empty to inherit the auto-bootstrapped default configuration, which is **review-only**. Use **Details** next to the dropdown to inspect the selected workflows and any persisted parameters.
    - **Deployment Target** *(optional)*: Select the per-PR preview environment used by workflows that need a live deployment, such as **Full-stack QA** / E2E tests.
    - **Run workflow when PR is opened** *(optional)*: When enabled, the bot executes its configured PR workflows whenever a pull request is created or opened — even if the bot is not assigned as a reviewer. Disabled by default. Useful for mandatory-review bots that must run on every PR. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for details.
+   - **Run workflow when PR head is updated** *(optional)*: When enabled, the bot runs its configured PR workflows again whenever new commits are pushed to a pull request. Title edits, label changes and reviewer votes do not count. Disabled by default. Works on all Git providers; see [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for how each provider reports pushes.
    - **Branch Filter** *(optional)*: A comma-separated list of glob patterns that restricts PR workflows to specific target branches/refs. When a PR's target (base) branch does not match the list, the workflow is **not** started and no PR comment is posted — only an ignore entry is logged. **Blank or `*` ⇒ all branches and tags are allowed** (the historical default). Patterns follow [gobwas/glob](https://pkg.go.dev/github.com/gobwas/glob#Compile) syntax: `*` (any run, including `/`), `?` (single character), `[abc]` / `[a-z]` (character classes), and `{a,b}` (alternation). Use a `refs/heads/` or `refs/tags/` prefix to match full ref names (e.g. `refs/heads/develop`). Useful for branch-based workflows (e.g. git-flow) that should only run on specific target branches — e.g. `releases/*` allows only PRs into a release branch. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for details.
    - **AI Integration**: Select an AI integration from the dropdown
    - **Git Integration**: Select a Git integration from the dropdown
-   - **User Whitelist** *(optional)*: Restrict AI-spending interactions to a set of Git usernames. This is recommended for public repositories.
+   - **User Whitelist** *(optional)*: Restrict AI-spending interactions to a set of Git usernames. This is recommended for public repositories: without a whitelist, anyone who mentions the bot in a pull request conversation comment can trigger it. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for who may trigger the bot from which kind of comment.
    - **Enabled**: Whether the bot is active
 3. Click **Save**
 
@@ -523,15 +528,18 @@ Configure this URL in your Git provider's webhook settings. See the provider-spe
 
 ### Webhook Events
 
-Select the following events in your Git provider's webhook configuration:
+Select the following events in your Git provider's webhook configuration. This table lists
+what to subscribe to; what the bot then does with each event, and under which bot settings,
+is described once for all providers in
+[PR Workflows → Triggers per Git provider](PR_WORKFLOWS.md#triggers-per-git-provider).
 
 | Event | Gitea | GitHub | GitLab | Bitbucket | Azure DevOps | Description |
 |-------|-------|--------|--------|-----------|--------------|-------------|
-| Pull Request | ✅ Pull Request | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created/Updated | ✅ Pull request created + Pull request updated | PR/MR open/close and reviewer request events |
-| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | ✅ Pull request commented on | Bot mentions in comments; Bitbucket and Azure DevOps re-review requests |
+| Pull Request | ✅ Pull Request, Pull Request Synchronized, Pull Request Review Requested, Pull Request Assigned | ✅ Pull requests | ✅ Merge request events | ✅ PR: Created, Updated, Merged, Declined | ✅ Pull request created + Pull request updated | PR/MR opened, reopened and closed, new commits, the bot requested as reviewer or assigned |
+| Comments | ✅ Issue Comment | ✅ Issue comments | ✅ Comments | ✅ PR: Comment created | ✅ Pull request commented on | Bot mentions in PR and issue comments, slash commands, "review again" requests |
+| Inline code comments | ✅ Pull Request Comment | ✅ Pull request review comments | ✅ Comments (same trigger) | ✅ PR: Comment created (same trigger) | ✅ Pull request commented on (same subscription) | Bot mentions in comments on a line of the diff |
 | PR Review | ✅ Pull Request (`reviewed` action) | ✅ Pull request reviews | — | — | — | Review submissions |
-| PR Comment | ✅ Pull Request Comment | ✅ Pull request review comments | — | — | ✅ Pull request commented on (same subscription) | Inline code comments |
-| Issues | ✅ Issues | ✅ Issues | ✅ Issues events | — | — | Issue-based agent workflows (optional) |
+| Issues | ✅ Issues, Issue Assigned | ✅ Issues | ✅ Issues events | — | — | Issue-based agent workflows (optional) |
 
 
 ### Bot Statistics
@@ -547,9 +555,10 @@ The dashboard and bot list show per-bot statistics:
 
 Coding bots use an explicit-request review workflow:
 
-- Review pull requests only when the PR/MR is created with the bot as reviewer, the bot is added/re-requested as reviewer, or (Bitbucket, Azure DevOps) the PR author comments a request such as `@ai_bot - Review the Pull-Request again`.
-- Do not automatically re-review when new commits are pushed.
-- Respond to bot mentions in PR comments and inline review comments from the PR/MR author.
+- Review pull requests when the PR/MR is created with the bot as reviewer, when the bot is added/re-requested as reviewer or assigned to the PR/MR later, or when anyone comments an explicit request such as `@ai_bot - Review the Pull-Request again` (with a **User Whitelist**, only listed users).
+- Do not automatically re-review when new commits are pushed, unless **Run workflow when PR head is updated** is enabled.
+- Respond to bot mentions in PR comments and inline review comments from anyone. A **User Whitelist** restricts both to the listed users.
+- See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for every trigger and how each Git provider reports it.
 - Start the issue implementation workflow when the bot is assigned to an issue.
 
 #### Writer bot
@@ -713,7 +722,7 @@ Each bot has an optional **User Whitelist** (see [Creating a Bot](#creating-a-bo
 * **Blank whitelist ⇒ everyone is allowed.** This is the historical default and remains safe for private/internal repositories where the set of repository collaborators is already trusted.
 * **Non-blank whitelist ⇒ strict allow-list.** Only the listed usernames (case-insensitive, whitespace-trimmed, newline- *or* comma-separated) may spend tokens. Every other caller is silently ignored — no PR comment is posted, but the rejection is logged at `INFO` so operators can audit blocked traffic.
 
-The whitelist is the recommended defence for bots installed on **public repositories**, where any drive-by visitor could otherwise open a PR or post an `@bot` comment and burn through your AI quota. The bot's own username does not need to be listed: events authored by the bot itself are filtered out separately by `BotWebhookService#isBotUser`.
+The whitelist is the recommended defence for bots installed on **public repositories**, where any drive-by visitor could otherwise open a PR or post an `@bot` comment and burn through your AI quota. It also decides who can direct the coding agent: without a whitelist, an `@bot` comment from anyone on a pull request the agent opened makes the agent change the code and push to that pull request's branch. The bot's own username does not need to be listed: events authored by the bot itself are filtered out separately by `WebhookEventDispatcher`, before the whitelist is consulted.
 
 ## Configuration Reference
 

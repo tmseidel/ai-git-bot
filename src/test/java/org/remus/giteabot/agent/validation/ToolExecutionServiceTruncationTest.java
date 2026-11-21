@@ -25,7 +25,7 @@ class ToolExecutionServiceTruncationTest {
 
     private final AgentConfigProperties config = new AgentConfigProperties();
     private final ToolExecutionService service = new ToolExecutionService(config,
-            new ToolCatalog(config), new PackageManagerDetector(), new YarnCommandBuilder(config));
+            new ToolCatalog(config), new PackageManagerDetector(), new YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config));
 
     @ParameterizedTest
     @ValueSource(strings = {"ctags-signatures", "ctags-deps"})

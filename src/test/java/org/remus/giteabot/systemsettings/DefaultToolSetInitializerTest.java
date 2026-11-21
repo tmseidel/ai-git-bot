@@ -44,7 +44,7 @@ class DefaultToolSetInitializerTest {
                 .filter(name -> !BotToolConfigurationService.OPT_IN_TOOLS.contains(name))
                 .toList();
         assertThat(selected).containsAll(expected);
-        assertThat(selected).doesNotContain("execute-code");
+        assertThat(selected).doesNotContain("execute-code", "download-file", "upload-file");
     }
 
     @Test
@@ -69,6 +69,21 @@ class DefaultToolSetInitializerTest {
         assertThat(BotToolConfigurationService.OPT_IN_TOOLS)
                 .describedAs("a new agent-control tool must be a decision, not a default")
                 .containsAll(agentControl);
+    }
+
+    /**
+     * The agentic-review submission protocol is not a repository capability: it is required for
+     * every agentic review and must never appear in the operator's tool list, the whitelist or the
+     * seeded default configuration.
+     */
+    @Test
+    void reviewProtocolToolsAreNeverSelectable() {
+        assertThat(builtinToolRegistry.builtinTools())
+                .extracting(BuiltinToolRegistry.BuiltinTool::name)
+                .noneMatch(name -> name.startsWith("review-"));
+
+        initializer.run(null);
+        assertThat(selectedToolNames()).noneMatch(name -> name.startsWith("review-"));
     }
 
     private List<String> selectedToolNames() {

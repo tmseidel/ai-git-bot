@@ -2,6 +2,7 @@ package org.remus.giteabot.agent.validation;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.agent.filetransfer.FileTransferService;
 import org.remus.giteabot.agent.packagemanager.PackageManagerDetection;
 import org.remus.giteabot.agent.packagemanager.PackageManagerDetector;
 import org.remus.giteabot.agent.packagemanager.YarnCommandBuilder;
@@ -20,6 +21,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -47,6 +49,7 @@ public class ToolExecutionService {
 
     private static final int MAX_TOOL_OUTPUT_CHARS = 10_000;
     private static final int MAX_SEARCH_MATCHES = 200;
+    static final int MAX_SEARCH_MATCHES_PER_FILE = 5;
     private static final int MAX_SEARCH_DEPTH = 12;
     private static final int MAX_TREE_DEPTH = 6;
     private static final int DEFAULT_GIT_LOG_LIMIT = 10;
@@ -58,6 +61,7 @@ public class ToolExecutionService {
     private final ToolCatalog catalog;
     private final PackageManagerDetector packageManagerDetector;
     private final YarnCommandBuilder yarnCommandBuilder;
+    private final FileTransferService fileTransferService;
 
     /**
      * Executes a configured validation tool in the given workspace:
@@ -264,6 +268,7 @@ public class ToolExecutionService {
             case "branch-switcher" -> executeBranchSwitcherTool(workspace, arguments);
             case "ctags-signatures" -> executeCtagsSignaturesTool(workspaceDir, arguments);
             case "ctags-deps"       -> executeCtagsDepsTool(workspaceDir, arguments);
+            case "file-info"        -> fileTransferService.fileInfo(workspaceDir, arguments);
             default -> new ToolResult(false, -1, "",
                     "Repository tool '" + tool + "' is not implemented");
         };
@@ -340,7 +345,7 @@ public class ToolExecutionService {
     }
 
     /**
-     * Executes a file-modification tool (write-file, patch-file, mkdir, delete-file)
+     * Executes a file tool (write-file, patch-file, mkdir, delete-file, download-file, upload-file)
      * in the given workspace.  Results are passed back to the AI but never posted as
      * public issue comments.
      *
@@ -362,6 +367,8 @@ public class ToolExecutionService {
             case "patch-file" -> executePatchFileTool(workspaceDir, arguments);
             case "mkdir"      -> executeMkdirTool(workspaceDir, arguments);
             case "delete-file" -> executeDeleteFileTool(workspaceDir, arguments);
+            case "download-file" -> fileTransferService.download(workspace, arguments);
+            case "upload-file"   -> fileTransferService.upload(workspace, arguments);
             default -> new ToolResult(false, -1, "", "File tool '" + tool + "' is not implemented");
         };
     }
@@ -701,56 +708,92 @@ public class ToolExecutionService {
             return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
         }
 
-        SearchRequest searchRequest = parseSearchRequest(arguments);
-        String patternText = searchRequest.patternText();
-        String relativePath = searchRequest.relativePath();
-        if (patternText == null && !searchRequest.listFiles()) {
-            log.info("{}: no pattern argument (path {})", tool, relativePath);
-            return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
-        }
-        Path basePath;
+        SearchRequest searchRequest;
         try {
-            basePath = resolveWorkspacePath(workspaceDir, relativePath);
-        } catch (IOException e) {
-            log.info("{}: rejected path {}: {}", tool, relativePath, e.getMessage());
+            searchRequest = parseSearchRequest(arguments);
+        } catch (IllegalArgumentException e) {
             return new ToolResult(false, -1, "", e.getMessage());
         }
-
-        if (!Files.exists(basePath)) {
-            log.info("{}: path not found: {}", tool, relativePath);
-            return new ToolResult(false, 1, "", "Path not found: " + relativePath);
+        String patternText = searchRequest.patternText();
+        if (patternText == null && !searchRequest.listFiles()) {
+            log.info("{}: no pattern argument (paths {})", tool, searchRequest.paths());
+            return new ToolResult(false, -1, "", "Search tool requires at least a pattern argument");
         }
+        // As in ripgrep, every given path is searched; one that does not exist is named in a note
+        // instead of failing the call, and only if none exists does the call fail.
+        List<Path> basePaths = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        for (String relativePath : searchRequest.paths()) {
+            try {
+                Path basePath = resolveWorkspacePath(workspaceDir, relativePath);
+                if (Files.exists(basePath)) {
+                    basePaths.add(basePath);
+                } else {
+                    log.info("{}: path not found: {}", tool, relativePath);
+                    notFound.add(relativePath);
+                }
+            } catch (IOException e) {
+                log.info("{}: rejected path {}: {}", tool, relativePath, e.getMessage());
+                if (searchRequest.paths().size() == 1) {
+                    return new ToolResult(false, -1, "", e.getMessage());
+                }
+                notFound.add(relativePath + " (" + e.getMessage() + ")");
+            }
+        }
+        if (basePaths.isEmpty()) {
+            return new ToolResult(false, 1, "", "Path not found: " + String.join(", ", notFound));
+        }
+        // Notes go first: outputResult keeps only the head of a long output and would cut them off.
+        String notFoundNote = notFound.isEmpty() ? "" : "Not searched, path not found: " + String.join(", ", notFound) + "\n";
         if (searchRequest.listFiles()) {
-            return listSearchFiles(workspaceDir, tool, basePath, searchRequest);
+            return listSearchFiles(workspaceDir, tool, basePaths, searchRequest, notFoundNote);
         }
 
         Pattern compiledPattern;
+        String literalFallbackNote = "";
         try {
             compiledPattern = compileSearchPattern(patternText, searchRequest);
         } catch (PatternSyntaxException e) {
             compiledPattern = Pattern.compile(Pattern.quote(patternText), searchRequest.regexFlags());
+            literalFallbackNote = "Note: '" + patternText + "' is not a valid regex (" + e.getDescription()
+                    + "), so it was searched as a literal string. Escape special characters (e.g. \\() or use -F.\n";
         }
 
-        List<String> matches;
+        SearchMatches found;
         try {
-            matches = findMatches(workspaceDir, basePath, compiledPattern, searchRequest);
-            if (matches.isEmpty() && shouldRetryWithUnescapedAlternation(tool, patternText, searchRequest)) {
+            found = findMatches(workspaceDir, basePaths, compiledPattern, searchRequest);
+            if (found.lines().isEmpty() && shouldRetryWithUnescapedAlternation(tool, patternText, searchRequest)) {
                 String normalizedPatternText = patternText.replace("\\|", "|");
                 Pattern normalizedPattern = compileSearchPattern(normalizedPatternText, searchRequest);
-                matches = findMatches(workspaceDir, basePath, normalizedPattern, searchRequest);
-                if (!matches.isEmpty()) {
+                found = findMatches(workspaceDir, basePaths, normalizedPattern, searchRequest);
+                if (!found.lines().isEmpty()) {
                     patternText = normalizedPatternText;
                 }
             }
         } catch (IOException e) {
-            log.info("{}: search failed in {}: {}", tool, relativePath, e.getMessage());
+            log.info("{}: search failed in {}: {}", tool, searchRequest.paths(), e.getMessage());
             return new ToolResult(false, -1, "", "Search failed: " + e.getMessage());
         }
 
+        List<String> matches = found.lines();
         String output = matches.isEmpty()
                 ? "No matches found for pattern: " + patternText
                 : String.join("\n", matches);
-        return outputResult(true, 0, output, false);
+        String notes = literalFallbackNote + notFoundNote
+                + (found.capped() ? SEARCH_CAPPED_NOTE + "\n" : "");
+        return outputResult(true, 0, notes + output, false);
+    }
+
+    /**
+     * Said when the search stops at {@value #MAX_SEARCH_MATCHES} results, so the model does not take the
+     * list as every match in the searched paths.
+     */
+    static final String SEARCH_CAPPED_NOTE = "Search stopped after " + MAX_SEARCH_MATCHES
+            + " results; later lines and files were not searched and may match too. "
+            + "Narrow it with a path, -g <glob> or a more specific pattern.";
+
+    /** The result lines of a search, and whether it stopped at {@value #MAX_SEARCH_MATCHES} results. */
+    private record SearchMatches(List<String> lines, boolean capped) {
     }
 
     private Pattern compileSearchPattern(String patternText, SearchRequest searchRequest) {
@@ -760,16 +803,17 @@ public class ToolExecutionService {
         return Pattern.compile(patternText, searchRequest.regexFlags());
     }
 
-    private List<String> findMatches(Path workspaceDir, Path basePath,
-                                     Pattern pattern, SearchRequest searchRequest) throws IOException {
+    private SearchMatches findMatches(Path workspaceDir, List<Path> basePaths, Pattern pattern,
+                                      SearchRequest searchRequest) throws IOException {
         List<String> matches = new ArrayList<>();
-        try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
-            List<Path> files = stream
-                    .filter(this::isVisibleWorkspacePath)
-                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
-                    .filter(this::isReasonableTextFile)
-                    .sorted()
-                    .toList();
+        // counts match lines and "more matches" notes, not context lines, against MAX_SEARCH_MATCHES
+        int reported = 0;
+        // A search across many files keeps a few hits per file, so generated files such as test
+        // snapshots cannot flood the result; searching one file returns all of its hits.
+        int perFileLimit = basePaths.size() == 1 && Files.isRegularFile(basePaths.getFirst())
+                ? Integer.MAX_VALUE : MAX_SEARCH_MATCHES_PER_FILE;
+        try (Stream<Path> stream = walkFiles(basePaths, searchRequest.maxDepth())) {
+            List<Path> files = stream.filter(this::isReasonableTextFile).toList();
 
             for (Path file : files) {
                 String relativeFilePath = workspaceDir.relativize(file).toString();
@@ -781,26 +825,100 @@ public class ToolExecutionService {
                 if (lines == null) {
                     continue;
                 }
+                List<Integer> hits = new ArrayList<>();
+                long more = 0;
+                boolean budgetExhausted = false;
                 for (int i = 0; i < lines.size(); i++) {
-                    String line = lines.get(i);
-                    if (!pattern.matcher(line).find()) {
+                    if (!pattern.matcher(lines.get(i)).find()) {
                         continue;
                     }
+                    // another result exists but the budget is spent: only then was the search cut short
                     if (searchRequest.filesOnly()) {
+                        if (reported >= MAX_SEARCH_MATCHES) {
+                            return new SearchMatches(matches, true);
+                        }
                         matches.add(relativeFilePath);
+                        reported++;
                         break;
                     }
-                    matches.add(relativeFilePath + ":" + (i + 1) + ": " + line);
-                    if (matches.size() >= MAX_SEARCH_MATCHES) {
-                        return matches;
+                    if (hits.size() >= perFileLimit) {
+                        more++;
+                        continue;
                     }
+                    if (reported >= MAX_SEARCH_MATCHES) {
+                        budgetExhausted = true;
+                        break;
+                    }
+                    hits.add(i);
+                    reported++;
                 }
-                if (searchRequest.filesOnly() && matches.size() >= MAX_SEARCH_MATCHES) {
-                    return matches;
+                appendSearchHits(matches, relativeFilePath, lines, hits,
+                        searchRequest.linesBefore(), searchRequest.linesAfter(),
+                        searchRequest.onlyMatching() ? pattern : null);
+                if (more > 0) {
+                    matches.add(relativeFilePath + ": … " + more
+                            + (more == 1 ? " more match" : " more matches") + " in this file; "
+                            + "search that file alone to see all.");
+                    reported++;
+                }
+                if (budgetExhausted) {
+                    return new SearchMatches(matches, true);
                 }
             }
         }
-        return matches;
+        return new SearchMatches(matches, false);
+    }
+
+    /**
+     * Adds the hits of one file. Without context a hit is {@code path:N: line}. With {@code -A/-B/-C} the
+     * output follows ripgrep: match lines {@code path:N: line}, context lines {@code path-N- line}, and
+     * {@code --} between non-adjacent groups, also between files. With {@code onlyMatching} ({@code -o}),
+     * as in ripgrep, a hit line becomes one {@code path:N: match} line per non-empty match; context lines
+     * stay whole.
+     */
+    private static void appendSearchHits(List<String> out, String path, List<String> lines, List<Integer> hits,
+                                         int before, int after, Pattern onlyMatching) {
+        if (before == 0 && after == 0) {
+            for (int hit : hits) {
+                appendHitLine(out, path, hit, lines.get(hit), onlyMatching);
+            }
+            return;
+        }
+        Set<Integer> hitLines = new HashSet<>(hits);
+        int printedUpTo = -1;
+        for (int hit : hits) {
+            int from = Math.max(hit - before, printedUpTo + 1);
+            int to = Math.min(hit + after, lines.size() - 1);
+            if (from > to) {
+                continue; // already printed as context of the previous hit
+            }
+            if (!out.isEmpty() && (printedUpTo < 0 || from > printedUpTo + 1)) {
+                out.add("--");
+            }
+            for (int k = from; k <= to; k++) {
+                if (hitLines.contains(k)) {
+                    appendHitLine(out, path, k, lines.get(k), onlyMatching);
+                } else {
+                    out.add(path + "-" + (k + 1) + "- " + lines.get(k));
+                }
+            }
+            printedUpTo = to;
+        }
+    }
+
+    /** {@code path:N: line}, or with {@code onlyMatching} one {@code path:N: match} per non-empty match. */
+    private static void appendHitLine(List<String> out, String path, int index, String line, Pattern onlyMatching) {
+        String prefix = path + ":" + (index + 1) + ": ";
+        if (onlyMatching == null) {
+            out.add(prefix + line);
+            return;
+        }
+        Matcher matcher = onlyMatching.matcher(line);
+        while (matcher.find()) {
+            if (!matcher.group().isEmpty()) {
+                out.add(prefix + matcher.group());
+            }
+        }
     }
 
     /**
@@ -844,12 +962,11 @@ public class ToolExecutionService {
      * {@code rg --files [path]}: lists the files under the path, filtered by {@code -g} globs. Binary and
      * oversized files are listed too; only the search skips them.
      */
-    private ToolResult listSearchFiles(Path workspaceDir, String tool, Path basePath, SearchRequest searchRequest) {
+    private ToolResult listSearchFiles(Path workspaceDir, String tool, List<Path> basePaths,
+                                       SearchRequest searchRequest, String notFoundNote) {
         List<String> files;
-        try (Stream<Path> stream = Files.walk(basePath, MAX_SEARCH_DEPTH)) {
+        try (Stream<Path> stream = walkFiles(basePaths, searchRequest.maxDepth())) {
             files = stream
-                    .filter(this::isVisibleWorkspacePath)
-                    .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                     .map(path -> workspaceDir.relativize(path).toString())
                     .filter(path -> matchesAnyGlob(path, searchRequest.includeGlobs(), searchRequest.caseInsensitive()))
                     .sorted()
@@ -857,17 +974,37 @@ public class ToolExecutionService {
                     .toList();
         } catch (IOException e) {
             log.info("{}: listing files failed in {}: {}", tool,
-                    workspaceDir.relativize(basePath), e.getMessage());
+                    basePaths.stream().map(workspaceDir::relativize).toList(), e.getMessage());
             return new ToolResult(false, -1, "", "Listing files failed: " + e.getMessage());
         }
         if (files.isEmpty()) {
-            return outputResult(true, 0, "No files found.", false);
+            return outputResult(true, 0, notFoundNote + "No files found.", false);
         }
         String output = String.join("\n", files.subList(0, Math.min(files.size(), MAX_SEARCH_MATCHES)));
         if (files.size() > MAX_SEARCH_MATCHES) {
             output += "\n... (more than " + MAX_SEARCH_MATCHES + " files; narrow it with a path or -g <glob>)";
         }
-        return outputResult(true, 0, output, false);
+        return outputResult(true, 0, notFoundNote + output, false);
+    }
+
+    /**
+     * The visible regular files below each of {@code basePaths}, sorted, each file once even when the
+     * paths overlap ({@code ["src", "src/A.java"]}).
+     */
+    private Stream<Path> walkFiles(List<Path> basePaths, int maxDepth) throws IOException {
+        Stream<Path> all = Stream.empty();
+        try {
+            for (Path basePath : basePaths) {
+                all = Stream.concat(all, Files.walk(basePath, maxDepth));
+            }
+        } catch (IOException | RuntimeException e) {
+            all.close(); // the walks opened so far
+            throw e;
+        }
+        return all.filter(this::isVisibleWorkspacePath)
+                .filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                .distinct()
+                .sorted();
     }
 
     private boolean shouldRetryWithUnescapedAlternation(String tool, String patternText, SearchRequest searchRequest) {
@@ -880,22 +1017,50 @@ public class ToolExecutionService {
         return patternText.contains("\\|");
     }
 
+    /** Upper bound for {@code -A}/{@code -B}/{@code -C}; larger values are clamped. */
+    static final int MAX_SEARCH_CONTEXT_LINES = 10;
+    /** Short flags that change the result and are honoured. */
+    private static final Set<Character> SEARCH_RESULT_FLAGS = Set.of('i', 'F', 'l', 'o');
     /**
-     * Short ripgrep/grep flags that take a value; the value is skipped rather than read as pattern or path.
-     * {@code g} and {@code e} take a value too but are handled, see {@link #parseSearchRequest}.
+     * Short flags accepted without effect: line numbers and file names are always printed, the search is
+     * always recursive and the pattern always a Java regex.
      */
-    private static final Set<Character> SEARCH_VALUE_FLAGS = Set.of('A', 'B', 'C', 'm', 't', 'T', 'M', 'j', 'f', 'd');
-    private static final Set<String> SEARCH_VALUE_OPTIONS = Set.of("--max-count", "--context", "--after-context",
-            "--before-context", "--type", "--type-not", "--max-columns", "--threads", "--file", "--max-depth",
-            "--maxdepth", "--max-filesize", "--exclude", "--exclude-dir", "--iglob");
+    private static final Set<Character> SEARCH_NOOP_FLAGS = Set.of('n', 'H', 'r', 'R', 'E');
+    /** Short flags that take a value: glob, pattern, context lines, max depth. */
+    private static final Set<Character> SEARCH_VALUE_FLAGS = Set.of('g', 'e', 'A', 'B', 'C', 'd');
+    /** Long options that take a value ({@code --name value} or {@code --name=value}). */
+    private static final Set<String> SEARCH_VALUE_OPTIONS = Set.of("--glob", "--include", "--regexp", "--context",
+            "--before-context", "--after-context", "--max-depth", "--maxdepth", "--color", "--colour");
+    private static final Set<String> SEARCH_NOOP_OPTIONS = Set.of("--line-number", "--with-filename",
+            "--no-heading", "--heading", "--recursive", "--extended-regexp");
     /** A flag is {@code -x...} with letters/digits only, so patterns such as {@code ->} stay positional. */
     private static final Pattern SEARCH_SHORT_FLAGS = Pattern.compile("-[A-Za-z0-9]+");
+    /** A long option name; anything else after {@code --} ({@code --depth|shallow}) is a pattern. */
+    private static final Pattern SEARCH_LONG_OPTION = Pattern.compile("--[A-Za-z][A-Za-z0-9-]*");
+    /** One array element holding a flag and its value, e.g. {@code -A2 "name: Foo"}. */
+    private static final Pattern SEARCH_FLAG_WITH_VALUE = Pattern.compile("-{1,2}[A-Za-z][A-Za-z0-9-]*=?\\d*\\s+\\S.*");
+    static final String SEARCH_SUPPORTED_FLAGS = "Supported flags: -i, -F, -l, -o, -n, -g <glob>, -e <pattern>, "
+            + "-A/-B/-C <lines> (max " + MAX_SEARCH_CONTEXT_LINES + "), -d/--max-depth <n>, --files; "
+            + "use -e <pattern> or -- for a pattern that starts with -.";
+
+    /** A glob or pattern value must not be blank: an empty pattern matches every line, an empty glob no file. */
+    private static String requireSearchValue(String flag, String value) {
+        if (value.isBlank()) {
+            throw new IllegalArgumentException("Flag " + flag + " needs a non-empty value. " + SEARCH_SUPPORTED_FLAGS);
+        }
+        return value;
+    }
 
     /**
      * Ripgrep-style arguments: flags may come before, between or after the positionals, as models
      * write {@code rg -i pattern path}. Without {@code -e} the first positional is the pattern and the
-     * second the path; with {@code -e}/{@code --regexp} (repeatable, the patterns are OR-ed as in ripgrep)
-     * the first positional is the path. {@code --} ends the flags, so a pattern may start with {@code -}.
+     * rest are paths; with {@code -e}/{@code --regexp} (repeatable, the patterns are OR-ed as in ripgrep)
+     * all positionals are paths. {@code --} ends the flags, so a pattern may start with {@code -}.
+     *
+     * <p>A flag that is not supported fails the call instead of being ignored: silently dropping
+     * {@code -v} or {@code -w} returns a plausible but wrong result.</p>
+     *
+     * @throws IllegalArgumentException naming the offending argument and the supported flags
      */
     private SearchRequest parseSearchRequest(List<String> arguments) {
         List<String> positionals = new ArrayList<>();
@@ -904,6 +1069,10 @@ public class ToolExecutionService {
         List<String> includeGlobs = new ArrayList<>();
         boolean flagsEnded = false;
         boolean listFiles = false;
+        Integer context = null;
+        Integer before = null;
+        Integer after = null;
+        int maxDepth = MAX_SEARCH_DEPTH;
 
         for (int i = 0; i < arguments.size(); i++) {
             String argument = arguments.get(i);
@@ -915,57 +1084,85 @@ public class ToolExecutionService {
                     flagsEnded = true;
                     continue;
                 }
-                if (argument.startsWith("--include=") || argument.startsWith("--glob=")) {
-                    includeGlobs.add(argument.substring(argument.indexOf('=') + 1));
-                    continue;
+                if (SEARCH_FLAG_WITH_VALUE.matcher(argument).matches()) {
+                    throw new IllegalArgumentException("Argument '" + argument + "' holds a flag and its value in "
+                            + "one element; pass each as its own array element, e.g. [\"-A\", \"2\", \"pattern\"]. "
+                            + "If it is a pattern that starts with -, pass it as [\"-e\", \"" + argument
+                            + "\"] or put \"--\" before it.");
                 }
-                if ("--glob".equals(argument) || "--include".equals(argument) || "-g".equals(argument)) {
-                    if (i + 1 < arguments.size()) {
-                        includeGlobs.add(arguments.get(++i));
+                // "--depth|shallow" cannot be an option name: as in ripgrep it is the pattern, not an error
+                if (argument.startsWith("--") && SEARCH_LONG_OPTION.matcher(argument.split("=", 2)[0]).matches()) {
+                    int eq = argument.indexOf('=');
+                    String name = eq > 0 ? argument.substring(0, eq) : argument;
+                    String value = null;
+                    if (SEARCH_VALUE_OPTIONS.contains(name)) {
+                        // "--context=3" carries its value inline, "--context 3" takes the next element
+                        value = eq > 0 ? argument.substring(eq + 1) : i + 1 < arguments.size() ? arguments.get(++i) : null;
+                        if (value == null) {
+                            throw new IllegalArgumentException("Option " + name + " needs a value. "
+                                    + SEARCH_SUPPORTED_FLAGS);
+                        }
                     }
-                    continue;
-                }
-                if ("-e".equals(argument) || "--regexp".equals(argument)) {
-                    if (i + 1 < arguments.size()) {
-                        explicitPatterns.add(arguments.get(++i));
+                    switch (name) {
+                        case "--files" -> listFiles = true;
+                        case "--ignore-case" -> flags.add('i');
+                        case "--fixed-strings" -> flags.add('F');
+                        case "--files-with-matches" -> flags.add('l');
+                        case "--only-matching" -> flags.add('o');
+                        case "--glob", "--include" -> includeGlobs.add(requireSearchValue(name, value));
+                        case "--regexp" -> explicitPatterns.add(requireSearchValue(name, value));
+                        case "--context" -> context = contextLines(name, value);
+                        case "--before-context" -> before = contextLines(name, value);
+                        case "--after-context" -> after = contextLines(name, value);
+                        case "--max-depth", "--maxdepth" -> maxDepth = searchDepth(name, value);
+                        default -> {
+                            // colour takes a value but has no effect here
+                            if (!SEARCH_VALUE_OPTIONS.contains(name) && !SEARCH_NOOP_OPTIONS.contains(name)) {
+                                // models also pass text such as "--depth" as the pattern: say how to search for it
+                                throw new IllegalArgumentException("Unsupported option " + name + ". To search for "
+                                        + "it, pass [\"-e\", \"" + argument + "\"]. " + SEARCH_SUPPORTED_FLAGS);
+                            }
+                        }
                     }
-                    continue;
-                }
-                if (argument.startsWith("--regexp=")) {
-                    explicitPatterns.add(argument.substring("--regexp=".length()));
-                    continue;
-                }
-                switch (argument) {
-                    case "--files" -> listFiles = true;
-                    case "--ignore-case" -> flags.add('i');
-                    case "--fixed-strings" -> flags.add('F');
-                    case "--files-with-matches" -> flags.add('l');
-                    default -> { }
-                }
-                if (SEARCH_VALUE_OPTIONS.contains(argument)) {
-                    i++;
-                    continue;
-                }
-                if (argument.startsWith("--")) {
                     continue;
                 }
                 if (SEARCH_SHORT_FLAGS.matcher(argument).matches()) {
                     for (int j = 1; j < argument.length(); j++) {
                         char flag = argument.charAt(j);
-                        if (flag == 'g' || flag == 'e' || SEARCH_VALUE_FLAGS.contains(flag)) {
+                        if (SEARCH_VALUE_FLAGS.contains(flag)) {
                             // "-ig *.java" / "-C 3" take the next argument; "-C3" carries its value inline
                             String value = j < argument.length() - 1 ? argument.substring(j + 1)
                                     : i + 1 < arguments.size() ? arguments.get(++i) : null;
-                            if (value != null && flag == 'g') {
-                                includeGlobs.add(value);
-                            } else if (value != null && flag == 'e') {
-                                explicitPatterns.add(value);
+                            if (value == null) {
+                                throw new IllegalArgumentException("Flag -" + flag + " needs a value. "
+                                        + SEARCH_SUPPORTED_FLAGS);
+                            }
+                            switch (flag) {
+                                case 'g' -> includeGlobs.add(requireSearchValue("-g", value));
+                                case 'e' -> explicitPatterns.add(requireSearchValue("-e", value));
+                                case 'A' -> after = contextLines("-A", value);
+                                case 'B' -> before = contextLines("-B", value);
+                                case 'C' -> context = contextLines("-C", value);
+                                default -> maxDepth = searchDepth("-d", value);
                             }
                             break;
                         }
-                        flags.add(flag);
+                        if (SEARCH_RESULT_FLAGS.contains(flag)) {
+                            flags.add(flag);
+                        } else if (!SEARCH_NOOP_FLAGS.contains(flag)) {
+                            throw new IllegalArgumentException("Unsupported flag -" + flag
+                                    + (argument.length() > 2 ? " in " + argument : "") + ". " + SEARCH_SUPPORTED_FLAGS);
+                        }
                     }
                     continue;
+                }
+                // "-g=*.java" or "-g*.java" is neither a flag form above nor meant as a pattern; taken as
+                // the pattern it would only report "No matches found", a plausible but wrong answer
+                if (argument.length() > 2 && argument.charAt(0) == '-' && Character.isLetter(argument.charAt(1))) {
+                    throw new IllegalArgumentException("Cannot read '" + argument + "' as flags; pass a flag and "
+                            + "its value as separate elements, e.g. [\"-g\", \"*.java\"]. If it is a pattern that "
+                            + "starts with -, pass it as [\"-e\", \"" + argument + "\"] or put \"--\" before it. "
+                            + SEARCH_SUPPORTED_FLAGS);
                 }
             }
             positionals.add(argument);
@@ -973,29 +1170,55 @@ public class ToolExecutionService {
 
         boolean fixedString = flags.contains('F');
         String patternText;
-        String relativePath;
+        List<String> paths;
+        // as in ripgrep, every positional after the pattern is a path; all of them are searched
         if (!explicitPatterns.isEmpty()) {
-            relativePath = positionals.isEmpty() ? null : positionals.getFirst();
+            paths = positionals;
             patternText = joinAlternatives(explicitPatterns, fixedString);
             // several -F patterns are quoted into one regex, which must not be quoted again
             fixedString = fixedString && explicitPatterns.size() == 1;
         } else if (listFiles) {
-            // "rg --files src" takes no pattern: its positional is the path
+            // "rg --files src" takes no pattern: its positionals are the paths
             patternText = null;
-            relativePath = positionals.isEmpty() ? null : positionals.getFirst();
+            paths = positionals;
         } else {
             patternText = positionals.isEmpty() ? null : positionals.getFirst();
-            relativePath = positionals.size() > 1 ? positionals.get(1) : null;
+            paths = positionals.isEmpty() ? List.of() : positionals.subList(1, positionals.size());
         }
-        if (relativePath == null) {
-            relativePath = ".";
+        if (paths.isEmpty()) {
+            paths = List.of(".");
         }
 
         int regexFlags = flags.contains('i') ? Pattern.CASE_INSENSITIVE : 0;
         boolean filesOnly = flags.contains('l');
         boolean caseInsensitive = flags.contains('i');
-        return new SearchRequest(patternText, relativePath, regexFlags, fixedString, filesOnly,
-                caseInsensitive, includeGlobs, listFiles);
+        // as in ripgrep, -A and -B win over -C whatever the order
+        int linesBefore = before != null ? before : context != null ? context : 0;
+        int linesAfter = after != null ? after : context != null ? context : 0;
+        return new SearchRequest(patternText, List.copyOf(paths), regexFlags, fixedString, filesOnly,
+                caseInsensitive, includeGlobs, listFiles, linesBefore, linesAfter, maxDepth, flags.contains('o'));
+    }
+
+    /**
+     * A {@code -d}/{@code --max-depth} value, counted like ripgrep: 1 searches only the entries directly
+     * below the path, 0 only the path itself. Values above {@value #MAX_SEARCH_DEPTH} are clamped.
+     */
+    private static int searchDepth(String flag, String value) {
+        if (!isDigits(value)) {
+            throw new IllegalArgumentException(flag + " needs a non-negative number, got '" + value + "'. "
+                    + SEARCH_SUPPORTED_FLAGS);
+        }
+        return value.length() > 4 ? MAX_SEARCH_DEPTH : Math.min(Integer.parseInt(value), MAX_SEARCH_DEPTH);
+    }
+
+    /** A context line count; values above {@value #MAX_SEARCH_CONTEXT_LINES} are clamped. */
+    private static int contextLines(String flag, String value) {
+        if (!isDigits(value)) {
+            throw new IllegalArgumentException(flag + " needs a number of lines, got '" + value + "'. "
+                    + SEARCH_SUPPORTED_FLAGS);
+        }
+        return value.length() > 4 ? MAX_SEARCH_CONTEXT_LINES
+                : Math.min(Integer.parseInt(value), MAX_SEARCH_CONTEXT_LINES);
     }
 
     /** Ripgrep ORs repeated {@code -e} patterns; with {@code -F} each one is matched literally. */
@@ -1008,9 +1231,10 @@ public class ToolExecutionService {
                 .collect(Collectors.joining("|"));
     }
 
-    private record SearchRequest(String patternText, String relativePath, int regexFlags,
+    private record SearchRequest(String patternText, List<String> paths, int regexFlags,
                                  boolean fixedString, boolean filesOnly,
-                                 boolean caseInsensitive, List<String> includeGlobs, boolean listFiles) {
+                                 boolean caseInsensitive, List<String> includeGlobs, boolean listFiles,
+                                 int linesBefore, int linesAfter, int maxDepth, boolean onlyMatching) {
     }
 
     private ToolResult executeFindTool(Path workspaceDir, List<String> arguments) {
@@ -1360,11 +1584,27 @@ public class ToolExecutionService {
         return indent + name;
     }
 
+    /**
+     * The {@code -g} filters, as in ripgrep: a glob starting with {@code !} excludes the paths it
+     * matches; if any plain glob is given, the path must also match one of them.
+     */
     private boolean matchesAnyGlob(String path, List<String> globPatterns, boolean caseInsensitive) {
         if (globPatterns == null || globPatterns.isEmpty()) {
             return true;
         }
-        return globPatterns.stream().anyMatch(glob -> matchesGlob(path, glob, caseInsensitive));
+        boolean anyInclude = false;
+        boolean included = false;
+        for (String glob : globPatterns) {
+            if (glob.startsWith("!")) {
+                if (matchesGlob(path, glob.substring(1), caseInsensitive)) {
+                    return false;
+                }
+            } else {
+                anyInclude = true;
+                included = included || matchesGlob(path, glob, caseInsensitive);
+            }
+        }
+        return !anyInclude || included;
     }
 
     private boolean matchesGlob(String path, String globPattern, boolean caseInsensitive) {
@@ -1380,16 +1620,43 @@ public class ToolExecutionService {
         return normalizedPath.matches(globToRegex(normalizedPattern));
     }
 
-    private String globToRegex(String glob) {
+    /**
+     * Glob to regex: {@code *} and {@code **} match any run of characters, {@code ?} one character,
+     * {@code **}{@code /} also matches no directory at all ({@code **}{@code /*.java} finds
+     * {@code A.java} at the root), and {@code {a,b}} matches either alternative. A stray {@code ,}
+     * or {@code }} outside braces is literal.
+     */
+    static String globToRegex(String glob) {
         StringBuilder regex = new StringBuilder("^");
-        for (char c : glob.toCharArray()) {
+        int braceDepth = 0;
+        for (int i = 0; i < glob.length(); i++) {
+            char c = glob.charAt(i);
+            if (glob.startsWith("**/", i)) {
+                regex.append("(?:.*/)?");
+                i += 2;
+                continue;
+            }
             switch (c) {
                 case '*' -> regex.append(".*");
                 case '?' -> regex.append('.');
-                case '.' -> regex.append("\\.");
+                case '{' -> {
+                    regex.append("(?:");
+                    braceDepth++;
+                }
+                case '}' -> {
+                    if (braceDepth > 0) {
+                        regex.append(')');
+                        braceDepth--;
+                    } else {
+                        regex.append(Pattern.quote("}"));
+                    }
+                }
+                case ',' -> regex.append(braceDepth > 0 ? "|" : Pattern.quote(","));
                 default -> regex.append(Pattern.quote(String.valueOf(c)));
             }
         }
+        // an unclosed "{" would leave an invalid group: close it, matching what was written
+        regex.repeat(")", braceDepth);
         regex.append('$');
         return regex.toString();
     }

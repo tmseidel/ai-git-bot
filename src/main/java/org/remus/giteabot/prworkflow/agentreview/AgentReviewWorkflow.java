@@ -23,27 +23,6 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
     static final int DEFAULT_MAX_TOOL_ROUNDS = 12;
 
-    static final String DEFAULT_FORMAL_REVIEW_DECISION_PROMPT = """
-            # Formal Review Decision
-
-            After writing your review findings, classify them by severity:
-
-            - **BLOCKER** — Critical issues that must be fixed before merging:
-              bugs, security vulnerabilities, broken tests, missing error handling,
-              or any problem that could cause a production defect.
-
-            - **MEDIUM** — Notable issues that should be addressed but may not block
-              merging on their own: significant code-quality concerns, unclear
-              naming, missing tests for edge cases, or maintainability risks.
-
-            - **LOW** — Minor issues, style nits, optional suggestions, or small
-              observations that should not block merging.
-
-            The application will decide whether to approve or request changes based
-            on the configured thresholds for each severity class. Do not emit
-            APPROVE, REQUEST_CHANGES, or NONE yourself; only provide the classification
-            counts below.""";
-
     private final AgentReviewServiceFactory serviceFactory;
     private final WorkflowSelectionService selectionService;
 
@@ -57,8 +36,8 @@ public class AgentReviewWorkflow implements PrWorkflow {
     @Override public String displayName() { return "Agentic PR Review"; }
     @Override public String description() {
         return "Reviews the pull request with an LLM that can iteratively call read-only "
-                + "repository and MCP tools to gather context before writing its findings as a "
-                + "Markdown comment.";
+                + "repository and MCP tools, then records findings and an overall assessment "
+                + "that the application renders as the review comment.";
     }
     @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
 
@@ -79,12 +58,9 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         "Enable formal review decision",
                         WorkflowParamField.ParamType.BOOLEAN, false,
                         "false",
-                        "When enabled, the bot may post a formal PR review decision."),
-                new WorkflowParamField(AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
-                        "Approval decision prompt",
-                        WorkflowParamField.ParamType.TEXT, false,
-                        DEFAULT_FORMAL_REVIEW_DECISION_PROMPT,
-                        "Criteria the model uses to classify findings by severity."),
+                        "When enabled, the bot posts approve or request-changes, computed from the "
+                                + "stored findings and the thresholds below. The model is never asked "
+                                + "to decide."),
                 new WorkflowParamField(AgentReviewParam.BLOCKER_THRESHOLD,
                         "Blocker must be less or equal",
                         WorkflowParamField.ParamType.INTEGER, false,
@@ -99,7 +75,16 @@ public class AgentReviewWorkflow implements PrWorkflow {
                         "Low must be less or equal",
                         WorkflowParamField.ParamType.INTEGER, false,
                         null,
-                        "Maximum allowed LOW findings for a formal APPROVE. Leave empty to ignore."));
+                        "Maximum allowed LOW findings for a formal APPROVE. Leave empty to ignore."),
+                new WorkflowParamField(AgentReviewParam.FEEDBACK_ENABLED,
+                        "Collect review feedback",
+                        WorkflowParamField.ParamType.BOOLEAN, false,
+                        "false",
+                        "Accept `@bot feedback …` commands on this bot's reviews, and store the task, "
+                                + "diff, prompt and revisions a review was produced from so that "
+                                + "feedback can later be analysed against what the bot actually saw. "
+                                + "With this off, feedback commands are not recorded and no snapshot "
+                                + "is kept; reviews are created identically."));
     }
 
     @Override
@@ -116,8 +101,6 @@ public class AgentReviewWorkflow implements PrWorkflow {
         int maxToolRounds = intParam(params, AgentReviewParam.MAX_TOOL_ROUNDS, DEFAULT_MAX_TOOL_ROUNDS);
         boolean enableProgressComments = boolParam(params, AgentReviewParam.ENABLE_PROGRESS_COMMENTS, false);
         boolean enableFormalDecision = boolParam(params, AgentReviewParam.ENABLE_FORMAL_REVIEW_DECISION, false);
-        String decisionPrompt = strParam(params, AgentReviewParam.FORMAL_REVIEW_DECISION_PROMPT,
-                DEFAULT_FORMAL_REVIEW_DECISION_PROMPT);
         AgentReviewService.SeverityThresholds thresholds = new AgentReviewService.SeverityThresholds(
                 integerParam(params, AgentReviewParam.BLOCKER_THRESHOLD),
                 integerParam(params, AgentReviewParam.MEDIUM_THRESHOLD),
@@ -126,12 +109,18 @@ public class AgentReviewWorkflow implements PrWorkflow {
         context.requireActive("before running agentic review");
 
         AgentReviewService.ReviewResult reviewed = serviceFactory.create(bot)
-                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, decisionPrompt, thresholds,
-                        context.runId(), context.auditToolCallConsumer(), enableProgressComments);
+                .reviewPullRequest(payload, maxToolRounds, enableFormalDecision, thresholds,
+                        context.runId(), context.auditToolCallConsumer(), enableProgressComments,
+                        AgentReviewLearningSettingsResolver.from(params));
 
         WorkflowResult result = switch (reviewed) {
             case POSTED -> WorkflowResult.success("Agentic review posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to review");
+            // Generated and stored, but deliberately not posted. Not a failure: a head that moved
+            // during the review is the normal reason, and the stored review stays available.
+            case SUPPRESSED -> WorkflowResult.skipped(
+                    "Agentic review stored but not posted (suppressed or already published; "
+                            + "see the review log for the reason)");
             case FAILED -> WorkflowResult.failed("Agentic review failed; no complete review was produced");
         };
         context.appendStep("agentic-review", result.summary());
@@ -151,6 +140,7 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         WorkflowResult result = switch (answered) {
             case POSTED -> WorkflowResult.success("Clarification posted");
+            case SUPPRESSED -> WorkflowResult.skipped("Clarification was not posted");
             case NO_DIFF -> WorkflowResult.skipped("No diff to answer clarification");
             case FAILED -> WorkflowResult.failed("No clarification produced");
         };

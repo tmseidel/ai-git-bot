@@ -90,6 +90,17 @@ class WebhookIntegrationTest {
     }
 
     private static void setupGiteaServer() {
+        // The account the token authenticates as: the webhook translator identifies the bot by it.
+        giteaServer.createContext("/api/v1/user", exchange -> {
+            byte[] response = """
+                    {"id": 42, "login": "ai_bot", "full_name": "AI Bot", "email": "ai_bot@example.com"}
+                    """.getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response);
+            }
+        });
         giteaServer.createContext("/api/v1/repos/", exchange -> {
             String path = exchange.getRequestURI().getPath();
             String method = exchange.getRequestMethod();
@@ -166,7 +177,6 @@ class WebhookIntegrationTest {
         git.setProviderType(org.remus.giteabot.repository.RepositoryType.GITEA);
         git.setUrl("http://localhost:" + giteaPort);
         git.setToken("test-gitea-token");
-        git.setUsername("ai_bot");
         git = gitIntegrationService.save(git, false);
 
         Bot bot = new Bot();
@@ -183,6 +193,7 @@ class WebhookIntegrationTest {
         long startTime = System.currentTimeMillis();
         mockMvc.perform(post("/api/webhook/" + secret)
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Gitea-Event", "pull_request")
                         .content(webhookPayload))
                 .andExpect(status().isOk())
                 .andExpect(content().string("review triggered"));
@@ -204,6 +215,7 @@ class WebhookIntegrationTest {
 
         mockMvc.perform(post("/api/webhook/nonexistent-secret-xyz")
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Gitea-Event", "pull_request")
                         .content(webhookPayload))
                 .andExpect(status().isNotFound());
     }
@@ -225,7 +237,6 @@ class WebhookIntegrationTest {
         git.setProviderType(org.remus.giteabot.repository.RepositoryType.GITEA);
         git.setUrl("http://localhost:" + giteaPort);
         git.setToken("test-token");
-        git.setUsername("ai_bot");
         git = gitIntegrationService.save(git, false);
 
         Bot bot = new Bot();
@@ -240,6 +251,7 @@ class WebhookIntegrationTest {
 
         mockMvc.perform(post("/api/webhook/" + bot.getWebhookSecret())
                         .contentType(MediaType.APPLICATION_JSON)
+                        .header("X-Gitea-Event", "pull_request")
                         .content(webhookPayload))
                 .andExpect(status().isOk())
                 .andExpect(content().string("session closed"));
@@ -257,7 +269,7 @@ class WebhookIntegrationTest {
                         "body": "This PR adds JWT-based authentication.",
                         "state": "open",
                         "user": {"login": "testowner"},
-                        "requested_reviewers": [{"login": "ai_bot"}],
+                        "requested_reviewers": [{"id": 42, "login": "ai_bot"}],
                         "head": {"ref": "feature/auth", "sha": "abc123"},
                         "base": {"ref": "main", "sha": "def456"}
                     },

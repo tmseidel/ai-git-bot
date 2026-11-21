@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.EncryptionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.util.Throwables;
 import org.remus.giteabot.config.ApplicationVersion;
 import org.remus.giteabot.secret.KeyResolveException;
 import org.remus.giteabot.secret.SecretTemplate;
@@ -232,15 +233,8 @@ public class McpOrchestrationService {
     }
 
     private boolean isBadRequestTransportFailure(Exception e) {
-        Throwable current = e;
-        while (current != null) {
-            String message = current.getMessage();
-            if (message != null && message.contains("Bad Request. Status code:400")) {
-                return true;
-            }
-            current = current.getCause();
-        }
-        return false;
+        return Throwables.hasCause(e, cause -> cause.getMessage() != null
+                && cause.getMessage().contains("Bad Request. Status code:400"));
     }
 
     private String diagnoseInitializeFailure(McpServerDefinition server, McpConnectionAttempt attempt) {
@@ -415,8 +409,8 @@ public class McpOrchestrationService {
             request.header(name, value);
         } catch (IllegalArgumentException e) {
             throw new KeyResolveException(("""
-                    Header '%s' cannot be sent: the configured name, or the value a
-                    secret reference resolved to, is not valid in an HTTP header. Check it for line breaks
+                    Header '%s' cannot be sent: the configured name, or the value a \
+                    secret reference resolved to, is not valid in an HTTP header. Check it for line breaks \
                     or control characters.""").formatted(name));
         }
     }

@@ -39,10 +39,13 @@ public class BotToolConfigurationService {
      * that lands in it is permanent and reaches every bot that never configured tools of its
      * own. A code-execution tool must therefore be a decision an operator takes per bot.</p>
      *
+     * <p>{@code download-file} and {@code upload-file} reach the network: a manipulated issue could
+     * otherwise make every bot fetch from, or send repository content to, an allowed host.</p>
+     *
      * <p>{@code DefaultToolSetInitializerTest} pins that every agent-control tool is listed
      * here: a new one does not silently become part of the Default set.</p>
      */
-    static final Set<String> OPT_IN_TOOLS = Set.of("execute-code");
+    static final Set<String> OPT_IN_TOOLS = Set.of("execute-code", "download-file", "upload-file");
 
     private final BotToolConfigurationRepository configurationRepository;
     private final BotToolSelectionRepository selectionRepository;

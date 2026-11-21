@@ -11,7 +11,7 @@ The bot needs its own Gitea user account to post reviews and comments.
 1. Log in to your Gitea instance as an **administrator**
 2. Navigate to **Site Administration → User Accounts → Create User Account**
 3. Fill in the details:
-   - **Username:** `ai_bot` (or any name you prefer — this will be configured on the Git Integration)
+   - **Username:** `ai_bot` (or any name you prefer — the bot reads it from Gitea with the token)
    - **Email:** `ai_bot@noreply.localhost`
    - **Password:** Choose a strong password
 4. Click **Create User Account**
@@ -144,7 +144,7 @@ use for comments, reviews, and repository metadata.
 
 Webhooks tell Gitea to notify the bot when pull request events occur. Each bot has a unique webhook URL.
 
-Code reviews are explicit-request only: pushes to an existing pull request do not trigger another review by themselves.
+By default, a review runs when a pull request is opened with the bot as a reviewer, or when the bot is requested as a reviewer or assigned to the pull request later; pushes to an existing pull request trigger another review only when **Run workflow when PR head is updated** is enabled. See [Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for every trigger per provider.
 
 ### Getting the Webhook URL
 
@@ -162,10 +162,11 @@ Code reviews are explicit-request only: pushes to an existing pull request do no
    - **Content Type:** application/json
    - **Secret:** Set a strong random secret here and enter the same value as **Webhook signing secret** on the bot. AI-Git-Bot then verifies the `X-Gitea-Signature` HMAC of every delivery and rejects forged events. (Leave empty only on fully trusted networks — authentication then relies solely on the URL path secret.)
 3. Under **Trigger On**, select **Custom Events**, then enable:
-   - ✅ **Pull Request** — handles PR open/close events and reviewer requests/re-requests
+   - ✅ **Pull Request** — handles PR open/reopen/close events
+   - ✅ **Pull Request Synchronized** — new commits pushed to the PR; needed for **Run workflow when PR head is updated**
    - ✅ **Pull Request Comment** — allows the bot to respond to inline code review comments
    - ✅ **Pull Request Review Requested** — allows the bot to respond when added as a reviewer
-   - ✅ **Pull Request Assigned** — allows the bot to respond when assigned as a reviewer
+   - ✅ **Pull Request Assigned** — allows the bot to start a review when it is assigned to the pull request
    - ✅ **Issue Comment** — allows the bot to respond to `@bot` mentions in PR and issue comments
    - ✅ **Issue Assigned** — allows the bot to start either as coding or writer bot (if using the agent feature)
    - ✅ **Issues** (only if using the agent feature)
@@ -192,7 +193,7 @@ In the bot's web UI:
    - Select **Gitea** as the provider type
    - Enter your Gitea URL (e.g., `https://gitea.example.com`)
    - Enter the API token you created above
-   - Set **Username** to the bot's Gitea username (e.g., `ai_bot`). It is used to detect and ignore the bot's own actions, and the mention alias is derived as `@ai_bot`
+   - The bot's username is read from Gitea with the token (e.g., `ai_bot`). It is used to detect and ignore the bot's own actions, and the mention alias is derived as `@ai_bot`
    - Click **Save**
 
 2. **Create or Edit a Bot** and select this Git Integration.
@@ -200,16 +201,17 @@ In the bot's web UI:
 ## Review Workflow
 
 - First review: create the pull request with the bot already listed as a reviewer, or add the bot as a reviewer after opening the PR.
-- Re-review: re-request the bot as reviewer using Gitea's reviewer workflow.
-- New commits: pushing to the PR does not run another review. Re-request the bot when you want a fresh review.
-- PR and inline comments that mention the bot are handled only when they are written by the pull request author.
+- Re-review: re-request the bot as reviewer using Gitea's reviewer workflow, or comment with the bot mention and an explicit re-review request (anyone may; with a **User Whitelist**, only listed users), for example `@ai_bot please review this again`.
+- New commits: pushing to the PR runs another review only when **Run workflow when PR head is updated** is enabled on the bot. Otherwise re-request the bot when you want a fresh review.
+- Comments: a PR comment or inline code comment that mentions the bot is answered whoever wrote it, a "review again" request included. With a **User Whitelist** on the bot, the commenter must be listed.
+- **Public repositories:** without a **User Whitelist**, anyone who can comment can make the bot run its PR workflows (a "review again" request, slash commands) and spend AI tokens. Set a whitelist on bots that serve repositories where people you don't trust can comment. See [User Whitelist](USER_GUIDE.md#per-bot-user-whitelist-token-spend-guard).
 
 ## Verification
 
 After setup, create a test pull request. The bot should:
 
 1. Post an AI-generated code review when the PR is opened with the bot reviewer or the bot is added/re-requested as reviewer
-2. Ignore pushes to the PR until the bot is explicitly re-requested
+2. Ignore pushes to the PR until the bot is explicitly re-requested (unless **Run workflow when PR head is updated** is enabled)
 3. Respond when mentioned in PR comments (e.g., `@ai_bot explain this`)
 4. Respond to inline review comments mentioning the bot
 5. React with 👀 to acknowledge commands

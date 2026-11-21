@@ -5,6 +5,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.repository.GitTransport;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryType;
+import org.remus.giteabot.repository.model.RepositoryUser;
+import org.springframework.http.MediaType;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -23,12 +25,19 @@ public class GitIntegrationController {
 
     private final GitIntegrationService gitIntegrationService;
     private final GiteaSshSetupService giteaSshSetupService;
+    private final RepositoryPlatformFactory repositoryPlatformFactory;
+    private final GitConnectionTestService gitConnectionTestService;
     private final MessageSource messageSource;
 
     public GitIntegrationController(GitIntegrationService gitIntegrationService,
-                                    GiteaSshSetupService giteaSshSetupService, MessageSource messageSource) {
+                                    GiteaSshSetupService giteaSshSetupService,
+                                    RepositoryPlatformFactory repositoryPlatformFactory,
+                                    GitConnectionTestService gitConnectionTestService,
+                                    MessageSource messageSource) {
         this.gitIntegrationService = gitIntegrationService;
         this.giteaSshSetupService = giteaSshSetupService;
+        this.repositoryPlatformFactory = repositoryPlatformFactory;
+        this.gitConnectionTestService = gitConnectionTestService;
         this.messageSource = messageSource;
     }
 
@@ -36,6 +45,7 @@ public class GitIntegrationController {
     public String list(Model model) {
         List<GitIntegration> integrations = gitIntegrationService.findAll();
         model.addAttribute("integrations", integrations);
+        model.addAttribute("gitUsernames", repositoryPlatformFactory.findCachedUsernames(integrations));
         model.addAttribute("activeNav", "git-integrations");
         return "git-integrations/list";
     }
@@ -105,6 +115,41 @@ public class GitIntegrationController {
         return "redirect:/git-integrations/" + id + "/edit";
     }
 
+    /**
+     * Tests the connection with the values currently in the form, without saving them, and
+     * reports the account the token authenticates as.
+     */
+    @PostMapping(value = "/test", produces = MediaType.APPLICATION_JSON_VALUE)
+    @ResponseBody
+    public ConnectionTestResponse testConnection(@ModelAttribute GitIntegration integration,
+                                                 @RequestParam(required = false) String token,
+                                                 @RequestParam(required = false, defaultValue = "false") boolean clearToken,
+                                                 @RequestParam(required = false) String testOrganization) {
+        GitConnectionTestResult result = gitConnectionTestService.test(integration, token, clearToken, testOrganization);
+        String message = messageSource.getMessage(result.messageKey(), result.messageArgs().toArray(),
+                LocaleContextHolder.getLocale());
+        return ConnectionTestResponse.of(result, message);
+    }
+
+    /**
+     * JSON answer of {@link #testConnection}. {@code organizationRequired} asks the form for an Azure DevOps
+     * organization the URL does not name; {@code email} is {@code null} when the token may not read it.
+     */
+    public record ConnectionTestResponse(boolean success, boolean organizationRequired, String message,
+                                         String detail, String username, String displayName, String email) {
+
+        static ConnectionTestResponse of(GitConnectionTestResult result, String message) {
+            RepositoryUser user = result.user();
+            if (user == null) {
+                return new ConnectionTestResponse(false, result.organizationRequired(), message, result.detail(),
+                        null, null, null);
+            }
+            String email = RepositoryUser.FALLBACK_EMAIL.equals(user.email()) ? null : user.email();
+            return new ConnectionTestResponse(true, false, message, result.detail(),
+                    user.username(), user.displayName(), email);
+        }
+    }
+
     @PostMapping("/save")
     public String save(@ModelAttribute GitIntegration integration,
                        @RequestParam(required = false) String token,
@@ -165,7 +210,8 @@ public class GitIntegrationController {
                     clearSshCredentials = true;
                 }
             }
-            gitIntegrationService.save(integration, clearToken, clearSshCredentials);
+            GitIntegration saved = gitIntegrationService.save(integration, clearToken, clearSshCredentials);
+            resolveAccount(saved);
             redirectAttributes.addFlashAttribute("success", messageSource.getMessage("flash.gitSaved", null, LocaleContextHolder.getLocale()));
         } catch (OptimisticLockException | OptimisticLockingFailureException e) {
             log.warn("Rejected stale save for Git Integration {}: {}", integration.getId(), e.getMessage());
@@ -176,6 +222,22 @@ public class GitIntegrationController {
                     new Object[]{"Git integration could not be saved; check the submitted fields and credentials"}, LocaleContextHolder.getLocale()));
         }
         return "redirect:/git-integrations";
+    }
+
+    /**
+     * Resolves the account the saved integration's token authenticates as, so the list the save
+     * redirects to shows it: saving changes the integration, which hides the account resolved
+     * before. The integration is saved either way.
+     */
+    private void resolveAccount(GitIntegration saved) {
+        try {
+            repositoryPlatformFactory.getPlatform(saved).getUser(null);
+        } catch (RuntimeException e) {
+            // Like the other failures here, the provider's message stays out of the log, since it
+            // may quote the response body.
+            log.warn("Saved the Git Integration, but could not resolve the account its token authenticates as ({})",
+                    e.getClass().getSimpleName());
+        }
     }
 
     @PostMapping("/{id}/delete")

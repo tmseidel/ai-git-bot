@@ -1,12 +1,21 @@
 package org.remus.giteabot;
 
 import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.domain.JavaMethod;
 import com.tngtech.archunit.core.importer.ImportOption;
 import com.tngtech.archunit.junit.AnalyzeClasses;
 import com.tngtech.archunit.junit.ArchTest;
+import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
+import com.tngtech.archunit.lang.ConditionEvents;
+import com.tngtech.archunit.lang.SimpleConditionEvent;
+import org.springframework.scheduling.annotation.Async;
+
+import java.util.concurrent.Future;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods;
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_ACCESS_STANDARD_STREAMS;
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_USE_FIELD_INJECTION;
 import static com.tngtech.archunit.library.GeneralCodingRules.NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING;
@@ -36,6 +45,31 @@ class ArchitectureTest {
 
     @ArchTest
     static final ArchRule no_java_util_logging = NO_CLASSES_SHOULD_USE_JAVA_UTIL_LOGGING;
+
+    /**
+     * An {@code @Async} method returns {@code void} or a {@code Future}. Spring hands the call to an
+     * executor and returns {@code null} to the proxy for any other return type: a primitive makes the
+     * proxy throw {@code AopInvocationException} in every caller, and an object silently reaches the
+     * caller as {@code null}. Keeping the rule mechanical catches the case where an annotation drifts
+     * onto the neighbouring method during an edit.
+     */
+    @ArchTest
+    static final ArchRule async_methods_return_void_or_a_future =
+            methods().that().areAnnotatedWith(Async.class)
+                    .should(new ArchCondition<JavaMethod>("return void or a Future") {
+                        @Override
+                        public void check(JavaMethod method, ConditionEvents events) {
+                            JavaClass returnType = method.getRawReturnType();
+                            if (!returnType.isEquivalentTo(void.class)
+                                    && !returnType.isAssignableTo(Future.class)) {
+                                events.add(SimpleConditionEvent.violated(method,
+                                        method.getFullName() + " is @Async and returns "
+                                                + returnType.getName()
+                                                + " — the async proxy returns null for it, so every caller "
+                                                + "gets null or fails with AopInvocationException"));
+                            }
+                        }
+                    });
 
     /** The {@code webhook} package is an entry-point layer: nothing may depend on it. */
     @ArchTest

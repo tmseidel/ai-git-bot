@@ -48,7 +48,7 @@ class ToolExecutionServiceExecuteScriptTest {
 
     private static ToolExecutionService newService(AgentConfigProperties config) {
         return new ToolExecutionService(config, new ToolCatalog(config),
-                new PackageManagerDetector(), new YarnCommandBuilder(config));
+                new PackageManagerDetector(), new YarnCommandBuilder(config), new org.remus.giteabot.agent.filetransfer.FileTransferService(config));
     }
 
     private void git(String... arguments) throws IOException {

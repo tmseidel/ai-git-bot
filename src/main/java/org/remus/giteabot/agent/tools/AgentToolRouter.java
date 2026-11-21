@@ -15,6 +15,7 @@ import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.prworkflow.agentreview.DiffSummary;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.systemsettings.McpConfiguration;
+import org.remus.giteabot.util.UrlRedaction;
 import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
@@ -112,6 +113,17 @@ public class AgentToolRouter {
         if (tool.isBlank()) {
             return new ToolResult(false, -1, "", "Empty tool name");
         }
+        // Review-output tools mutate the review draft, not the workspace. The review submission
+        // executor dispatches them from their typed JSON; a repository router would otherwise treat
+        // their names as unknown and try to run them.
+        if (catalog.kindOf(tool) == ToolKind.REVIEW_OUTPUT) {
+            return new ToolResult(false, -1, "", "Tool '" + tool
+                    + "' writes the review draft and is not available through the repository router");
+        }
+        if (catalog.kindOf(tool) == ToolKind.REVIEW_CONTEXT) {
+            return new ToolResult(false, -1, "", "Tool '" + tool
+                    + "' reads stored reviews and is not available through the repository router");
+        }
         if (mode == Mode.REVIEW && !catalog.reviewToolNames(allowedBuiltinTools).contains(tool)
                 && mcpToolCatalog.tools().stream().noneMatch(selected -> selected.qualifiedName().equals(tool))) {
             return new ToolResult(false, -1, "", "Tool is not enabled for read-only review: " + tool);
@@ -121,10 +133,10 @@ public class AgentToolRouter {
             return denied;
         }
         if (origin == null) {
-            log.debug("Executing tool: {} {}", tool, String.join(" ", context.args()));
+            log.debug("Executing tool: {} {}", tool, UrlRedaction.redactAll(String.join(" ", context.args())));
         } else {
             log.debug("Executing nested tool (from {}): {} {}", origin, tool,
-                    String.join(" ", context.args()));
+                    UrlRedaction.redactAll(String.join(" ", context.args())));
         }
         try {
             if (catalog.kindOf(tool) == ToolKind.AGENT_CONTROL) {

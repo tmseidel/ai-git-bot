@@ -120,6 +120,24 @@ public final class PrPayloadHydrator {
         }
     }
 
+    /**
+     * Current head revision of a pull request, asked of the provider. An unreadable answer is
+     * {@code null} ("cannot verify"), never a guessed revision.
+     */
+    public static String resolveHeadSha(RepositoryApiClient client, String owner, String repo,
+                                        long prNumber) {
+        if (client == null || owner == null || repo == null || prNumber <= 0) {
+            return null;
+        }
+        try {
+            return client.getPullRequestHeadSha(owner, repo, prNumber);
+        } catch (RuntimeException e) {
+            log.debug("getPullRequestHeadSha failed for {}/{}#{}: {}",
+                    owner, repo, prNumber, e.getMessage());
+            return null;
+        }
+    }
+
     private static boolean hasHeadRef(WebhookPayload payload) {
         return payload.getPullRequest() != null
                 && payload.getPullRequest().getHead() != null

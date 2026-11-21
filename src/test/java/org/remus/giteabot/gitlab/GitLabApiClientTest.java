@@ -3,10 +3,14 @@ package org.remus.giteabot.gitlab;
 import org.remus.giteabot.repository.model.RepositoryUser;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.remus.giteabot.repository.PostReviewAction;
 import org.remus.giteabot.repository.RepositoryApiClient;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
 import org.remus.giteabot.repository.model.PullRequestHead;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -253,6 +257,45 @@ class GitLabApiClientTest {
         // inherited refs/pull/<n>/head does not exist there.
         assertEquals("refs/merge-requests/7/head",
                 new GitLabApiClient(null).getPullRequestHeadRef(7L));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "opened, OPEN, 12",
+            "opened, OPEN, null",
+            "opened, OPEN, 12.5",
+            "closed, CLOSED_WITHOUT_MERGE, 12",
+            "merged, MERGED, 12",
+            "locked, , 12"
+    })
+    void getPullRequestDetails_mapsStateAndCurrentSourceCommit(
+            String state, PullRequestState expectedState, String sourceProjectIdJson) {
+        RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        GitLabApiClient client = new GitLabApiClient(builder.build());
+        String sha = "a".repeat(40);
+        server.expect(requestTo("https://gitlab.example.com/api/v4/projects/group%2Fsub%2Fproject/merge_requests/7"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"title":"Fix login","description":"Details","state":"%s","sha":"%s",
+                         "source_project_id":%s,"target_project_id":7,
+                         "source_branch":"feature/login","target_branch":"develop",
+                         "diff_refs":{"head_sha":"%s","start_sha":"%s"}}
+                        """.formatted(state, "b".repeat(40), sourceProjectIdJson, "b".repeat(40), "c".repeat(40)),
+                        MediaType.APPLICATION_JSON));
+        boolean hasLiveHead = expectedState == PullRequestState.OPEN && sourceProjectIdJson.equals("12");
+        if (hasLiveHead) {
+            server.expect(requestTo("https://gitlab.example.com/api/v4/projects/12/repository/branches/feature%2Flogin"))
+                    .andExpect(method(HttpMethod.GET))
+                    .andRespond(withSuccess("""
+                            {"name":"feature/login","commit":{"id":"%s"}}
+                            """.formatted(sha), MediaType.APPLICATION_JSON));
+        }
+
+        assertEquals(new PullRequestDetails("Fix login", "Details", expectedState,
+                        "feature/login", hasLiveHead ? sha : null, "develop", null),
+                client.getPullRequestDetails("group/sub", "project", 7L).orElseThrow());
+        server.verify();
     }
 
     @Test

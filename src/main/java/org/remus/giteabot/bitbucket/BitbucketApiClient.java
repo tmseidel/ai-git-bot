@@ -1,6 +1,7 @@
 package org.remus.giteabot.bitbucket;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.bitbucket.model.BitbucketAccount;
 import org.remus.giteabot.bitbucket.model.BitbucketCommit;
 import org.remus.giteabot.bitbucket.model.BitbucketEmail;
 import org.remus.giteabot.bitbucket.model.BitbucketReviewComment;
@@ -12,6 +13,8 @@ import org.remus.giteabot.repository.WorkflowDispatchRequest;
 import org.remus.giteabot.repository.WorkflowRunStatus;
 import org.remus.giteabot.repository.model.CommentId;
 import org.remus.giteabot.repository.model.PullRequestCommit;
+import org.remus.giteabot.repository.model.PullRequestDetails;
+import org.remus.giteabot.repository.model.PullRequestState;
 import org.remus.giteabot.repository.model.RepositoryTreeEntry;
 import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.repository.model.Review;
@@ -30,6 +33,8 @@ import org.springframework.web.client.RestClientException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * Bitbucket Cloud implementation of {@link RepositoryApiClient}.
@@ -40,9 +45,11 @@ import java.util.Map;
 @Slf4j
 public class BitbucketApiClient implements RepositoryApiClient {
 
+    private static final Pattern FULL_COMMIT_HASH = Pattern.compile("[0-9a-f]{40}|[0-9a-f]{64}");
+    private static final Pattern COMMIT_PREFIX = Pattern.compile("[0-9a-f]{7,63}");
+    private static final Pattern REPOSITORY_PATH = Pattern.compile("[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+");
     private final RestClient restClient;
     private final String cloneUrl;
-    private volatile BitbucketAccount authenticatedAccount;
 
     /**
      * Creates a BitbucketApiClient with the given RestClient and clone URL.
@@ -53,21 +60,6 @@ public class BitbucketApiClient implements RepositoryApiClient {
     public BitbucketApiClient(RestClient restClient, String cloneUrl) {
         this.restClient = restClient;
         this.cloneUrl = cloneUrl;
-    }
-
-    /**
-     * Returns the Bitbucket account behind the configured e-mail/API-token pair.
-     * The result is memoized; clients are re-created whenever the integration changes.
-     *
-     * @throws IllegalStateException when Bitbucket returns neither an account id nor a uuid
-     */
-    public BitbucketAccount getAuthenticatedAccount() {
-        BitbucketAccount account = authenticatedAccount;
-        if (account == null) {
-            account = fetchAuthenticatedAccount();
-            authenticatedAccount = account;
-        }
-        return account;
     }
 
     /**
@@ -82,7 +74,7 @@ public class BitbucketApiClient implements RepositoryApiClient {
         BitbucketAccount account = fetchAuthenticatedAccount();
         String email = fetchPrimaryEmail();
         String username = email != null ? email : account.accountId();
-        return new RepositoryUser(account.accountId(), username, account.displayName(), email);
+        return new RepositoryUser(account.accountId(), username, account.name(), email);
     }
 
     private BitbucketAccount fetchAuthenticatedAccount() {
@@ -122,13 +114,93 @@ public class BitbucketApiClient implements RepositoryApiClient {
 
     // ---- Pull request operations ----
 
+    /** Reads PR details, expanding the source and destination hashes in their respective repositories. */
+    @Override
+    public Optional<PullRequestDetails> getPullRequestDetails(String owner, String repo, Long pullNumber) {
+        Map<String, Object> pr = fetchPullRequest(owner, repo, pullNumber);
+        if (pr == null) {
+            return Optional.empty();
+        }
+        PullRequestState state = switch (String.valueOf(pr.get("state"))) {
+            case "OPEN" -> PullRequestState.OPEN;
+            case "MERGED" -> PullRequestState.MERGED;
+            case "DECLINED", "SUPERSEDED" -> PullRequestState.CLOSED_WITHOUT_MERGE;
+            default -> null;
+        };
+        Map<?, ?> source = object(pr.get("source"));
+        Map<?, ?> destination = object(pr.get("destination"));
+        return Optional.of(new PullRequestDetails(string(pr.get("title")), string(pr.get("description")), state,
+                string(object(source.get("branch")).get("name")), pullRequestCommitSha(source),
+                string(object(destination.get("branch")).get("name")), pullRequestCommitSha(destination)));
+    }
+
+    @Override
+    public String getPullRequestHeadSha(String owner, String repo, Long pullNumber) {
+        Map<String, Object> pr = fetchPullRequest(owner, repo, pullNumber);
+        return pr == null ? null : pullRequestCommitSha(object(pr.get("source")));
+    }
+
+    private String pullRequestCommitSha(Map<?, ?> side) {
+        return resolveCommitSha(string(object(side.get("repository")).get("full_name")),
+                string(object(side.get("commit")).get("hash")));
+    }
+
+    /**
+     * Returns a full commit SHA, or {@code null} if Bitbucket cannot confirm an abbreviation in the named repository.
+     */
+    @Override
+    public String resolveCommitSha(String repository, String hash) {
+        if (hash == null) {
+            return null;
+        }
+        if (FULL_COMMIT_HASH.matcher(hash).matches()) {
+            return hash;
+        }
+        if (!COMMIT_PREFIX.matcher(hash).matches() || repository == null
+                || !REPOSITORY_PATH.matcher(repository).matches()) {
+            return null;
+        }
+        String[] path = repository.split("/", 2);
+        if (".".equals(path[1]) || "..".equals(path[1])) {
+            return null;
+        }
+        try {
+            var response = restClient.get().uri("/repositories/{workspace}/{repo}/commit/{hash}", path[0], path[1], hash)
+                    .retrieve().toEntity(new ParameterizedTypeReference<Map<String, Object>>() {});
+            Map<?, ?> commit = object(response.getBody());
+            String fullSha = string(commit.get("hash"));
+            // shortcut: prefix uniqueness depends on Bitbucket; qualify collisions before stricter publication guarantees.
+            if (response.getStatusCode().is2xxSuccessful() && !commit.containsKey("error")
+                    && "commit".equals(commit.get("type")) && fullSha != null
+                    && FULL_COMMIT_HASH.matcher(fullSha).matches() && fullSha.startsWith(hash)
+                    && repository.equals(object(commit.get("repository")).get("full_name"))) {
+                return fullSha;
+            }
+        } catch (RestClientException e) {
+            log.debug("Could not resolve a Bitbucket PR commit ({})", e.getClass().getSimpleName());
+        }
+        return null;
+    }
+
+    private static Map<?, ?> object(Object value) {
+        return value instanceof Map<?, ?> map ? map : Map.of();
+    }
+
+    private static String string(Object value) {
+        return value instanceof String text ? text : null;
+    }
+
     @Override
     public boolean isPullRequestOpen(String owner, String repo, Long pullNumber) {
-        Map<String, Object> pr = restClient.get()
+        Map<String, Object> pr = fetchPullRequest(owner, repo, pullNumber);
+        return pr != null && "OPEN".equals(pr.get("state"));
+    }
+
+    private Map<String, Object> fetchPullRequest(String owner, String repo, Long pullNumber) {
+        return restClient.get()
                 .uri("/repositories/{workspace}/{repo}/pullrequests/{pr_id}", owner, repo, pullNumber)
                 .retrieve()
                 .body(new ParameterizedTypeReference<>() {});
-        return pr != null && "OPEN".equals(pr.get("state"));
     }
 
     @Override

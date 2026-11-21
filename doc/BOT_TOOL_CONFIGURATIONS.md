@@ -244,10 +244,12 @@ application-level code:
 Once the migrations have run, `DefaultToolSetInitializer` extends the Default row on every
 start: it adds each built-in tool the running build ships that the row does not select yet, so
 a bot that references Default gains a newly shipped tool on upgrade instead of silently losing
-it. `execute-code` is the exception (`BotToolConfigurationService.OPT_IN_TOOLS`) — the Default
-row cannot be edited afterwards, so a tool that landed in it would be permanent and opt-out for
-every bot that never attached a configuration of its own. A bot gets code execution only from a
-configuration that selects it.
+it. `execute-code`, `download-file` and `upload-file` are the exceptions
+(`BotToolConfigurationService.OPT_IN_TOOLS`) — the Default row cannot be edited afterwards, so a
+tool that landed in it would be permanent and opt-out for every bot that never attached a
+configuration of its own. A bot gets code execution or network file transfer only from a
+configuration that selects it; the transfer tools additionally need their global allowlists (see
+[Binary Assets](FILE_TRANSFER.md)).
 
 Tool configurations an admin creates are never touched by this: a tool removed there stays
 removed, and a narrower configuration stays narrow.
@@ -285,4 +287,5 @@ flowchart LR
 - [MCP Server Handling](MCP_SERVER_HANDLING.md)
 - [Agent Documentation](AGENT.md)
 - [Tool Calling](TOOL_CALLING.md)
+- [Binary Assets](FILE_TRANSFER.md)
 

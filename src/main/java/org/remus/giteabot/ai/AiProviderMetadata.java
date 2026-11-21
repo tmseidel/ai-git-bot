@@ -47,8 +47,16 @@ public interface AiProviderMetadata {
     boolean requiresApiKey();
 
     /**
+     * Derives settings the form does not set directly, such as an API URL implied
+     * by another setting. Makes no network calls, so it can run on unsaved values.
+     * Callers run it before {@link #validateConfiguration} and before building a client.
+     */
+    default void canonicalize(AiIntegration integration) {
+    }
+
+    /**
      * Validates provider-specific settings and the resolved plaintext key before
-     * saving. Providers may canonicalize derived settings such as their API URL.
+     * saving, after {@link #canonicalize} has run.
      * A null key denotes an explicitly cleared or not yet configured credential.
      */
     default void validateConfiguration(AiIntegration integration, String apiKey) {

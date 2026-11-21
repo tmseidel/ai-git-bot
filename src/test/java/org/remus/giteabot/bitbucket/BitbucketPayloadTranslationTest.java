@@ -12,11 +12,11 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for the Bitbucket Cloud → WebhookPayload translation logic in
- * {@link BitbucketWebhookHandler#translatePayload(String, Map)}.
+ * {@link BitbucketWebhookTranslator#translatePayload(String, Map)}.
  */
 class BitbucketPayloadTranslationTest {
 
-    private final BitbucketWebhookHandler handler = new BitbucketWebhookHandler(null, null, null);
+    private final BitbucketWebhookTranslator handler = new BitbucketWebhookTranslator(null, null);
 
     @Test
     void translatePullRequestCreated_mapsAllFields() {
@@ -25,7 +25,6 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:created", raw);
 
         assertNotNull(payload);
-        assertEquals("opened", payload.getAction());
         assertEquals("developer", payload.getSender().getLogin());
         assertEquals("myrepo", payload.getRepository().getName());
         assertEquals("workspace/myrepo", payload.getRepository().getFullName());
@@ -34,21 +33,13 @@ class BitbucketPayloadTranslationTest {
         assertEquals(42L, payload.getPullRequest().getNumber());
         assertEquals("Add feature", payload.getPullRequest().getTitle());
         assertEquals("feature-branch", payload.getPullRequest().getHead().getRef());
+        assertEquals("developer/fork", payload.getPullRequest().getHead().getRepositoryFullName());
         assertEquals("main", payload.getPullRequest().getBase().getRef());
+        assertEquals("workspace/myrepo", payload.getPullRequest().getBase().getRepositoryFullName());
     }
 
     @Test
-    void translatePullRequestUpdated_mapsToSynchronized() {
-        Map<String, Object> raw = createPullRequestPayload();
-
-        WebhookPayload payload = handler.translatePayload("pullrequest:updated", raw);
-
-        assertNotNull(payload);
-        assertEquals("synchronized", payload.getAction());
-    }
-
-    @Test
-    void translatePullRequestFulfilled_mapsToClosed() {
+    void translatePullRequestFulfilled_mapsMerged() {
         Map<String, Object> raw = createPullRequestPayload();
         // Set state to MERGED for fulfilled
         Map<String, Object> pr = new HashMap<>((Map<String, Object>) raw.get("pullrequest"));
@@ -59,18 +50,7 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:fulfilled", rawCopy);
 
         assertNotNull(payload);
-        assertEquals("closed", payload.getAction());
         assertTrue(payload.getPullRequest().getMerged());
-    }
-
-    @Test
-    void translatePullRequestRejected_mapsToClosed() {
-        Map<String, Object> raw = createPullRequestPayload();
-
-        WebhookPayload payload = handler.translatePayload("pullrequest:rejected", raw);
-
-        assertNotNull(payload);
-        assertEquals("closed", payload.getAction());
     }
 
     @Test
@@ -80,13 +60,12 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:comment_created", raw);
 
         assertNotNull(payload);
-        assertEquals("created", payload.getAction());
         assertNotNull(payload.getComment());
         assertEquals(CommentId.NumericCommentId.of(55L), payload.getComment().getId());
         assertEquals("@ai_bot review this", payload.getComment().getBody());
         assertEquals("commenter", payload.getComment().getUser().getLogin());
-        assertNotNull(payload.getIssue());
-        assertNotNull(payload.getIssue().getPullRequest());
+        // Only what Bitbucket sent: the issue half is added by the dispatcher.
+        assertNull(payload.getIssue());
     }
 
     @Test
@@ -184,7 +163,6 @@ class BitbucketPayloadTranslationTest {
         WebhookPayload payload = handler.translatePayload("pullrequest:created", raw);
 
         assertNotNull(payload);
-        assertEquals("opened", payload.getAction());
 
         // Actor/sender
         assertNotNull(payload.getSender());
@@ -213,10 +191,12 @@ class BitbucketPayloadTranslationTest {
         Map<String, Object> source = new HashMap<>();
         source.put("branch", Map.of("name", "feature-branch"));
         source.put("commit", Map.of("hash", "abc123"));
+        source.put("repository", Map.of("full_name", "developer/fork"));
 
         Map<String, Object> destination = new HashMap<>();
         destination.put("branch", Map.of("name", "main"));
         destination.put("commit", Map.of("hash", "def456"));
+        destination.put("repository", Map.of("full_name", "workspace/myrepo"));
 
         Map<String, Object> pullrequest = new HashMap<>();
         pullrequest.put("id", 42);
