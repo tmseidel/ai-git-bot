@@ -89,8 +89,8 @@ public class ProviderRetryCommentNotifier implements ProviderRetryNotifier {
                 %s
                 ```
 
-                No further retry is scheduled. The next possible retry is once the provider is healthy again
-                **and** this workflow is triggered anew — push an update or mention the bot. Provider overload
+                No further retry is scheduled. The next possible retry is once the provider is healthy again \
+                **and** this workflow is triggered anew — push an update or mention the bot. Provider overload \
                 spikes usually clear within a few minutes.
 
                 _Workflow: `%s`_

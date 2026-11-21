@@ -24,10 +24,10 @@ public final class FeedbackHint {
         String exampleTarget = outputReference + "-F1";
         return """
                 ---
-                Feedback on this review is welcome: answer with `%s feedback <target> <verdict> <why>`,
-                for example `%s feedback %s incorrect The check already exists in the filter`.
-                Verdicts: %s. Targets: `%s` for the whole review, `%s`-style for one finding, or
-                `%s-A` for the assessment. Feedback only records your assessment; it never re-runs
+                Feedback on this review is welcome: answer with `%s feedback <target> <verdict> <why>`, \
+                for example `%s feedback %s incorrect The check already exists in the filter`. \
+                Verdicts: %s. Targets: `%s` for the whole review, `%s`-style for one finding, or \
+                `%s-A` for the assessment. Feedback only records your assessment; it never re-runs \
                 the review.""".formatted(mention, mention, exampleTarget, FeedbackVerdict.tokens(),
                 outputReference, outputReference, outputReference);
     }

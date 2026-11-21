@@ -22,13 +22,13 @@ public final class FeedbackReplyRenderer {
     /** Footer explaining the vocabulary; posted with every acknowledgement. */
     public static String footer() {
         return """
-                Reply with `feedback <target> <verdict> <why>` to judge a review, for example
-                `feedback O1234-F2 incorrect The permission check is already in the filter`.
-                Verdicts: %s. Targets: `O1234` (whole review), `O1234-F2` (finding),
+                Reply with `feedback <target> <verdict> <why>` to judge a review, for example \
+                `feedback O1234-F2 incorrect The permission check is already in the filter`. \
+                Verdicts: %s. Targets: `O1234` (whole review), `O1234-F2` (finding), \
                 `O1234-A` (assessment).
 
-                Feedback only records your assessment — it never re-runs a review, changes code, or
-                edits instructions. A later comment from you replaces your earlier assessment of the
+                Feedback only records your assessment — it never re-runs a review, changes code, or \
+                edits instructions. A later comment from you replaces your earlier assessment of the \
                 same target; `feedback retract <FB…>` withdraws one.
                 """.formatted(FeedbackVerdict.tokens());
     }

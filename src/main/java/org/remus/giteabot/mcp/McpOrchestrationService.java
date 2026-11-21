@@ -409,8 +409,8 @@ public class McpOrchestrationService {
             request.header(name, value);
         } catch (IllegalArgumentException e) {
             throw new KeyResolveException(("""
-                    Header '%s' cannot be sent: the configured name, or the value a
-                    secret reference resolved to, is not valid in an HTTP header. Check it for line breaks
+                    Header '%s' cannot be sent: the configured name, or the value a \
+                    secret reference resolved to, is not valid in an HTTP header. Check it for line breaks \
                     or control characters.""").formatted(name));
         }
     }
