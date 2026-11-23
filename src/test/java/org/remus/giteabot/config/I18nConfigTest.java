@@ -6,8 +6,13 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.web.servlet.LocaleResolver;
 import org.springframework.web.servlet.i18n.LocaleChangeInterceptor;
 
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
+import java.util.Properties;
 import java.util.ResourceBundle;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -81,6 +86,28 @@ class I18nConfigTest {
                         () -> option.code() + ": " + key + " contains markup: " + message);
             }
         }
+    }
+
+    /** Every text is translated: a key missing from a bundle would silently show the English text. */
+    @Test
+    void everySupportedLocale_translatesEveryKey() throws Exception {
+        Set<String> english = bundle("messages.properties").stringPropertyNames();
+        for (I18nConfig.LocaleOption option : I18nConfig.SUPPORTED.subList(1, I18nConfig.SUPPORTED.size())) {
+            Set<String> translated = bundle("messages_" + option.code() + ".properties").stringPropertyNames();
+            List<String> missing = english.stream().filter(key -> !translated.contains(key)).sorted().toList();
+            List<String> unknown = translated.stream().filter(key -> !english.contains(key)).sorted().toList();
+            assertTrue(missing.isEmpty(), () -> option.code() + " lacks " + missing);
+            assertTrue(unknown.isEmpty(), () -> option.code() + " has keys English does not: " + unknown);
+        }
+    }
+
+    private static Properties bundle(String name) throws Exception {
+        Properties properties = new Properties();
+        try (var reader = new InputStreamReader(
+                I18nConfigTest.class.getClassLoader().getResourceAsStream(name), StandardCharsets.UTF_8)) {
+            properties.load(reader);
+        }
+        return properties;
     }
 
     @Test
