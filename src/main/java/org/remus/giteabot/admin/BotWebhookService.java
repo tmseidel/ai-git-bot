@@ -10,6 +10,7 @@ import org.remus.giteabot.event.WebhookEventKind;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.issueworkflow.IssueWorkflowOrchestrator;
 import org.remus.giteabot.learning.feedback.FeedbackCommandHandler;
+import org.remus.giteabot.learning.knowledge.LearningCommandHandler;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.PrWorkflowOrchestrator;
@@ -94,6 +95,7 @@ public class BotWebhookService {
     private final ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler;
     private final I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     private final FeedbackCommandHandler feedbackCommandHandler;
+    private final LearningCommandHandler learningCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
 
@@ -108,6 +110,7 @@ public class BotWebhookService {
                              ReadmeSyncSlashCommandHandler readmeSyncSlashCommandHandler,
                              I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler,
                              FeedbackCommandHandler feedbackCommandHandler,
+                             LearningCommandHandler learningCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
                              IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
         this.repositoryPlatformFactory = repositoryPlatformFactory;
@@ -121,6 +124,7 @@ public class BotWebhookService {
         this.readmeSyncSlashCommandHandler = readmeSyncSlashCommandHandler;
         this.i18nCoverageSlashCommandHandler = i18nCoverageSlashCommandHandler;
         this.feedbackCommandHandler = feedbackCommandHandler;
+        this.learningCommandHandler = learningCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
         this.issueWorkflowOrchestrator = issueWorkflowOrchestrator;
     }
@@ -285,7 +289,8 @@ public class BotWebhookService {
                                            PullRequestCommentKind commentKind,
                                            String effectiveAlias) {
         try {
-            return feedbackCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias);
+            return feedbackCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias)
+                    || learningCommandHandler.tryHandle(bot, payload, commentKind, effectiveAlias);
         } catch (RuntimeException e) {
             // Falling through would forward feedback text into an AI conversation.
             log.error("[Bot '{}'] Learning command handling failed: {}", bot.getName(),

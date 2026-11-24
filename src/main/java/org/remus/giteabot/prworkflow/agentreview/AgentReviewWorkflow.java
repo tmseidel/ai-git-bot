@@ -13,6 +13,7 @@ import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -84,7 +85,37 @@ public class AgentReviewWorkflow implements PrWorkflow {
                                 + "diff, prompt and revisions a review was produced from so that "
                                 + "feedback can later be analysed against what the bot actually saw. "
                                 + "With this off, feedback commands are not recorded and no snapshot "
-                                + "is kept; reviews are created identically."));
+                                + "is kept; reviews are created identically."),
+                new WorkflowParamField(AgentReviewParam.LEARNING_MODE,
+                        "Learning mode",
+                        false,
+                        AgentReviewLearningMode.OFF.name(),
+                        "How this bot's agentic reviews learn from feedback. This configuration is "
+                                + "shared: the mode applies to every bot assigned to it, while each "
+                                + "bot and repository keeps its own lessons.",
+                        List.of(new WorkflowParamField.EnumOption(AgentReviewLearningMode.OFF.name(),
+                                        "Off",
+                                        "Record feedback (when collected) without creating or using "
+                                                + "lessons. Stored lessons are kept."),
+                                new WorkflowParamField.EnumOption(
+                                        AgentReviewLearningMode.CURATED.name(),
+                                        "Curated",
+                                        "Learning maintainers write lessons from feedback and "
+                                                + "activate them through Git comments. No AI "
+                                                + "proposes or activates anything."))),
+                new WorkflowParamField(AgentReviewParam.LEARNING_MAINTAINERS,
+                        "Learning maintainers",
+                        WorkflowParamField.ParamType.TEXT, false,
+                        null,
+                        "Git accounts allowed to propose, activate and disable lessons with "
+                                + "`@bot learning …`, one per line. Empty means nobody: permission to "
+                                + "give feedback is not permission to change what future reviews "
+                                + "are told."));
+    }
+
+    @Override
+    public List<String> validateParams(Map<String, String> params) {
+        return AgentReviewLearningSettingsValidator.validate(params);
     }
 
     @Override

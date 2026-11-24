@@ -53,6 +53,7 @@ class FeedbackCommandHandlerTest {
     @Mock private RepositoryPlatformFactory repositoryPlatformFactory;
     @Mock private RepositoryApiClient repositoryClient;
     @Mock private RepositoryPlatform platform;
+    @Mock private LessonsCitingFeedback lessonsCitingFeedback;
 
     private FeedbackCommandHandler handler;
     private Bot bot;
@@ -60,7 +61,7 @@ class FeedbackCommandHandlerTest {
     @BeforeEach
     void setUp() {
         handler = new FeedbackCommandHandler(feedbackService, authorizationService,
-                learningSettingsResolver, repositoryPlatformFactory);
+                learningSettingsResolver, repositoryPlatformFactory, lessonsCitingFeedback);
         bot = new Bot();
         bot.setId(2L);
         bot.setName("review-bot");
@@ -208,7 +209,7 @@ class FeedbackCommandHandlerTest {
 
     @Test
     void aRepeatedRetractionDoesNotConfirmTwice() {
-        when(feedbackService.retract(any(), any(), any()))
+        when(feedbackService.retract(any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean()))
                 .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
                         FeedbackVerdict.USEFUL, "alice", true));
 
@@ -310,6 +311,37 @@ class FeedbackCommandHandlerTest {
         assertThat(replies.getAllValues().get(0))
                 .contains("Feedback for **review-bot** on this pull request: none yet.");
         assertThat(replies.getAllValues().get(1)).contains("FB31").contains("incorrect");
+    }
+
+    @Test
+    void showNamesTheLessonsThatCiteTheFeedback() {
+        when(feedbackService.show(any(), eq("FB31"))).thenReturn(Optional.of(
+                new FeedbackService.Detail(summary("FB31", 9L), List.of())));
+        when(lessonsCitingFeedback.lessonsCiting(any(), any()))
+                .thenReturn(List.of("L17@1 (active)"));
+
+        handler.tryHandle(bot, payload("@ai_bot feedback show FB31"),
+                PullRequestCommentKind.PR_COMMENT, null);
+
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient).postPullRequestComment(eq("acme"), eq("web"), eq(9L), reply.capture());
+        assertThat(reply.getValue()).contains("Lessons citing it: L17@1 (active)");
+    }
+
+    @Test
+    void aRetractionCarriesTheActorsCurrentMaintainerStanding() {
+        when(learningSettingsResolver.resolve(any(Bot.class))).thenReturn(
+                new AgentReviewLearningSettings(true,
+                        org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningMode.CURATED,
+                        java.util.Set.of("alice")));
+        when(feedbackService.retract(any(), eq("FB7"), eq("alice"), eq(true)))
+                .thenReturn(new FeedbackService.Recorded("FB7", "O1234", FeedbackTargetType.OUTPUT,
+                        FeedbackVerdict.USEFUL, "bob", false));
+
+        assertThat(handler.tryHandle(bot, payload("@ai_bot feedback retract FB7"),
+                PullRequestCommentKind.PR_COMMENT, null)).isTrue();
+
+        verify(feedbackService).retract(any(), eq("FB7"), eq("alice"), eq(true));
     }
 
     @Test

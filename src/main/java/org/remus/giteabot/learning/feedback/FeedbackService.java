@@ -11,6 +11,7 @@ import org.remus.giteabot.review.structured.ReviewState;
 import org.remus.giteabot.review.structured.StructuredReviewService;
 import org.remus.giteabot.review.structured.WorkflowOutput;
 import org.remus.giteabot.review.structured.WorkflowOutputRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,9 @@ import java.util.Optional;
  * <p>Writing is append-only in meaning: a later comment by the same actor supersedes that actor's
  * earlier assessment of the same target, and retraction is a state transition. A webhook redelivery
  * resolves to the existing record through the normalized source key, so one comment is one record.</p>
+ *
+ * <p>Retracting or superseding a record publishes a {@link FeedbackWithdrawnEvent} inside the same
+ * transaction, so whatever rests on that feedback (lessons citing it) is flagged in the same commit.</p>
  */
 @Slf4j
 @Service
@@ -49,6 +53,7 @@ public class FeedbackService {
     private final ReviewRecordRepository reviewRepository;
     private final ReferenceAllocator referenceAllocator;
     private final PlatformTransactionManager transactionManager;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * One accepted assessment. {@code duplicate} means this comment was already recorded — the
@@ -173,11 +178,25 @@ public class FeedbackService {
 
     @Transactional
     public Recorded retract(FeedbackScope scope, String reference, String actor) {
+        return retract(scope, reference, actor, false);
+    }
+
+    /**
+     * Withdraws a record. Its author may always retract it; {@code actorIsLearningMaintainer} — the
+     * caller's standing under the bot's <em>current</em> learning-maintainer list — additionally
+     * lets a maintainer retract feedback that should not support lessons.
+     */
+    @Transactional
+    public Recorded retract(FeedbackScope scope, String reference, String actor,
+                            boolean actorIsLearningMaintainer) {
         WorkflowFeedback record = requireInScope(scope, reference);
         String normalizedActor = actor == null ? null : actor.trim();
-        if (normalizedActor == null || !normalizedActor.equalsIgnoreCase(record.getActor())) {
+        boolean author = normalizedActor != null && normalizedActor.equalsIgnoreCase(record.getActor());
+        if (normalizedActor == null || normalizedActor.isEmpty()
+                || !(author || actorIsLearningMaintainer)) {
             throw new FeedbackRejectedException("not-author",
-                    "Only the author of " + record.getReference() + " can retract it.");
+                    "Only the author of " + record.getReference() + " or a learning maintainer can "
+                            + "retract it.");
         }
         if (record.getState() == FeedbackState.RETRACTED) {
             return replayed(record, FeedbackEventType.RETRACTED);
@@ -190,6 +209,8 @@ public class FeedbackService {
         record.setState(FeedbackState.RETRACTED);
         WorkflowFeedbackEvent retracted = appendEvent(record.getId(), FeedbackEventType.RETRACTED,
                 normalizedActor, null, FeedbackAcknowledgement.PENDING);
+        eventPublisher.publishEvent(new FeedbackWithdrawnEvent(record.getId(), record.getReference(),
+                FeedbackState.RETRACTED, null, normalizedActor));
         return recorded(record, false, retracted);
     }
 
@@ -306,6 +327,8 @@ public class FeedbackService {
             previous.setState(FeedbackState.SUPERSEDED);
             previous.setSupersededBy(supersededBy);
             appendEvent(previous.getId(), FeedbackEventType.SUPERSEDED, actor, supersededBy, null);
+            eventPublisher.publishEvent(new FeedbackWithdrawnEvent(previous.getId(),
+                    previous.getReference(), FeedbackState.SUPERSEDED, supersededBy, actor));
         }
     }
 

@@ -7,6 +7,7 @@ import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -58,8 +59,20 @@ public class AgentReviewLearningSettingsResolver {
         if (params == null) {
             return AgentReviewLearningSettings.DISABLED;
         }
+        List<String> errors = AgentReviewLearningSettingsValidator.validate(params);
+        if (!errors.isEmpty()) {
+            // A row the admin form would refuse (hand-edited, or from an older import): learning and
+            // collection stay off rather than guessing which part was meant. Reviews are unaffected.
+            log.error("Invalid agentic-review learning configuration — feedback collection and "
+                    + "learning are disabled until it is fixed: {}", String.join("; ", errors));
+            return AgentReviewLearningSettings.DISABLED;
+        }
         return new AgentReviewLearningSettings(
-                flag(params.get(AgentReviewParam.FEEDBACK_ENABLED.key())));
+                flag(params.get(AgentReviewParam.FEEDBACK_ENABLED.key())),
+                AgentReviewLearningMode.parse(params.get(AgentReviewParam.LEARNING_MODE.key()))
+                        .orElse(AgentReviewLearningMode.OFF),
+                AgentReviewLearningSettingsValidator.maintainers(
+                        params.get(AgentReviewParam.LEARNING_MAINTAINERS.key())));
     }
 
     private static boolean flag(Object raw) {
