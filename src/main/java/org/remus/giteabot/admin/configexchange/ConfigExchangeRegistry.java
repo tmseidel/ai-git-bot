@@ -16,6 +16,7 @@ import org.remus.giteabot.eventhook.EventHookEndpointRepository;
 import org.remus.giteabot.eventhook.EventHookEndpointService;
 import org.remus.giteabot.issueworkflow.IssueWorkflowRegistry;
 import org.remus.giteabot.prworkflow.PrWorkflowRegistry;
+import org.remus.giteabot.prworkflow.WorkflowDescriptor;
 import org.remus.giteabot.prworkflow.config.DeploymentTarget;
 import org.remus.giteabot.prworkflow.config.DeploymentTargetRepository;
 import org.remus.giteabot.prworkflow.config.DeploymentTargetService;
@@ -282,6 +283,18 @@ public class ConfigExchangeRegistry {
                     ? issueWorkflowRegistry.find(key).isPresent()
                     : prWorkflowRegistry.find(key).isPresent();
             if (known) {
+                // Cross-field rules (e.g. agentic-review learning preferences) apply to imports
+                // exactly as to admin saves, so an import cannot enable a refused combination.
+                List<String> errors = (kind == WorkflowConfigurationKind.ISSUE
+                        ? issueWorkflowRegistry.find(key).map(w -> (WorkflowDescriptor) w)
+                        : prWorkflowRegistry.find(key).map(w -> (WorkflowDescriptor) w))
+                        .map(workflow -> workflow.validateParams(selection.getParamsMap()))
+                        .orElse(List.of());
+                if (!errors.isEmpty()) {
+                    throw new IllegalArgumentException("workflowConfigurations['"
+                            + configuration.getName() + "'] workflow '" + key + "': "
+                            + String.join("; ", errors));
+                }
                 continue;
             }
             boolean otherKind = kind == WorkflowConfigurationKind.ISSUE

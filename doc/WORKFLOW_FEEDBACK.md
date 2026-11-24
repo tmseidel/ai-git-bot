@@ -4,8 +4,9 @@ Agentic PR Review can record what reviewers think of its findings, so later work
 be judged against what the bot actually said. Feedback is text in Git comments — there
 is no web UI, no separate database to administer, and no AI call involved in recording it.
 
-This page covers the first release: recording, correcting, retracting and reading feedback
-on **agentic review** output.
+This page covers recording, correcting, retracting and reading feedback on **agentic
+review** output. Turning feedback into reusable guidance is described in
+[Lessons for agentic reviews](WORKFLOW_LESSONS.md).
 
 ## What feedback applies to
 
@@ -93,8 +94,10 @@ deletion, and conflicting assessments from different people coexist.
 @bot feedback retract FB31
 ```
 
-Retraction is limited to the author of the record, and retracting something already
-superseded is refused with a pointer to the record that replaced it.
+Retraction is limited to the author of the record and to the bot's current learning
+maintainers (see [Lessons](WORKFLOW_LESSONS.md)), and retracting something already
+superseded is refused with a pointer to the record that replaced it. Lessons that cite
+retracted or replaced feedback are flagged for a maintainer's review.
 
 ## Reading feedback
 
@@ -112,7 +115,7 @@ mention, and each lists only its own records. Where the provider's URL scheme is
 that submitted them; Azure DevOps entries are plain text.
 
 `feedback show` adds the record's history: when it was submitted, superseded (and by
-which record) or retracted, and by whom.
+which record) or retracted, and by whom — and names the lessons that cite it.
 
 Repository-wide listing shows records from other pull requests but stays inside the same
 bot and repository. Lists show 20 entries, newest first, and end with a line such as

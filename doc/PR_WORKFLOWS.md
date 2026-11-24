@@ -200,6 +200,8 @@ documentation workflows are opt-in. Bots with no explicit configuration inherit
   explores the codebase.
   - [Feedback on agentic reviews](WORKFLOW_FEEDBACK.md) — judge findings with
     `@bot feedback O1234-F2 incorrect …`; recorded without an AI call.
+  - [Lessons for agentic reviews](WORKFLOW_LESSONS.md) — maintainers turn
+    corrections into versioned lessons with `@bot learning …`.
 - [Unit Tests](PR_WORKFLOWS_UNIT_TEST.md) — generate and run unit tests.
 - [Full-Stack QA](PR_WORKFLOWS_E2E.md) — generate and run E2E browser tests.
 - [README Sync](PR_WORKFLOWS_README_SYNC.md) — keep documentation current.

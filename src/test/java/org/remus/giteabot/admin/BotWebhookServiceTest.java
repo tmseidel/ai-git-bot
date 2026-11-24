@@ -98,6 +98,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
     @Mock private org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler;
+    @Mock private org.remus.giteabot.learning.knowledge.LearningCommandHandler learningCommandHandler;
     @Mock private ReviewChunkingProperties chunkingProperties;
     @Mock private org.remus.giteabot.eventhook.EventHookPublisher eventHookPublisher;
     @Mock private org.remus.giteabot.notification.WorkflowRetryNotices retryNotices;
@@ -138,7 +139,7 @@ class BotWebhookServiceTest {
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
                 agentReviewSlashCommandHandler, readmeSyncSlashCommandHandler,
                 i18nCoverageSlashCommandHandler,
-                feedbackCommandHandler, workflowSelectionService,
+                feedbackCommandHandler, learningCommandHandler, workflowSelectionService,
                 issueWorkflowOrchestrator);
         codingIssueConfiguration = namedConfiguration(101L, "coding-issue-cfg");
         writerIssueConfiguration = namedConfiguration(102L, "writer-issue-cfg");
@@ -1868,10 +1869,45 @@ class BotWebhookServiceTest {
         @Test
         void ordinaryCommentIsNotConsumed() {
             when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
+            when(learningCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
 
             assertFalse(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
                     feedbackPayload(),
                     PullRequestCommentKind.PR_COMMENT, null));
+        }
+
+        @Test
+        void aLessonCommandIsConsumedThroughTheSameSeam() {
+            WebhookPayload payload = buildPrCommentPayload("Test", "my-repo", 140L, 1056L,
+                    "@claude_bot learning activate L17@1");
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
+            when(learningCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(true);
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    payload, PullRequestCommentKind.INLINE_COMMENT, "@AI_Bot"));
+
+            verify(learningCommandHandler).tryHandle(any(), eq(payload),
+                    eq(PullRequestCommentKind.INLINE_COMMENT), eq("@AI_Bot"));
+        }
+
+        @Test
+        void aFeedbackCommandNeverReachesTheLessonHandler() {
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(true);
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    feedbackPayload(), PullRequestCommentKind.PR_COMMENT, null));
+
+            verify(learningCommandHandler, never()).tryHandle(any(), any(), any(), any());
+        }
+
+        @Test
+        void aFailingLessonCommandIsStillConsumed() {
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
+            when(learningCommandHandler.tryHandle(any(), any(), any(), any()))
+                    .thenThrow(new IllegalStateException("lesson store unavailable"));
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    feedbackPayload(), PullRequestCommentKind.PR_COMMENT, null));
         }
 
         @Test

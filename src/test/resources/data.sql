@@ -50,3 +50,7 @@ INSERT INTO reference_sequences (name, next_value)
 SELECT 'workflow_feedback', 1
 WHERE NOT EXISTS (SELECT 1 FROM reference_sequences WHERE name = 'workflow_feedback');
 
+INSERT INTO reference_sequences (name, next_value)
+SELECT 'knowledge_lesson', 1
+WHERE NOT EXISTS (SELECT 1 FROM reference_sequences WHERE name = 'knowledge_lesson');
+

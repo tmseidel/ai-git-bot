@@ -23,6 +23,11 @@ import org.remus.giteabot.review.structured.ReviewFinding;
 import org.remus.giteabot.review.structured.ReviewFindingLocation;
 import org.remus.giteabot.learning.feedback.WorkflowFeedback;
 import org.remus.giteabot.learning.feedback.WorkflowFeedbackEvent;
+import org.remus.giteabot.learning.knowledge.KnowledgeLesson;
+import org.remus.giteabot.learning.knowledge.KnowledgeLessonEvidence;
+import org.remus.giteabot.learning.knowledge.KnowledgeLessonRevision;
+import org.remus.giteabot.learning.knowledge.LearningEvent;
+import org.remus.giteabot.learning.knowledge.LessonUsage;
 import org.remus.giteabot.review.structured.ReviewPublication;
 import org.remus.giteabot.review.structured.ReviewRecord;
 import org.remus.giteabot.review.structured.ReviewToolOperation;
@@ -96,6 +101,11 @@ class ConfigCoverageTest {
         NOT_A_TABLE.put(WorkflowOutputSnapshot.class, "supplemental learning evidence");
         NOT_A_TABLE.put(WorkflowFeedback.class, "runtime feedback records");
         NOT_A_TABLE.put(WorkflowFeedbackEvent.class, "runtime feedback history");
+        NOT_A_TABLE.put(KnowledgeLesson.class, "runtime lessons (bot/repository knowledge)");
+        NOT_A_TABLE.put(KnowledgeLessonRevision.class, "runtime lesson revisions");
+        NOT_A_TABLE.put(KnowledgeLessonEvidence.class, "runtime lesson evidence links");
+        NOT_A_TABLE.put(LearningEvent.class, "runtime lesson history");
+        NOT_A_TABLE.put(LessonUsage.class, "runtime lesson usage records");
         NOT_A_TABLE.put(ReferenceSequence.class, "runtime reference counters");
     }
 

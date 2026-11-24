@@ -46,6 +46,8 @@ PR Review**.
 | `mediumThreshold` | integer | *(empty)* | Maximum allowed `MEDIUM` findings for a formal `APPROVE`. Empty means ignored. |
 | `lowThreshold` | integer | *(empty)* | Maximum allowed `LOW` findings for a formal `APPROVE`. Empty means ignored. |
 | `feedbackEnabled` | boolean | `false` | Accept `@bot feedback …` commands on this bot's reviews, and keep the evidence a review was produced from (task, diff, prompt, revisions) so that feedback can later be analysed against what the bot actually saw. With this off, feedback commands are consumed silently when they name a target and left to their ordinary routing otherwise, and no snapshot is kept; reviews are created identically. |
+| `learningMode` | enum | `OFF` | `OFF` or `CURATED`. With `CURATED`, learning maintainers write lessons from feedback and activate them through `@bot learning …` comments; see [Lessons](WORKFLOW_LESSONS.md). Stored lessons are kept when the mode is switched off. |
+| `learningMaintainers` | text | *(empty)* | Git accounts allowed to manage lessons, one per line. Empty means nobody; permission to give feedback does not include it. |
 
 Progress comments show timestamps in UTC without fractional seconds. Review
 decisions and findings remain in the separate final review.
@@ -138,5 +140,6 @@ duplicates the default **PR Review** workflow.
 ## See also
 
 - [Feedback on agentic reviews](WORKFLOW_FEEDBACK.md) — how reviewers judge findings, and what the bot stores
+- [Lessons for agentic reviews](WORKFLOW_LESSONS.md) — how maintainers turn corrections into versioned guidance
 - [PR Workflows overview](PR_WORKFLOWS.md)
 - [PR Review](PR_WORKFLOWS_REVIEW.md) — the simpler, always-on review.

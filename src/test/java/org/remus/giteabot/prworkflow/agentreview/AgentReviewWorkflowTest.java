@@ -58,13 +58,40 @@ class AgentReviewWorkflowTest {
         AgentReviewWorkflow wf = workflow();
         assertEquals("agentic-review", wf.key());
         assertEquals(PrWorkflowCategory.REVIEW, wf.category());
-        assertEquals(7, wf.paramsSchema().fields().size());
+        assertEquals(9, wf.paramsSchema().fields().size());
         assertFalse(wf.paramsSchema().isEmpty());
         var progress = wf.paramsSchema().fields().stream()
                 .filter(field -> field.name().equals("enableProgressComments")).findFirst().orElseThrow();
         assertEquals(WorkflowParamField.ParamType.BOOLEAN, progress.type());
         assertEquals("false", progress.defaultValue());
         org.assertj.core.api.Assertions.assertThat(progress.description()).contains("review or clarification");
+    }
+
+    @Test
+    void theLearningParametersShipOnlyImplementedModesAndDefaultToOff() {
+        var schema = workflow().paramsSchema();
+        var mode = schema.require("learningMode");
+        assertEquals(WorkflowParamField.ParamType.ENUM, mode.type());
+        assertEquals("OFF", mode.defaultValue());
+        org.assertj.core.api.Assertions.assertThat(mode.allowedValues())
+                .extracting(WorkflowParamField.EnumOption::key)
+                .containsExactly("OFF", "CURATED");
+        // The configuration is shared between bots; the form has to say so.
+        org.assertj.core.api.Assertions.assertThat(mode.description()).contains("shared");
+
+        var maintainers = schema.require("learningMaintainers");
+        assertEquals(WorkflowParamField.ParamType.TEXT, maintainers.type());
+        org.assertj.core.api.Assertions.assertThat(maintainers.defaultValue()).isNull();
+        org.assertj.core.api.Assertions.assertThat(maintainers.description()).contains("nobody");
+    }
+
+    @Test
+    void invalidLearningParametersAreRefusedByTheWorkflow() {
+        org.assertj.core.api.Assertions.assertThat(workflow().validateParams(
+                Map.of("learningMode", "CURATED", "learningMaintainers", "alex\nmaria")))
+                .isEmpty();
+        org.assertj.core.api.Assertions.assertThat(workflow().validateParams(
+                Map.of("learningMaintainers", "two names"))).hasSize(1);
     }
 
     @Test

@@ -32,7 +32,19 @@ public enum AgentReviewParam implements WorkflowParamName {
      * Accept agentic-review feedback and retain supplemental learning evidence. Structured review
      * generation and rendering do not depend on it.
      */
-    FEEDBACK_ENABLED("feedbackEnabled");
+    FEEDBACK_ENABLED("feedbackEnabled"),
+
+    /**
+     * How lessons are created and used: {@code OFF} or {@code CURATED}. See
+     * {@link AgentReviewLearningMode}.
+     */
+    LEARNING_MODE("learningMode"),
+
+    /**
+     * Accounts allowed to propose, activate and disable lessons, one per line. Empty grants nobody;
+     * permission to give feedback is not authority to set repository policy.
+     */
+    LEARNING_MAINTAINERS("learningMaintainers");
 
     private final String key;
 
