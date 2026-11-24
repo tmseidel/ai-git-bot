@@ -27,7 +27,7 @@ class SandboxSlotsTest {
     void aSlotIsHandedOutOnceAndComesBackWhenItIsReleased() throws Exception {
         Path directory = Files.createTempDirectory("execute-code-slots-");
         try {
-            long gid = SandboxTestSupport.ownGid(directory);
+            long gid = SandboxTestSupport.slotGid(directory);
             SandboxSlots slots = slots(directory, List.of("execute-code-10007 " + gid + " " + gid));
 
             SandboxSlots.Slot slot = slots.acquire();
@@ -53,7 +53,7 @@ class SandboxSlotsTest {
     void everySlotIsClearedWhenThePoolIsReadAndWhenARunEnds() throws Exception {
         Path directory = Files.createTempDirectory("execute-code-slots-");
         try {
-            long gid = SandboxTestSupport.ownGid(directory);
+            long gid = SandboxTestSupport.slotGid(directory);
             SandboxSlots slots = slots(directory, List.of(
                     "execute-code-10007 " + gid + " " + gid,
                     "execute-code-10008 " + gid + " " + gid));
@@ -105,7 +105,7 @@ class SandboxSlotsTest {
     void aSlotSudoRefusesFailsTheRead() throws IOException {
         Path directory = Files.createTempDirectory("execute-code-slots-");
         try {
-            long gid = SandboxTestSupport.ownGid(directory);
+            long gid = SandboxTestSupport.slotGid(directory);
             Path pool = SandboxTestSupport.poolFile(directory, "execute-code-10007", gid, gid);
             Path sudo = SandboxTestSupport.fakeSudo(directory, directory.resolve("sudo.log"),
                     "sudo: a password is required");
