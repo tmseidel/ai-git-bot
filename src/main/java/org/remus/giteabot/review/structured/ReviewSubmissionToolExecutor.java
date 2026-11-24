@@ -3,6 +3,8 @@ package org.remus.giteabot.review.structured;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.ai.ToolCallAudit;
+import org.remus.giteabot.util.UrlRedaction;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -14,6 +16,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Supplier;
 
 /**
  * Executes the agentic-review submission protocol: the five tools that mutate only the current
@@ -66,11 +69,11 @@ public class ReviewSubmissionToolExecutor {
         if (completes && calls.size() > 1) {
             // Nothing runs, so nothing is partially finalized: the batch is refused as a whole.
             List<ToolResult> refused = new ArrayList<>(calls.size());
-            for (int i = 0; i < calls.size(); i++) {
-                refused.add(failure("BATCH_REJECTED",
+            for (ReviewToolCall call : calls) {
+                refused.add(audited(call, () -> failure("BATCH_REJECTED",
                         "review-complete must be the only call in its batch. Submit findings and the "
                                 + "assessment in earlier batches, then complete on its own. Nothing in "
-                                + "this batch was applied.", null, null));
+                                + "this batch was applied.", null, null)));
             }
             return refused;
         }
@@ -81,8 +84,34 @@ public class ReviewSubmissionToolExecutor {
         return results;
     }
 
-    /** One call. */
+    /** One call, recorded as a tool call of the current AI interaction ({@link ToolCallAudit}). */
     public ToolResult execute(ReviewInvocation invocation, ReviewToolCall call) {
+        return audited(call, () -> dispatch(invocation, call));
+    }
+
+    private static ToolResult audited(ReviewToolCall call, Supplier<ToolResult> dispatch) {
+        if (call == null) {
+            return dispatch.get();
+        }
+        String arguments = call.arguments() == null ? "{}" : UrlRedaction.redactAll(call.arguments().toString());
+        return ToolCallAudit.record(ToolCallAudit.BUILT_IN, call.tool() != null ? call.tool() : "unknown",
+                arguments, dispatch, ReviewSubmissionToolExecutor::failureOf);
+    }
+
+    /** A failed call's reason for the audit log: its error code and message (see {@link #failure}). */
+    private static String failureOf(ToolResult result) {
+        if (result.success()) {
+            return null;
+        }
+        try {
+            JsonNode payload = JSON.readTree(result.output());
+            return payload.get("error").asString() + ": " + payload.get("message").asString();
+        } catch (RuntimeException e) {
+            return result.failureMessage();
+        }
+    }
+
+    private ToolResult dispatch(ReviewInvocation invocation, ReviewToolCall call) {
         if (invocation == null || call == null) {
             return failure("INVALID_ARGUMENT", "A tool call and its review invocation are required",
                     null, null);

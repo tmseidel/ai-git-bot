@@ -2,11 +2,13 @@ package org.remus.giteabot.prworkflow.e2e.tools;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.ai.ToolCallAudit;
 import org.remus.giteabot.prworkflow.e2e.E2eTestFramework;
 import org.remus.giteabot.prworkflow.e2e.PrTestCase;
 import org.remus.giteabot.prworkflow.e2e.PrTestCaseRepository;
 import org.remus.giteabot.prworkflow.e2e.PrTestCaseStatus;
 import org.remus.giteabot.prworkflow.e2e.workspace.PrTestWorkspaceManager;
+import org.remus.giteabot.util.UrlRedaction;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -81,6 +83,12 @@ public class PrWorkflowToolExecutor {
      * agent unchanged.
      */
     public String execute(String toolName, Map<String, Object> args, PrWorkflowToolContext ctx) {
+        return ToolCallAudit.record(ToolCallAudit.BUILT_IN, toolName != null ? toolName : "unknown",
+                UrlRedaction.redactAll(ToolCallAudit.json(args)),
+                () -> dispatch(toolName, args, ctx), ToolCallAudit::errorOfTextResult);
+    }
+
+    private String dispatch(String toolName, Map<String, Object> args, PrWorkflowToolContext ctx) {
         if (toolName == null) {
             return "ERROR: tool name is null";
         }

@@ -183,12 +183,6 @@ public interface AiClient {
     }
 
     /**
-     * Reports a failed provider interaction to the attached audit recorder
-     * (no-op when no recorder is attached).
-     */
-    void reportError(Throwable error);
-
-    /**
      * Returns the AiClients model-name
      * @return the model name
      */

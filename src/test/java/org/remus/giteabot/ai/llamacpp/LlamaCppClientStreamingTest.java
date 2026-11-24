@@ -96,9 +96,6 @@ class LlamaCppClientStreamingTest {
             this.invocations++;
         }
 
-        @Override
-        public void recordError(Throwable error) {
-        }
     }
 
     private static void drain(HttpExchange exchange) throws IOException {

@@ -282,6 +282,7 @@ public final class AgentLoop {
 
         log.warn("AgentLoop exhausted {} rounds without final decision (issue #{})",
                 budget.maxRounds(), ctx.issueNumber());
+        AiAuditContext.markRoundLimitReached();
         return strategy.onBudgetExhausted(ctx);
     }
 
@@ -387,7 +388,10 @@ public final class AgentLoop {
         int maxAttempts = 2;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
-                AiAuditContext.setRound(round);
+                if (attempt > 1) {
+                    // A retry repeats the round's AI call; the audit log keeps its round number.
+                    AiAuditContext.markRetry();
+                }
                 return aiClient.chatWithTools(history, currentMessage, tools, systemPrompt,
                         null, budget.maxTokensPerCall());
             } catch (RuntimeException e) {
@@ -414,8 +418,6 @@ public final class AgentLoop {
                             + "Retrying without changing history. Error: {}",
                             attempt, maxAttempts, e.getMessage());
                 }
-            } finally {
-                AiAuditContext.clearRound();
             }
         }
         // Unreachable, but keeps the compiler happy

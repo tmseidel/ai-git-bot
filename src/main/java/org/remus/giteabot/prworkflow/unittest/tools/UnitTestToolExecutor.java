@@ -1,10 +1,12 @@
 package org.remus.giteabot.prworkflow.unittest.tools;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.ai.ToolCallAudit;
 import org.remus.giteabot.prworkflow.unittest.UnitTestCase;
 import org.remus.giteabot.prworkflow.unittest.UnitTestCaseRepository;
 import org.remus.giteabot.prworkflow.unittest.UnitTestCaseStatus;
 import org.remus.giteabot.prworkflow.unittest.UnitTestPathGuard;
+import org.remus.giteabot.util.UrlRedaction;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -52,6 +54,12 @@ public class UnitTestToolExecutor {
      * successful writes start with {@code "OK:"}.
      */
     public String execute(String toolName, Map<String, Object> args, UnitTestToolContext ctx) {
+        return ToolCallAudit.record(ToolCallAudit.BUILT_IN, toolName != null ? toolName : "unknown",
+                UrlRedaction.redactAll(ToolCallAudit.json(args)),
+                () -> dispatch(toolName, args, ctx), ToolCallAudit::errorOfTextResult);
+    }
+
+    private String dispatch(String toolName, Map<String, Object> args, UnitTestToolContext ctx) {
         if (toolName == null) {
             return "ERROR: tool name is null";
         }

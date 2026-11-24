@@ -87,6 +87,7 @@ class IssueWorkflowOrchestratorTest {
                 workflowSelectionService, botService, eventHookPublisher,
                 retryNotices, commentAcknowledgement, new AiIntegrationConcurrencyLimiter());
         bot = new Bot();
+        withIntegrations(bot);
         bot.setName("test-bot");
         WorkflowConfiguration configuration = new WorkflowConfiguration();
         configuration.setId(5L);
@@ -318,5 +319,15 @@ class IssueWorkflowOrchestratorTest {
 
         assertEquals(1, recording.assigned.size());
         verify(retryNotices).installForIssue(bot, "issue-x", "Test", "my-repo", null);
+    }
+
+    /** A bot always has an AI and a Git integration (not nullable); the audit trigger reads their names. */
+    private static void withIntegrations(Bot bot) {
+        org.remus.giteabot.admin.AiIntegration ai = new org.remus.giteabot.admin.AiIntegration();
+        ai.setName("test-ai");
+        bot.setAiIntegration(ai);
+        org.remus.giteabot.admin.GitIntegration git = new org.remus.giteabot.admin.GitIntegration();
+        git.setName("test-git");
+        bot.setGitIntegration(git);
     }
 }

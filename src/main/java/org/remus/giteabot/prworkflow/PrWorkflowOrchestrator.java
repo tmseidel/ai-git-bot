@@ -5,7 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.admin.AiIntegrationConcurrencyLimiter;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.agent.loop.AgentRunContext;
+import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiRetryContext;
+import org.remus.giteabot.ai.AuditRun;
 import org.remus.giteabot.audit.ActorType;
 import org.remus.giteabot.audit.AuditEventType;
 import org.remus.giteabot.audit.PrAuditEvent;
@@ -16,6 +18,7 @@ import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.notification.WorkflowRetryNotices;
 import org.remus.giteabot.prworkflow.config.WorkflowSelectionService;
 import org.remus.giteabot.prworkflow.review.ReviewWorkflow;
+import org.remus.giteabot.workflowrun.WorkflowRunTriggers;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -152,6 +155,8 @@ public class PrWorkflowOrchestrator {
                 hints == null ? Map.of() : hints,
                 toolCallConsumer);
 
+        // Collects the AI interactions of this invocation as one workflow run (see AiAuditContext).
+        AuditRun auditRun = AiAuditContext.openRun(workflow.key(), WorkflowRunTriggers.of(bot, payload));
         try {
             retryNotices.installForPullRequest(bot, workflow.key(), owner, repoName, prNumber);
             WorkflowResult result = workflow.run(context);
@@ -161,6 +166,9 @@ public class PrWorkflowOrchestrator {
             PrWorkflowRunStatus desired = mapTerminalStatus(result.status());
             PrWorkflowRun completed = runService.complete(run.getId(), desired, result.summary());
             PrWorkflowRunStatus effective = completed.getStatus() != null ? completed.getStatus() : desired;
+            if (effective == PrWorkflowRunStatus.FAILED) {
+                auditRun.fail(completed.getSummary());
+            }
             metrics.recordRun(workflow.key(), effective, Duration.between(startInstant, Instant.now()));
             auditService.record(PrAuditEvent.builder()
                     .eventType(AuditEventType.PR_WORKFLOW_RUN_COMPLETED)
@@ -210,6 +218,7 @@ public class PrWorkflowOrchestrator {
             log.info("[Workflow '{}'] Finished run id={} status={}", workflow.key(), completed.getId(), effective);
             return completed;
         } catch (WorkflowCancelledException cancelled) {
+            auditRun.fail("Cancelled: " + cancelled.getMessage());
             try {
                 runService.appendStep(run.getId(), "cancelled", "INFO", cancelled.getMessage());
             } catch (RuntimeException persistErr) {
@@ -231,6 +240,7 @@ public class PrWorkflowOrchestrator {
             return runService.getById(run.getId());
         } catch (RuntimeException e) {
             String summary = "Workflow failed: " + truncateForSummary(e.getMessage());
+            auditRun.fail(summary);
             try {
                 runService.appendStep(run.getId(), "exception", "ERROR", stackTraceSnippet(e));
                 runService.complete(run.getId(), PrWorkflowRunStatus.FAILED, summary);
@@ -258,6 +268,7 @@ public class PrWorkflowOrchestrator {
             throw e;
         } finally {
             AiRetryContext.clear();
+            auditRun.close();
         }
     }
 

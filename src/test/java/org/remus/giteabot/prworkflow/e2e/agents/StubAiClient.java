@@ -94,11 +94,6 @@ public final class StubAiClient implements AiClient {
     @Override public boolean isPromptTooLongError(HttpClientErrorException e) { return false; }
 
     @Override
-    public void reportError(Throwable error) {
-
-    }
-
-    @Override
     public String getModel() {
         return "";
     }

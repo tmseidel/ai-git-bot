@@ -167,34 +167,41 @@ class AgentLoopTest {
     }
 
     @Test
-    void run_publishesAgentLoopRoundDuringEachCall_andClearsItAfter() {
+    void run_retryAfterTransientFailure_keepsTheRoundOfTheAuditRun() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
                 new AgentBudget(5, 3, 3, 8000,
                         8_000, 120_000,
                         200_000, 0.7));
         java.util.List<Integer> roundsDuringCalls = new java.util.ArrayList<>();
+        AtomicInteger aiCalls = new AtomicInteger();
         when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
                 .thenAnswer(inv -> {
-                    roundsDuringCalls.add(AiAuditContext.getRound());
-                    return ChatTurn.text("ai-" + roundsDuringCalls.size());
+                    // What the outermost (auditing) client does for every logical call.
+                    AiAuditContext.beginCall();
+                    roundsDuringCalls.add(AiAuditContext.currentRun().getRound());
+                    if (aiCalls.incrementAndGet() == 1) {
+                        throw new ResourceAccessException("Read timed out");
+                    }
+                    return ChatTurn.text("ai-" + aiCalls.get());
                 });
 
-        AtomicInteger calls = new AtomicInteger();
+        AtomicInteger steps = new AtomicInteger();
         AgentStrategy strategy = new AgentStrategy() {
             @Override public String systemPrompt() { return "sys"; }
             @Override public StepDecision step(AgentRunContext c, String r, int round) {
-                if (calls.incrementAndGet() == 1) return new StepDecision.Continue("follow-up");
+                if (steps.incrementAndGet() == 1) return new StepDecision.Continue("follow-up");
                 return new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), null));
             }
             @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) { return LoopOutcome.fail(c.baseBranch()); }
         };
 
-        loop.run(ctx, "kickoff", strategy);
+        try (var run = AiAuditContext.openRun("issue-writer", null)) {
+            loop.run(ctx, "kickoff", strategy);
+            assertThat(run.isRoundLimitReached()).isFalse();
+        }
 
-        // The audit recorder reads the round from the thread-local while the call is
-        // in flight; it must be gone once the loop stops calling the provider.
-        assertThat(roundsDuringCalls).containsExactly(1, 2);
-        assertThat(AiAuditContext.getRound()).isNull();
+        // The retried call stays in round 1; the follow-up is round 2.
+        assertThat(roundsDuringCalls).containsExactly(1, 1, 2);
     }
 
     @Test
@@ -216,7 +223,11 @@ class AgentLoopTest {
             }
         };
 
-        LoopOutcome outcome = loop.run(ctx, "go", strategy);
+        LoopOutcome outcome;
+        try (var run = AiAuditContext.openRun("issue-writer", null)) {
+            outcome = loop.run(ctx, "go", strategy);
+            assertThat(run.isRoundLimitReached()).isTrue();
+        }
 
         assertThat(outcome.success()).isFalse();
         assertThat(outcome.selectedBranch()).isEqualTo("dead-branch");
@@ -319,7 +330,6 @@ class AgentLoopTest {
 
         verify(aiClient, times(2)).chatWithTools(anyList(), eq("go"), eq(List.of()), eq("sys"), isNull(), eq(8000));
         verify(sessionService, never()).flushMessages(any(), anyList(), anyLong(), anyLong());
-        assertThat(AiAuditContext.getRound()).isNull();
     }
 
     @ParameterizedTest

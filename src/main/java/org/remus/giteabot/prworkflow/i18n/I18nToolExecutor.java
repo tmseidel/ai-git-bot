@@ -1,6 +1,8 @@
 package org.remus.giteabot.prworkflow.i18n;
 
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.ai.ToolCallAudit;
+import org.remus.giteabot.util.UrlRedaction;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -36,6 +38,12 @@ import java.util.Map;
 public class I18nToolExecutor {
 
     public String execute(String toolName, Map<String, Object> args, I18nCoverageToolContext ctx) {
+        return ToolCallAudit.record(ToolCallAudit.BUILT_IN, toolName != null ? toolName : "unknown",
+                UrlRedaction.redactAll(ToolCallAudit.json(args)),
+                () -> dispatch(toolName, args, ctx), ToolCallAudit::errorOfTextResult);
+    }
+
+    private String dispatch(String toolName, Map<String, Object> args, I18nCoverageToolContext ctx) {
         if (toolName == null) {
             return "ERROR: tool name is null";
         }

@@ -114,9 +114,6 @@ class OllamaClientStreamingTest {
             this.invocations++;
         }
 
-        @Override
-        public void recordError(Throwable error) {
-        }
     }
 
     private void attachRecorder(OllamaClient client, CapturingRecorder recorder) {

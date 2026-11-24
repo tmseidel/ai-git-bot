@@ -229,9 +229,5 @@ class ProviderAggregateAvailabilityTest {
             usage.add(new RecordedUsage(inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens));
         }
 
-        @Override
-        public void recordError(Throwable error) {
-            throw new AssertionError("Unexpected provider error", error);
-        }
     }
 }

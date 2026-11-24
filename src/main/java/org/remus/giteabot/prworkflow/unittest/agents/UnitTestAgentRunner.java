@@ -111,7 +111,6 @@ public final class UnitTestAgentRunner {
         for (int round = 1; round <= maxRounds; round++) {
             ChatTurn turn;
             try {
-                AiAuditContext.setRound(round);
                 if (mode == ToolingMode.NATIVE) {
                     turn = aiClient.chatWithTools(history, currentMessage, toolDescriptors,
                             systemPrompt, null, maxTokens);
@@ -122,8 +121,6 @@ public final class UnitTestAgentRunner {
             } catch (RuntimeException e) {
                 log.warn("[{}] AI call failed in round {}: {}", agentLabel, round, e.getMessage(), e);
                 return new Result(lastAssistantText, invocations, round - 1, true);
-            } finally {
-                AiAuditContext.clearRound();
             }
             lastAssistantText = turn.assistantText() == null ? "" : turn.assistantText();
             log.debug("[{}] round {}/{}: assistantTextLen={} toolCalls={}",
@@ -181,6 +178,7 @@ public final class UnitTestAgentRunner {
         }
 
         log.warn("[{}] exhausted {} rounds without a terminal text turn", agentLabel, maxRounds);
+        AiAuditContext.markRoundLimitReached();
         return new Result(lastAssistantText, invocations, maxRounds, true);
     }
 

@@ -3,14 +3,13 @@ package org.remus.giteabot.admin;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.ai.AbstractAiClient;
-import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiAuditRecorder;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.ai.AiProviderMetadata;
 import org.remus.giteabot.ai.AiProviderRegistry;
-import org.remus.giteabot.ai.AuditingAiClient;
 import org.remus.giteabot.ai.ProviderRetryNotifier;
 import org.remus.giteabot.ai.RetryAiClient;
+import org.remus.giteabot.ai.StopReason;
 import org.remus.giteabot.aiusage.AiUsageService;
 import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
@@ -58,7 +57,6 @@ public class AiClientFactory {
         return client;
     }
 
-
     /**
      * The provider's own client for a plaintext key, without the retry and
      * audit wrappers {@link #getClient} adds and without caching.
@@ -71,38 +69,54 @@ public class AiClientFactory {
         AiProviderMetadata provider = providerRegistry.getProviderOrThrow(integration.getProviderType());
         String decryptedApiKey = provider.requiresApiKey() ? aiIntegrationService.decryptApiKey(integration) : null;
         AiClient client = createUnwrappedClient(provider, integration, decryptedApiKey);
+        return decorate(client, integration.getName());
+    }
 
-        AiAuditRecorder recorder = new IntegrationAuditRecorder(integration.getName(), aiUsageService);
+    /**
+     * Wraps a provider client the way {@link #getClient} does: provider retries, and audit
+     * recording of every logical call (round) and every request to the provider (attempt),
+     * tagged with {@code integrationName}.
+     */
+    public AiClient decorate(AiClient client, String integrationName) {
+        AiAuditRecorder recorder = new IntegrationAuditRecorder(integrationName, aiUsageService);
         if (client instanceof AbstractAiClient abstractClient) {
             abstractClient.setAuditRecorder(recorder);
             abstractClient.setUsageProperties(usageProperties);
         }
-        AiClient retrying = new RetryAiClient(client, retryProperties, retryNotifier);
-        return new AuditingAiClient(retrying, recorder);
+        return new RetryAiClient(client, retryProperties, retryNotifier, recorder);
     }
 
     /**
-     * Bridges client-side audit callbacks to the {@link AiUsageService},
-     * tagging every record with the integration name and the session id from
-     * the {@link AiAuditContext} thread-local.
+     * Bridges client-side audit callbacks to the {@link AiUsageService}, tagging every record
+     * with the integration name. The service attaches it to the current workflow run from the
+     * {@link org.remus.giteabot.ai.AiAuditContext} thread-local.
      */
     private record IntegrationAuditRecorder(String integrationName,
                                             AiUsageService aiUsageService) implements AiAuditRecorder {
 
         @Override
-        public void recordUsage(long inputTokens, long outputTokens,
-                                long cacheCreationInputTokens, long cacheReadInputTokens,
-                                String rawRequest, String rawResponse) {
-            aiUsageService.recordUsage(integrationName, AiAuditContext.getSessionId(),
-                    AiAuditContext.getRound(),
-                    inputTokens, outputTokens, cacheCreationInputTokens, cacheReadInputTokens,
-                    rawRequest, rawResponse);
+        public void attemptStarted() {
+            aiUsageService.attemptStarted(integrationName);
         }
 
         @Override
-        public void recordError(Throwable error) {
-            aiUsageService.recordError(integrationName, AiAuditContext.getSessionId(), error);
+        public void recordUsage(long inputTokens, long outputTokens,
+                                long cacheCreationInputTokens, long cacheReadInputTokens,
+                                String rawRequest, String rawResponse) {
+            aiUsageService.usageReported(inputTokens, outputTokens,
+                    cacheCreationInputTokens, cacheReadInputTokens, rawRequest, rawResponse);
         }
+
+        @Override
+        public void attemptSucceeded(StopReason stopReason) {
+            aiUsageService.attemptSucceeded(stopReason);
+        }
+
+        @Override
+        public void attemptFailed(Throwable error) {
+            aiUsageService.attemptFailed(error);
+        }
+
     }
 
     private record CachedClient(long updatedAtMillis, AiClient client) {}

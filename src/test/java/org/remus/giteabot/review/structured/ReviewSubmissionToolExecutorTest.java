@@ -6,6 +6,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.ai.AiAuditContext;
+import org.remus.giteabot.ai.AuditRun;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -503,4 +505,62 @@ class ReviewSubmissionToolExecutorTest {
         return record;
     }
 
+    // ------------------------------------------------------------------ audit log
+
+    /** Collects the tool calls reported to an open, persisted audit run. */
+    private static List<AuditRun.ToolCallRecord> recordToolCalls() {
+        List<AuditRun.ToolCallRecord> records = new java.util.ArrayList<>();
+        AuditRun run = AiAuditContext.openRun("agentic-review", null);
+        run.attach(1L, new AuditRun.Sink() {
+            @Override
+            public void runFinished(AuditRun finished) {
+            }
+
+            @Override
+            public void toolCallFinished(AuditRun current, AuditRun.ToolCallRecord record) {
+                records.add(record);
+            }
+        });
+        run.beginAttempt();
+        run.setInteractionId(10L);
+        return records;
+    }
+
+    @Test
+    void callsAreRecordedAsToolCallsOfTheCurrentInteraction() {
+        List<AuditRun.ToolCallRecord> records = recordToolCalls();
+        try {
+            executor.execute(invocation(), call(ReviewSubmissionToolExecutor.UPSERT_FINDING,
+                    findingArgs("op-1", "settings-auth")));
+            executor.execute(invocation(), call("review-unknown", JSON.createObjectNode()));
+        } finally {
+            AiAuditContext.clear();
+        }
+
+        assertEquals(2, records.size());
+        assertEquals(ReviewSubmissionToolExecutor.UPSERT_FINDING, records.get(0).toolName());
+        assertEquals("built-in", records.get(0).source());
+        assertTrue(records.get(0).success());
+        assertTrue(records.get(0).arguments().contains("settings-auth"));
+        assertFalse(records.get(1).success());
+        assertTrue(records.get(1).errorMessage().startsWith("UNKNOWN_TOOL: "));
+    }
+
+    @Test
+    void callsOfARejectedBatchAreRecordedAsFailed() {
+        completeDraft();
+        List<AuditRun.ToolCallRecord> records = recordToolCalls();
+        try {
+            executor.executeBatch(invocation(), List.of(
+                    call(ReviewSubmissionToolExecutor.UPSERT_FINDING, findingArgs("op-9", "late")),
+                    call(ReviewSubmissionToolExecutor.COMPLETE, completeArgs("op-10", 2, 1))));
+        } finally {
+            AiAuditContext.clear();
+        }
+
+        assertEquals(List.of(ReviewSubmissionToolExecutor.UPSERT_FINDING, ReviewSubmissionToolExecutor.COMPLETE),
+                records.stream().map(AuditRun.ToolCallRecord::toolName).toList());
+        assertTrue(records.stream().noneMatch(AuditRun.ToolCallRecord::success));
+        assertTrue(records.getFirst().errorMessage().startsWith("BATCH_REJECTED: "));
+    }
 }
