@@ -22,7 +22,7 @@ class AiUsagePropertiesTest {
         properties(true, 0).warnIfPayloadsAreUnbounded();
 
         assertThat(output).contains("AI usage raw payloads are stored in full")
-                .contains("clear it regularly on the Usage page");
+                .contains("clear it regularly on the Workflow runs page");
     }
 
     @Test

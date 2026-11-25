@@ -10,31 +10,11 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface AiInteractionRepository extends JpaRepository<AiInteraction, Long> {
-
-    /** Successful interactions without the raw payload columns, which can be very large. */
-    @Query(value = "select new org.remus.giteabot.aiusage.AiUsageRow(i.id, i.startedAt, i.aiIntegrationName, "
-            + "i.sessionId, i.roundNumber, i.inputTokens, i.outputTokens, i.cacheCreationInputTokens, "
-            + "i.cacheReadInputTokens) from AiInteraction i "
-            + "where i.status = org.remus.giteabot.workflowrun.RunStatus.SUCCEEDED "
-            + "and i.startedAt between :from and :to",
-            countQuery = "select count(i) from AiInteraction i "
-                    + "where i.status = org.remus.giteabot.workflowrun.RunStatus.SUCCEEDED "
-                    + "and i.startedAt between :from and :to")
-    Page<AiUsageRow> findUsageRows(@Param("from") Instant from, @Param("to") Instant to, Pageable pageable);
-
-    /** Failed interactions without the raw payload columns. */
-    @Query(value = "select new org.remus.giteabot.aiusage.AiErrorRow(i.id, i.startedAt, i.aiIntegrationName, "
-            + "i.sessionId, i.errorMessage, i.stackTrace) from AiInteraction i "
-            + "where i.status = org.remus.giteabot.workflowrun.RunStatus.ERROR "
-            + "and i.startedAt between :from and :to",
-            countQuery = "select count(i) from AiInteraction i "
-                    + "where i.status = org.remus.giteabot.workflowrun.RunStatus.ERROR "
-                    + "and i.startedAt between :from and :to")
-    Page<AiErrorRow> findErrorRows(@Param("from") Instant from, @Param("to") Instant to, Pageable pageable);
 
     @Query("select new org.remus.giteabot.aiusage.AiUsageRawPayload(i.rawRequest, i.rawResponse) "
             + "from AiInteraction i where i.id = :id")
@@ -50,6 +30,30 @@ public interface AiInteractionRepository extends JpaRepository<AiInteraction, Lo
             + "and not exists (select 1 from AiInteraction later where later.workflowRun = i.workflowRun "
             + "and later.roundNumber = i.roundNumber and later.attempt > i.attempt)")
     long countFailedCallsStartedAfter(@Param("after") Instant after);
+
+    /**
+     * The interactions of the given runs without their raw payloads and stack traces, in run,
+     * round and attempt order.
+     */
+    @Query("select new org.remus.giteabot.aiusage.InteractionRow(i.id, i.workflowRun.id, i.roundNumber, i.attempt, "
+            + "i.aiIntegrationName, i.status, i.startedAt, i.durationMs, i.stopReason, i.inputTokens, i.outputTokens, "
+            + "i.cacheCreationInputTokens, i.cacheReadInputTokens, i.errorMessage) from AiInteraction i "
+            + "where i.workflowRun.id in :runIds order by i.workflowRun.id, i.roundNumber, i.attempt")
+    List<InteractionRow> findRowsByRunIds(@Param("runIds") Collection<Long> runIds);
+
+    /** One interaction without its raw payloads, or empty. */
+    @Query("select new org.remus.giteabot.aiusage.InteractionRow(i.id, i.workflowRun.id, i.roundNumber, i.attempt, "
+            + "i.aiIntegrationName, i.status, i.startedAt, i.durationMs, i.stopReason, i.inputTokens, i.outputTokens, "
+            + "i.cacheCreationInputTokens, i.cacheReadInputTokens, i.errorMessage) from AiInteraction i "
+            + "where i.id = :id")
+    Optional<InteractionRow> findRowById(@Param("id") Long id);
+
+    @Query("select i.stackTrace from AiInteraction i where i.id = :id")
+    String findStackTraceById(@Param("id") Long id);
+
+    /** The number of distinct rounds of a run. */
+    @Query("select count(distinct i.roundNumber) from AiInteraction i where i.workflowRun.id = :runId")
+    long countRoundsOfRun(@Param("runId") Long runId);
 
     @Query("select coalesce(sum(i.inputTokens), 0) from AiInteraction i")
     long sumInputTokens();

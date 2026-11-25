@@ -33,7 +33,7 @@ The dashboard (`/dashboard`) provides an overview of all your bots and key stati
 - **Active Bots**: Number of enabled bots
 - **Total Webhook Calls**: Sum of all webhook calls across all bots
 - **AI Tokens**: Total tokens sent to and received from AI providers (taken from the AI usage audit log)
-- **AI Errors**: Number of failed AI interactions (e.g. HTTP 401 responses from a provider) in the last 7 days. The card turns red when errors occurred and links to the [Usage page](#usage) for details.
+- **AI Errors**: Number of failed AI calls (e.g. HTTP 401 responses from a provider) in the last 7 days. A request that failed but was retried successfully does not count. The card turns red when errors occurred and links to the [Workflow runs page](#workflow-runs), filtered to runs with failed AI calls that started in the same 7 days.
 
 The bot table shows each bot's name, status, integrations, and recent activity.
 
@@ -52,25 +52,50 @@ When no language has been chosen, the interface follows your browser's `Accept-L
 
 Only the web UI is localized. Everything the bot says or sends to an AI model — system prompts, tool descriptions, and log output — remains in English.
 
-## Usage
+## Workflow runs
 
-The Usage page (`/usage`) audits all AI provider interactions. It contains two collapsible sections (expand/collapse them individually or with the *Expand all* / *Collapse all* buttons, like on the System settings page):
+The Workflow runs page (`/workflow-runs`) shows what the bot did with the AI: one entry per triggered workflow (a review, a Writer Agent run, …), each with its AI interactions (rounds) and the tool calls the model requested.
 
-### AI usage
+### Run list
 
-A paginated table (20 entries per page) of every AI interaction with the columns **Timestamp**, **AI-Integration**, **Session-ID**, **Round**, **Input tokens**, **Output tokens**, **Cache creation input tokens**, **Cache read input tokens**, and **Details**. The Session-ID has the form `owner/repo#number` and identifies the pull request or issue that triggered the interaction. The **Round** column shows which round of the agent loop produced the interaction — useful to see how deep into a loop a run got — and is **—** for single-shot calls that are not part of an agent loop (a plain code review or a triage classification, for example). Click a column header to sort ascending/descending. Use **Clear all** in the section header (a confirmation dialog is shown) to remove all recorded usage entries.
+Each run shows its **state** (Succeeded, Error or Running), its **workflow type**, the **bot**, what **triggered** it (the repository and a link to the pull request or issue in the Git provider), when it **started**, its **duration**, the number of **rounds**, its **tool calls** (with the number that failed) and its **tokens in / out**. Runs are sorted by start, newest first; click **Started** to reverse the order. **Rows per page** and the page links work as elsewhere in the app.
 
-Click the **Raw** button in the **Details** column to open a modal showing the raw JSON request sent to the AI provider and the raw JSON response received back. This is useful for debugging provider-specific behavior, token accounting discrepancies, or unexpected completions. The payloads are loaded only when the modal opens (from `/usage/{id}/raw`), so the table stays fast however large they are.
+<img src="screenshots/workflow-runs/run-list.png" alt="Workflow runs — filters and a run expanded to its rounds" width="700"/>
 
-Raw payload capture is **disabled by default** because the payloads can be large and may contain sensitive prompt content. When disabled, the **Details** column is hidden from the AI usage table entirely. To enable it, set the configuration property `ai-usage.raw-payloads-enabled=true` (for example, in `application.properties`, `application.yml`, or via the `AI_USAGE_RAW_PAYLOADS_ENABLED` environment variable when running under Docker). You can also cap the stored payload size with `ai-usage.max-raw-payload-length` (default: 65535). Set it to `0` to store payloads in full, for example to inspect the complete conversation of a long agent run; the database then grows with every recorded request. The modal shows **—** when a payload is not available.
+Two warnings are shown next to the state:
 
-### Errors
+- **Round limit reached**: an agent loop of the run ran out of rounds while the model still wanted to call tools, so the result may be incomplete.
+- **Output truncated**: a round ended because the model hit its output token limit.
 
-A paginated table (20 entries per page) of failed AI interactions — for example when a provider responds with an HTTP error code such as `401 Unauthorized`. Columns: **Timestamp**, **AI-Integration**, **Session-ID**, and **Error-Log**. Click *Stack trace* on an entry to expand the full stack trace. The complete error log (respecting the active timespan filter) can be downloaded with **Export as JSON**.
+Click the chevron in front of a run (or **Expand all** / **Collapse all**) to see its details: the run ID, the AI and Git integrations, the cache write/read tokens and cache hit rate, the time spent in the model and in tools, and the rounds table. Each row of the rounds table is one request to the AI provider; when the provider was unavailable and the request was retried, the retries appear as indented *attempt* rows of the same round. Failed requests are highlighted red, a request still in progress blue, and rounds with a warning yellow.
 
-### Timespan filter
+<img src="screenshots/workflow-runs/run-with-failed-round.png" alt="Workflow runs — a run whose last round failed" width="700"/>
 
-Both tables can be restricted to a timespan with the **From**/**To** date filter at the top of the page. The filter also applies to the JSON export of the error log.
+<img src="screenshots/workflow-runs/run-in-progress.png" alt="Workflow runs — a run with a round still in progress" width="700"/>
+
+Times and numbers are shown in your browser's time zone and in the interface language.
+
+### Filters
+
+Filter by **Workflow run ID**, **Project**, **PR / issue number**, **Workflow type**, **Bot** and **State** (the state buttons show how many runs match the other filters). **Only runs with warnings** keeps the runs with one of the warnings above; **Only runs with failed AI calls** keeps the runs where a request to the AI provider failed and was not retried successfully, whatever the run's own state. **Started from** / **Started until** restrict the runs by their start, in your browser's time zone. All filters are part of the page's address, so a filtered list can be bookmarked or shared.
+
+### AI interaction details
+
+Click **Details** on a round to open the details of that request: when it started and how long it took (split into model and tool time), the stop reason, the run it belongs to (**Show run** opens the run list filtered to it), the token usage, and every tool call with its source (an MCP server or `built-in`), duration and result. A failed tool call shows its error; click a tool call to see its arguments. For a failed request, the error message and the stack trace are shown at the top. While a request is still waiting for the provider, its duration counts the time so far.
+
+<img src="screenshots/workflow-runs/interaction-details.png" alt="AI interaction details — tool calls with arguments and a failed call" width="700"/>
+
+<img src="screenshots/workflow-runs/interaction-details-failed.png" alt="AI interaction details — a failed request with its error and stack trace" width="700"/>
+
+**Raw request / response** opens the raw JSON request sent to the AI provider and the raw JSON response received back. This is useful for debugging provider-specific behavior, token accounting discrepancies, or unexpected completions. The payloads are loaded only when you open them, so the page stays fast however large they are.
+
+Raw payload capture is **disabled by default** because the payloads can be large and may contain sensitive prompt content. When disabled, the button is not shown. To enable it, set the configuration property `ai-usage.raw-payloads-enabled=true` (for example, in `application.properties`, `application.yml`, or via the `AI_USAGE_RAW_PAYLOADS_ENABLED` environment variable when running under Docker). You can also cap the stored payload size with `ai-usage.max-raw-payload-length` (default: 65535). Set it to `0` to store payloads in full, for example to inspect the complete conversation of a long agent run; the database then grows with every recorded request. The modal shows **—** when a payload is not available.
+
+### Export and clearing
+
+**Export as JSON** downloads the runs matching the current filters, each with its AI interactions and tool calls (without raw payloads). **Clear all** (a confirmation dialog is shown) removes every finished run with its interactions and tool calls; runs that are still running are kept.
+
+Runs recorded before this page existed (from the former usage and error logs) appear as runs of type **Legacy**, one per pull request or issue. Such a run can cover several workflows.
 
 ## Managing AI Integrations
 

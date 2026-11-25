@@ -68,7 +68,9 @@
                 </div>
             </div>
             <div class="col-md">
-                <a th:href="@{/usage}" class="text-decoration-none d-block h-100">
+                <!-- The Workflow runs page filtered to failed AI calls in the card's window (computed by the
+                     controller); that page's date filter applies to the run's start, which is close enough. -->
+                <a th:href="@{/workflow-runs(failedCalls=true, from=${aiErrorsFrom}, tz=${aiErrorsZone})}" class="text-decoration-none d-block h-100">
                     <div class="card text-white h-100" th:classappend="${aiErrorCount > 0} ? 'bg-danger' : 'bg-secondary'">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-center">

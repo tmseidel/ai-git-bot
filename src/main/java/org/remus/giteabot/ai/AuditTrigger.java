@@ -22,12 +22,4 @@ public record AuditTrigger(Long botId,
                            String repoName,
                            TriggerKind triggerKind,
                            Long triggerNumber) {
-
-    /** The legacy audit session id ({@code owner/repo#n}), or {@code null} without a repository. */
-    public String sessionId() {
-        if (repoOwner == null || repoName == null) {
-            return null;
-        }
-        return repoOwner + "/" + repoName + (triggerNumber != null ? "#" + triggerNumber : "");
-    }
 }

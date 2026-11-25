@@ -56,6 +56,12 @@ public class GiteaPlatform extends RepositoryPlatform {
                 : repositoryWebUrl(owner, repo).map(base -> base + "/pulls/" + number);
     }
 
+    @Override
+    public Optional<String> getIssueWebUrl(String owner, String repo, @Nullable Long number) {
+        return number == null ? Optional.empty()
+                : repositoryWebUrl(owner, repo).map(base -> base + "/issues/" + number);
+    }
+
     /** Gitea anchors conversation and inline comments alike; reviews have no anchor. */
     @Override
     protected Optional<String> commentAnchor(PullRequestCommentKind kind, String commentId) {

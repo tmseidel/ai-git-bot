@@ -32,6 +32,12 @@ public class GitLabPlatform extends RepositoryPlatform {
                 : repositoryWebUrl(owner, repo).map(base -> base + "/-/merge_requests/" + number);
     }
 
+    @Override
+    public Optional<String> getIssueWebUrl(String owner, String repo, @Nullable Long number) {
+        return number == null ? Optional.empty()
+                : repositoryWebUrl(owner, repo).map(base -> base + "/-/issues/" + number);
+    }
+
     /** Conversation and inline comments are both notes; GitLab has no review bodies. */
     @Override
     protected Optional<String> commentAnchor(PullRequestCommentKind kind, String commentId) {

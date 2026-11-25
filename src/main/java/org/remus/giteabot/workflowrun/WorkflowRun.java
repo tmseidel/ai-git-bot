@@ -62,10 +62,6 @@ public class WorkflowRun {
     @Column(name = "trigger_number")
     private Long triggerNumber;
 
-    /** The audit session id ({@code owner/repo#n}) the run was triggered for. */
-    @Column(name = "session_id")
-    private String sessionId;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private RunStatus state = RunStatus.RUNNING;

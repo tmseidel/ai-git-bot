@@ -56,9 +56,6 @@ public class AiInteraction {
     @Column(name = "ai_integration_name", nullable = false)
     private String aiIntegrationName;
 
-    @Column(name = "session_id")
-    private String sessionId;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
     private RunStatus status = RunStatus.RUNNING;

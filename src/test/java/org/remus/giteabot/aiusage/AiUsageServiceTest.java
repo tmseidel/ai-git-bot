@@ -18,14 +18,7 @@ import org.remus.giteabot.config.AiUsageProperties;
 import org.remus.giteabot.workflowrun.RunStatus;
 import org.remus.giteabot.workflowrun.WorkflowRun;
 import org.remus.giteabot.workflowrun.WorkflowRunRepository;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 
-import java.time.Instant;
-import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -117,7 +110,6 @@ class AiUsageServiceTest {
             assertEquals("owner", saved.getRepoOwner());
             assertEquals(TriggerKind.PULL_REQUEST, saved.getTriggerKind());
             assertEquals(42L, saved.getTriggerNumber());
-            assertEquals("owner/repo#42", saved.getSessionId());
             assertEquals(RunStatus.RUNNING, saved.getState());
 
             ArgumentCaptor<AiInteraction> captor = ArgumentCaptor.forClass(AiInteraction.class);
@@ -127,7 +119,6 @@ class AiUsageServiceTest {
             assertEquals(1, interaction.getRoundNumber());
             assertEquals(1, interaction.getAttempt());
             assertEquals(RunStatus.RUNNING, interaction.getStatus());
-            assertEquals("owner/repo#42", interaction.getSessionId());
         }
     }
 
@@ -247,109 +238,5 @@ class AiUsageServiceTest {
         });
         verify(interactionRepository, never()).finish(any(), any(), anyLong(), any(), anyLong(), anyLong(),
                 anyLong(), anyLong(), any(), any(), any(), any());
-    }
-
-    // ------------------------------------------------------------------ queries
-
-    @Test
-    void findUsage_fallsBackToStartTimeForUnknownSortColumn() {
-        ArgumentCaptor<PageRequest> captor = usagePageRequest();
-
-        service.findUsage(null, null, 0, AiUsageService.PAGE_SIZE, "evil'); DROP TABLE", false);
-
-        Sort.Order order = captor.getValue().getSort().iterator().next();
-        assertEquals("startedAt", order.getProperty());
-        assertEquals(Sort.Direction.DESC, order.getDirection());
-        assertEquals(AiUsageService.PAGE_SIZE, captor.getValue().getPageSize());
-    }
-
-    @Test
-    void findUsage_mapsPageSortKeysToInteractionProperties() {
-        ArgumentCaptor<PageRequest> captor = usagePageRequest();
-
-        service.findUsage(null, null, 0, 20, "round", true);
-
-        Sort.Order order = captor.getValue().getSort().iterator().next();
-        assertEquals("roundNumber", order.getProperty());
-        assertEquals(Sort.Direction.ASC, order.getDirection());
-    }
-
-    @Test
-    void findUsage_usesRequestedPageSize() {
-        ArgumentCaptor<PageRequest> captor = usagePageRequest();
-
-        service.findUsage(null, null, 0, 100, "timestamp", false);
-
-        assertEquals(100, captor.getValue().getPageSize());
-    }
-
-    @Test
-    void findUsage_clampsOversizedPageSizeToMax() {
-        ArgumentCaptor<PageRequest> captor = usagePageRequest();
-
-        service.findUsage(null, null, 0, 1_000_000, "timestamp", false);
-
-        assertEquals(AiUsageService.MAX_PAGE_SIZE, captor.getValue().getPageSize());
-    }
-
-    @Test
-    void findErrors_usesDefaultPageSizeWhenZero() {
-        ArgumentCaptor<PageRequest> captor = errorPageRequest();
-
-        service.findErrors(null, null, 0, 0, "timestamp", false);
-
-        assertEquals(AiUsageService.PAGE_SIZE, captor.getValue().getPageSize());
-    }
-
-    @Test
-    void findErrors_appliesRequestedSortAscending() {
-        ArgumentCaptor<PageRequest> captor = errorPageRequest();
-
-        service.findErrors(Instant.EPOCH, Instant.now(), 2, AiUsageService.PAGE_SIZE, "aiIntegrationName", true);
-
-        Sort.Order order = captor.getValue().getSort().iterator().next();
-        assertEquals("aiIntegrationName", order.getProperty());
-        assertEquals(Sort.Direction.ASC, order.getDirection());
-        assertEquals(2, captor.getValue().getPageNumber());
-    }
-
-    @Test
-    void findErrors_clampsJustAboveMaxPageSize() {
-        ArgumentCaptor<PageRequest> captor = errorPageRequest();
-
-        service.findErrors(null, null, 0, AiUsageService.MAX_PAGE_SIZE + 1, "timestamp", false);
-
-        assertEquals(AiUsageService.MAX_PAGE_SIZE, captor.getValue().getPageSize());
-    }
-
-    @Test
-    void findRawPayload_readsTheEntryWhenCaptureIsEnabled() {
-        when(usageProperties.isRawPayloadsEnabled()).thenReturn(true);
-        AiUsageRawPayload payload = new AiUsageRawPayload("req", "res");
-        when(interactionRepository.findRawPayloadById(5L)).thenReturn(Optional.of(payload));
-
-        assertEquals(Optional.of(payload), service.findRawPayload(5L));
-    }
-
-    @Test
-    void findRawPayload_isEmptyWhenCaptureIsDisabled() {
-        when(usageProperties.isRawPayloadsEnabled()).thenReturn(false);
-
-        assertTrue(service.findRawPayload(5L).isEmpty());
-        verifyNoInteractions(interactionRepository);
-    }
-
-    private ArgumentCaptor<PageRequest> usagePageRequest() {
-        Page<AiUsageRow> page = new PageImpl<>(List.of());
-        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        when(interactionRepository.findUsageRows(any(), any(), captor.capture())).thenReturn(page);
-        return captor;
-    }
-
-    private ArgumentCaptor<PageRequest> errorPageRequest() {
-        Page<AiErrorRow> page = new PageImpl<>(List.of());
-        ArgumentCaptor<PageRequest> captor = ArgumentCaptor.forClass(PageRequest.class);
-        when(interactionRepository.findErrorRows(any(), any(), captor.capture())).thenReturn(page);
-        return captor;
     }
 }

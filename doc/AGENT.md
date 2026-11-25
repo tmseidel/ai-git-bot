@@ -223,7 +223,7 @@ Because the setting is global to the provider, one endpoint can keep serving a f
 
 ## Prompt caching
 
-For Anthropic **AI Integrations**, **Enable prompt caching** is on by default. Agentic loops re-send the whole prompt prefix (system prompt, diff, previous tool results) on every round; caching marks breakpoints so repeated prefixes are billed as cache reads at roughly 1/10 of the input price, cutting review cost to a fraction. The Usage page records the raw provider figures — input tokens are the total processed (uncached + cache write + cache read, matching the Anthropic console) with separate **Cache write** / **Cache read** columns, so cache hits are directly visible. Other providers ignore the switch and record zeros in the cache columns.
+For Anthropic **AI Integrations**, **Enable prompt caching** is on by default. Agentic loops re-send the whole prompt prefix (system prompt, diff, previous tool results) on every round; caching marks breakpoints so repeated prefixes are billed as cache reads at roughly 1/10 of the input price, cutting review cost to a fraction. The Workflow runs page records the raw provider figures — input tokens are the total processed (uncached + cache write + cache read, matching the Anthropic console) with separate **Cache write** / **Cache read** figures and a cache hit rate per run and per AI interaction, so cache hits are directly visible. Other providers ignore the switch and record zeros in the cache columns.
 
 ## Security considerations
 
