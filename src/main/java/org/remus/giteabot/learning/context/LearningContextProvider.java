@@ -27,12 +27,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Selects the curated lessons a later agentic review receives.
@@ -319,7 +318,11 @@ public class LearningContextProvider {
     /**
      * Why guidance this run already received no longer holds, or empty while it does: learning was
      * switched off, a supplied lesson was disabled, replaced by another revision or marked stale, or
-     * its validation now fails. Exceptions propagate — the caller decides what "cannot tell" means.
+     * it was questioned since — review required, recheck date passed, or a conflicting lesson
+     * activated, or its cited feedback was withdrawn. Exceptions propagate — the caller decides what "cannot tell" means.
+     *
+     * <p>Asked at every round boundary of a run, so it reads only the supplied lessons' standing —
+     * a fixed number of queries — instead of re-listing the repository's lessons.</p>
      *
      * @param current the bot's learning settings as configured right now
      */
@@ -333,24 +336,25 @@ public class LearningContextProvider {
                     + (current == null ? "OFF" : current.learningMode().name())
                     + ", so lessons " + bundle.revisionReferences() + " may no longer be used");
         }
-        Map<Long, KnowledgeLessonService.ActiveLesson> active = lessonService
-                .activeLessons(scopeOf(request), ACTIVE_SCAN_LIMIT).stream()
-                .collect(Collectors.toMap(lesson -> lesson.summary().id(), Function.identity(),
-                        (first, second) -> first));
+        Map<Long, Long> supplied = new LinkedHashMap<>();
         for (LessonBundle.SelectedLesson used : bundle.lessons()) {
-            KnowledgeLessonService.ActiveLesson now = active.get(used.lessonId());
-            if (now == null) {
+            supplied.put(used.lessonId(), used.revisionId());
+        }
+        Map<Long, KnowledgeLessonService.Standing> standings =
+                lessonService.standing(scopeOf(request), supplied);
+        for (LessonBundle.SelectedLesson used : bundle.lessons()) {
+            KnowledgeLessonService.Standing standing = standings.get(used.lessonId());
+            if (standing == null || standing.state() != LessonState.ACTIVE
+                    || standing.activeRevision() == null) {
                 return Optional.of(used.revisionReference() + " is no longer active");
             }
-            if (!Objects.equals(now.summary().activeRevision(), used.revision())) {
+            if (standing.activeRevision() != used.revision()) {
                 return Optional.of(used.revisionReference() + " was replaced by "
-                        + LessonReference.revision(used.reference(), now.summary().activeRevision()));
+                        + LessonReference.revision(used.reference(), standing.activeRevision()));
             }
-            if (!now.summary().validation().valid()) {
-                List<String> problems = new ArrayList<>(now.summary().validation().issues());
-                problems.addAll(now.summary().validation().conflicts());
+            if (!standing.problems().isEmpty()) {
                 return Optional.of(used.revisionReference() + " no longer validates: "
-                        + String.join("; ", problems));
+                        + String.join("; ", standing.problems()));
             }
         }
         return Optional.empty();

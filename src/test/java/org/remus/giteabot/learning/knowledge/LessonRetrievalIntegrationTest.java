@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -135,6 +136,42 @@ class LessonRetrievalIntegrationTest {
         assertThat(provider.revocation(relevant(), inFlight, CURATED))
                 .hasValue(lesson + "@1 was replaced by " + lesson + "@2");
         assertThat(provider.select(relevant()).revisionReferences()).isEqualTo(lesson + "@2");
+    }
+
+    @Test
+    void aConflictingLessonActivatedDuringTheRunRevokesTheGuidanceLikeLearningShowReportsIt() {
+        LessonBundle inFlight = provider.select(relevant());
+
+        String rival = lessons.propose(scope(repo), comment(repo), feedback, List.of(),
+                "Report every endpoint without an explicit permission check.", "alex").lessonReference();
+        lessons.activate(scope(repo), comment(repo), rival, 1, "alex");
+
+        List<String> shown = lessons.show(scope(repo), lesson).orElseThrow().summary().validation()
+                .conflicts();
+        assertThat(shown).isNotEmpty();
+        assertThat(provider.revocation(relevant(), inFlight, CURATED)).hasValueSatisfying(reason ->
+                assertThat(reason).startsWith(lesson + "@1 no longer validates: ")
+                        .contains(shown.getFirst()));
+    }
+
+    @Test
+    void theRevocationCheckReadsOnlyTheSuppliedLessons() {
+        LessonBundle inFlight = provider.select(relevant());
+        // Unrelated active lessons of the same repository neither revoke nor are read.
+        for (int i = 0; i < 3; i++) {
+            String other = fixtures.incorrectFinding(repo, fixtures.finalizedReview(repo), "alex");
+            String unrelated = lessons.propose(scope(repo), comment(repo), other,
+                    List.of(), "Unrelated lesson " + i + ".", "alex").lessonReference();
+            lessons.activate(scope(repo), comment(repo), unrelated, 1, "alex");
+        }
+
+        assertThat(provider.revocation(relevant(), inFlight, CURATED)).isEmpty();
+        LessonBundle.SelectedLesson supplied = inFlight.lessons().getFirst();
+        Map<Long, KnowledgeLessonService.Standing> standing =
+                lessons.standing(scope(repo), Map.of(supplied.lessonId(), supplied.revisionId()));
+        assertThat(standing).containsOnlyKeys(supplied.lessonId());
+        assertThat(standing.get(supplied.lessonId()).problems()).isEmpty();
+        assertThat(standing.get(supplied.lessonId()).activeRevision()).isEqualTo(1);
     }
 
     @Test

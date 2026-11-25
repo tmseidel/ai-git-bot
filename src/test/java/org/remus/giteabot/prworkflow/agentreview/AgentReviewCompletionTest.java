@@ -863,6 +863,19 @@ class AgentReviewCompletionTest {
 
     /** Wires real lesson selection over a stubbed lesson store, as the factory does. */
     private void enableLessons() {
+        // A supplied lesson's standing mirrors what the active listing shows at that moment, so each
+        // test controls revocation by stubbing that listing alone.
+        lenient().when(lessonService.standing(any(), any())).thenAnswer(invocation -> {
+            Map<Long, KnowledgeLessonService.Standing> standings = new HashMap<>();
+            for (KnowledgeLessonService.ActiveLesson active : lessonService.activeLessons(null, 0)) {
+                List<String> problems = new ArrayList<>(active.summary().validation().issues());
+                problems.addAll(active.summary().validation().conflicts());
+                standings.put(active.summary().id(), new KnowledgeLessonService.Standing(
+                        active.summary().id(), active.summary().state(),
+                        active.summary().activeRevision(), problems));
+            }
+            return standings;
+        });
         lessons = new AgentReviewLessons(new LearningContextProvider(lessonService, usageRepository,
                 outputRepository, new org.remus.giteabot.config.LearningProperties()),
                 () -> currentLearning);
@@ -1074,6 +1087,31 @@ class AgentReviewCompletionTest {
                 .contains("Repository guidance: L17@1");
         assertThat(occurrences(prompts.getValue(), ActiveLessons.TEXT)).isEqualTo(1);
         verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void aFollowUpWhoseGuidanceIsRevokedTellsTheAskerInsteadOfStayingSilent() {
+        enableLessons();
+        // Selection sees the lesson; by the first round boundary a maintainer has disabled it.
+        when(lessonService.activeLessons(any(), anyInt())).thenReturn(List.of(LESSON), List.of());
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("The filter covers it."));
+
+        assertThatThrownBy(() -> service.answerClarification(payload, "Is this endpoint protected?", 5,
+                false, CURATED))
+                .isInstanceOf(GuidanceRevokedException.class)
+                .isInstanceOf(WorkflowCancelledException.class)
+                .hasMessageContaining("Clarification of PR #1")
+                .hasMessageContaining("L17@1 is no longer active");
+
+        org.mockito.ArgumentCaptor<String> comments = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(repositoryClient).postPullRequestComment(eq("owner"), eq("repo"), eq(1L), comments.capture());
+        assertThat(comments.getValue())
+                .startsWith("ℹ️ **AI Agent (Clarification)**: This question was not answered")
+                .contains("L17@1 is no longer active")
+                .contains("Ask again")
+                .doesNotContain("The filter covers it.")
+                .doesNotContain("Error details");
     }
 
     @Test

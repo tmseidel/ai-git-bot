@@ -134,8 +134,9 @@ public class AgentReviewService {
             if (result.guidance() != null && result.guidance().revokedReason().isPresent()) {
                 // Suppressed right before publication: the run ends cancelled, like one revoked
                 // between rounds. The finalized review stays stored.
-                throw new WorkflowCancelledException("Agentic review " + result.reference()
-                        + " was not published: " + result.guidance().revokedReason().get());
+                throw new GuidanceRevokedException("Agentic review " + result.reference()
+                        + " was not published: " + result.guidance().revokedReason().get(),
+                        result.guidance().revokedReason().get());
             }
             return reviewResult;
         } catch (WorkflowCancelledException e) {
@@ -266,6 +267,16 @@ public class AgentReviewService {
                     formatClarification(answer.text()));
             log.info("Clarification answered for PR #{} in {}/{}", prNumber, owner, repo);
             return ReviewResult.POSTED;
+        } catch (GuidanceRevokedException e) {
+            // The answer is withheld like a review would be, but a question is not review evidence:
+            // the person who asked is told why nothing came and that asking again will work.
+            log.warn("Clarification for PR #{} in {}/{} withheld: {}", prNumber, owner, repo,
+                    e.reason());
+            postNotice(owner, repo, prNumber, "Clarification",
+                    "This question was not answered because the repository guidance given to the "
+                            + "answer changed while it ran (" + abbreviate(e.reason(), 300) + "). "
+                            + "Ask again to get an answer based on the current lessons.");
+            throw e;
         } catch (WorkflowCancelledException e) {
             throw e;
         } catch (Exception e) {
@@ -285,6 +296,20 @@ public class AgentReviewService {
             return "## 🤖 Follow-up\n\n" + answer;
         }
         return "## 🤖 Follow-up\n\n" + answer + "\n\n---\n\n" + footer.strip();
+    }
+
+    /** A plain one-line notice on the pull request; a failure to post it is logged only. */
+    private void postNotice(String owner, String repo, Long prNumber, String stage, String message) {
+        if (owner == null || repo == null || prNumber == null) {
+            return;
+        }
+        try {
+            repositoryClient.postPullRequestComment(owner, repo, prNumber,
+                    "ℹ️ **AI Agent (" + stage + ")**: " + message);
+        } catch (RuntimeException postError) {
+            log.warn("Failed to post notice on PR #{} in {}/{}: {}",
+                    prNumber, owner, repo, postError.getMessage());
+        }
     }
 
     private void postErrorComment(String owner, String repo, Long prNumber,

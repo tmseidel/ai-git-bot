@@ -250,7 +250,10 @@ and right before the review is posted. If a supplied lesson is disabled, replace
 newly activated revision or invalidated — or learning is switched off — in the meantime,
 the run is cancelled: what the model already read cannot be taken back, so nothing it
 produced is posted. A finalized review that is stopped this way stays stored, unpublished.
-Ask for a new review to run with the current lessons.
+Ask for a new review to run with the current lessons. A follow-up question stopped this
+way is not dropped silently: the bot replies that the question was not answered, names
+the lesson change that stopped it, and asks you to ask again. The check reads only the
+lessons the run received, so it stays cheap however many lessons the repository has.
 
 **When retrieval fails.** If the lessons cannot be read, the review runs without learned
 guidance, records that no lessons were used, and counts as no lesson's evidence. It is

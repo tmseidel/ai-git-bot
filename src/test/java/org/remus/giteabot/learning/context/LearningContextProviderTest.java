@@ -7,6 +7,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.config.LearningProperties;
 import org.remus.giteabot.learning.knowledge.KnowledgeLessonService;
+import org.remus.giteabot.learning.knowledge.LessonState;
 import org.remus.giteabot.learning.knowledge.LessonUsage;
 import org.remus.giteabot.learning.knowledge.LessonUsageRepository;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningMode;
@@ -17,6 +18,7 @@ import org.remus.giteabot.review.structured.WorkflowOutputRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -300,23 +302,42 @@ class LearningContextProviderTest {
         LessonSelectionRequest request = request(List.of("src/A.java"));
         LessonBundle bundle = provider.select(request);
 
+        Map<Long, Long> supplied = Map.of(17L, 170L);
+        when(lessonService.standing(any(), eq(supplied))).thenReturn(Map.of(17L, standing(
+                LessonState.ACTIVE, 1)));
+
         assertThat(provider.revocation(request, bundle, CURATED)).isEmpty();
         assertThat(provider.revocation(request, bundle, AgentReviewLearningSettings.DISABLED))
                 .hasValueSatisfying(reason -> assertThat(reason).contains("learning mode is now OFF"));
 
-        when(lessonService.activeLessons(any(), anyInt())).thenReturn(List.of());
+        when(lessonService.standing(any(), eq(supplied))).thenReturn(Map.of());
         assertThat(provider.revocation(request, bundle, CURATED))
                 .hasValue("L17@1 is no longer active");
-
-        var questioned = ActiveLessons.lesson(17, ActiveLessons.TEXT, List.of(), null,
-                List.of("review required: FB31 was retracted"), List.of(), Instant.now());
-        when(lessonService.activeLessons(any(), anyInt())).thenReturn(List.of(questioned));
+        when(lessonService.standing(any(), eq(supplied)))
+                .thenReturn(Map.of(17L, standing(LessonState.DISABLED, 1)));
         assertThat(provider.revocation(request, bundle, CURATED))
-                .hasValueSatisfying(reason -> assertThat(reason).contains("no longer validates")
-                        .contains("FB31 was retracted"));
+                .hasValue("L17@1 is no longer active");
+        when(lessonService.standing(any(), eq(supplied)))
+                .thenReturn(Map.of(17L, standing(LessonState.ACTIVE, 2)));
+        assertThat(provider.revocation(request, bundle, CURATED))
+                .hasValue("L17@1 was replaced by L17@2");
+
+        when(lessonService.standing(any(), eq(supplied))).thenReturn(Map.of(17L, standing(
+                LessonState.ACTIVE, 1, "review required: FB31 was retracted", "L9@1 also rests on O12-F2")));
+        assertThat(provider.revocation(request, bundle, CURATED))
+                .hasValue("L17@1 no longer validates: review required: FB31 was retracted; "
+                        + "L9@1 also rests on O12-F2");
 
         assertThat(provider.revocation(request, LessonBundle.empty(LessonBundle.Status.NONE),
                 AgentReviewLearningSettings.DISABLED)).isEmpty();
+        // Asked at every round boundary: only the supplied lessons' standing is read, never the
+        // repository's full lesson listing.
+        verify(lessonService, times(1)).activeLessons(any(), anyInt());
+    }
+
+    private static KnowledgeLessonService.Standing standing(LessonState state, int revision,
+                                                            String... problems) {
+        return new KnowledgeLessonService.Standing(17L, state, revision, List.of(problems));
     }
 
     @Test

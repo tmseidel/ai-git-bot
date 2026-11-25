@@ -43,6 +43,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Versioned, Git-managed lessons for agentic review.
@@ -200,6 +201,22 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
      */
     public record ActiveLesson(Summary summary, Long revisionId, String contentHash,
                                Instant activatedAt) {
+    }
+
+    /**
+     * What a running review needs to know about a lesson revision it already received.
+     *
+     * @param state          the lesson's state now
+     * @param activeRevision its active revision number now, or {@code null}
+     * @param problems       why the supplied revision no longer validates — the same issues and
+     *                       conflicts {@code learning show} reports; empty while it does
+     */
+    public record Standing(Long lessonId, LessonState state, Integer activeRevision,
+                           List<String> problems) {
+
+        public Standing {
+            problems = problems == null ? List.of() : List.copyOf(problems);
+        }
     }
 
     // ------------------------------------------------------------------ commands
@@ -596,6 +613,102 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
                     activeRow.getContentHash(), activeRow.getActivatedAt()));
         }
         return active;
+    }
+
+    /**
+     * The current standing of lesson revisions a running review received, for its round-boundary
+     * revocation check. It applies the validation of {@link #activeLessons} — review required, cited
+     * feedback no longer effective, recheck due, conflicting active lesson — but only to the given
+     * revisions and with a fixed number of queries, whatever the number of lessons, revisions and
+     * evidence in the repository.
+     *
+     * @param revisionIdsByLesson lesson id → id of the revision row the review received
+     * @return standings of the lessons that still exist in this scope; a missing id means gone
+     */
+    @Transactional(readOnly = true)
+    public Map<Long, Standing> standing(FeedbackScope scope, Map<Long, Long> revisionIdsByLesson) {
+        if (scope == null || scope.gitIntegrationId() == null || scope.botId() == null
+                || revisionIdsByLesson == null || revisionIdsByLesson.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, KnowledgeLesson> lessons = new HashMap<>();
+        for (KnowledgeLesson lesson : lessonRepository.findAllById(revisionIdsByLesson.keySet())) {
+            if (inScope(scope, lesson)) {
+                lessons.put(lesson.getId(), lesson);
+            }
+        }
+        Map<Long, KnowledgeLessonRevision> supplied = new HashMap<>();
+        for (KnowledgeLessonRevision revision : revisionRepository.findAllById(revisionIdsByLesson.values())) {
+            supplied.put(revision.getId(), revision);
+        }
+        List<KnowledgeLessonEvidence> cited = evidenceRepository.findByRevisionIdInOrderByIdAsc(
+                supplied.isEmpty() ? List.of(-1L) : supplied.keySet());
+        Map<Long, WorkflowFeedback> feedback = new HashMap<>();
+        for (WorkflowFeedback record : feedbackRepository.findAllById(cited.stream()
+                .map(KnowledgeLessonEvidence::getFeedbackId).collect(Collectors.toSet()))) {
+            feedback.put(record.getId(), record);
+        }
+        Set<String> targets = cited.stream().map(KnowledgeLessonEvidence::getTargetReference)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<KnowledgeLessonEvidence> onTargets = targets.isEmpty() ? List.of()
+                : evidenceRepository.findByTargetReferenceIn(targets);
+        Map<Long, KnowledgeLesson> citing = new HashMap<>();
+        for (KnowledgeLesson other : lessonRepository.findAllById(onTargets.stream()
+                .map(KnowledgeLessonEvidence::getLessonId).collect(Collectors.toSet()))) {
+            if (other.getActiveRevision() != null && inScope(scope, other)) {
+                citing.put(other.getId(), other);
+            }
+        }
+        Map<Long, KnowledgeLessonRevision> citingRevisions = new HashMap<>();
+        for (KnowledgeLessonRevision revision : revisionRepository.findAllById(onTargets.stream()
+                .filter(row -> citing.containsKey(row.getLessonId()))
+                .map(KnowledgeLessonEvidence::getRevisionId).collect(Collectors.toSet()))) {
+            citingRevisions.put(revision.getId(), revision);
+        }
+
+        Instant now = Instant.now();
+        Map<Long, Standing> standings = new HashMap<>();
+        for (KnowledgeLesson lesson : lessons.values()) {
+            KnowledgeLessonRevision revision = supplied.get(revisionIdsByLesson.get(lesson.getId()));
+            List<String> problems = new ArrayList<>();
+            if (lesson.isReviewRequired()) {
+                problems.add("review required: " + lesson.getReviewReason());
+            }
+            Set<String> own = new LinkedHashSet<>();
+            for (KnowledgeLessonEvidence row : cited) {
+                if (revision == null || !row.getRevisionId().equals(revision.getId())) {
+                    continue;
+                }
+                own.add(row.getTargetReference());
+                WorkflowFeedback record = feedback.get(row.getFeedbackId());
+                if (record == null) {
+                    problems.add(row.getFeedbackReference() + " no longer exists");
+                } else if (record.getState() != FeedbackState.EFFECTIVE) {
+                    problems.add(record.getReference() + " is "
+                            + record.getState().name().toLowerCase(Locale.ROOT)
+                            + (record.getSupersededBy() == null ? "" : " (by " + record.getSupersededBy() + ")"));
+                }
+            }
+            if (revision != null && revision.getRecheckAfter() != null
+                    && revision.getRecheckAfter().isBefore(now)) {
+                problems.add("recheck due since " + revision.getRecheckAfter());
+            }
+            Set<String> conflicts = new LinkedHashSet<>();
+            for (KnowledgeLessonEvidence row : onTargets) {
+                KnowledgeLesson other = citing.get(row.getLessonId());
+                KnowledgeLessonRevision theirs = citingRevisions.get(row.getRevisionId());
+                if (other != null && !other.getId().equals(lesson.getId()) && theirs != null
+                        && own.contains(row.getTargetReference())
+                        && theirs.getRevisionNumber() == other.getActiveRevision()) {
+                    conflicts.add(LessonReference.revision(other.getReference(),
+                            theirs.getRevisionNumber()) + " also rests on " + row.getTargetReference());
+                }
+            }
+            problems.addAll(conflicts);
+            standings.put(lesson.getId(), new Standing(lesson.getId(), lesson.getState(),
+                    lesson.getActiveRevision(), problems));
+        }
+        return standings;
     }
 
     /**

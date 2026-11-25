@@ -216,7 +216,7 @@ public class AgentReviewExecution {
                         diffSummary, prTitle, prBody, systemPrompt, draft, options, progress,
                         guidance);
             }
-            cancelIfRevoked(guidance, prNumber);
+            cancelIfRevoked(guidance, "Agentic review", prNumber);
             if (!outcome.success() || !(outcome.payload() instanceof String reference)
                     || !reference.equals(draft.outputReference())) {
                 log.warn("Agentic review for PR #{} ended without a finalized review; nothing will be "
@@ -314,7 +314,7 @@ public class AgentReviewExecution {
                 ctx.setProgressConsumer(progress);
                 outcome = loop.run(ctx, userMessage, strategy);
             }
-            cancelIfRevoked(guidance, prNumber);
+            cancelIfRevoked(guidance, "Clarification", prNumber);
             if (!outcome.success() || !(outcome.payload() instanceof String answer) || answer.isBlank()) {
                 log.warn("Clarification for PR #{} produced no answer", prNumber);
                 return new Answer(AnswerOutcome.FAILED, null);
@@ -506,11 +506,11 @@ public class AgentReviewExecution {
     }
 
     /** A run whose guidance was revoked in flight is cancelled; nothing it produced is published. */
-    private static void cancelIfRevoked(LearnedGuidance guidance, Long prNumber) {
+    private static void cancelIfRevoked(LearnedGuidance guidance, String what, Long prNumber) {
         Optional<String> revoked = guidance == null ? Optional.empty() : guidance.revokedReason();
         if (revoked.isPresent()) {
-            throw new WorkflowCancelledException("Agentic review of PR #" + prNumber
-                    + " cancelled before publication: " + revoked.get());
+            throw new GuidanceRevokedException(what + " of PR #" + prNumber
+                    + " cancelled before publication: " + revoked.get(), revoked.get());
         }
     }
 
