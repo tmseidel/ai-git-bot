@@ -23,6 +23,9 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
+import org.remus.giteabot.learning.context.LearningContextProvider;
+import org.remus.giteabot.learning.context.LessonBundle;
+import org.remus.giteabot.learning.context.LessonSelectionRequest;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.prworkflow.PrPayloadHydrator;
 import org.remus.giteabot.prworkflow.WorkflowCancelledException;
@@ -42,6 +45,7 @@ import org.remus.giteabot.review.structured.StructuredReviewService;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -53,6 +57,11 @@ import java.util.function.Consumer;
  * <p>Every exit path leaves an explicit draft state. A run that failed, was cancelled or was
  * superseded closes its draft, so a later attempt can never append to it, and an incomplete draft
  * can never be mistaken for an empty review.</p>
+ *
+ * <p>Curated lessons selected for the change are delivered in the kickoff (or clarification) user
+ * message — never in the operator system prompt, which together with the tool protocol and the
+ * permission settings stays authoritative. A run whose guidance is revoked while it is in flight
+ * ends as cancelled instead of publishing.</p>
  */
 @Slf4j
 public class AgentReviewExecution {
@@ -64,8 +73,14 @@ public class AgentReviewExecution {
      * @param reviewId  the draft this run opened (present for every outcome but {@link Outcome#NO_DIFF})
      * @param reference the finalized {@code O<n>} reference when {@code outcome == FINALIZED}
      * @param reviewedHeadSha the webhook's head, resolved when abbreviated by Bitbucket, if known
+     * @param guidance  learned guidance the run received, or {@code null}; publication rechecks it
      */
-    public record Result(Outcome outcome, Long reviewId, String reference, String reviewedHeadSha) {
+    public record Result(Outcome outcome, Long reviewId, String reference, String reviewedHeadSha,
+                         LearnedGuidance guidance) {
+
+        public Result(Outcome outcome, Long reviewId, String reference, String reviewedHeadSha) {
+            this(outcome, reviewId, reference, reviewedHeadSha, null);
+        }
 
         public boolean finalized() {
             return outcome == Outcome.FINALIZED;
@@ -95,6 +110,7 @@ public class AgentReviewExecution {
     private final ReviewSubmissionToolExecutor submissionExecutor;
     private final ReviewSnapshotService snapshotService;
     private final ReviewLookupToolExecutor reviewLookup;
+    private final AgentReviewLessons lessons;
 
     private final RepositoryPlatform repositoryPlatform;
     private final RepositoryApiClient repositoryClient;
@@ -116,7 +132,8 @@ public class AgentReviewExecution {
                                 ReviewSubmissionToolExecutor submissionExecutor,
                                 ReviewSnapshotService snapshotService,
                                 ReviewLookupToolExecutor reviewLookup,
-                                PythonExecutionService pythonExecution) {
+                                PythonExecutionService pythonExecution,
+                                AgentReviewLessons lessons) {
         this.context = context;
         this.sessionService = sessionService;
         this.toolCatalog = toolCatalog;
@@ -127,6 +144,7 @@ public class AgentReviewExecution {
         this.submissionExecutor = submissionExecutor;
         this.snapshotService = snapshotService;
         this.reviewLookup = reviewLookup;
+        this.lessons = lessons == null ? AgentReviewLessons.NONE : lessons;
         this.repositoryPlatform = context.repositoryPlatform();
         this.repositoryClient = repositoryPlatform.getClient();
         this.aiClient = context.aiClient();
@@ -185,13 +203,20 @@ public class AgentReviewExecution {
                 reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
                 return new Result(Outcome.FAILED, draft.reviewId(), null, null);
             }
+            LessonSelectionRequest selection = selectionRequest(owner, repo, diffSummary, prTitle,
+                    prBody, options.learningSettings());
+            LessonBundle bundle = selectLessons(selection);
+            LearnedGuidance guidance = guidanceOf(selection, bundle);
+            recordUsage(bundle, draft.outputReference(), request.invocationId());
             String systemPrompt = resolveReviewPrompt();
             LoopOutcome outcome;
             try (Workspace workspace = wsResult.workspace()) {
                 AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
                 outcome = runReviewLoop(session, workspace, owner, repo, prNumber, headBranch,
-                        diffSummary, prTitle, prBody, systemPrompt, draft, options, progress);
+                        diffSummary, prTitle, prBody, systemPrompt, draft, options, progress,
+                        guidance);
             }
+            cancelIfRevoked(guidance, "Agentic review", prNumber);
             if (!outcome.success() || !(outcome.payload() instanceof String reference)
                     || !reference.equals(draft.outputReference())) {
                 log.warn("Agentic review for PR #{} ended without a finalized review; nothing will be "
@@ -200,8 +225,9 @@ public class AgentReviewExecution {
                 return new Result(Outcome.FAILED, draft.reviewId(), null, null);
             }
             finalized = true;
-            captureSnapshot(payload, request, reference, systemPrompt, diff, options);
-            return new Result(Outcome.FINALIZED, draft.reviewId(), reference, request.headSha());
+            captureSnapshot(payload, request, reference, systemPrompt, diff, options, bundle);
+            return new Result(Outcome.FINALIZED, draft.reviewId(), reference, request.headSha(),
+                    guidance);
         } catch (WorkflowCancelledException e) {
             reviewService.closeDraft(draft.reviewId(), ReviewState.CANCELLED);
             log.warn("Agentic review for PR #{} was cancelled; its draft stays incomplete", prNumber);
@@ -219,9 +245,14 @@ public class AgentReviewExecution {
     /**
      * Answers a clarification question about a previously-reviewed PR with a plain answer. No
      * submission tools are advertised, so nothing here can alter a published review.
+     *
+     * <p>Learned guidance is selected afresh from the lessons valid now — a follow-up never inherits
+     * the guidance an earlier review received. It is not counted as lesson usage: usage counts
+     * reviews.</p>
      */
     public Answer answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds,
-                                      boolean enableProgressComments) {
+                                      boolean enableProgressComments,
+                                      AgentReviewLearningSettings learningSettings) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -261,17 +292,20 @@ public class AgentReviewExecution {
                                 + "could not be answered. The bot log holds the Git output.");
                 return new Answer(AnswerOutcome.FAILED, null);
             }
+            LessonSelectionRequest selection = selectionRequest(owner, repo, diffSummary, prTitle,
+                    prBody, learningSettings);
+            LearnedGuidance guidance = guidanceOf(selection, selectLessons(selection));
             LoopOutcome outcome;
             try (Workspace workspace = wsResult.workspace()) {
                 String systemPrompt = resolveClarificationPrompt();
-                String userMessage = buildClarificationMessage(prTitle, prBody, diffSummary,
-                        userQuestion);
+                String userMessage = withGuidance(buildClarificationMessage(prTitle, prBody,
+                        diffSummary, userQuestion), guidance);
                 AgentSession session = new AgentSession(owner, repo, prNumber, prTitle);
                 ReviewAgentStrategy strategy = new ReviewAgentStrategy(systemPrompt, toolRouter,
                         toolCatalog, context.mcpToolCatalog(), context.allowedBuiltinTools(),
                         responseParser, branchSwitcher, this::fetchFiles,
                         agentConfig.getBudget().getMaxContextRounds(), Math.max(1, maxToolRounds),
-                        Math.max(1, maxToolRounds), lookup(owner, repo, prNumber), null);
+                        Math.max(1, maxToolRounds), lookup(owner, repo, prNumber), null, guidance);
                 AgentBudget budget = budget(maxToolRounds, maxToolRounds);
                 AgentLoop loop = new AgentLoop(aiClient, sessionService, budget);
                 AgentRunContext ctx = AgentRunContext.forPullRequest(session, owner, repo, prNumber,
@@ -280,14 +314,13 @@ public class AgentReviewExecution {
                 ctx.setProgressConsumer(progress);
                 outcome = loop.run(ctx, userMessage, strategy);
             }
+            cancelIfRevoked(guidance, "Clarification", prNumber);
             if (!outcome.success() || !(outcome.payload() instanceof String answer) || answer.isBlank()) {
                 log.warn("Clarification for PR #{} produced no answer", prNumber);
                 return new Answer(AnswerOutcome.FAILED, null);
             }
             completed = true;
             return new Answer(AnswerOutcome.ANSWERED, answer);
-        } catch (WorkflowCancelledException e) {
-            throw e;
         } finally {
             if (progress != null) {
                 progress.finish(completed);
@@ -301,7 +334,8 @@ public class AgentReviewExecution {
      * failure here leaves the review usable and the evidence explicitly incomplete.
      */
     private void captureSnapshot(WebhookPayload payload, ReviewDraftRequest request, String reference,
-                                 String systemPrompt, String diff, Options options) {
+                                 String systemPrompt, String diff, Options options,
+                                 LessonBundle lessonBundle) {
         if (!options.learningSettings().feedbackEnabled()) {
             return;
         }
@@ -323,7 +357,10 @@ public class AgentReviewExecution {
                     request.baseSha(), reviewedHead,
                     refOf(payload.getPullRequest().getBase()), refOf(payload.getPullRequest().getHead()),
                     request.providerRepositoryId(),
-                    reasons));
+                    reasons,
+                    lessonBundle.status().name(),
+                    lessonBundle.hasGuidance() ? lessonBundle.revisionReferences() : null,
+                    lessonBundle.contentHash()));
         } catch (RuntimeException e) {
             log.warn("Could not capture the learning snapshot for review {}: {}", reference,
                     e.getMessage());
@@ -349,8 +386,8 @@ public class AgentReviewExecution {
                                       String repo, Long prNumber, String headBranch,
                                       DiffSummary diffSummary, String prTitle, String prBody,
                                       String systemPrompt, ReviewDraftHandle draft, Options options,
-                                      ReviewProgress progress) {
-        String userMessage = buildKickoffMessage(prTitle, prBody, diffSummary);
+                                      ReviewProgress progress, LearnedGuidance guidance) {
+        String userMessage = withGuidance(buildKickoffMessage(prTitle, prBody, diffSummary), guidance);
 
         int explorationRounds = Math.max(1, options.maxToolRounds());
         // Submissions are one AI round each (finding, correction, assessment), so the budget has to
@@ -363,7 +400,8 @@ public class AgentReviewExecution {
                 branchSwitcher, this::fetchFiles, agentConfig.getBudget().getMaxContextRounds(),
                 explorationRounds, submissionRounds,
                 lookup(owner, repo, prNumber),
-                new ReviewAgentStrategy.Submission(submissionExecutor, invocation, reviewService));
+                new ReviewAgentStrategy.Submission(submissionExecutor, invocation, reviewService),
+                guidance);
 
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
                 budget(explorationRounds, submissionRounds));
@@ -397,6 +435,88 @@ public class AgentReviewExecution {
                 bot.getGitIntegration() != null ? bot.getGitIntegration().getId() : null,
                 owner, repo, prNumber, runId,
                 () -> Thread.currentThread().isInterrupted());
+    }
+
+    // ------------------------------------------------------------------ learned guidance
+
+    private LessonSelectionRequest selectionRequest(String owner, String repo, DiffSummary diffSummary,
+                                                    String prTitle, String prBody,
+                                                    AgentReviewLearningSettings settings) {
+        return new LessonSelectionRequest(
+                bot.getGitIntegration() == null ? null : bot.getGitIntegration().getId(),
+                bot.getId(), owner, repo, LearningContextProvider.WORKFLOW_KEY,
+                diffSummary.changedFiles(),
+                (prTitle == null ? "" : prTitle) + "\n" + (prBody == null ? "" : prBody),
+                settings, context.contextWindowTokens());
+    }
+
+    /**
+     * The lessons for this run. Retrieval that is not wired or fails leaves the review without
+     * learned guidance — it never switches workflows and never fails the review.
+     */
+    private LessonBundle selectLessons(LessonSelectionRequest selection) {
+        if (!lessons.available()) {
+            return selection.settings().curatedLearning()
+                    ? LessonBundle.empty(LessonBundle.Status.UNAVAILABLE)
+                    : LessonBundle.empty(LessonBundle.Status.LEARNING_OFF);
+        }
+        try {
+            LessonBundle bundle = lessons.provider().select(selection);
+            if (bundle.hasGuidance()) {
+                log.info("Agentic review of {}/{} receives lessons {} ({} tokens){}",
+                        selection.repoOwner(), selection.repoName(), bundle.revisionReferences(),
+                        bundle.estimatedTokens(), bundle.excluded().isEmpty() ? ""
+                                : "; left out: " + describe(bundle.excluded()));
+            } else if (!bundle.excluded().isEmpty()) {
+                log.info("Agentic review of {}/{} receives no lessons; left out: {}",
+                        selection.repoOwner(), selection.repoName(), describe(bundle.excluded()));
+            }
+            return bundle;
+        } catch (RuntimeException e) {
+            log.warn("Lesson retrieval failed for {}/{}; the review runs without learned guidance: {}",
+                    selection.repoOwner(), selection.repoName(), e.getMessage());
+            return LessonBundle.empty(LessonBundle.Status.UNAVAILABLE);
+        }
+    }
+
+    private static String describe(List<LessonBundle.Exclusion> excluded) {
+        return String.join(", ", excluded.stream()
+                .map(exclusion -> exclusion.reference() + " (" + exclusion.reason() + ")").toList());
+    }
+
+    private LearnedGuidance guidanceOf(LessonSelectionRequest selection, LessonBundle bundle) {
+        if (!bundle.hasGuidance()) {
+            return null;
+        }
+        return new LearnedGuidance(bundle,
+                () -> lessons.provider().revocation(selection, bundle, lessons.current()));
+    }
+
+    /** Usage is evidence about the lesson, not part of the review: a failure is logged, never fatal. */
+    private void recordUsage(LessonBundle bundle, String outputReference, String invocationId) {
+        if (!bundle.hasGuidance()) {
+            return;
+        }
+        try {
+            lessons.provider().recordUsage(bundle, outputReference, invocationId);
+        } catch (RuntimeException e) {
+            log.warn("Could not record usage of lessons {} for review {}: {}",
+                    bundle.revisionReferences(), outputReference, e.getMessage());
+        }
+    }
+
+    /** A run whose guidance was revoked in flight is cancelled; nothing it produced is published. */
+    private static void cancelIfRevoked(LearnedGuidance guidance, String what, Long prNumber) {
+        Optional<String> revoked = guidance == null ? Optional.empty() : guidance.revokedReason();
+        if (revoked.isPresent()) {
+            throw new GuidanceRevokedException(what + " of PR #" + prNumber
+                    + " cancelled before publication: " + revoked.get(), revoked.get());
+        }
+    }
+
+    /** The learned guidance block goes last, as reference data after the task itself. */
+    static String withGuidance(String message, LearnedGuidance guidance) {
+        return guidance == null ? message : message + "\n\n" + guidance.text();
     }
 
     // ------------------------------------------------------------------ prompts

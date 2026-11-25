@@ -382,4 +382,83 @@ class AgentLoopTest {
             }
         };
     }
+    // ------------------------------------------------------------------ pinned context
+
+    private static final String PINNED = "## Repository guidance\n\nRepository guidance: L17@1";
+
+    @Test
+    void pinnedContext_isNotAddedWhileTheRequestStillCarriesIt() {
+        List<AiMessage> history = new ArrayList<>();
+        AiMessage pinned = AiMessage.builder().role("user").content(PINNED).build();
+
+        AgentLoop.restorePinned(history, "kickoff\n\n" + PINNED, pinned);
+        assertThat(history).isEmpty();
+
+        history.add(AiMessage.builder().role("user").content("kickoff\n\n" + PINNED).build());
+        AgentLoop.restorePinned(history, "", pinned);
+        assertThat(history).hasSize(1);
+    }
+
+    @Test
+    void pinnedContext_isRestoredOnceAtTheStartAfterCompactionDroppedIt() {
+        List<AiMessage> history = new ArrayList<>(List.of(
+                AiMessage.builder().role("user").content("[Earlier conversation compacted]").build(),
+                AiMessage.builder().role("assistant").content("later answer").build()));
+        AiMessage pinned = AiMessage.builder().role("user").content(PINNED).build();
+
+        AgentLoop.restorePinned(history, "next", pinned);
+        AgentLoop.restorePinned(history, "next", pinned);
+
+        assertThat(history).hasSize(3);
+        assertThat(history.getFirst().getContent()).isEqualTo(PINNED);
+        assertThat(history.stream().filter(m -> PINNED.equals(m.getContent()))).hasSize(1);
+    }
+
+    @Test
+    void pinnedContext_survivesAggressiveCompactionWithoutBeingPersistedOrDuplicated() {
+        when(aiClient.isPromptTooLongError(any())).thenReturn(true);
+        List<List<AiMessage>> requests = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    int call = calls.incrementAndGet();
+                    requests.add(List.copyOf(invocation.getArgument(0)));
+                    if (call == 3) {
+                        throw new HttpClientErrorException(HttpStatus.BAD_REQUEST, "too long");
+                    }
+                    return ChatTurn.text("answer-" + call);
+                });
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                // A tiny history budget, so the prompt-too-long retry really drops the kickoff.
+                new AgentBudget(5, 3, 3, 8000, 8_000, 10, 200_000, 0.7));
+        AtomicInteger rounds = new AtomicInteger();
+
+        LoopOutcome outcome = loop.run(ctx, "kickoff\n\n" + PINNED, new AgentStrategy() {
+            @Override public String systemPrompt() { return "sys"; }
+            @Override public String pinnedContext() { return PINNED; }
+            @Override public StepDecision step(AgentRunContext c, String r, int round) {
+                return rounds.incrementAndGet() < 3
+                        ? new StepDecision.Continue("next-" + round)
+                        : new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), r));
+            }
+            @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) {
+                throw new AssertionError("budget should not be exhausted");
+            }
+        });
+
+        assertThat(outcome.success()).isTrue();
+        // Before compaction the kickoff carries the guidance; the retry after compaction gets it back.
+        List<AiMessage> retried = requests.get(3);
+        assertThat(retried.stream().map(AiMessage::getContent)).doesNotContain("kickoff\n\n" + PINNED);
+        assertThat(retried.getFirst().getContent()).isEqualTo(PINNED);
+        for (List<AiMessage> request : requests) {
+            assertThat(request.stream().filter(m -> m.getContent() != null
+                    && m.getContent().contains(PINNED))).hasSizeLessThanOrEqualTo(1);
+        }
+        // Only the kickoff that delivered it is session history; the restored copy never is.
+        verify(sessionService, atLeastOnce()).flushMessages(any(), anyList(), anyLong(), anyLong());
+        verify(sessionService, never()).flushMessages(any(),
+                argThat(messages -> messages.contains(new PendingMessage("user", PINNED))),
+                anyLong(), anyLong());
+    }
 }

@@ -371,6 +371,21 @@ These timeouts apply to all outbound HTTP clients, including AI providers and Gi
 | `AUDIT_RETENTION` | `P90D` | ISO-8601 duration after which audit events are deleted. |
 | `AUDIT_GC_CRON` | `0 23 4 * * *` | Cron expression for the audit retention garbage collector. |
 
+### Agentic Review Feedback and Lessons (Optional)
+
+Instance-wide limits for the learning features of agentic reviews: the evidence snapshot kept when a workflow configuration enables feedback collection, and the curated lessons a review receives when it sets `learningMode` to `CURATED`. Workflow settings cannot raise them.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LEARNING_SNAPSHOT_MAX_CHARS` | `200000` | Characters kept per review snapshot (the task, diff and prompt a review was produced from). The diff and the system prompt get half each; content beyond that is dropped and the snapshot is marked incomplete, never silently shortened. Values below `1024` are raised to `1024`. |
+| `LEARNING_SNAPSHOT_RETENTION_DAYS` | `90` | Days review snapshots are kept (minimum `1`). Only the bulky snapshot expires; reviews, findings, feedback and lessons are kept. |
+| `LEARNING_SNAPSHOT_GC_CRON` | `0 53 3 * * *` | Cron expression for the snapshot garbage collector. |
+| `LEARNING_LESSON_RECHECK_DAYS` | `180` | Days after which a lesson revision is due for a maintainer's recheck (minimum `1`). The date is set when a revision is written, so a change applies to new revisions only. An active lesson past its recheck date is no longer supplied to reviews until it is revised. |
+| `LEARNING_CONTEXT_MAX_LESSONS` | `5` | Maximum number of lessons supplied to one agentic review or follow-up. Values above `20` are capped at `20`; `0` supplies none. |
+| `LEARNING_CONTEXT_MAX_TOKENS` | `1000` | Token allowance (estimated at 4 characters per token) for the guidance block of one review. It never exceeds a twentieth of the AI integration's context window, and values above `8000` are capped at `8000`. A lesson that does not fit is left out whole, never shortened. |
+
+See [Lessons for agentic reviews](WORKFLOW_LESSONS.md#what-a-review-receives) for how lessons are selected.
+
 ## Configuration via Web UI
 
 All AI provider and Git configuration is managed through the web interface:

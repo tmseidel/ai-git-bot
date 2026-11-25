@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
@@ -16,12 +17,14 @@ import java.time.Instant;
 /**
  * One delivery of a lesson revision into an agentic review. Lesson retrieval writes these rows;
  * listings count them. A count says how often guidance was supplied — it is adoption, not evidence
- * that the guidance improved anything.
+ * that the guidance improved anything. One invocation records each revision at most once.
  */
 @Data
 @NoArgsConstructor
 @Entity
 @Table(name = "lesson_usage",
+        uniqueConstraints = @UniqueConstraint(name = "uk_lesson_usage_invocation_revision",
+                columnNames = {"invocation_id", "revision_id"}),
         indexes = @Index(name = "idx_lesson_usage_lesson", columnList = "lesson_id, revision_id"))
 public class LessonUsage {
 

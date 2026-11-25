@@ -13,6 +13,5 @@ public interface KnowledgeLessonEvidenceRepository extends JpaRepository<Knowled
 
     List<KnowledgeLessonEvidence> findByFeedbackId(Long feedbackId);
 
-    List<KnowledgeLessonEvidence> findByTargetReferenceInAndLessonIdNot(Collection<String> targets,
-                                                                         Long lessonId);
+    List<KnowledgeLessonEvidence> findByTargetReferenceInOrderByIdAsc(Collection<String> targets);
 }

@@ -114,7 +114,47 @@ class KnowledgeLessonContractTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"h2", "postgresql"})
+    void oneInvocationRecordsEachLessonRevisionOnce(String vendor) throws Exception {
+        try (var database = FlywayDatabase.open(vendor)) {
+            database.flyway().migrate();
+            var sql = new JdbcTemplate(database.dataSource());
+            long lesson = insertLesson(sql);
+            insertRevision(sql, lesson, 1);
+            long revision = sql.queryForObject(
+                    "SELECT id FROM knowledge_lesson_revisions WHERE lesson_id = ?", Long.class, lesson);
+            insertUsage(sql, lesson, revision, "invocation-1");
+            insertUsage(sql, lesson, revision, "invocation-2");
+
+            assertThrows(DataIntegrityViolationException.class,
+                    () -> insertUsage(sql, lesson, revision, "invocation-1"));
+            assertEquals(2, sql.queryForObject(
+                    "SELECT COUNT(*) FROM lesson_usage WHERE revision_id = ?", Integer.class, revision));
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"h2", "postgresql"})
+    void theSnapshotHasRoomForTheLessonsAReviewReceived(String vendor) throws Exception {
+        try (var database = FlywayDatabase.open(vendor)) {
+            database.flyway().migrate();
+            var sql = new JdbcTemplate(database.dataSource());
+
+            assertEquals(0, sql.queryForList("SELECT lesson_selection, lesson_revisions, "
+                    + "lesson_context_hash FROM workflow_output_snapshots WHERE 1 = 0").size());
+        }
+    }
+
     // ------------------------------------------------------------------ fixtures
+
+    private static void insertUsage(JdbcTemplate sql, long lesson, long revision, String invocation) {
+        sql.update("""
+                INSERT INTO lesson_usage (lesson_id, revision_id, invocation_id, selection_reason,
+                    prompt_block_hash, created_at)
+                VALUES (?, ?, ?, 'repository-wide', ?, ?)
+                """, lesson, revision, invocation, "0".repeat(64), Timestamp.from(Instant.now()));
+    }
 
     private static LocalContainerEntityManagerFactoryBean entityManagerFactory(FlywayDatabase database) {
         var factory = new LocalContainerEntityManagerFactoryBean();

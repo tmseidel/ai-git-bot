@@ -144,7 +144,7 @@ class AgentReviewWorkflowTest {
         when(serviceFactory.create(bot)).thenReturn(service);
         when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), any(),
                 anyLong(), any(), anyBoolean(), any())).thenReturn(AgentReviewService.ReviewResult.POSTED);
-        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean()))
+        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean(), any()))
                 .thenReturn(AgentReviewService.ReviewResult.POSTED);
 
         assertEquals(WorkflowResultStatus.SUCCESS, workflow().run(context(bot)).status());
@@ -155,7 +155,7 @@ class AgentReviewWorkflowTest {
 
         verify(service).reviewPullRequest(any(), anyInt(), anyBoolean(), any(),
                 eq(1L), isNull(), eq(true), any());
-        verify(service).answerClarification(any(), anyString(), anyInt(), eq(true));
+        verify(service).answerClarification(any(), anyString(), anyInt(), eq(true), any());
     }
 
     @Test
@@ -216,7 +216,7 @@ class AgentReviewWorkflowTest {
                                          WorkflowResultStatus expected) {
         AgentReviewService service = mock(AgentReviewService.class);
         when(serviceFactory.create(any())).thenReturn(service);
-        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean())).thenReturn(serviceResult);
+        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean(), any())).thenReturn(serviceResult);
         PrWorkflowContext context = new PrWorkflowContext(new Bot(), new WebhookPayload(), 1L,
                 (name, log) -> { }, () -> false,
                 Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION, "Why was this changed?"), null);
