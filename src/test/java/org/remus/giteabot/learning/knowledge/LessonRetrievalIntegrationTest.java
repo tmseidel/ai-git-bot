@@ -1,5 +1,8 @@
 package org.remus.giteabot.learning.knowledge;
 
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.learning.context.LearningContextProvider;
@@ -42,6 +45,8 @@ class LessonRetrievalIntegrationTest {
     @Autowired private FeedbackService feedbackService;
     @Autowired private StructuredReviewService reviewService;
     @Autowired private LearningContextProvider provider;
+    @Autowired private KnowledgeLessonRevisionRepository revisionRepository;
+    @Autowired private EntityManagerFactory entityManagerFactory;
 
     private LessonFixtures fixtures;
     private String repo;
@@ -172,6 +177,70 @@ class LessonRetrievalIntegrationTest {
         assertThat(standing).containsOnlyKeys(supplied.lessonId());
         assertThat(standing.get(supplied.lessonId()).problems()).isEmpty();
         assertThat(standing.get(supplied.lessonId()).activeRevision()).isEqualTo(1);
+    }
+
+    @Test
+    void readingActiveLessonsAndTheirStandingTakesAFixedNumberOfQueries() {
+        LessonBundle.SelectedLesson supplied = provider.select(relevant()).lessons().getFirst();
+        long listingWithOne = statements(() -> lessons.activeLessons(scope(repo), 100));
+        long standingWithOne = statements(() -> lessons.standing(scope(repo),
+                Map.of(supplied.lessonId(), supplied.revisionId())));
+
+        // Five more active lessons, each with its own evidence and two revisions, two of them
+        // resting on the same finding as the first lesson (conflicts to resolve).
+        for (int i = 0; i < 5; i++) {
+            String source = i < 2 ? feedback
+                    : fixtures.incorrectFinding(repo, fixtures.finalizedReview(repo), "alex");
+            String more = lessons.propose(scope(repo), comment(repo), source, List.of(),
+                    "Lesson " + i + ".", "alex").lessonReference();
+            lessons.revise(scope(repo), comment(repo), more, null, "Lesson " + i + ", revised.", "alex");
+            lessons.activate(scope(repo), comment(repo), more, 2, "alex");
+        }
+        assertThat(lessons.activeLessons(scope(repo), 100)).hasSize(6);
+
+        assertThat(statements(() -> lessons.activeLessons(scope(repo), 100)))
+                .as("listing queries").isEqualTo(listingWithOne);
+        assertThat(statements(() -> lessons.standing(scope(repo),
+                Map.of(supplied.lessonId(), supplied.revisionId()))))
+                .as("standing queries").isEqualTo(standingWithOne);
+    }
+
+    @Test
+    void selectionAndRevocationApplyTheSameRulesInTheSameWords() {
+        LessonBundle.SelectedLesson supplied = provider.select(relevant()).lessons().getFirst();
+        // Every rule at once: a conflicting lesson, an overdue recheck and a withdrawn evidence.
+        String rival = lessons.propose(scope(repo), comment(repo), feedback, List.of(),
+                "Report every endpoint without an explicit permission check.", "alex").lessonReference();
+        lessons.activate(scope(repo), comment(repo), rival, 1, "alex");
+        KnowledgeLessonRevision row = revisionRepository.findById(supplied.revisionId()).orElseThrow();
+        row.setRecheckAfter(java.time.Instant.now().minusSeconds(60));
+        revisionRepository.save(row);
+        feedbackService.retract(scope(repo), feedback, "alex");
+
+        KnowledgeLessonService.Validation shown = lessons.activeLessons(scope(repo), 100).stream()
+                .filter(active -> active.summary().id().equals(supplied.lessonId()))
+                .findFirst().orElseThrow().summary().validation();
+        List<String> expected = new java.util.ArrayList<>(shown.issues());
+        expected.addAll(shown.conflicts());
+        assertThat(expected).anySatisfy(issue -> assertThat(issue).startsWith("review required"))
+                .anySatisfy(issue -> assertThat(issue).contains(" is retracted"))
+                .anySatisfy(issue -> assertThat(issue).startsWith("recheck due since"))
+                .anySatisfy(issue -> assertThat(issue).contains(" also rests on "));
+
+        assertThat(lessons.standing(scope(repo), Map.of(supplied.lessonId(), supplied.revisionId()))
+                .get(supplied.lessonId()).problems()).isEqualTo(expected);
+    }
+
+    private long statements(Runnable read) {
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        statistics.setStatisticsEnabled(true);
+        statistics.clear();
+        try {
+            read.run();
+            return statistics.getPrepareStatementCount();
+        } finally {
+            statistics.setStatisticsEnabled(false);
+        }
     }
 
     @Test

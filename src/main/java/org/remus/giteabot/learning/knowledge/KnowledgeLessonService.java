@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -351,7 +352,7 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
                     // activatable
                 }
             }
-            List<EvidenceView> evidence = evidenceOf(revision);
+            List<EvidenceView> evidence = read(List.of(revision), false).evidence(revision);
             if (evidence.stream().noneMatch(EvidenceView::effective)) {
                 throw new LessonRejectedException("unsupported", named + " has no effective "
                         + "evidence left (" + describe(evidence) + "). Propose a lesson from current "
@@ -532,11 +533,9 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
         return findInScope(scope, lessonReference).map(lesson -> {
             List<KnowledgeLessonRevision> rows =
                     revisionRepository.findByLessonIdOrderByRevisionNumberAsc(lesson.getId());
-            List<RevisionView> revisions = new ArrayList<>();
-            for (KnowledgeLessonRevision row : rows) {
-                revisions.add(view(row));
-            }
-            Summary summary = summarize(lesson, revisions);
+            Reads reads = read(rows, true);
+            List<RevisionView> revisions = rows.stream().map(row -> view(row, reads)).toList();
+            Summary summary = summarize(lesson, revisions, reads, Instant.now());
             List<HistoryEntry> history = eventRepository.findByLessonIdOrderByIdAsc(lesson.getId())
                     .stream()
                     .map(event -> new HistoryEntry(event.getEventType(), event.getRevisionNumber(),
@@ -566,14 +565,15 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
                 scope.repoOwner(), scope.repoName(), WORKFLOW_KEY, states, beforeId,
                 PageRequest.of(0, limit + 1));
         boolean more = rows.size() > limit;
+        List<KnowledgeLesson> page = rows.stream().limit(limit).toList();
+        Map<Long, List<KnowledgeLessonRevision>> revisionsByLesson = revisionsOf(page);
+        Reads reads = read(revisionsByLesson.values().stream().flatMap(List::stream).toList(), true);
+        Instant now = Instant.now();
         List<Summary> summaries = new ArrayList<>();
-        for (KnowledgeLesson lesson : rows.stream().limit(limit).toList()) {
-            List<RevisionView> revisions = new ArrayList<>();
-            for (KnowledgeLessonRevision row :
-                    revisionRepository.findByLessonIdOrderByRevisionNumberAsc(lesson.getId())) {
-                revisions.add(view(row));
-            }
-            summaries.add(summarize(lesson, revisions));
+        for (KnowledgeLesson lesson : page) {
+            List<RevisionView> revisions = revisionsByLesson.getOrDefault(lesson.getId(), List.of())
+                    .stream().map(row -> view(row, reads)).toList();
+            summaries.add(summarize(lesson, revisions, reads, now));
         }
         String next = more ? LessonCursor.encode(scope, state, summaries.getLast().id()) : null;
         return new ListPage(summaries, next);
@@ -583,6 +583,9 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
      * The repository's lessons that currently have an active revision, newest first and at most
      * {@code limit}, with the same validation {@code learning show} reports. Filtering on that
      * validation is the caller's decision; nothing is excluded here.
+     *
+     * <p>Read at the start of every agentic review and follow-up, so it takes a fixed number of
+     * queries whatever the number of lessons, revisions and evidence.</p>
      */
     @Transactional(readOnly = true)
     public List<ActiveLesson> activeLessons(FeedbackScope scope, int limit) {
@@ -592,24 +595,24 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
         List<KnowledgeLesson> rows = lessonRepository.page(scope.gitIntegrationId(), scope.botId(),
                 scope.repoOwner(), scope.repoName(), WORKFLOW_KEY, EnumSet.of(LessonState.ACTIVE),
                 Long.MAX_VALUE, PageRequest.of(0, Math.max(1, limit)));
+        List<KnowledgeLesson> lessons = rows.stream()
+                .filter(lesson -> lesson.getActiveRevision() != null && inScope(scope, lesson))
+                .toList();
+        Map<Long, List<KnowledgeLessonRevision>> revisionsByLesson = revisionsOf(lessons);
+        Reads reads = read(revisionsByLesson.values().stream().flatMap(List::stream).toList(), true);
+        Instant now = Instant.now();
         List<ActiveLesson> active = new ArrayList<>();
-        for (KnowledgeLesson lesson : rows) {
-            if (lesson.getActiveRevision() == null || !inScope(scope, lesson)) {
-                continue;
-            }
+        for (KnowledgeLesson lesson : lessons) {
             List<KnowledgeLessonRevision> revisions =
-                    revisionRepository.findByLessonIdOrderByRevisionNumberAsc(lesson.getId());
+                    revisionsByLesson.getOrDefault(lesson.getId(), List.of());
             KnowledgeLessonRevision activeRow = revisions.stream()
                     .filter(row -> row.getRevisionNumber() == lesson.getActiveRevision())
                     .findFirst().orElse(null);
             if (activeRow == null) {
                 continue;
             }
-            List<RevisionView> views = new ArrayList<>();
-            for (KnowledgeLessonRevision row : revisions) {
-                views.add(view(row));
-            }
-            active.add(new ActiveLesson(summarize(lesson, views), activeRow.getId(),
+            List<RevisionView> views = revisions.stream().map(row -> view(row, reads)).toList();
+            active.add(new ActiveLesson(summarize(lesson, views, reads, now), activeRow.getId(),
                     activeRow.getContentHash(), activeRow.getActivatedAt()));
         }
         return active;
@@ -617,10 +620,8 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
 
     /**
      * The current standing of lesson revisions a running review received, for its round-boundary
-     * revocation check. It applies the validation of {@link #activeLessons} — review required, cited
-     * feedback no longer effective, recheck due, conflicting active lesson — but only to the given
-     * revisions and with a fixed number of queries, whatever the number of lessons, revisions and
-     * evidence in the repository.
+     * revocation check: the same validation {@link #activeLessons} applies at selection, but only
+     * for the given revisions and with a fixed number of queries.
      *
      * @param revisionIdsByLesson lesson id → id of the revision row the review received
      * @return standings of the lessons that still exist in this scope; a missing id means gone
@@ -631,80 +632,26 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
                 || revisionIdsByLesson == null || revisionIdsByLesson.isEmpty()) {
             return Map.of();
         }
-        Map<Long, KnowledgeLesson> lessons = new HashMap<>();
-        for (KnowledgeLesson lesson : lessonRepository.findAllById(revisionIdsByLesson.keySet())) {
-            if (inScope(scope, lesson)) {
-                lessons.put(lesson.getId(), lesson);
-            }
-        }
         Map<Long, KnowledgeLessonRevision> supplied = new HashMap<>();
         for (KnowledgeLessonRevision revision : revisionRepository.findAllById(revisionIdsByLesson.values())) {
             supplied.put(revision.getId(), revision);
         }
-        List<KnowledgeLessonEvidence> cited = evidenceRepository.findByRevisionIdInOrderByIdAsc(
-                supplied.isEmpty() ? List.of(-1L) : supplied.keySet());
-        Map<Long, WorkflowFeedback> feedback = new HashMap<>();
-        for (WorkflowFeedback record : feedbackRepository.findAllById(cited.stream()
-                .map(KnowledgeLessonEvidence::getFeedbackId).collect(Collectors.toSet()))) {
-            feedback.put(record.getId(), record);
-        }
-        Set<String> targets = cited.stream().map(KnowledgeLessonEvidence::getTargetReference)
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-        List<KnowledgeLessonEvidence> onTargets = targets.isEmpty() ? List.of()
-                : evidenceRepository.findByTargetReferenceIn(targets);
-        Map<Long, KnowledgeLesson> citing = new HashMap<>();
-        for (KnowledgeLesson other : lessonRepository.findAllById(onTargets.stream()
-                .map(KnowledgeLessonEvidence::getLessonId).collect(Collectors.toSet()))) {
-            if (other.getActiveRevision() != null && inScope(scope, other)) {
-                citing.put(other.getId(), other);
-            }
-        }
-        Map<Long, KnowledgeLessonRevision> citingRevisions = new HashMap<>();
-        for (KnowledgeLessonRevision revision : revisionRepository.findAllById(onTargets.stream()
-                .filter(row -> citing.containsKey(row.getLessonId()))
-                .map(KnowledgeLessonEvidence::getRevisionId).collect(Collectors.toSet()))) {
-            citingRevisions.put(revision.getId(), revision);
-        }
-
+        Reads reads = read(List.copyOf(supplied.values()), false);
         Instant now = Instant.now();
         Map<Long, Standing> standings = new HashMap<>();
-        for (KnowledgeLesson lesson : lessons.values()) {
+        for (KnowledgeLesson lesson : lessonRepository.findAllById(revisionIdsByLesson.keySet())) {
+            if (!inScope(scope, lesson)) {
+                continue;
+            }
             KnowledgeLessonRevision revision = supplied.get(revisionIdsByLesson.get(lesson.getId()));
             List<String> problems = new ArrayList<>();
-            if (lesson.isReviewRequired()) {
-                problems.add("review required: " + lesson.getReviewReason());
+            if (revision == null || !revision.getLessonId().equals(lesson.getId())) {
+                problems.add("the supplied revision no longer exists");
+            } else {
+                Validation validation = validate(lesson, view(revision, reads), reads, now);
+                problems.addAll(validation.issues());
+                problems.addAll(validation.conflicts());
             }
-            Set<String> own = new LinkedHashSet<>();
-            for (KnowledgeLessonEvidence row : cited) {
-                if (revision == null || !row.getRevisionId().equals(revision.getId())) {
-                    continue;
-                }
-                own.add(row.getTargetReference());
-                WorkflowFeedback record = feedback.get(row.getFeedbackId());
-                if (record == null) {
-                    problems.add(row.getFeedbackReference() + " no longer exists");
-                } else if (record.getState() != FeedbackState.EFFECTIVE) {
-                    problems.add(record.getReference() + " is "
-                            + record.getState().name().toLowerCase(Locale.ROOT)
-                            + (record.getSupersededBy() == null ? "" : " (by " + record.getSupersededBy() + ")"));
-                }
-            }
-            if (revision != null && revision.getRecheckAfter() != null
-                    && revision.getRecheckAfter().isBefore(now)) {
-                problems.add("recheck due since " + revision.getRecheckAfter());
-            }
-            Set<String> conflicts = new LinkedHashSet<>();
-            for (KnowledgeLessonEvidence row : onTargets) {
-                KnowledgeLesson other = citing.get(row.getLessonId());
-                KnowledgeLessonRevision theirs = citingRevisions.get(row.getRevisionId());
-                if (other != null && !other.getId().equals(lesson.getId()) && theirs != null
-                        && own.contains(row.getTargetReference())
-                        && theirs.getRevisionNumber() == other.getActiveRevision()) {
-                    conflicts.add(LessonReference.revision(other.getReference(),
-                            theirs.getRevisionNumber()) + " also rests on " + row.getTargetReference());
-                }
-            }
-            problems.addAll(conflicts);
             standings.put(lesson.getId(), new Standing(lesson.getId(), lesson.getState(),
                     lesson.getActiveRevision(), problems));
         }
@@ -936,34 +883,127 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
         return paths.stream().limit(LessonPathScope.MAX_PATTERNS).toList();
     }
 
-    private RevisionView view(KnowledgeLessonRevision row) {
+    // ------------------------------------------------------------------ batched reads and validation
+
+    /** Every revision of the lessons, in one query: lesson id → revisions in number order. */
+    private Map<Long, List<KnowledgeLessonRevision>> revisionsOf(List<KnowledgeLesson> lessons) {
+        if (lessons.isEmpty()) {
+            return Map.of();
+        }
+        return revisionRepository.findByLessonIdInOrderByLessonIdAscRevisionNumberAsc(
+                        lessons.stream().map(KnowledgeLesson::getId).toList())
+                .stream()
+                .collect(Collectors.groupingBy(KnowledgeLessonRevision::getLessonId,
+                        LinkedHashMap::new, Collectors.toList()));
+    }
+
+    /**
+     * What views and validation of some revisions need, read with a fixed number of queries
+     * whatever the number of revisions and evidence: the feedback their evidence cites, optionally
+     * usage counts, and the other lessons resting on the same review targets.
+     */
+    private Reads read(List<KnowledgeLessonRevision> revisions, boolean withUsage) {
+        if (revisions.isEmpty()) {
+            return Reads.EMPTY;
+        }
+        List<KnowledgeLessonEvidence> cited = evidenceRepository.findByRevisionIdInOrderByIdAsc(
+                revisions.stream().map(KnowledgeLessonRevision::getId).collect(Collectors.toSet()));
+        Map<Long, WorkflowFeedback> feedback = new HashMap<>();
+        if (!cited.isEmpty()) {
+            for (WorkflowFeedback record : feedbackRepository.findAllById(cited.stream()
+                    .map(KnowledgeLessonEvidence::getFeedbackId).collect(Collectors.toSet()))) {
+                feedback.put(record.getId(), record);
+            }
+        }
+        Map<Long, List<EvidenceView>> evidence = new HashMap<>();
+        for (KnowledgeLessonEvidence row : cited) {
+            evidence.computeIfAbsent(row.getRevisionId(), id -> new ArrayList<>())
+                    .add(evidenceView(row, feedback.get(row.getFeedbackId())));
+        }
+        Map<Long, Long> usage = new HashMap<>();
+        if (withUsage) {
+            for (Object[] count : usageRepository.countPerRevision(revisions.stream()
+                    .map(KnowledgeLessonRevision::getLessonId).collect(Collectors.toSet()))) {
+                usage.put((Long) count[0], ((Number) count[1]).longValue());
+            }
+        }
+        Set<String> targets = evidence.values().stream().flatMap(List::stream)
+                .map(EvidenceView::targetReference).filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<KnowledgeLessonEvidence> onTargets = targets.isEmpty() ? List.of()
+                : evidenceRepository.findByTargetReferenceInOrderByIdAsc(targets);
+        Map<Long, KnowledgeLesson> citing = new HashMap<>();
+        if (!onTargets.isEmpty()) {
+            for (KnowledgeLesson lesson : lessonRepository.findAllById(onTargets.stream()
+                    .map(KnowledgeLessonEvidence::getLessonId).collect(Collectors.toSet()))) {
+                if (lesson.getActiveRevision() != null) {
+                    citing.put(lesson.getId(), lesson);
+                }
+            }
+        }
+        Map<Long, KnowledgeLessonRevision> citingRevisions = new HashMap<>();
+        Set<Long> citingRevisionIds = onTargets.stream()
+                .filter(row -> citing.containsKey(row.getLessonId()))
+                .map(KnowledgeLessonEvidence::getRevisionId).collect(Collectors.toSet());
+        if (!citingRevisionIds.isEmpty()) {
+            for (KnowledgeLessonRevision revision : revisionRepository.findAllById(citingRevisionIds)) {
+                citingRevisions.put(revision.getId(), revision);
+            }
+        }
+        return new Reads(evidence, usage, onTargets, citing, citingRevisions);
+    }
+
+    /**
+     * Everything {@link #read} loaded.
+     *
+     * @param onTargets       evidence rows of any lesson on the review targets the read revisions
+     *                        rest on, in id order
+     * @param citing          lessons of those rows that have an active revision
+     * @param citingRevisions revisions of those rows, for the citing lessons
+     */
+    private record Reads(Map<Long, List<EvidenceView>> evidenceByRevision,
+                         Map<Long, Long> usageByRevision, List<KnowledgeLessonEvidence> onTargets,
+                         Map<Long, KnowledgeLesson> citing,
+                         Map<Long, KnowledgeLessonRevision> citingRevisions) {
+
+        static final Reads EMPTY = new Reads(Map.of(), Map.of(), List.of(), Map.of(), Map.of());
+
+        List<EvidenceView> evidence(KnowledgeLessonRevision revision) {
+            return List.copyOf(evidenceByRevision.getOrDefault(revision.getId(), List.of()));
+        }
+
+        long usage(KnowledgeLessonRevision revision) {
+            return usageByRevision.getOrDefault(revision.getId(), 0L);
+        }
+    }
+
+    private static EvidenceView evidenceView(KnowledgeLessonEvidence cited, WorkflowFeedback record) {
+        return record != null
+                ? new EvidenceView(record.getReference(), record.getTargetReference(),
+                        record.getTargetType(), record.getVerdict(), record.getState(),
+                        record.getSupersededBy(), record.getActor(), record.getPrNumber(),
+                        record.getCommentKind(), record.getCommentId())
+                : new EvidenceView(cited.getFeedbackReference(), cited.getTargetReference(), null,
+                        null, null, null, null, null, null, null);
+    }
+
+    private static RevisionView view(KnowledgeLessonRevision row, Reads reads) {
         return new RevisionView(row.getRevisionNumber(), row.getState(), row.getText(),
                 LessonPathScope.deserialize(row.getPathScopes()), row.getCategory(),
                 row.getSourceCommitSha(), row.getRecheckAfter(), row.getCreatedBy(),
                 row.getCreatedAt(), row.getActivationProvenance(), row.getActivatedBy(),
-                row.getActivatedAt(), row.getEndedBy(), row.getEndedAt(), evidenceOf(row),
-                usageRepository.countByRevisionId(row.getId()));
+                row.getActivatedAt(), row.getEndedBy(), row.getEndedAt(), reads.evidence(row),
+                reads.usage(row));
     }
 
-    private List<EvidenceView> evidenceOf(KnowledgeLessonRevision revision) {
-        List<EvidenceView> out = new ArrayList<>();
-        for (KnowledgeLessonEvidence cited : evidenceRepository.findByRevisionIdOrderByIdAsc(revision.getId())) {
-            Optional<WorkflowFeedback> feedback = feedbackRepository.findById(cited.getFeedbackId());
-            out.add(feedback.map(record -> new EvidenceView(record.getReference(),
-                            record.getTargetReference(), record.getTargetType(), record.getVerdict(),
-                            record.getState(), record.getSupersededBy(), record.getActor(),
-                            record.getPrNumber(), record.getCommentKind(), record.getCommentId()))
-                    .orElseGet(() -> new EvidenceView(cited.getFeedbackReference(),
-                            cited.getTargetReference(), null, null, null, null, null, null, null,
-                            null)));
-        }
-        return out;
-    }
-
-    private Summary summarize(KnowledgeLesson lesson, List<RevisionView> revisions) {
+    /** @param revisions every revision of the lesson, read through the same {@code reads} */
+    private static Summary summarize(KnowledgeLesson lesson, List<RevisionView> revisions, Reads reads,
+                                     Instant now) {
         Map<Integer, RevisionView> byNumber = new HashMap<>();
+        long usage = 0;
         for (RevisionView revision : revisions) {
             byNumber.put(revision.number(), revision);
+            usage += revision.usageCount();
         }
         RevisionView current = lesson.getActiveRevision() != null
                 ? byNumber.get(lesson.getActiveRevision())
@@ -975,12 +1015,16 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
                 ? lesson.getLatestRevision() : null;
         return new Summary(lesson.getId(), lesson.getReference(), lesson.getState(),
                 lesson.getActiveRevision(), lesson.getLatestRevision(), current, pending,
-                lesson.isReviewRequired(), lesson.getReviewReason(),
-                usageRepository.countByLessonId(lesson.getId()), lesson.getRepoOwner(),
-                lesson.getRepoName(), validate(lesson, current));
+                lesson.isReviewRequired(), lesson.getReviewReason(), usage, lesson.getRepoOwner(),
+                lesson.getRepoName(), validate(lesson, current, reads, now));
     }
 
-    private Validation validate(KnowledgeLesson lesson, RevisionView current) {
+    /**
+     * The one rule set deciding whether a lesson revision may guide a review — shown by
+     * {@code learning show}, applied at selection and rechecked while a review runs.
+     */
+    private static Validation validate(KnowledgeLesson lesson, RevisionView current, Reads reads,
+                                       Instant now) {
         List<String> issues = new ArrayList<>();
         if (lesson.isReviewRequired()) {
             issues.add("review required: " + lesson.getReviewReason());
@@ -994,37 +1038,35 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
                         : " (by " + cited.supersededBy() + ")"));
             }
         }
-        if (current.recheckAfter() != null && current.recheckAfter().isBefore(Instant.now())
+        if (current.recheckAfter() != null && current.recheckAfter().isBefore(now)
                 && (current.state() == LessonState.ACTIVE || current.state() == LessonState.CANDIDATE)) {
             issues.add("recheck due since " + current.recheckAfter());
         }
-        return new Validation(issues, conflicts(lesson, current));
+        return new Validation(issues, conflicts(lesson, current, reads));
     }
 
     /**
      * Other active lessons of the same repository whose active revision rests on feedback about the
      * same review target: two lessons drawn from one finding may say opposite things.
      */
-    private List<String> conflicts(KnowledgeLesson lesson, RevisionView current) {
+    private static List<String> conflicts(KnowledgeLesson lesson, RevisionView current, Reads reads) {
         Set<String> targets = new LinkedHashSet<>();
         for (EvidenceView cited : current.evidence()) {
             targets.add(cited.targetReference());
         }
-        if (targets.isEmpty()) {
-            return List.of();
-        }
         Set<String> conflicts = new LinkedHashSet<>();
-        for (KnowledgeLessonEvidence other :
-                evidenceRepository.findByTargetReferenceInAndLessonIdNot(targets, lesson.getId())) {
-            lessonRepository.findById(other.getLessonId())
-                    .filter(candidate -> candidate.getActiveRevision() != null)
-                    .filter(candidate -> sameScope(lesson, candidate))
-                    .ifPresent(candidate -> revisionRepository.findById(other.getRevisionId())
-                            .filter(revision -> revision.getRevisionNumber()
-                                    == candidate.getActiveRevision())
-                            .ifPresent(revision -> conflicts.add(LessonReference.revision(
-                                    candidate.getReference(), revision.getRevisionNumber())
-                                    + " also rests on " + other.getTargetReference())));
+        for (KnowledgeLessonEvidence other : reads.onTargets()) {
+            if (other.getLessonId().equals(lesson.getId())
+                    || !targets.contains(other.getTargetReference())) {
+                continue;
+            }
+            KnowledgeLesson candidate = reads.citing().get(other.getLessonId());
+            KnowledgeLessonRevision revision = reads.citingRevisions().get(other.getRevisionId());
+            if (candidate != null && sameScope(lesson, candidate) && revision != null
+                    && revision.getRevisionNumber() == candidate.getActiveRevision()) {
+                conflicts.add(LessonReference.revision(candidate.getReference(),
+                        revision.getRevisionNumber()) + " also rests on " + other.getTargetReference());
+            }
         }
         return List.copyOf(conflicts);
     }
