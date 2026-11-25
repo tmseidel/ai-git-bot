@@ -141,6 +141,9 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private final Submission submission;
     private final Lookup lookup;
 
+    /** Learned guidance this run received, or {@code null}; rechecked at every round boundary. */
+    private final LearnedGuidance guidance;
+
     public ReviewAgentStrategy(String systemPrompt,
                                AgentToolRouter toolRouter,
                                ToolCatalog catalog,
@@ -154,6 +157,30 @@ public final class ReviewAgentStrategy implements AgentStrategy {
                                int maxSubmissionRounds,
                                Lookup lookup,
                                Submission submission) {
+        this(systemPrompt, toolRouter, catalog, mcpToolCatalog, allowedBuiltinTools, responseParser,
+                branchSwitcher, fileFetcher, maxContextRounds, maxToolRounds, maxSubmissionRounds,
+                lookup, submission, null);
+    }
+
+    /**
+     * @param guidance learned guidance delivered in the initial user message, or {@code null}. It is
+     *                 pinned against compaction and rechecked before each round's tools run; once
+     *                 revoked the run ends without executing anything further.
+     */
+    public ReviewAgentStrategy(String systemPrompt,
+                               AgentToolRouter toolRouter,
+                               ToolCatalog catalog,
+                               McpToolCatalog mcpToolCatalog,
+                               Set<String> allowedBuiltinTools,
+                               AiResponseParser responseParser,
+                               BranchSwitcher branchSwitcher,
+                               FileFetcher fileFetcher,
+                               int maxContextRounds,
+                               int maxToolRounds,
+                               int maxSubmissionRounds,
+                               Lookup lookup,
+                               Submission submission,
+                               LearnedGuidance guidance) {
         this.systemPrompt = systemPrompt;
         this.toolRouter = toolRouter;
         this.catalog = catalog;
@@ -167,11 +194,18 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         this.maxSubmissionRounds = Math.max(1, maxSubmissionRounds);
         this.submission = submission;
         this.lookup = lookup;
+        this.guidance = guidance;
     }
 
     @Override
     public String systemPrompt() {
         return systemPrompt;
+    }
+
+    /** The learned guidance block, kept in the conversation even when compaction drops the kickoff. */
+    @Override
+    public String pinnedContext() {
+        return guidance == null ? null : guidance.text();
     }
 
     /** {@code true} when this run publishes a stored review rather than an answer. */
@@ -224,6 +258,9 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     @Override
     public StepDecision step(AgentRunContext ctx, ChatTurn turn, int round) {
+        if (guidanceRevoked()) {
+            return cancelForRevokedGuidance(ctx, turn.toolCalls());
+        }
         StopReason expected = turn.hasToolCalls() ? StopReason.TOOL_USE : StopReason.END_TURN;
         if (turn.stopReason() != expected) {
             return incompleteTurn(ctx, turn.stopReason());
@@ -236,6 +273,9 @@ public final class ReviewAgentStrategy implements AgentStrategy {
 
     @Override
     public StepDecision stepLegacy(AgentRunContext ctx, ChatTurn turn, int round) {
+        if (guidanceRevoked()) {
+            return cancelForRevokedGuidance(ctx, List.of());
+        }
         // Reject any turn carrying tool calls, even with END_TURN: the legacy
         // JSON protocol has no native-call envelope, so such a mix can only be
         // provider metadata leaking into a text turn — never accept its text.
@@ -243,6 +283,31 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             return incompleteTurn(ctx, turn.stopReason());
         }
         return step(ctx, turn.assistantText(), round);
+    }
+
+    // ------------------------------------------------------------------ learned guidance
+
+    /** Round boundary: whether guidance this run already received was revoked since. */
+    private boolean guidanceRevoked() {
+        return guidance != null && guidance.recheck().isPresent();
+    }
+
+    /**
+     * Ends the run without executing this round's calls. The model has already read guidance that is
+     * no longer permitted and the earlier messages cannot be erased, so nothing it produced may be
+     * published; the caller turns this into a cancelled run.
+     */
+    private StepDecision cancelForRevokedGuidance(AgentRunContext ctx, List<ToolCall> calls) {
+        String reason = guidance.revokedReason().orElse("its learned guidance was revoked");
+        log.warn("Agentic review run for PR #{} stops before publication: {}", ctx.issueNumber(), reason);
+        List<StepDecision.ToolCallResult> notExecuted = new ArrayList<>(calls.size());
+        for (ToolCall call : calls) {
+            notExecuted.add(new StepDecision.ToolCallResult(call.id(),
+                    "Not executed: the run was cancelled because " + reason + "."));
+        }
+        return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(),
+                "⚠️ *The run was cancelled because learned guidance it used was revoked: " + reason
+                        + ".*"), notExecuted);
     }
 
     // ------------------------------------------------------------------ native transport
@@ -326,9 +391,9 @@ public final class ReviewAgentStrategy implements AgentStrategy {
             }
         }
         if (!exploration.isEmpty()) {
-            actions.add(0, "inspected repository: " + String.join(", ", exploration));
+            actions.addFirst("inspected repository: " + String.join(", ", exploration));
         }
-        return String.join(" \u00B7 ", actions);
+        return String.join(" · ", actions);
     }
 
     private static String describeSubmission(String tool) {
@@ -743,8 +808,8 @@ public final class ReviewAgentStrategy implements AgentStrategy {
     private ToolResult executeLegacyLookup(ImplementationPlan.ToolRequest request) {
         ObjectNode arguments = JSON.createObjectNode();
         List<String> args = request.getArgs() == null ? List.of() : request.getArgs();
-        if (!args.isEmpty() && args.get(0) != null && !args.get(0).isBlank()) {
-            arguments.put("reference", args.get(0));
+        if (!args.isEmpty() && args.get(0) != null && !args.getFirst().isBlank()) {
+            arguments.put("reference", args.getFirst());
         }
         if (args.size() > 1 && args.get(1) != null && !args.get(1).isBlank()) {
             arguments.put("query", args.get(1));
@@ -771,10 +836,6 @@ public final class ReviewAgentStrategy implements AgentStrategy {
         log.warn("Agentic review stopped before completion for PR #{}: {}", ctx.issueNumber(), reason);
         return new StepDecision.Finish(LoopOutcome.fail(ctx.baseBranch(),
                 "Agentic review stopped before completion: " + reason));
-    }
-
-    int explorationRoundsUsed() {
-        return toolRounds;
     }
 
     int submissionRoundsUsed() {

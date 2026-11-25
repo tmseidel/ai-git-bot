@@ -193,6 +193,15 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
     public record ListPage(List<Summary> rows, String nextCursor) {
     }
 
+    /**
+     * One active lesson as lesson retrieval sees it: the summary (whose {@code current()} is the
+     * active revision, with its evidence and validation), plus the identity and wording hash of that
+     * revision, so a usage record can prove exactly which text was supplied.
+     */
+    public record ActiveLesson(Summary summary, Long revisionId, String contentHash,
+                               Instant activatedAt) {
+    }
+
     // ------------------------------------------------------------------ commands
 
     /**
@@ -551,6 +560,42 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
         }
         String next = more ? LessonCursor.encode(scope, state, summaries.getLast().id()) : null;
         return new ListPage(summaries, next);
+    }
+
+    /**
+     * The repository's lessons that currently have an active revision, newest first and at most
+     * {@code limit}, with the same validation {@code learning show} reports. Filtering on that
+     * validation is the caller's decision; nothing is excluded here.
+     */
+    @Transactional(readOnly = true)
+    public List<ActiveLesson> activeLessons(FeedbackScope scope, int limit) {
+        if (scope == null || scope.gitIntegrationId() == null || scope.botId() == null) {
+            return List.of();
+        }
+        List<KnowledgeLesson> rows = lessonRepository.page(scope.gitIntegrationId(), scope.botId(),
+                scope.repoOwner(), scope.repoName(), WORKFLOW_KEY, EnumSet.of(LessonState.ACTIVE),
+                Long.MAX_VALUE, PageRequest.of(0, Math.max(1, limit)));
+        List<ActiveLesson> active = new ArrayList<>();
+        for (KnowledgeLesson lesson : rows) {
+            if (lesson.getActiveRevision() == null || !inScope(scope, lesson)) {
+                continue;
+            }
+            List<KnowledgeLessonRevision> revisions =
+                    revisionRepository.findByLessonIdOrderByRevisionNumberAsc(lesson.getId());
+            KnowledgeLessonRevision activeRow = revisions.stream()
+                    .filter(row -> row.getRevisionNumber() == lesson.getActiveRevision())
+                    .findFirst().orElse(null);
+            if (activeRow == null) {
+                continue;
+            }
+            List<RevisionView> views = new ArrayList<>();
+            for (KnowledgeLessonRevision row : revisions) {
+                views.add(view(row));
+            }
+            active.add(new ActiveLesson(summarize(lesson, views), activeRow.getId(),
+                    activeRow.getContentHash(), activeRow.getActivatedAt()));
+        }
+        return active;
     }
 
     /**

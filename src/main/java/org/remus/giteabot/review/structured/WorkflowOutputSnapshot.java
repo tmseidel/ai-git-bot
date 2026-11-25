@@ -92,6 +92,22 @@ public class WorkflowOutputSnapshot {
     @Column(name = "settings_hash", length = 64)
     private String settingsHash;
 
+    /**
+     * Whether learned guidance was supplied, or why not — the name of a lesson-bundle status such as
+     * {@code SELECTED}, {@code NONE}, {@code LEARNING_OFF} or {@code UNAVAILABLE}. A review whose
+     * retrieval was unavailable ran without lessons and is no lesson's evidence.
+     */
+    @Column(name = "lesson_selection", length = 16)
+    private String lessonSelection;
+
+    /** The exact lesson revisions supplied ({@code L17@1, L18@2}); {@code null} for none. */
+    @Column(name = "lesson_revisions", length = 1000)
+    private String lessonRevisions;
+
+    /** SHA-256 of the guidance block the model received; {@code null} for none. */
+    @Column(name = "lesson_context_hash", length = 64)
+    private String lessonContextHash;
+
     @Column(nullable = false)
     private boolean complete;
 

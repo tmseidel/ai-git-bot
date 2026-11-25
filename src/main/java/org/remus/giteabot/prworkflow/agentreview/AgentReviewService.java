@@ -36,6 +36,9 @@ import java.util.function.Consumer;
  * agent until it finalizes a structured review, and {@link ReviewPublisher} renders and posts that
  * stored record. Nothing is published from model prose, so the comment is reproducible from the
  * database and the formal decision is computed from persisted findings.</p>
+ *
+ * <p>Curated lessons reach the run only through the explicit {@link AgentReviewLessons} argument;
+ * a run whose lessons are revoked before publication is cancelled, not published.</p>
  */
 @Slf4j
 public class AgentReviewService {
@@ -82,7 +85,8 @@ public class AgentReviewService {
                               ReviewSnapshotService snapshotService,
                               ReviewLookupToolExecutor reviewLookup,
                               ReviewCommentProperties commentProperties,
-                              ReviewPublisher publisher) {
+                              ReviewPublisher publisher,
+                              AgentReviewLessons lessons) {
         this.bot = bot;
         this.repositoryPlatform = context.repositoryPlatform();
         this.repositoryClient = repositoryPlatform.getClient();
@@ -91,7 +95,7 @@ public class AgentReviewService {
         this.execution = new AgentReviewExecution(context, sessionService, toolExecutionService,
                 toolCatalog, workspaceService, agentConfig, mcpOrchestrationService, bot,
                 reviewService, submissionExecutor, snapshotService, reviewLookup,
-                pythonExecution);
+                pythonExecution, lessons);
     }
 
     /**
@@ -121,12 +125,19 @@ public class AgentReviewService {
                             enableProgressComments, runId, toolCallConsumer,
                             learningSettings == null
                                     ? AgentReviewLearningSettings.DISABLED : learningSettings));
-            return switch (result.outcome()) {
+            ReviewResult reviewResult = switch (result.outcome()) {
                 case NO_DIFF -> ReviewResult.NO_DIFF;
                 case FAILED -> ReviewResult.FAILED;
                 case FINALIZED -> publish(owner, repo, prNumber, result,
                         enableFormalDecision, severityThresholds, learningSettings);
             };
+            if (result.guidance() != null && result.guidance().revokedReason().isPresent()) {
+                // Suppressed right before publication: the run ends cancelled, like one revoked
+                // between rounds. The finalized review stays stored.
+                throw new WorkflowCancelledException("Agentic review " + result.reference()
+                        + " was not published: " + result.guidance().revokedReason().get());
+            }
+            return reviewResult;
         } catch (WorkflowCancelledException e) {
             throw e;
         } catch (Exception e) {
@@ -151,7 +162,9 @@ public class AgentReviewService {
                              enableFormalDecision, thresholds, linkStyle(owner, repo, result.reviewedHeadSha()),
                              providerName(), "pull_request_review", result.reviewedHeadSha(),
                             () -> currentHeadSha(owner, repo, prNumber),
-                            () -> Thread.currentThread().isInterrupted(),
+                            () -> Thread.currentThread().isInterrupted()
+                                    || (result.guidance() != null
+                                    && result.guidance().recheck().isPresent()),
                             learningSettings.feedbackEnabled()
                                     ? org.remus.giteabot.learning.feedback.FeedbackHint.forReview(
                                             mention(owner), result.reference())
@@ -217,12 +230,21 @@ public class AgentReviewService {
                 prNumber == null ? 0 : prNumber);
     }
 
-    /**
-     * Answers a clarification question about a previously-reviewed PR. Formal review decisions are
-     * not applicable, and the answer cannot modify the published review.
-     */
+    /** A clarification without learned guidance. */
     public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds,
                                            boolean enableProgressComments) {
+        return answerClarification(payload, userQuestion, maxToolRounds, enableProgressComments,
+                AgentReviewLearningSettings.DISABLED);
+    }
+
+    /**
+     * Answers a clarification question about a previously-reviewed PR. Formal review decisions are
+     * not applicable, and the answer cannot modify the published review. Lessons valid right now are
+     * selected afresh for the answer when the settings use them.
+     */
+    public ReviewResult answerClarification(WebhookPayload payload, String userQuestion, int maxToolRounds,
+                                           boolean enableProgressComments,
+                                           AgentReviewLearningSettings learningSettings) {
         String owner = payload.getRepository().getOwner().getLogin();
         String repo = payload.getRepository().getName();
         Long prNumber = payload.getPullRequest().getNumber();
@@ -230,7 +252,8 @@ public class AgentReviewService {
                 userQuestion.length() > 120 ? userQuestion.substring(0, 117) + "..." : userQuestion);
         try {
             AgentReviewExecution.Answer answer = execution.answerClarification(payload, userQuestion,
-                    maxToolRounds, enableProgressComments);
+                    maxToolRounds, enableProgressComments,
+                    learningSettings == null ? AgentReviewLearningSettings.DISABLED : learningSettings);
             if (answer.outcome() == AgentReviewExecution.AnswerOutcome.NO_DIFF) {
                 return ReviewResult.NO_DIFF;
             }

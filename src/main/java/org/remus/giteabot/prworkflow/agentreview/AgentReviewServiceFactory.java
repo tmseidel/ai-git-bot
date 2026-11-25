@@ -13,6 +13,7 @@ import org.remus.giteabot.agent.validation.WorkspaceService;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.eventhook.EventHookPublisher;
+import org.remus.giteabot.learning.context.LearningContextProvider;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
 import org.remus.giteabot.repository.RepositoryPlatform;
@@ -47,6 +48,8 @@ public class AgentReviewServiceFactory {
     private final ReviewSnapshotService reviewSnapshotService;
     private final ReviewLookupToolExecutor reviewLookup;
     private final ReviewCommentProperties commentProperties;
+    private final LearningContextProvider learningContextProvider;
+    private final AgentReviewLearningSettingsResolver learningSettingsResolver;
 
     public AgentReviewService create(Bot bot) {
         if (bot.getSystemPrompt() == null) {
@@ -73,6 +76,9 @@ public class AgentReviewServiceFactory {
                 toolCatalog, workspaceService, agentConfig, mcpOrchestrationService,
                 bot, eventHookPublisher, pythonExecution, structuredReviewService,
                 submissionToolExecutor, reviewSnapshotService, reviewLookup, commentProperties,
-                reviewPublisher);
+                reviewPublisher,
+                // Rechecked during a run: switching learning off stops a run that uses lessons.
+                new AgentReviewLessons(learningContextProvider,
+                        () -> learningSettingsResolver.resolve(bot)));
     }
 }

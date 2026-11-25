@@ -83,6 +83,14 @@ public class ReviewSnapshotService {
         snapshot.setWorkflowConfigurationId(request.workflowConfigurationId());
         snapshot.setSettingsHash(request.settingsFingerprint() == null ? null
                 : Digests.sha256Hex(request.settingsFingerprint()));
+        snapshot.setLessonSelection(request.lessonSelection());
+        String lessons = request.lessonRevisions();
+        if (lessons != null && lessons.length() > 1_000) {
+            reasons.add("the list of supplied lesson revisions was truncated");
+            lessons = lessons.substring(0, 1_000);
+        }
+        snapshot.setLessonRevisions(lessons);
+        snapshot.setLessonContextHash(request.lessonContextHash());
         snapshot.setComplete(reasons.isEmpty());
         snapshot.setIncompleteReason(reasons.isEmpty() ? null : String.join("; ", reasons));
         if (!reasons.isEmpty()) {

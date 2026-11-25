@@ -167,7 +167,8 @@ public class AgentReviewWorkflow implements PrWorkflow {
 
         AgentReviewService.ReviewResult answered = serviceFactory.create(bot)
                 .answerClarification(context.payload(), userQuestion, maxToolRounds,
-                        boolParam(params, AgentReviewParam.ENABLE_PROGRESS_COMMENTS, false));
+                        boolParam(params, AgentReviewParam.ENABLE_PROGRESS_COMMENTS, false),
+                        AgentReviewLearningSettingsResolver.from(params));
 
         WorkflowResult result = switch (answered) {
             case POSTED -> WorkflowResult.success("Clarification posted");
@@ -208,9 +209,4 @@ public class AgentReviewWorkflow implements PrWorkflow {
         return "true".equalsIgnoreCase(s) || "1".equals(s);
     }
 
-    private String strParam(Map<String, Object> params, AgentReviewParam name, String fallback) {
-        Object raw = params.get(name.key());
-        if (raw instanceof String s && !s.isBlank()) return s;
-        return fallback;
-    }
 }

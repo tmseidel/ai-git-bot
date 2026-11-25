@@ -33,6 +33,12 @@ import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.eventhook.EventHookEventType;
 import org.remus.giteabot.eventhook.EventHookPublisher;
+import org.remus.giteabot.learning.context.ActiveLessons;
+import org.remus.giteabot.learning.context.LearningContextProvider;
+import org.remus.giteabot.learning.knowledge.KnowledgeLessonService;
+import org.remus.giteabot.learning.knowledge.LessonUsage;
+import org.remus.giteabot.learning.knowledge.LessonUsageRepository;
+import org.remus.giteabot.prworkflow.WorkflowCancelledException;
 import org.remus.giteabot.prworkflow.PrWorkflowContext;
 import org.remus.giteabot.prworkflow.WorkflowResultStatus;
 import org.remus.giteabot.prworkflow.config.WorkflowConfiguration;
@@ -72,8 +78,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -91,6 +99,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -137,6 +146,11 @@ class AgentReviewCompletionTest {
     private final Map<String, ReviewToolOperation> receipts = new HashMap<>();
     private final Map<Long, org.remus.giteabot.review.structured.ReviewPublication> publications =
             new HashMap<>();
+
+    @Mock private KnowledgeLessonService lessonService;
+    @Mock private LessonUsageRepository usageRepository;
+    private AgentReviewLessons lessons = AgentReviewLessons.NONE;
+    private AgentReviewLearningSettings currentLearning = CURATED;
 
     private AgentReviewService service;
     private StructuredReviewService reviewService;
@@ -271,7 +285,8 @@ class AgentReviewCompletionTest {
                         new org.remus.giteabot.review.structured.PublishedReviewLookup(
                                 outputRepository, reviewRepository)),
                 commentProperties,
-                publisher);
+                publisher,
+                lessons);
     }
 
     // ------------------------------------------------------------------ structured publication
@@ -837,6 +852,242 @@ class AgentReviewCompletionTest {
 
         // The refused turn applied nothing: the review holds exactly the finding of the later turn.
         assertThat(draft().findings()).hasSize(1);
+    }
+
+    // ------------------------------------------------------------------ learned guidance
+
+    private static final AgentReviewLearningSettings CURATED =
+            new AgentReviewLearningSettings(false, AgentReviewLearningMode.CURATED, Set.of("alex"));
+    private static final KnowledgeLessonService.ActiveLesson LESSON =
+            ActiveLessons.lesson(17, ActiveLessons.TEXT, List.of(), "authorization");
+
+    /** Wires real lesson selection over a stubbed lesson store, as the factory does. */
+    private void enableLessons() {
+        lessons = new AgentReviewLessons(new LearningContextProvider(lessonService, usageRepository,
+                outputRepository, new org.remus.giteabot.config.LearningProperties()),
+                () -> currentLearning);
+        service = serviceFor(platform, RepositoryType.GITEA);
+    }
+
+    private AgentReviewService.ReviewResult review(AgentReviewLearningSettings settings) {
+        return service.reviewPullRequest(payload, 12, false,
+                new AgentReviewService.SeverityThresholds(null, null, null), 1L, null, false, settings);
+    }
+
+    private static long occurrences(String text, String needle) {
+        long count = 0;
+        for (int at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + 1)) {
+            count++;
+        }
+        return count;
+    }
+
+    /** Everything one request sends besides the system prompt: history plus the user message. */
+    private static String requestText(List<AiMessage> history, String userMessage) {
+        StringBuilder sb = new StringBuilder();
+        history.forEach(message -> sb.append(message.getContent()).append('\n'));
+        return sb.append(userMessage).toString();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void aCuratedLessonReachesTheKickoffOnceInNativeAndLegacyTransports(boolean legacy) {
+        enableLessons();
+        when(lessonService.activeLessons(any(), anyInt())).thenReturn(List.of(LESSON));
+        when(aiClient.supportsNativeTools()).thenReturn(!legacy);
+        List<ChatTurn> turns = legacy
+                ? List.of(ChatTurn.text(legacyRunTools("r1", ReviewSubmissionToolExecutor.UPSERT_FINDING,
+                                findingArguments("auth", "MEDIUM"))),
+                        ChatTurn.text(legacyRunTools("r2", ReviewSubmissionToolExecutor.SET_ASSESSMENT,
+                                assessmentArguments(1))),
+                        ChatTurn.text(legacyRunTools("r3", ReviewSubmissionToolExecutor.COMPLETE,
+                                completionArguments(2, 1))))
+                : List.of(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+        List<String> requests = new ArrayList<>();
+        List<String> systemPrompts = new ArrayList<>();
+        List<String> kickoff = new ArrayList<>();
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    if (requests.isEmpty()) {
+                        // Only the kickoff carries it, not a separate history message.
+                        assertThat(invocation.<List<AiMessage>>getArgument(0)).noneSatisfy(message ->
+                                assertThat(String.valueOf(message.getContent()))
+                                        .contains("Repository guidance"));
+                        kickoff.add(invocation.getArgument(1));
+                    }
+                    requests.add(requestText(invocation.getArgument(0), invocation.getArgument(1)));
+                    systemPrompts.add(invocation.getArgument(3));
+                    return turns.get(requests.size() - 1);
+                });
+
+        assertThat(review(CURATED)).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        String block = "Repository guidance: L17@1 · applies to the whole repository\n> "
+                + ActiveLessons.TEXT + "\nEvidence: feedback FB31 on O1200-F2 (PR #42).";
+        // The same block in both transports, delivered by the kickoff user message (after the task)
+        // and exactly once per request; the operator system prompt never carries it.
+        assertThat(kickoff).singleElement().satisfies(message -> assertThat(message)
+                .startsWith("Please review the following pull request.").endsWith(block));
+        assertThat(requests).hasSize(3).allSatisfy(request -> {
+            assertThat(occurrences(request, block)).isEqualTo(1);
+            assertThat(occurrences(request, "## Repository guidance")).isEqualTo(1);
+        });
+        assertThat(systemPrompts).allSatisfy(prompt -> assertThat(prompt)
+                .doesNotContain("Repository guidance").doesNotContain(ActiveLessons.TEXT));
+        verify(usageRepository).save(argThat((LessonUsage usage) -> usage.getRevisionId() == 170L
+                && usage.getLessonId() == 17L && Long.valueOf(1L).equals(usage.getOutputId())
+                && usage.getPromptBlockHash() != null && usage.getPromptBlockHash().length() == 64
+                && usage.getInvocationId() != null));
+    }
+
+    @Test
+    void withLearningOffNoLessonIsReadOrAddedAndNoExtraModelCallHappens() {
+        enableLessons();
+        List<String> requests = new ArrayList<>();
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    requests.add(requestText(invocation.getArgument(0), invocation.getArgument(1)));
+                    return List.of(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1))
+                            .get(requests.size() - 1);
+                });
+
+        assertThat(review(new AgentReviewLearningSettings(true))).isEqualTo(
+                AgentReviewService.ReviewResult.POSTED);
+
+        assertThat(requests).hasSize(3).noneSatisfy(request -> assertThat(request)
+                .contains("Repository guidance"));
+        verifyNoInteractions(lessonService, usageRepository);
+        verify(snapshotRepository).save(argThat(
+                (org.remus.giteabot.review.structured.WorkflowOutputSnapshot snapshot) ->
+                        "LEARNING_OFF".equals(snapshot.getLessonSelection())
+                                && snapshot.getLessonRevisions() == null));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lesson-disabled", "learning-off"})
+    void guidanceRevokedDuringTheRunCancelsItBeforePublication(String revocation) {
+        enableLessons();
+        AtomicBoolean revoked = new AtomicBoolean();
+        when(lessonService.activeLessons(any(), anyInt())).thenAnswer(invocation ->
+                revoked.get() && revocation.equals("lesson-disabled") ? List.of() : List.of(LESSON));
+        List<ChatTurn> turns = List.of(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+        AtomicBoolean secondCall = new AtomicBoolean();
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    if (secondCall.getAndSet(true)) {
+                        // A maintainer acts while the model is thinking about round 2.
+                        revoked.set(true);
+                        if (revocation.equals("learning-off")) {
+                            currentLearning = AgentReviewLearningSettings.DISABLED;
+                        }
+                        return turns.get(1);
+                    }
+                    return turns.getFirst();
+                });
+
+        assertThatThrownBy(() -> review(CURATED))
+                .isInstanceOf(WorkflowCancelledException.class)
+                .hasMessageContaining("L17@1");
+
+        // Round 2's calls never ran: the draft keeps round 1's finding and is closed as cancelled.
+        assertThat(draft().state()).isEqualTo(ReviewState.CANCELLED);
+        assertThat(draft().assessmentCurrent()).isFalse();
+        verify(aiClient, times(2)).chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt());
+        assertNothingPublished();
+    }
+
+    @Test
+    void guidanceRevokedAfterCompletionSuppressesThePublication() {
+        enableLessons();
+        // Selection and the three round boundaries see the lesson; the pre-publication check does not.
+        when(lessonService.activeLessons(any(), anyInt()))
+                .thenReturn(List.of(LESSON), List.of(LESSON), List.of(LESSON), List.of(LESSON), List.of());
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThatThrownBy(() -> review(CURATED))
+                .isInstanceOf(WorkflowCancelledException.class)
+                .hasMessageContaining("was not published")
+                .hasMessageContaining("L17@1 is no longer active");
+
+        assertThat(draft().state()).isEqualTo(ReviewState.FINALIZED);
+        verify(repositoryClient, never()).postReview(anyString(), anyString(), anyLong(), anyString(), any());
+        assertThat(publications.values()).singleElement().satisfies(publication ->
+                assertThat(publication.getState()).isEqualTo(ReviewPublicationState.SUPPRESSED));
+    }
+
+    @Test
+    void unavailableRetrievalRunsTheReviewWithoutGuidanceAndRecordsThat() {
+        enableLessons();
+        when(lessonService.activeLessons(any(), anyInt()))
+                .thenThrow(new IllegalStateException("database unavailable"));
+        List<String> requests = new ArrayList<>();
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    requests.add(requestText(invocation.getArgument(0), invocation.getArgument(1)));
+                    return List.of(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1))
+                            .get(requests.size() - 1);
+                });
+
+        assertThat(review(new AgentReviewLearningSettings(true, AgentReviewLearningMode.CURATED,
+                Set.of()))).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        assertThat(requests).noneSatisfy(request -> assertThat(request).contains("Repository guidance"));
+        verify(usageRepository, never()).save(any());
+        verify(snapshotRepository).save(argThat(
+                (org.remus.giteabot.review.structured.WorkflowOutputSnapshot snapshot) ->
+                        "UNAVAILABLE".equals(snapshot.getLessonSelection())
+                                && snapshot.getLessonRevisions() == null
+                                && snapshot.getLessonContextHash() == null));
+    }
+
+    @Test
+    void theSnapshotNamesTheExactRevisionsAndBlockSupplied() {
+        enableLessons();
+        when(lessonService.activeLessons(any(), anyInt())).thenReturn(List.of(LESSON));
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThat(review(new AgentReviewLearningSettings(true, AgentReviewLearningMode.CURATED,
+                Set.of()))).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        verify(snapshotRepository).save(argThat(
+                (org.remus.giteabot.review.structured.WorkflowOutputSnapshot snapshot) ->
+                        "SELECTED".equals(snapshot.getLessonSelection())
+                                && "L17@1".equals(snapshot.getLessonRevisions())
+                                && snapshot.getLessonContextHash() != null
+                                && snapshot.getLessonContextHash().length() == 64));
+    }
+
+    @Test
+    void aFollowUpSelectsCurrentGuidanceAfreshWithoutCountingUsage() {
+        enableLessons();
+        when(lessonService.activeLessons(any(), anyInt())).thenReturn(List.of(LESSON));
+        org.mockito.ArgumentCaptor<String> prompts = org.mockito.ArgumentCaptor.forClass(String.class);
+        when(aiClient.chatWithTools(anyList(), prompts.capture(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("The filter covers it."));
+
+        assertThat(service.answerClarification(payload, "Is this endpoint protected?", 5, false, CURATED))
+                .isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        assertThat(prompts.getValue()).contains("Is this endpoint protected?")
+                .contains("Repository guidance: L17@1");
+        assertThat(occurrences(prompts.getValue(), ActiveLessons.TEXT)).isEqualTo(1);
+        verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void aFollowUpWithLearningOffGetsNoGuidance() {
+        enableLessons();
+        org.mockito.ArgumentCaptor<String> prompts = org.mockito.ArgumentCaptor.forClass(String.class);
+        when(aiClient.chatWithTools(anyList(), prompts.capture(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(ChatTurn.text("The filter covers it."));
+
+        assertThat(service.answerClarification(payload, "Why?", 5, false,
+                AgentReviewLearningSettings.DISABLED)).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        assertThat(prompts.getValue()).doesNotContain("Repository guidance");
+        verifyNoInteractions(lessonService);
     }
 
     // ------------------------------------------------------------------ helpers

@@ -78,6 +78,9 @@ public final class AgentLoop {
         pending.add(new PendingMessage("user", initialUserMessage));
         String currentMessage = initialUserMessage;
         AiMessage closingReminder = null;
+        String pinned = strategy.pinnedContext();
+        AiMessage pinnedMessage = pinned == null || pinned.isBlank() ? null
+                : AiMessage.builder().role("user").content(pinned).build();
 
         ToolingMode resolvedMode = resolveMode(strategy);
         ctx.setToolingMode(resolvedMode);
@@ -110,10 +113,12 @@ public final class AgentLoop {
             if (closingReminder != null && !history.contains(closingReminder)) {
                 history.add(closingReminder);
             }
+            restorePinned(history, currentMessage, pinnedMessage);
             long started = System.nanoTime();
             ChatTurn turn;
             try {
-                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt, round, closingReminder);
+                turn = callAiWithRetry(history, currentMessage, tools, systemPrompt, round, closingReminder,
+                        pinnedMessage);
             } finally {
                 AgentMetricsHolder.recordLatency(modeTag(resolvedMode), providerTag,
                         Duration.ofNanos(System.nanoTime() - started));
@@ -318,6 +323,27 @@ public final class AgentLoop {
         pending.clear();
     }
 
+    /**
+     * Puts the strategy's pinned context back at the start of the history when no message of this
+     * request carries it any more — compaction dropped the message that delivered it. Checking the
+     * request as a whole (history and the pending user message) is what keeps it to one copy.
+     */
+    static void restorePinned(List<AiMessage> history, String currentMessage, AiMessage pinnedMessage) {
+        if (pinnedMessage == null) {
+            return;
+        }
+        String pinned = pinnedMessage.getContent();
+        if (currentMessage != null && currentMessage.contains(pinned)) {
+            return;
+        }
+        for (AiMessage message : history) {
+            if (message.getContent() != null && message.getContent().contains(pinned)) {
+                return;
+            }
+        }
+        history.addFirst(pinnedMessage);
+    }
+
     private ToolingMode resolveMode(AgentStrategy strategy) {
         boolean clientSupportsNative = aiClient != null && aiClient.supportsNativeTools();
         ToolingMode resolved = ToolingMode.resolve(
@@ -384,7 +410,7 @@ public final class AgentLoop {
      */
     private ChatTurn callAiWithRetry(List<AiMessage> history, String currentMessage,
                                      List<ToolDescriptor> tools, String systemPrompt, int round,
-                                     AiMessage closingReminder) {
+                                     AiMessage closingReminder, AiMessage pinnedMessage) {
         int maxAttempts = 2;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
@@ -413,6 +439,7 @@ public final class AgentLoop {
                     if (closingReminder != null && !history.contains(closingReminder)) {
                         history.add(closingReminder);
                     }
+                    restorePinned(history, currentMessage, pinnedMessage);
                 } else {
                     log.warn("AgentLoop: AI call failed with a transient network error on attempt {}/{}. "
                             + "Retrying without changing history. Error: {}",
