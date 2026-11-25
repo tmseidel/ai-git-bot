@@ -1,5 +1,6 @@
 package org.remus.giteabot.workflowrun;
 
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.remus.giteabot.aiusage.AiInteractionRepository;
 import org.remus.giteabot.aiusage.AiToolCall;
@@ -12,6 +13,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
@@ -44,8 +46,8 @@ public class WorkflowRunQueryService {
     /** Upper bound for requested page sizes, the largest the rows-per-page select offers. */
     public static final int MAX_PAGE_SIZE = 100;
 
-    /** Runs per page when exporting — keeps heap bounded however many runs match. */
-    private static final int EXPORT_PAGE_SIZE = 50;
+    /** Runs per batch when exporting — keeps heap bounded however many runs match. */
+    private static final int EXPORT_BATCH_SIZE = 50;
 
     private final WorkflowRunRepository runRepository;
     private final AiInteractionRepository interactionRepository;
@@ -53,6 +55,7 @@ public class WorkflowRunQueryService {
     private final AiUsageProperties usageProperties;
     private final TriggerLinks triggerLinks;
     private final ObjectMapper objectMapper;
+    private final EntityManager entityManager;
 
     /** A page of runs matching {@code filter}, sorted by start, each with its attempts and totals. */
     @Transactional(readOnly = true)
@@ -129,32 +132,41 @@ public class WorkflowRunQueryService {
 
     /**
      * Streams the runs matching {@code filter} as a JSON array of {@link RunExport}s, newest first.
-     * Runs are read in pages of {@value #EXPORT_PAGE_SIZE}, each page in its own short read-only
-     * transaction, so heap use stays bounded however many runs match.
+     * Runs are read in batches of {@value #EXPORT_BATCH_SIZE}, each continuing after the last run
+     * written (by start, then id) rather than at an offset, so runs started or cleared during the
+     * export neither repeat nor push others out. The persistence context is cleared after each
+     * batch, so heap use stays bounded however many runs match.
      */
     public void export(WorkflowRunFilter filter, OutputStream outputStream) {
+        export(filter, outputStream, EXPORT_BATCH_SIZE);
+    }
+
+    void export(WorkflowRunFilter filter, OutputStream outputStream, int batchSize) {
+        Specification<WorkflowRun> matching = WorkflowRunSpecifications.matching(filter);
+        Sort newestFirst = Sort.by(Sort.Direction.DESC, "startedAt").and(Sort.by(Sort.Direction.DESC, "id"));
         try (SequenceWriter writer = objectMapper.writer().writeValuesAsArray(outputStream)) {
-            int page = 0;
-            Page<WorkflowRun> runs;
+            WorkflowRun last = null;
+            List<WorkflowRun> batch;
             do {
-                runs = runRepository.findAll(WorkflowRunSpecifications.matching(filter),
-                        PageRequest.of(page, EXPORT_PAGE_SIZE,
-                                Sort.by(Sort.Direction.DESC, "startedAt").and(Sort.by(Sort.Direction.DESC, "id"))));
-                List<Long> runIds = runs.getContent().stream().map(WorkflowRun::getId).toList();
-                if (!runIds.isEmpty()) {
+                Specification<WorkflowRun> next = last == null
+                        ? matching : matching.and(WorkflowRunSpecifications.startedBefore(last));
+                batch = runRepository.findBy(next, query -> query.sortBy(newestFirst).limit(batchSize).all());
+                if (!batch.isEmpty()) {
+                    List<Long> runIds = batch.stream().map(WorkflowRun::getId).toList();
                     Map<Long, List<InteractionRow>> rowsByRun = rowsByRun(runIds);
                     Map<Long, List<AiToolCall>> callsByInteraction = toolCallRepository.findByRunIds(runIds).stream()
                             .collect(Collectors.groupingBy(call -> call.getInteraction().getId()));
-                    for (WorkflowRun run : runs.getContent()) {
+                    for (WorkflowRun run : batch) {
                         writer.write(new RunExport(run, rowsByRun.getOrDefault(run.getId(), List.of()).stream()
                                 .map(row -> new RunExport.Interaction(row,
                                         callsByInteraction.getOrDefault(row.id(), List.of())))
                                 .toList()));
                     }
+                    last = batch.getLast();
                 }
                 writer.flush();
-                page++;
-            } while (runs.hasNext());
+                entityManager.clear();
+            } while (batch.size() == batchSize);
         }
     }
 

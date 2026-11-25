@@ -4,7 +4,7 @@
 <!--/* The content of the interaction details modal (list.html), served by /workflow-runs/interactions/{id}.
        Untrusted text (errors, stack traces, tool arguments) is only written with th:text; dates,
        durations and numbers carry data attributes that the page's formatter localizes. */-->
-<div class="modal-content" th:fragment="details" th:with="row=${details.row}, run=${details.run}, failed=${details.failed()}">
+<div class="modal-content" th:fragment="details" th:with="row=${details.row}, run=${details.run}, failed=${details.failed()}, running=${details.running()}">
     <div class="modal-header">
         <div>
             <h5 class="modal-title d-flex flex-wrap align-items-center gap-2" id="interactionModalTitle">
@@ -43,12 +43,13 @@
             <div class="col-6 col-md-3">
                 <div class="text-secondary" th:text="${failed} ? #{workflowRuns.details.failedAfter} : #{workflowRuns.details.duration}">Duration</div>
                 <div class="fs-6" th:with="ended=${#messages.msg('workflowRuns.details.ended', '§')}">
-                    <span th:data-duration-ms="${details.totalTimeMs()}" th:text="|${details.totalTimeMs()} ms|">8 s</span>
-                    <span class="text-secondary small">(<span th:text="${#strings.substringBefore(ended, '§')}">ended </span><time
+                    <span th:data-duration-ms="${details.durationMs(now)}" th:text="|${details.durationMs(now)} ms|">8 s</span>
+                    <span th:if="${running}" class="text-secondary small" th:text="#{workflowRuns.round.soFar}">so far</span>
+                    <span th:unless="${running}" class="text-secondary small">(<span th:text="${#strings.substringBefore(ended, '§')}">ended </span><time
                             th:datetime="${details.endedAt()}" data-format="time" th:text="${details.endedAt()}">10:00:08</time><span
                             th:text="${#strings.substringAfter(ended, '§')}"></span>)</span>
                 </div>
-                <th:block th:unless="${failed}">
+                <th:block th:unless="${failed || running}">
                     <div class="d-flex mt-1 rounded overflow-hidden" style="height: 6px; width: 160px;" aria-hidden="true">
                         <div class="split-model" th:style="|width: ${details.modelSharePercent()}%|"></div>
                         <div class="split-tools" th:style="|width: ${100 - details.modelSharePercent()}%|"></div>

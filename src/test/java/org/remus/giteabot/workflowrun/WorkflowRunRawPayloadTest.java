@@ -20,7 +20,8 @@ class WorkflowRunRawPayloadTest {
     private final AiUsageProperties properties = new AiUsageProperties();
     private final WorkflowRunQueryService service = new WorkflowRunQueryService(mock(WorkflowRunRepository.class),
             interactionRepository, mock(AiToolCallRepository.class), properties, mock(TriggerLinks.class),
-            mock(tools.jackson.databind.ObjectMapper.class));
+            mock(tools.jackson.databind.ObjectMapper.class),
+            mock(jakarta.persistence.EntityManager.class));
 
     @Test
     void storedPayloadsAreReadWhenCaptureIsEnabled() {

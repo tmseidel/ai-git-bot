@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Recording and the Usage page queries against the Flyway schema: a workflow run with retried
+ * Recording and the error count queries against the Flyway schema: a workflow run with retried
  * and failed attempts and tool calls is stored with its totals, the row query leaves the raw
  * payloads out, and a full payload ({@code max-raw-payload-length=0}) far beyond 65535 characters
  * is stored and read back by id. Runs with {@code ddl-auto=validate} as production does, so the

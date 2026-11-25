@@ -77,4 +77,12 @@ final class WorkflowRunSpecifications {
             return cb.and(predicates.toArray(Predicate[]::new));
         };
     }
+
+    /** Runs after {@code last} in newest-first order (by start, then id): the export's next batch. */
+    static Specification<WorkflowRun> startedBefore(WorkflowRun last) {
+        return (root, query, cb) -> cb.or(
+                cb.lessThan(root.get("startedAt"), last.getStartedAt()),
+                cb.and(cb.equal(root.get("startedAt"), last.getStartedAt()),
+                        cb.lessThan(root.get("id"), last.getId())));
+    }
 }

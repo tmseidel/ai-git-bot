@@ -16,6 +16,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 import java.io.ByteArrayOutputStream;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -242,6 +243,33 @@ class WorkflowRunQueryServiceTest {
         assertThat(run.get("startedAt").asText()).isEqualTo(review.getStartedAt().toString());
         assertThat(run.get("interactions").get(0).get("roundNumber").asInt()).isEqualTo(1);
         assertThat(run.get("interactions").get(1).get("toolCalls").get(0).has("interaction")).isFalse();
+    }
+
+    /**
+     * Batches continue after the last run written, not at an offset: a run started while the
+     * export is under way does not push an already written run into the next batch again.
+     */
+    @Test
+    void exportReadsEveryRunOnceWhileRunsAreAdded() throws Exception {
+        WorkflowRun tie = run("issue-writer", 2L, "Writer Bot", "group/sub", "app", TriggerKind.ISSUE, 8L,
+                RunStatus.SUCCEEDED, writer.getStartedAt(), false);
+        ByteArrayOutputStream out = new ByteArrayOutputStream() {
+            private boolean added;
+
+            @Override
+            public void flush() {
+                if (!added && size() > 0) {
+                    added = true;
+                    run("agentic-review", 1L, "Default Bot", "owner", "repo", TriggerKind.PULL_REQUEST, 44L,
+                            RunStatus.RUNNING, T0.plusSeconds(9_000), false);
+                }
+            }
+        };
+        service.export(filter(), out, 1);
+
+        List<Long> exported = new ArrayList<>();
+        new ObjectMapper().readTree(out.toByteArray()).forEach(run -> exported.add(run.get("id").asLong()));
+        assertThat(exported).containsExactly(running.getId(), tie.getId(), writer.getId(), review.getId());
     }
 
     private List<Long> ids(WorkflowRunFilter filter) {

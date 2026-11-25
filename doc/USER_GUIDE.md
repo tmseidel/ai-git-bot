@@ -60,12 +60,18 @@ The Workflow runs page (`/workflow-runs`) shows what the bot did with the AI: on
 
 Each run shows its **state** (Succeeded, Error or Running), its **workflow type**, the **bot**, what **triggered** it (the repository and a link to the pull request or issue in the Git provider), when it **started**, its **duration**, the number of **rounds**, its **tool calls** (with the number that failed) and its **tokens in / out**. Runs are sorted by start, newest first; click **Started** to reverse the order. **Rows per page** and the page links work as elsewhere in the app.
 
+<img src="screenshots/workflow-runs/run-list.png" alt="Workflow runs — filters and a run expanded to its rounds" width="700"/>
+
 Two warnings are shown next to the state:
 
 - **Round limit reached**: an agent loop of the run ran out of rounds while the model still wanted to call tools, so the result may be incomplete.
 - **Output truncated**: a round ended because the model hit its output token limit.
 
 Click the chevron in front of a run (or **Expand all** / **Collapse all**) to see its details: the run ID, the AI and Git integrations, the cache write/read tokens and cache hit rate, the time spent in the model and in tools, and the rounds table. Each row of the rounds table is one request to the AI provider; when the provider was unavailable and the request was retried, the retries appear as indented *attempt* rows of the same round. Failed requests are highlighted red, a request still in progress blue, and rounds with a warning yellow.
+
+<img src="screenshots/workflow-runs/run-with-failed-round.png" alt="Workflow runs — a run whose last round failed" width="700"/>
+
+<img src="screenshots/workflow-runs/run-in-progress.png" alt="Workflow runs — a run with a round still in progress" width="700"/>
 
 Times and numbers are shown in your browser's time zone and in the interface language.
 
@@ -75,7 +81,11 @@ Filter by **Workflow run ID**, **Project**, **PR / issue number**, **Workflow ty
 
 ### AI interaction details
 
-Click **Details** on a round to open the details of that request: when it started and how long it took (split into model and tool time), the stop reason, the run it belongs to (**Show run** opens the run list filtered to it), the token usage, and every tool call with its source (an MCP server or `built-in`), duration and result. A failed tool call shows its error; click a tool call to see its arguments. For a failed request, the error message and the stack trace are shown at the top.
+Click **Details** on a round to open the details of that request: when it started and how long it took (split into model and tool time), the stop reason, the run it belongs to (**Show run** opens the run list filtered to it), the token usage, and every tool call with its source (an MCP server or `built-in`), duration and result. A failed tool call shows its error; click a tool call to see its arguments. For a failed request, the error message and the stack trace are shown at the top. While a request is still waiting for the provider, its duration counts the time so far.
+
+<img src="screenshots/workflow-runs/interaction-details.png" alt="AI interaction details — tool calls with arguments and a failed call" width="700"/>
+
+<img src="screenshots/workflow-runs/interaction-details-failed.png" alt="AI interaction details — a failed request with its error and stack trace" width="700"/>
 
 **Raw request / response** opens the raw JSON request sent to the AI provider and the raw JSON response received back. This is useful for debugging provider-specific behavior, token accounting discrepancies, or unexpected completions. The payloads are loaded only when you open them, so the page stays fast however large they are.
 

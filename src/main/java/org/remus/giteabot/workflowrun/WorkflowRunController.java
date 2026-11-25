@@ -60,6 +60,7 @@ public class WorkflowRunController {
         InteractionDetails details = queryService.interactionDetails(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         model.addAttribute("details", details);
+        model.addAttribute("now", Instant.now());
         model.addAttribute("rawPayloadsEnabled", queryService.rawPayloadsEnabled());
         return "workflow-runs/interaction :: details";
     }

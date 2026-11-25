@@ -3,6 +3,7 @@ package org.remus.giteabot.workflowrun;
 import org.remus.giteabot.aiusage.AiToolCall;
 import org.remus.giteabot.aiusage.InteractionRow;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -29,6 +30,11 @@ public record InteractionDetails(InteractionRow row,
         return row.status() == RunStatus.ERROR;
     }
 
+    /** The request to the provider is still in flight: no duration, response or tool calls yet. */
+    public boolean running() {
+        return row.status() == RunStatus.RUNNING;
+    }
+
     public long toolTimeMs() {
         return toolCalls.stream().mapToLong(AiToolCall::getDurationMs).sum();
     }
@@ -47,6 +53,12 @@ public record InteractionDetails(InteractionRow row,
         return failed() ? modelTimeMs() : modelTimeMs() + toolTimeMs();
     }
 
+    /** The round's duration; for a running interaction, the time so far. */
+    public long durationMs(Instant now) {
+        return running() ? Math.max(0, Duration.between(row.startedAt(), now).toMillis()) : totalTimeMs();
+    }
+
+    /** When the round ended; only for a finished interaction. */
     public Instant endedAt() {
         return row.startedAt().plusMillis(totalTimeMs());
     }

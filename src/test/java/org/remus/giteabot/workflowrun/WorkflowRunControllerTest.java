@@ -131,6 +131,36 @@ class WorkflowRunControllerTest {
                 .andExpect(content().string(containsString("Not reported")));
     }
 
+    /** Still waiting for the provider: the time so far, no end time and no model/tools split. */
+    @Test
+    void runningInteractionShowsTheTimeSoFar() throws Exception {
+        java.time.Instant started = java.time.Instant.now().minusSeconds(90);
+        org.remus.giteabot.aiusage.InteractionRow row = new org.remus.giteabot.aiusage.InteractionRow(103L, 42L, 3, 1,
+                "claude", RunStatus.RUNNING, started, null, null, 0, 0, 0, 0, null);
+        when(queryService.interactionDetails(103L)).thenReturn(Optional.of(
+                new InteractionDetails(row, null, details().run(), 3, null, List.of())));
+
+        String html = mockMvc.perform(get("/workflow-runs/interactions/103").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        java.util.regex.Matcher duration = java.util.regex.Pattern.compile("data-duration-ms=\"(\\d+)\"").matcher(html);
+        assertThat(duration.find()).isTrue();
+        assertThat(Long.parseLong(duration.group(1))).isBetween(90_000L, 120_000L);
+        assertThat(html).contains("so far").doesNotContain("ended").doesNotContain("split-model");
+    }
+
+    /** Links are form-encoded: a plain "+" in the query would reach the server as a space. */
+    @Test
+    void listLinksKeepAPlusInTheTimeZone() throws Exception {
+        stubPage(List.of(reviewRun()), false);
+
+        mockMvc.perform(get("/workflow-runs").with(user("admin").roles("ADMIN")).param("tz", "Etc/GMT+1"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("tz=Etc%2FGMT%2B1")))
+                .andExpect(content().string(not(containsString("tz=Etc/GMT+1"))));
+    }
+
     @Test
     void emptyListShowsAHint() throws Exception {
         stubPage(List.of(), false);
