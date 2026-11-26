@@ -124,7 +124,7 @@ public class ReviewQualityService {
         }
         ReviewQualityCalculator.Inputs inputs = new ReviewQualityCalculator.Inputs(
                 loader.load(Scope.of(filter), since), window, comparison, filter.severities(), filter.monthly(),
-                properties.effectiveMinSample(), loader.prices(), settingsService.current(), now);
+                properties.effectiveMinSample(), settingsService.current(), now);
         return new ReviewQualityCalculator(inputs, texts(locale), locale);
     }
 
@@ -134,7 +134,7 @@ public class ReviewQualityService {
         return new ReviewQualityCalculator.Inputs(new ReviewQualityFacts.Dataset(List.of(), java.util.Map.of(),
                 List.of(), List.of(), java.util.Map.of(), List.of(), java.util.Map.of(),
                 loaderSince()), window, null, filter.severities(), filter.monthly(), properties.effectiveMinSample(),
-                java.util.Map.of(), settingsService.current(), now);
+                settingsService.current(), now);
     }
 
     private ReviewQualityFacts.DataSince loaderSince() {

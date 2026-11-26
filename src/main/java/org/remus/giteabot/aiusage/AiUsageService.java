@@ -6,6 +6,7 @@ import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AuditRun;
 import org.remus.giteabot.ai.AuditTrigger;
 import org.remus.giteabot.ai.StopReason;
+import org.remus.giteabot.ai.TokenPrices;
 import org.remus.giteabot.config.AiUsageProperties;
 import org.remus.giteabot.workflowrun.RunStatus;
 import org.remus.giteabot.workflowrun.WorkflowRun;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -59,11 +61,20 @@ public class AiUsageService implements AuditRun.Sink {
      * open is not recorded.
      */
     public void attemptStarted(String aiIntegrationName) {
+        attemptStarted(aiIntegrationName, null);
+    }
+
+    /**
+     * As {@link #attemptStarted(String)}, with the integration's token prices in effect now: the
+     * attempt's cost is computed with them when it ends and stored with its tokens.
+     */
+    public void attemptStarted(String aiIntegrationName, TokenPrices prices) {
         AuditRun run = AiAuditContext.currentRun();
         if (run == null) {
             return;
         }
         run.beginAttempt();
+        run.setAttemptPrices(prices);
         try {
             ensurePersisted(run);
             AiInteraction interaction = new AiInteraction();
@@ -121,13 +132,16 @@ public class AiUsageService implements AuditRun.Sink {
                 : new AuditRun.PendingUsage(0, 0, 0, 0, null, null);
         try {
             if (run.getInteractionId() != null) {
+                TokenPrices prices = run.getAttemptPrices();
+                BigDecimal cost = prices == null ? null : prices.cost(usage.inputTokens(), usage.outputTokens(),
+                        usage.cacheCreationInputTokens(), usage.cacheReadInputTokens());
                 interactionRepository.finish(run.getInteractionId(), status, durationMs,
                         stopReason != null ? stopReason.name() : null,
                         usage.inputTokens(), usage.outputTokens(),
                         usage.cacheCreationInputTokens(), usage.cacheReadInputTokens(),
                         error != null ? truncate(errorMessageOf(error), MAX_ERROR_MESSAGE_LENGTH) : null,
                         error != null ? truncate(stackTraceOf(error), MAX_STACK_TRACE_LENGTH) : null,
-                        usage.rawRequest(), usage.rawResponse());
+                        usage.rawRequest(), usage.rawResponse(), cost);
             }
         } catch (Exception e) {
             log.warn("Failed to persist the end of an AI interaction: {}", e.getMessage());

@@ -80,7 +80,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
    - **Max Tokens**: Maximum tokens per AI response, used for reviews and comment replies (default: 16000 for hosted providers, 4096 for Ollama and llama.cpp)
    - **Parallel Worker Limit**: Maximum number of jobs that may run at the same time for this integration (`0` = unlimited, `1`–`20` = cap). See [Parallel worker limit](#parallel-worker-limit)
    - **Context Window (tokens)**: The model's total context window, used for proactive history compaction
-   - **Token prices (optional)**: Price per million input, output, cache-write and cache-read tokens, in the currency of the [Review quality](#review-quality) assumptions. Only used to show recorded token usage as cost on that page; leave empty to see tokens. Cache prices fall back to the input price.
+   - **Token prices (optional)**: Price per million input, output, cache-write and cache-read tokens, in the currency of the [Review quality](#review-quality) assumptions. The cost of every AI call is computed with the prices in effect when it is recorded and stored with it, so a price change applies from then on and never changes past cost. Leave empty to record tokens only. Cache prices fall back to the input price.
 3. Click **Save**
 
 Diff chunking for reviews (**Max diff chars per chunk**, **Max diff chunks**, **Retry truncated chunk chars**) is configured per review workflow, not on the AI Integration.
@@ -498,7 +498,7 @@ When an agentic review is finalized, each of its findings is matched against the
 
 ### Cost and return
 
-**Cost** is the recorded token usage of agentic-review workflow runs — the reviews and the follow-up answers on the pull request — priced with the **Token prices** of the AI integration that served them (see [Creating an AI Integration](#creating-an-ai-integration)). Without prices the page shows tokens instead of money, and tokens of integrations without a price are listed separately rather than counted as free. Changing a price recalculates past cost.
+**Cost** is the token usage of agentic-review workflow runs — the reviews and the follow-up answers on the pull request. The cost of each AI call is computed when it is recorded, with the **Token prices** its AI integration has at that moment (see [Creating an AI Integration](#creating-an-ai-integration)), and stored with it. A later price change, a switch to another model or a renamed integration therefore never changes past cost; a new price applies to usage from then on. Usage recorded while its integration had no prices stays in tokens: without any priced usage the page shows tokens instead of money, and unpriced tokens are listed separately rather than counted as free. Usage recorded before this version has no price and stays in tokens.
 
 The **return** is an estimate. The **Assumptions** form on the tab sets the minutes saved per accepted blocker, medium and low finding, the minutes lost per incorrect finding, the engineering cost per hour and the currency; they apply to the whole installation. A finding counts as *accepted* when a later review no longer reports it or a reviewer marked it useful. Saving the assumptions changes only the estimate, never a measured figure.
 

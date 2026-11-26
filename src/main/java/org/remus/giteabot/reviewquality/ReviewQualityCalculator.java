@@ -13,7 +13,6 @@ import org.remus.giteabot.reviewquality.ReviewQualityFacts.ReviewFact;
 import org.remus.giteabot.reviewquality.ReviewQualityFacts.RunUsage;
 import org.remus.giteabot.reviewquality.ReviewQualityFilterForm.Window;
 import org.remus.giteabot.reviewquality.ReviewQualityLoader.ActiveLesson;
-import org.remus.giteabot.reviewquality.ReviewQualityLoader.Prices;
 import org.remus.giteabot.reviewquality.ReviewQualityViews.AccuracyView;
 import org.remus.giteabot.reviewquality.ReviewQualityViews.AuthorRow;
 import org.remus.giteabot.reviewquality.ReviewQualityViews.AuthorsView;
@@ -91,7 +90,7 @@ final class ReviewQualityCalculator {
     }
 
     record Inputs(Dataset data, Window window, Window comparison, Set<ReviewSeverity> severities, boolean monthly,
-                  int minSample, Map<String, Prices> prices, ReviewQualitySettings settings, Instant now) {
+                  int minSample, ReviewQualitySettings settings, Instant now) {
     }
 
     /** What the page knows about one pull request reviewed in a period. */
@@ -116,7 +115,7 @@ final class ReviewQualityCalculator {
         }
     }
 
-    /** Cost of a set of runs: money where the AI integration has prices, tokens where it has none. */
+    /** Cost of a set of runs: the stored money of priced usage, and the tokens of unpriced usage. */
     record Cost(double money, long pricedTokens, long unpricedTokens) {
 
         static final Cost NONE = new Cost(0, 0, 0);
@@ -834,19 +833,7 @@ final class ReviewQualityCalculator {
     }
 
     Cost cost(RunUsage run) {
-        Prices prices = in.prices().get(run.integration());
-        long tokens = run.inputTokens() + run.outputTokens();
-        if (prices == null || !prices.priced()) {
-            return new Cost(0, 0, tokens);
-        }
-        long cacheWrite = run.cacheWriteTokens();
-        long cacheRead = run.cacheReadTokens();
-        long uncached = Math.max(0, run.inputTokens() - cacheWrite - cacheRead);
-        double writePrice = prices.cacheWrite() != null ? prices.cacheWrite() : prices.input();
-        double readPrice = prices.cacheRead() != null ? prices.cacheRead() : prices.input();
-        double money = (uncached * prices.input() + cacheWrite * writePrice + cacheRead * readPrice
-                + run.outputTokens() * prices.output()) / 1_000_000.0;
-        return new Cost(money, tokens, 0);
+        return new Cost(run.cost(), run.pricedTokens(), run.unpricedTokens());
     }
 
     private Cost total(List<RunUsage> runs) {

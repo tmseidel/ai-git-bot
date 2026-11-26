@@ -5,11 +5,10 @@ import org.hibernate.SessionFactory;
 import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.remus.giteabot.admin.AiIntegration;
-import org.remus.giteabot.admin.AiIntegrationRepository;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.admin.GitIntegration;
+import org.remus.giteabot.ai.TokenPrices;
 import org.remus.giteabot.aiusage.AiInteraction;
 import org.remus.giteabot.aiusage.AiInteractionRepository;
 import org.remus.giteabot.event.model.WebhookPayload;
@@ -45,7 +44,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -97,7 +95,6 @@ class ReviewQualityIntegrationTest {
     @Autowired private TransactionTemplate transactions;
 
     @MockitoBean private BotRepository botRepository;
-    @MockitoBean private AiIntegrationRepository aiIntegrationRepository;
 
     private Bot bot;
     private String repo;
@@ -112,11 +109,6 @@ class ReviewQualityIntegrationTest {
         bot.setGitIntegration(integration);
         when(botRepository.findById(BOT)).thenReturn(Optional.of(bot));
         when(botRepository.findAllById(anyIterable())).thenReturn(List.of(bot));
-        AiIntegration priced = new AiIntegration();
-        priced.setName("priced-ai");
-        priced.setPriceInputPerMtok(new BigDecimal("3"));
-        priced.setPriceOutputPerMtok(new BigDecimal("15"));
-        when(aiIntegrationRepository.findAll()).thenReturn(List.of(priced));
         repo = "rq-" + UUID.randomUUID();
     }
 
@@ -185,16 +177,18 @@ class ReviewQualityIntegrationTest {
     }
 
     @Test
-    void costComesFromTheLinkedRunsPricedWithTheIntegrationsPrices() {
+    void costIsTheCostStoredWithTheUsageAndUnpricedUsageIsListedApart() {
         long reviewId = review(7, "alex", finding("a", ReviewSeverity.BLOCKER, "security", "Missing check", "src/A.java", 1));
         reviewService.linkWorkflowRun(reviewId, run(7, 1_000_000, 100_000));
         run(7, 500_000, 0);
+        run(7, 20_000, 1_000, null);
 
         ReviewQualityViews.CostView view = qualityService.cost(filter(), Locale.ENGLISH);
         assertThat(view.money()).isTrue();
         assertThat(view.reviewCost()).isEqualTo("$4.50");
         assertThat(view.followUpCost()).isEqualTo("$1.50");
         assertThat(kpi(view.kpis(), "reviewQuality.kpi.aiCost").value()).isEqualTo("$6.00");
+        assertThat(view.unpricedTokens()).as("recorded while the integration had no price").isEqualTo("21K");
     }
 
     @Test
@@ -305,7 +299,14 @@ class ReviewQualityIntegrationTest {
                 .getFindings().getLast().setWithdrawn(true));
     }
 
+    private static final TokenPrices PRICES = new TokenPrices(new BigDecimal("3"), new BigDecimal("15"), null, null);
+
     private long run(long pr, long input, long output) {
+        return run(pr, input, output, PRICES);
+    }
+
+    /** A run of {@code pr} whose one interaction was recorded with {@code prices} (null: unpriced). */
+    private long run(long pr, long input, long output, TokenPrices prices) {
         WorkflowRun run = new WorkflowRun();
         run.setWorkflowType(StructuredReviewService.WORKFLOW_KEY);
         run.setBotId(BOT);
@@ -324,6 +325,7 @@ class ReviewQualityIntegrationTest {
         interaction.setStartedAt(Instant.now());
         interaction.setInputTokens(input);
         interaction.setOutputTokens(output);
+        interaction.setCost(prices == null ? null : prices.cost(input, output, 0, 0));
         interactionRepository.save(interaction);
         return run.getId();
     }

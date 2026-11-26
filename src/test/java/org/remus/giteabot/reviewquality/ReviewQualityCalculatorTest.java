@@ -15,7 +15,6 @@ import org.remus.giteabot.reviewquality.ReviewQualityFacts.ReviewFact;
 import org.remus.giteabot.reviewquality.ReviewQualityFacts.RunUsage;
 import org.remus.giteabot.reviewquality.ReviewQualityFilterForm.Window;
 import org.remus.giteabot.reviewquality.ReviewQualityLoader.ActiveLesson;
-import org.remus.giteabot.reviewquality.ReviewQualityLoader.Prices;
 import org.remus.giteabot.reviewquality.ReviewQualityViews.Kpi;
 
 import java.time.Instant;
@@ -46,10 +45,9 @@ class ReviewQualityCalculatorTest {
     private final List<FeedbackFact> feedback = new ArrayList<>();
     private final Map<PrKey, OutcomeFact> outcomes = new HashMap<>();
     private final List<RunUsage> runs = new ArrayList<>();
-    private final Map<String, Prices> prices = new HashMap<>();
     private long nextId = 1;
     private int minSample = 1;
-    private Set<ReviewSeverity> severities = EnumSet.allOf(ReviewSeverity.class);
+    private final Set<ReviewSeverity> severities = EnumSet.allOf(ReviewSeverity.class);
 
     @Test
     void aPullRequestCountsOnceWithItsFirstReviewInThePeriodOfThatReview() {
@@ -146,21 +144,19 @@ class ReviewQualityCalculatorTest {
     }
 
     @Test
-    void costUsesTheIntegrationsPricesAndFallsBackToTokens() {
-        prices.put("claude", new Prices(3.0, 15.0, 3.75, null));
-        RunUsage priced = new RunUsage(1, 1L, "acme", "web", 1L, Instant.parse("2026-11-02T10:00:00Z"), "claude",
-                1_000_000, 100_000, 200_000, 500_000);
-        ReviewQualityCalculator.Cost cost = calculator().cost(priced);
-        // uncached 300k x 3 + cache write 200k x 3.75 + cache read 500k x 3 (no read price: input) + 100k x 15
-        assertThat(cost.money()).isEqualTo((300_000 * 3.0 + 200_000 * 3.75 + 500_000 * 3.0 + 100_000 * 15.0) / 1e6);
-        RunUsage unpriced = new RunUsage(2, 1L, "acme", "web", 1L, Instant.parse("2026-11-02T10:00:00Z"), "local",
-                10_000, 2_000, 0, 0);
-        assertThat(calculator().cost(unpriced).unpricedTokens()).isEqualTo(12_000);
+    void costIsTheStoredCostAndUnpricedUsageStaysInTokens() {
+        RunUsage priced = new RunUsage(1, 1L, "acme", "web", 1L, Instant.parse("2026-11-02T10:00:00Z"),
+                4.5, 1_100_000, 0);
+        RunUsage partly = new RunUsage(2, 1L, "acme", "web", 1L, Instant.parse("2026-11-02T10:00:00Z"),
+                0.25, 50_000, 12_000);
+
+        assertThat(calculator().cost(priced)).isEqualTo(new ReviewQualityCalculator.Cost(4.5, 1_100_000, 0));
+        assertThat(calculator().cost(partly).unpricedTokens()).isEqualTo(12_000);
+        assertThat(calculator().cost(partly).tokens()).isEqualTo(62_000);
     }
 
     @Test
     void theReturnCountsAcceptedFindingsAndChargesIncorrectOnes() {
-        prices.put("claude", new Prices(1.0, 1.0, null, null));
         ReviewFact first = review("web", 1, "2026-11-02T10:00:00Z", true, "alex");
         finding(first, ReviewSeverity.BLOCKER, "security", null);
         FindingFact useful = finding(first, ReviewSeverity.LOW, "style", null);
@@ -169,8 +165,7 @@ class ReviewQualityCalculatorTest {
         verdict(first, wrong, FeedbackVerdict.INCORRECT);
         ReviewFact second = review("web", 1, "2026-11-03T10:00:00Z", true, "alex");
         finding(second, ReviewSeverity.MEDIUM, "correctness", wrong.id());
-        runs.add(new RunUsage(1, 1L, "acme", "web", 1L, Instant.parse("2026-11-02T10:00:00Z"), "claude",
-                1_000_000, 0, 0, 0));
+        runs.add(new RunUsage(1, 1L, "acme", "web", 1L, Instant.parse("2026-11-02T10:00:00Z"), 1.0, 1_000_000, 0));
 
         ReviewQualitySettings settings = new ReviewQualitySettings();
         List<Kpi> kpis = calculator(settings).cost().kpis();
@@ -226,7 +221,7 @@ class ReviewQualityCalculatorTest {
         Dataset data = new Dataset(reviews, firsts, findings, feedback, outcomes, runs, Map.of(1L, "bot"),
                 new DataSince(null, null, null, null, null));
         return new ReviewQualityCalculator(new ReviewQualityCalculator.Inputs(data, WINDOW, BEFORE, severities,
-                false, minSample, prices, settings, NOW), (key, args) -> key + java.util.Arrays.toString(args)
+                false, minSample, settings, NOW), (key, args) -> key + java.util.Arrays.toString(args)
                 .replace(", ", ","), Locale.ROOT);
     }
 

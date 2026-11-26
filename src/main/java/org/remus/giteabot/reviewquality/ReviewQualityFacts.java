@@ -65,10 +65,12 @@ public final class ReviewQualityFacts {
     public record OutcomeFact(PrOutcome.State state, Instant closedAt) {
     }
 
-    /** Token usage of one workflow run with one AI integration. */
+    /**
+     * AI usage of one workflow run: the cost stored with its priced interactions, and the tokens of
+     * priced and of unpriced interactions (recorded while their integration had no prices).
+     */
     public record RunUsage(long runId, Long botId, String owner, String repo, Long prNumber, Instant startedAt,
-                           String integration, long inputTokens, long outputTokens, long cacheWriteTokens,
-                           long cacheReadTokens) {
+                           double cost, long pricedTokens, long unpricedTokens) {
     }
 
     /** Since when each new kind of data is recorded at all ({@code null}: not yet). */

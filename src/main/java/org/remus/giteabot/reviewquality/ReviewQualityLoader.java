@@ -3,8 +3,6 @@ package org.remus.giteabot.reviewquality;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.TypedQuery;
 import lombok.RequiredArgsConstructor;
-import org.remus.giteabot.admin.AiIntegration;
-import org.remus.giteabot.admin.AiIntegrationRepository;
 import org.remus.giteabot.admin.Bot;
 import org.remus.giteabot.admin.BotRepository;
 import org.remus.giteabot.learning.feedback.FeedbackState;
@@ -51,21 +49,12 @@ public class ReviewQualityLoader {
 
     private final EntityManager entityManager;
     private final BotRepository botRepository;
-    private final AiIntegrationRepository aiIntegrationRepository;
 
     /** The scope of the page: bot and repository filters. */
     public record Scope(Long bot, String owner, String repo) {
 
         static Scope of(ReviewQualityFilterForm filter) {
             return new Scope(filter.getBot(), filter.owner(), filter.repo());
-        }
-    }
-
-    /** Token prices of one AI integration, per million tokens ({@code null}: not set). */
-    public record Prices(Double input, Double output, Double cacheWrite, Double cacheRead) {
-
-        boolean priced() {
-            return input != null && output != null;
         }
     }
 
@@ -80,17 +69,6 @@ public class ReviewQualityLoader {
     public Dataset load(Scope scope, Instant since) {
         return new Dataset(reviews(scope, since), firstFinalized(scope, since), findings(scope, since),
                 feedback(scope, since), outcomes(scope, since), runs(scope, since), botNames(), dataSince());
-    }
-
-    @Transactional(readOnly = true)
-    public Map<String, Prices> prices() {
-        Map<String, Prices> prices = new HashMap<>();
-        for (AiIntegration integration : aiIntegrationRepository.findAll()) {
-            prices.put(integration.getName(), new Prices(value(integration.getPriceInputPerMtok()),
-                    value(integration.getPriceOutputPerMtok()), value(integration.getPriceCacheWritePerMtok()),
-                    value(integration.getPriceCacheReadPerMtok())));
-        }
-        return prices;
     }
 
     /** Lesson revisions active now, with the number of reviews each was supplied to. */
@@ -214,14 +192,17 @@ public class ReviewQualityLoader {
                 .param("key", WORKFLOW_KEY).param("since", since);
         scope(where, scope, "w.botId", "w.repoOwner", "w.repoName");
         List<RunUsage> runs = new ArrayList<>();
+        // The cost is the one stored when each interaction ended; today's prices play no part.
         for (Object[] row : where.bind(entityManager.createQuery("SELECT w.id, w.botId, w.repoOwner, w.repoName, "
-                + "w.triggerNumber, w.startedAt, i.aiIntegrationName, SUM(i.inputTokens), SUM(i.outputTokens), "
-                + "SUM(i.cacheCreationInputTokens), SUM(i.cacheReadInputTokens) FROM AiInteraction i "
-                + "JOIN i.workflowRun w WHERE " + where + " GROUP BY w.id, w.botId, w.repoOwner, w.repoName, "
-                + "w.triggerNumber, w.startedAt, i.aiIntegrationName", Object[].class)).getResultList()) {
+                + "w.triggerNumber, w.startedAt, SUM(i.cost), "
+                + "SUM(CASE WHEN i.cost IS NOT NULL THEN i.inputTokens + i.outputTokens ELSE 0 END), "
+                + "SUM(CASE WHEN i.cost IS NULL THEN i.inputTokens + i.outputTokens ELSE 0 END) "
+                + "FROM AiInteraction i JOIN i.workflowRun w WHERE " + where
+                + " GROUP BY w.id, w.botId, w.repoOwner, w.repoName, w.triggerNumber, w.startedAt",
+                Object[].class)).getResultList()) {
             runs.add(new RunUsage((Long) row[0], (Long) row[1], lower(row[2]), lower(row[3]), (Long) row[4],
-                    (Instant) row[5], (String) row[6], number(row[7]), number(row[8]), number(row[9]),
-                    number(row[10])));
+                    (Instant) row[5], row[6] == null ? 0 : ((Number) row[6]).doubleValue(), number(row[7]),
+                    number(row[8])));
         }
         return runs;
     }
@@ -295,10 +276,6 @@ public class ReviewQualityLoader {
 
     private static long number(Object value) {
         return value == null ? 0L : ((Number) value).longValue();
-    }
-
-    private static Double value(java.math.BigDecimal value) {
-        return value == null ? null : value.doubleValue();
     }
 
     /** A JPQL condition with its parameters. */
