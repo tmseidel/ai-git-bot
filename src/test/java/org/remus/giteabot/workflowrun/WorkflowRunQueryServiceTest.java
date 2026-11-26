@@ -121,6 +121,14 @@ class WorkflowRunQueryServiceTest {
     }
 
     @Test
+    void latestRunsAreTheNewestWithTheirTotals() {
+        assertThat(service.latestRuns(2)).extracting(r -> r.run().getId())
+                .containsExactly(running.getId(), writer.getId());
+        assertThat(service.latestRuns(5)).hasSize(3).last()
+                .satisfies(r -> assertThat(r.hasWarnings()).isTrue());
+    }
+
+    @Test
     void filtersCombine() {
         assertThat(ids(new WorkflowRunFilter(null, "owner/repo", null, null, null, null, false, false, null, null)))
                 .containsExactlyInAnyOrder(review.getId(), running.getId());

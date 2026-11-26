@@ -2,6 +2,7 @@ package org.remus.giteabot.admin;
 
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.aiusage.AiUsageService;
+import org.remus.giteabot.workflowrun.WorkflowRunQueryService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,15 +21,21 @@ public class DashboardController {
     /** Window of the "AI Errors" card. */
     static final Duration AI_ERROR_WINDOW = Duration.ofDays(7);
 
+    /** Rows of the "Recent workflow runs" card. */
+    static final int RECENT_RUNS = 5;
+
     private final BotService botService;
     private final AiUsageService aiUsageService;
     private final RepositoryPlatformFactory repositoryPlatformFactory;
+    private final WorkflowRunQueryService workflowRunQueryService;
 
     public DashboardController(BotService botService, AiUsageService aiUsageService,
-                               RepositoryPlatformFactory repositoryPlatformFactory) {
+                               RepositoryPlatformFactory repositoryPlatformFactory,
+                               WorkflowRunQueryService workflowRunQueryService) {
         this.botService = botService;
         this.aiUsageService = aiUsageService;
         this.repositoryPlatformFactory = repositoryPlatformFactory;
+        this.workflowRunQueryService = workflowRunQueryService;
     }
 
     @GetMapping("/")
@@ -57,6 +64,7 @@ public class DashboardController {
                 .truncatedTo(ChronoUnit.MINUTES).toString());
         // The zone goes along, or the page's filter form would re-read "from" in the browser's zone.
         model.addAttribute("aiErrorsZone", zone.getId());
+        model.addAttribute("recentRuns", workflowRunQueryService.latestRuns(RECENT_RUNS));
         model.addAttribute("activeNav", "dashboard");
         return "dashboard";
     }

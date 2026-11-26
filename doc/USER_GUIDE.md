@@ -35,6 +35,8 @@ The dashboard (`/dashboard`) provides an overview of all your bots and key stati
 - **AI Tokens**: Total tokens sent to and received from AI providers (taken from the AI usage audit log)
 - **AI Errors**: Number of failed AI calls (e.g. HTTP 401 responses from a provider) in the last 7 days. A request that failed but was retried successfully does not count. The card turns red when errors occurred and links to the [Workflow runs page](#workflow-runs), filtered to runs with failed AI calls that started in the same 7 days.
 
+**Recent workflow runs** lists the 5 most recently started runs with their state and warnings, workflow type, bot, trigger, start and duration. Each row opens the run expanded on the [Workflow runs page](#workflow-runs); **View all** opens the full list.
+
 The bot table shows each bot's name, status, integrations, and recent activity.
 
 Use the theme toggle in the navbar to cycle between **auto**, **dark**, and **light**. The preference is stored in your browser.
