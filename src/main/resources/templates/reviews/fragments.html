@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- Page styles shared by the Reviews pages -->
+<style th:fragment="styles">
+    .ref { font-family: var(--bs-font-monospace); font-size: .85em; }
+    .sev { display: inline-block; min-width: 1.8rem; text-align: center; border-radius: .35rem;
+           font-size: .75rem; font-weight: 600; padding: .1rem .35rem; }
+    .sev-BLOCKER { background: var(--bs-danger-bg-subtle); color: var(--bs-danger-text-emphasis); }
+    .sev-MEDIUM { background: var(--bs-warning-bg-subtle); color: var(--bs-warning-text-emphasis); }
+    .sev-LOW { background: var(--bs-secondary-bg-subtle); color: var(--bs-secondary-text-emphasis); }
+    .sev-none { opacity: .35; }
+    .lesson-text { border-left: 3px solid var(--bs-border-color); padding-left: .75rem; white-space: pre-wrap; }
+    .loc { font-family: var(--bs-font-monospace); font-size: .8rem; }
+    .finding + .finding { border-top: 1px solid var(--bs-border-color); }
+    .text-pre { white-space: pre-wrap; }
+    /* Markdown rendered by reviews.js; without script the text stays readable through .text-pre. */
+    .md-rendered { white-space: normal; }
+    .md-rendered > :last-child { margin-bottom: 0; }
+    .md-rendered p, .md-rendered ul, .md-rendered ol, .md-rendered pre, .md-rendered blockquote { margin-bottom: .5rem; }
+    .md-rendered pre { background: var(--bs-tertiary-bg); padding: .5rem .75rem; border-radius: .375rem; overflow-x: auto; }
+    .md-rendered code { font-size: .875em; }
+    .md-rendered h1, .md-rendered h2, .md-rendered h3, .md-rendered h4 { font-size: 1rem; font-weight: 600; }
+    .w-1 { width: 1%; white-space: nowrap; }
+</style>
+
+<!-- Page header and the three tabs -->
+<div th:fragment="header(tab)">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h2 class="mb-0"><i class="bi bi-clipboard-check" aria-hidden="true"></i>
+            <span th:text="#{nav.reviews}">Reviews</span></h2>
+        <small class="text-secondary" th:text="#{reviews.scopeNote}">Agentic reviews only.</small>
+    </div>
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item"><a class="nav-link" th:classappend="${tab == 'reviews'} ? 'active'"
+                                th:attr="aria-current=${tab == 'reviews'} ? 'page' : null"
+                                th:href="@{/reviews}"><i class="bi bi-list-check" aria-hidden="true"></i>
+            <span th:text="#{reviews.tab.reviews}">Reviews</span></a></li>
+        <li class="nav-item"><a class="nav-link" th:classappend="${tab == 'feedback'} ? 'active'"
+                                th:attr="aria-current=${tab == 'feedback'} ? 'page' : null"
+                                th:href="@{/reviews/feedback}"><i class="bi bi-chat-square-quote" aria-hidden="true"></i>
+            <span th:text="#{reviews.tab.feedback}">Feedback</span></a></li>
+        <li class="nav-item"><a class="nav-link" th:classappend="${tab == 'lessons'} ? 'active'"
+                                th:attr="aria-current=${tab == 'lessons'} ? 'page' : null"
+                                th:href="@{/reviews/lessons}"><i class="bi bi-mortarboard" aria-hidden="true"></i>
+            <span th:text="#{reviews.tab.lessons}">Lessons</span></a></li>
+    </ul>
+</div>
+
+<!-- Bot and repository selects shared by every list -->
+<th:block th:fragment="scopeFields">
+    <div class="col-auto" style="width: 12rem;">
+        <label for="filterBot" class="form-label mb-0 small" th:text="#{reviews.filter.bot}">Bot</label>
+        <select class="form-select form-select-sm" id="filterBot" name="bot">
+            <option value="" th:text="#{reviews.filter.allBots}">All bots</option>
+            <option th:each="b : ${bots}" th:value="${b.id}" th:text="${b.name}"
+                    th:selected="${b.id == filter.bot}">bot</option>
+        </select>
+    </div>
+    <div class="col-auto" style="width: 16rem;">
+        <label for="filterProject" class="form-label mb-0 small" th:text="#{reviews.filter.repository}">Repository</label>
+        <select class="form-select form-select-sm" id="filterProject" name="project">
+            <option value="" th:text="#{reviews.filter.allRepositories}">All repositories</option>
+            <option th:each="p : ${projects}" th:value="${p}" th:text="${p}"
+                    th:selected="${p == filter.project}">owner/repo</option>
+        </select>
+    </div>
+</th:block>
+
+<!-- Filter and reset buttons -->
+<div class="col-auto" th:fragment="filterButtons(base)">
+    <button type="submit" class="btn btn-primary btn-sm">
+        <i class="bi bi-funnel" aria-hidden="true"></i> <span th:text="#{button.filter}">Filter</span>
+    </button>
+    <a th:href="@{${base}}" class="btn btn-outline-secondary btn-sm" th:text="#{button.reset}">Reset</a>
+</div>
+
+<!-- Paging and rows per page, as on the Workflow runs page; page.page is 1-based -->
+<nav th:fragment="pager(page, base)" th:if="${page.total > 0}"
+     class="mt-3 d-flex flex-wrap justify-content-between align-items-center gap-2" th:aria-label="#{reviews.pagination}">
+    <ul class="pagination pagination-sm mb-0 flex-wrap" th:if="${page.pages() > 1}">
+        <li class="page-item" th:classappend="${page.hasPrevious()} ? '' : 'disabled'">
+            <a class="page-link" th:href="|@{${base}}?${filter.with('page', 1)}|"><span th:text="#{button.first}">«</span></a>
+        </li>
+        <li class="page-item" th:classappend="${page.hasPrevious()} ? '' : 'disabled'">
+            <a class="page-link" th:href="|@{${base}}?${filter.with('page', page.page - 1)}|"><span th:text="#{button.previous}">Previous</span></a>
+        </li>
+        <li th:each="p : ${#numbers.sequence(T(java.lang.Math).max(1, page.page - 2), T(java.lang.Math).min(page.pages(), page.page + 2))}"
+            class="page-item" th:classappend="${p == page.page} ? 'active'">
+            <a class="page-link" th:href="|@{${base}}?${filter.with('page', p)}|" th:text="${p}">1</a>
+        </li>
+        <li class="page-item" th:classappend="${page.hasNext()} ? '' : 'disabled'">
+            <a class="page-link" th:href="|@{${base}}?${filter.with('page', page.page + 1)}|"><span th:text="#{button.next}">Next</span></a>
+        </li>
+        <li class="page-item" th:classappend="${page.hasNext()} ? '' : 'disabled'">
+            <a class="page-link" th:href="|@{${base}}?${filter.with('page', page.pages())}|"><span th:text="#{button.last}">»</span></a>
+        </li>
+    </ul>
+    <span th:unless="${page.pages() > 1}"></span>
+    <form class="d-flex align-items-center gap-1" method="get" th:action="@{${base}}">
+        <input type="hidden" th:each="kept : ${filter.paramsWithout('size', 'page')}"
+               th:name="${kept.key}" th:value="${kept.value}"/>
+        <label class="small text-secondary" for="reviewsPageSize" th:text="#{label.rowsPerPage}">Rows per page</label>
+        <select id="reviewsPageSize" name="size" class="form-select form-select-sm" style="width: 4.5rem;" onchange="this.form.submit()">
+            <option th:each="n : ${ {10, 20, 50, 100} }" th:value="${n}" th:text="${n}" th:selected="${filter.effectiveSize() == n}">20</option>
+        </select>
+    </form>
+</nav>
+
+<!-- Blocker / medium / low counts of a review row -->
+<span th:fragment="severities(row)" class="text-nowrap">
+    <span class="sev sev-BLOCKER" th:classappend="${row.blockers == 0} ? 'sev-none'"
+          th:title="#{reviews.severity.BLOCKER}" th:text="${row.blockers}">0</span>
+    <span class="sev sev-MEDIUM" th:classappend="${row.medium == 0} ? 'sev-none'"
+          th:title="#{reviews.severity.MEDIUM}" th:text="${row.medium}">0</span>
+    <span class="sev sev-LOW" th:classappend="${row.low == 0} ? 'sev-none'"
+          th:title="#{reviews.severity.LOW}" th:text="${row.low}">0</span>
+</span>
+
+<!-- An actor: Git accounts as @login, admin-panel actions as admin:name -->
+<span th:fragment="actor(name)" th:text="${name == null} ? '' : (${name.startsWith('admin:')} ? ${name} : '@' + ${name})">@login</span>
+
+<!-- Markdown renderer for .md / .md-inline texts (same libraries as the bot form's prompt preview) -->
+<th:block th:fragment="markdownScripts">
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+</th:block>
+
+<!-- Publication state badge -->
+<span th:fragment="publication(state)" class="badge"
+      th:classappend="${state == null} ? 'text-bg-light border' : (${state.name() == 'PUBLISHED'} ? 'text-bg-success' : (${state.name() == 'FAILED'} ? 'text-bg-danger' : (${state.name() == 'UNCERTAIN'} ? 'text-bg-warning' : 'text-bg-secondary')))"
+      th:text="${state == null} ? #{reviews.publication.none} : ${#messages.msg('reviews.publication.' + state.name())}">published</span>
+
+<!-- Verdict badge -->
+<span th:fragment="verdict(v)" class="badge"
+      th:classappend="${v.name() == 'USEFUL'} ? 'text-bg-success' : (${v.name() == 'INCORRECT'} ? 'text-bg-danger' : (${v.name() == 'NEEDS_IMPROVEMENT'} ? 'text-bg-warning' : 'text-bg-secondary'))"
+      th:text="${#messages.msg('reviews.verdict.' + v.name())}">useful</span>
+
+<!-- Lesson state badge -->
+<span th:fragment="lessonState(s)" class="badge"
+      th:classappend="${s.name() == 'ACTIVE'} ? 'text-bg-success' : (${s.name() == 'CANDIDATE'} ? 'text-bg-primary' : (${s.name() == 'STALE'} ? 'text-bg-warning' : 'text-bg-secondary'))"
+      th:text="${#messages.msg('reviews.lessonState.' + s.name())}">active</span>
+
+<!-- The feedback recorded on one review target -->
+<div th:fragment="targetFeedback(items)" th:if="${!items.isEmpty()}" class="mt-2">
+    <div th:each="fb : ${items}" class="small ps-2 border-start mb-1"
+         th:classappend="${fb.state.name() != 'EFFECTIVE'} ? 'text-secondary'">
+        <span th:replace="~{reviews/fragments :: verdict(${fb.verdict})}"></span>
+        <span class="ref" th:text="${fb.reference}">FB1</span>
+        <span th:replace="~{reviews/fragments :: actor(${fb.actor})}"></span>
+        <span th:if="${fb.state.name() != 'EFFECTIVE'}" class="badge text-bg-light border"
+              th:text="${#messages.msg('reviews.feedbackState.' + fb.state.name())}">retracted</span>
+        <span th:if="${fb.reason != null}">— <span class="md-inline" th:text="${fb.reason}">reason</span></span>
+    </div>
+</div>
+
+</body>
+</html>

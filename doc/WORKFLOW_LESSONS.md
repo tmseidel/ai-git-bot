@@ -64,6 +64,7 @@ from the list removes their rights immediately; an old configuration never grant
 | `propose`, `revise`, `activate` | Learning maintainers, with `learningMode` = `CURATED` |
 | `reject`, `disable` | Learning maintainers, in every mode — switching learning off never traps an active lesson |
 | `feedback retract FB…` | The feedback's author, and now also learning maintainers |
+| The same actions on the admin panel's [Reviews page](USER_GUIDE.md#reviews) | Administrators, recorded as `admin:<user>` — `learningMode` applies, the maintainer list does not |
 
 Permission to give feedback is not permission to change repository policy. A
 permitted commenter who is not a maintainer gets a short explanation; a commenter the
@@ -181,6 +182,10 @@ cannot be activated; propose a lesson from current feedback instead.
   automatically.
 
 ## Discovering lessons
+
+The admin panel's [Reviews page](USER_GUIDE.md#reviews) lists the lessons of every bot and
+repository, with a filter for those needing attention, and offers propose, revise, activate,
+reject and disable as buttons. The Git commands work the same way:
 
 ```text
 @bot learning list                  # every lesson of this bot and repository

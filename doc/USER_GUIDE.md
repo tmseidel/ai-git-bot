@@ -97,6 +97,85 @@ Raw payload capture is **disabled by default** because the payloads can be large
 
 Runs recorded before this page existed (from the former usage and error logs) appear as runs of type **Legacy**, one per pull request or issue. Such a run can cover several workflows.
 
+## Reviews
+
+The Reviews page (`/reviews`) shows three things: what the [agentic review](PR_WORKFLOWS_AGENTIC_REVIEW.md) found, what reviewers said about it ([feedback](WORKFLOW_FEEDBACK.md)), and the [lessons](WORKFLOW_LESSONS.md) maintainers drew from that feedback. It reads the stored records, so it shows exactly what the `@bot feedback …` and `@bot learning …` commands show, for all bots and repositories in one place. Normal (non-agentic) reviews keep no structured record and do not appear here.
+
+The page has three tabs. Each tab has a **Bot** and a **Repository** filter. All filters are part of the page's address, so a filtered view can be bookmarked or shared. **Rows per page** and the page links work as on the [Workflow runs page](#workflow-runs).
+
+### Reviews tab
+
+The tab lists one row per agentic review, newest first. Each row shows:
+
+- the review's reference (`O412`), repository and pull request
+- when it was finalized, and on which head commit
+- its conclusion
+- its findings by severity (blocker / medium / low); withdrawn findings are not counted
+- how much feedback was given on it (on the review, its assessment or its findings)
+- how many lessons it was given
+- whether it was published on the pull request
+
+You can filter by **PR** number, by **State** (finalized, failed, cancelled, …) or by **With blockers**.
+
+<img src="screenshots/reviews/reviews.png" alt="Reviews — agentic reviews with findings by severity, feedback and publication" width="700"/>
+
+Click a reference to open the review. It shows the assessment, every finding with its location, explanation, impact and recommendation, and the feedback given on each finding. Review texts, feedback reasons and lesson guidance are rendered as Markdown, as on the pull request. The side panel lists:
+
+- the other reviews of the same pull request, so you can see whether a finding persisted from one review to the next
+- the lessons the review was given, each with the revision it saw
+
+**Workflow runs** opens the runs of that pull request.
+
+<img src="screenshots/reviews/review.png" alt="Review details — assessment, findings with feedback, and the other reviews of the pull request" width="700"/>
+
+### Feedback tab
+
+The tab lists every feedback record. Each record shows what it is about (a finding, the assessment or the whole review), the verdict, the reason, who gave it, and the lessons citing it. By default only the feedback in effect is listed. You can filter by:
+
+- **PR**
+- **Verdict**
+- **Not yet cited by a lesson**: corrections nobody has turned into guidance yet
+- **Include superseded and retracted**
+
+<img src="screenshots/reviews/feedback.png" alt="Feedback — verdicts and reasons with the lessons citing them" width="700"/>
+
+### Lessons tab
+
+The tab lists every lesson, newest first; pick a state to narrow the list. **Needs attention** lists the candidates waiting for a decision, and the lessons that their validation keeps out of reviews: review required, recheck due, withdrawn evidence, or conflicts. Each row shows the current guidance, where it applies, how often it was supplied to a review, and its validation.
+
+<img src="screenshots/reviews/lessons.png" alt="Lessons — current guidance, scope, usage and validation" width="700"/>
+
+Click a lesson to see:
+
+- its current guidance
+- a candidate waiting for activation
+- all revisions
+- the evidence (feedback) it is based on
+- its history
+- the reviews it was recently supplied to
+
+<img src="screenshots/reviews/lesson.png" alt="Lesson details — active guidance, a waiting candidate, revisions, evidence and history" width="700"/>
+
+<img src="screenshots/reviews/lesson_2.png" alt="Lesson details — active guidance, a waiting candidate, revisions, evidence and history" width="700"/>
+
+### Actions
+
+The page offers the same actions as the Git commands, and they change state exactly as the commands do:
+
+| Action | Where | Git command |
+|---|---|---|
+| Retract feedback | Feedback tab, **Actions** | `@bot feedback retract FB…` |
+| Propose a lesson from feedback | Feedback tab, **Actions** | `@bot learning propose FB…` |
+| Activate or reject a candidate revision | Lesson | `@bot learning activate L…@n`, `@bot learning reject L…@n` |
+| Revise a lesson | Lesson | `@bot learning revise L…` |
+| Disable a lesson | Lesson | `@bot learning disable L…` |
+
+- **Recorded as you.** Actions are recorded as `admin:<your user name>`. The lesson and feedback histories show Git accounts as `@login`, so the two are easy to tell apart. The bot's list of learning maintainers does not apply to administrators.
+- **Learning mode still applies.** When curated learning is off for the bot, lessons cannot be proposed, revised or activated; those buttons are disabled with a note. Rejecting and disabling keep working.
+- **Nothing is posted on the pull request.** The action appears only in the record's history.
+- **Feedback on a finding stays a Git action.** The reviewers of a pull request judge its findings there.
+- **Confirmation.** Retracting, activating and rejecting ask for confirmation; revising and disabling open a form. Submitting a form twice performs the action once.
+
 ## Managing AI Integrations
 
 AI Integrations define connections to AI providers. Navigate to **AI Integrations** from the dashboard or navbar.

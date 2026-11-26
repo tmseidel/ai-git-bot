@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviews}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewsPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <div th:replace="~{reviews/fragments :: header('reviews')}"></div>
+
+    <form method="get" th:action="@{/reviews}" class="row g-2 align-items-end mb-3">
+        <th:block th:replace="~{reviews/fragments :: scopeFields}"></th:block>
+        <div class="col-auto" style="width: 8rem;">
+            <label for="filterNumber" class="form-label mb-0 small" th:text="#{reviews.filter.pr}">PR</label>
+            <input type="number" min="1" class="form-control form-control-sm" id="filterNumber" name="number"
+                   th:value="${filter.number}"/>
+        </div>
+        <div class="col-auto" style="width: 11rem;">
+            <label for="filterState" class="form-label mb-0 small" th:text="#{reviews.filter.state}">State</label>
+            <select class="form-select form-select-sm" id="filterState" name="state">
+                <option value="" th:text="#{reviews.filter.allStates}">All states</option>
+                <option th:each="s : ${ {'FINALIZED', 'FAILED', 'CANCELLED', 'ABANDONED', 'DRAFT'} }"
+                        th:value="${s}" th:text="${#messages.msg('reviews.reviewState.' + s)}"
+                        th:selected="${s == filter.state}">state</option>
+            </select>
+        </div>
+        <div class="col-auto pb-1">
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="filterBlockers" name="blockers" value="true"
+                       th:checked="${filter.blockers}"/>
+                <label class="form-check-label small" for="filterBlockers" th:text="#{reviews.filter.blockers}">With blockers</label>
+            </div>
+        </div>
+        <div th:replace="~{reviews/fragments :: filterButtons('/reviews')}"></div>
+    </form>
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                <tr>
+                    <th th:text="#{reviews.col.review}">Review</th>
+                    <th th:text="#{reviews.col.repositoryPr}">Repository / PR</th>
+                    <th th:text="#{reviews.col.finalized}">Finalized</th>
+                    <th th:text="#{reviews.col.conclusion}">Conclusion</th>
+                    <th class="text-center w-1" th:text="#{reviews.col.findings}" th:title="#{reviews.col.findingsHint}">Findings</th>
+                    <th class="text-center w-1" th:text="#{reviews.col.feedback}">Feedback</th>
+                    <th class="w-1" th:text="#{reviews.col.lessons}">Lessons</th>
+                    <th class="w-1" th:text="#{reviews.col.publication}">Publication</th>
+                </tr>
+                </thead>
+                <tbody class="table-group-divider">
+                <tr th:if="${reviews.rows.isEmpty()}">
+                    <td colspan="8" class="text-center text-secondary py-4" th:text="#{reviews.empty}">No agentic reviews yet.</td>
+                </tr>
+                <tr th:each="r : ${reviews.rows}">
+                    <td>
+                        <a th:href="@{/reviews/{ref}(ref=${r.reference})}" class="ref fw-semibold" th:text="${r.reference}">O1</a>
+                        <div class="small text-secondary" th:text="${r.botName}">bot</div>
+                    </td>
+                    <td>
+                        <span th:text="${r.project()}">owner/repo</span>
+                        <span class="text-secondary" th:if="${r.prNumber != null}" th:text="|#${r.prNumber}|">#1</span>
+                    </td>
+                    <td class="small text-nowrap">
+                        <span th:text="${#temporals.format(r.finalizedAt != null ? r.finalizedAt : r.createdAt, 'yyyy-MM-dd HH:mm')}">date</span>
+                        <div class="text-secondary ref" th:text="${r.shortSha()}">sha</div>
+                    </td>
+                    <td class="small">
+                        <span th:if="${r.conclusion != null and r.state.name() == 'FINALIZED'}"
+                              th:text="${#messages.msg('reviews.conclusion.' + r.conclusion.name())}">conclusion</span>
+                        <span th:unless="${r.state.name() == 'FINALIZED'}" class="badge text-bg-secondary"
+                              th:text="${#messages.msg('reviews.reviewState.' + r.state.name())}">failed</span>
+                    </td>
+                    <td class="text-center"><span th:replace="~{reviews/fragments :: severities(${r})}"></span></td>
+                    <td class="text-center">
+                        <a th:if="${r.feedback > 0}" th:href="@{/reviews/{ref}(ref=${r.reference})}" th:text="${r.feedback}">0</a>
+                        <span th:unless="${r.feedback > 0}" class="text-secondary">–</span>
+                    </td>
+                    <td class="text-nowrap small">
+                        <span th:each="l : ${r.lessons}" class="badge text-bg-light border ref me-1" th:text="${l}">L1@1</span>
+                        <span th:if="${r.lessons.isEmpty()}" class="text-secondary">–</span>
+                    </td>
+                    <td><span th:replace="~{reviews/fragments :: publication(${r.publication})}"></span></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div th:replace="~{reviews/fragments :: pager(${reviews}, '/reviews')}"></div>
+</div>
+</body>
+</html>

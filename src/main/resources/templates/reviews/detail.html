@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviews}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewPage" th:with="r=${review.row}, fin=${review.finalized}">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <div th:replace="~{reviews/fragments :: header('reviews')}"></div>
+
+    <a th:href="@{/reviews}" class="small"><i class="bi bi-arrow-left" aria-hidden="true"></i>
+        <span th:text="#{reviews.backToReviews}">All reviews</span></a>
+
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-2 mb-3">
+        <div>
+            <h3 class="mb-1"><span class="ref" th:text="${r.reference}">O1</span></h3>
+            <div class="text-secondary small">
+                <span th:text="${r.project()}">owner/repo</span>
+                <span th:if="${r.prNumber != null}" th:text="|#${r.prNumber}|">#1</span>
+                · <span th:text="#{reviews.head}">head</span> <span class="ref" th:text="${r.shortSha()}">sha</span>
+                · <span th:text="${#temporals.format(r.finalizedAt != null ? r.finalizedAt : r.createdAt, 'yyyy-MM-dd HH:mm')}">date</span>
+                · <span th:text="${r.botName}">bot</span>
+            </div>
+        </div>
+        <div class="d-flex gap-2 align-items-center">
+            <span class="badge text-bg-secondary" th:unless="${r.state.name() == 'FINALIZED'}"
+                  th:text="${#messages.msg('reviews.reviewState.' + r.state.name())}">failed</span>
+            <span th:replace="~{reviews/fragments :: publication(${r.publication})}"></span>
+            <a class="btn btn-sm btn-outline-secondary" th:href="|@{/workflow-runs}?${review.workflowRunsQuery}|">
+                <i class="bi bi-graph-up" aria-hidden="true"></i> <span th:text="#{reviews.workflowRuns}">Workflow runs</span></a>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div th:if="${fin == null}" class="alert alert-secondary"
+                 th:text="#{reviews.notFinalized(${#messages.msg('reviews.reviewState.' + r.state.name())})}">
+                This review did not finalize.
+            </div>
+            <th:block th:if="${fin != null}">
+                <div class="card mb-4">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><span th:text="#{reviews.assessment}">Assessment</span>
+                            <span class="ref text-secondary small" th:text="${fin.assessmentReference}">O1-A</span></h5>
+                        <span><span th:text="${#messages.msg('reviews.conclusion.' + fin.conclusion.name())}">conclusion</span>
+                            · <span th:replace="~{reviews/fragments :: severities(${r})}"></span></span>
+                    </div>
+                    <div class="card-body small">
+                        <div class="md text-pre mb-3" th:text="${fin.summary}">Summary</div>
+                        <div class="row g-3">
+                            <div class="col-md-6" th:if="${fin.reviewedAreas != null}">
+                                <div class="text-secondary" th:text="#{reviews.reviewedAreas}">Reviewed areas</div>
+                                <div class="md text-pre" th:text="${fin.reviewedAreas}">areas</div>
+                            </div>
+                            <div class="col-md-6" th:if="${fin.limitations != null}">
+                                <div class="text-secondary" th:text="#{reviews.limitations}">Limitations</div>
+                                <div class="md text-pre" th:text="${fin.limitations}">limitations</div>
+                            </div>
+                            <div class="col-12" th:if="${fin.coverageNote != null}">
+                                <div class="text-secondary" th:text="#{reviews.coverageNote}">Coverage</div>
+                                <div class="md text-pre" th:text="${fin.coverageNote}">note</div>
+                            </div>
+                        </div>
+                        <div th:replace="~{reviews/fragments :: targetFeedback(${review.feedbackOn(r.reference)})}"></div>
+                        <div th:replace="~{reviews/fragments :: targetFeedback(${review.feedbackOn(fin.assessmentReference)})}"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h5 class="mb-0" th:text="#{reviews.findings}">Findings</h5></div>
+                    <div class="card-body py-0">
+                        <div th:if="${fin.findings.isEmpty()}" class="text-center text-secondary py-4" th:text="#{reviews.noFindings}">No findings.</div>
+                        <div th:each="f : ${fin.findings}" class="finding py-3">
+                            <div>
+                                <span class="sev" th:classappend="|sev-${f.severity.name()}|"
+                                      th:text="${#messages.msg('reviews.severity.' + f.severity.name())}">medium</span>
+                                <span class="ref text-secondary" th:text="${f.reference}">O1-F1</span>
+                                <strong class="ms-1 md-inline" th:text="${f.title}">Title</strong>
+                                <span class="badge text-bg-light border" th:if="${f.category != null}" th:text="${f.category}">category</span>
+                            </div>
+                            <div th:each="loc : ${f.locations}" class="loc mt-1">
+                                <i class="bi bi-file-earmark-code" aria-hidden="true"></i>
+                                <span th:text="${loc.path}">path</span><span th:if="${loc.startLine != null}"
+                                    th:text="|:${loc.startLine}${loc.endLine != null and loc.endLine != loc.startLine ? '-' + loc.endLine : ''}|">:1</span>
+                                <span class="text-secondary" th:if="${loc.description != null}">— <span class="md-inline" th:text="${loc.description}"></span></span>
+                            </div>
+                            <div class="md text-pre mb-2 mt-2 small" th:text="${f.explanation}">Explanation</div>
+                            <div class="mb-2 small" th:if="${f.impact != null}"><div class="text-secondary" th:text="#{reviews.impact}">Impact</div>
+                                <div class="md text-pre" th:text="${f.impact}">impact</div></div>
+                            <div class="mb-2 small" th:if="${f.recommendation != null}"><div class="text-secondary" th:text="#{reviews.recommendation}">Recommendation</div>
+                                <div class="md text-pre" th:text="${f.recommendation}">recommendation</div></div>
+                            <div th:replace="~{reviews/fragments :: targetFeedback(${review.feedbackOn(f.reference)})}"></div>
+                        </div>
+                    </div>
+                </div>
+            </th:block>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card mb-4">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.pullRequestReviews}">Reviews of this pull request</h6></div>
+                <ul class="list-group list-group-flush small">
+                    <li th:each="s : ${review.pullRequestReviews}" class="list-group-item d-flex justify-content-between"
+                        th:classappend="${s.reference == r.reference} ? 'bg-primary-subtle'">
+                        <span><a class="ref" th:href="@{/reviews/{ref}(ref=${s.reference})}" th:text="${s.reference}">O1</a>
+                            <span class="ref text-secondary" th:text="${s.shortSha()}">sha</span>
+                            <span class="d-block text-secondary" th:text="${#temporals.format(s.finalizedAt != null ? s.finalizedAt : s.createdAt, 'yyyy-MM-dd HH:mm')}">date</span></span>
+                        <span th:replace="~{reviews/fragments :: severities(${s})}"></span>
+                    </li>
+                </ul>
+            </div>
+            <div class="card">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.lessonsSupplied}">Lessons supplied</h6></div>
+                <div class="card-body small">
+                    <div th:if="${r.lessons.isEmpty()}" class="text-secondary" th:text="#{reviews.noLessonsSupplied}">No lessons were supplied.</div>
+                    <a th:each="l : ${r.lessons}" class="badge text-bg-light border ref me-1"
+                       th:href="@{/reviews/lessons/{ref}(ref=${#strings.substringBefore(l, '@')})}" th:text="${l}">L1@1</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script th:replace="~{reviews/fragments :: markdownScripts}"></script>
+    <script th:src="@{/js/reviews.js}"></script>
+</div>
+</body>
+</html>
