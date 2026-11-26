@@ -101,6 +101,10 @@ retracted or replaced feedback are flagged for a maintainer's review.
 
 ## Reading feedback
 
+The admin panel's [Reviews page](USER_GUIDE.md#reviews) lists the feedback of every bot and
+repository next to the reviews it judges. It can also retract feedback, which is recorded as
+`admin:<user>` and posts nothing on the pull request. On a pull request:
+
 ```text
 @bot feedback list                 # this pull request
 @bot feedback list repository      # this repository, across pull requests

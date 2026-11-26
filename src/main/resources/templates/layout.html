@@ -65,6 +65,14 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" th:href="@{/reviews}"
+                           th:classappend="${activeNav == 'reviews'} ? 'active'"
+                           data-tour="reviews" th:data-tour-title="#{tour.reviews.title}"
+                           th:data-tour-text="#{tour.reviews.text}">
+                            <i class="bi bi-clipboard-check"></i> <span th:text="#{nav.reviews}">Reviews</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" th:href="@{/workflow-runs}"
                            th:classappend="${activeNav == 'workflowRuns'} ? 'active'"
                            data-tour="workflowRuns" th:data-tour-title="#{tour.workflowRuns.title}"

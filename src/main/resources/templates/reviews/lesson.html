@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviews}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="lessonPage"
+     th:with="d=${lesson.detail}, s=${lesson.detail.summary}, pending=${lesson.pendingCandidate()}">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <div th:replace="~{reviews/fragments :: header('lessons')}"></div>
+
+    <a th:href="@{/reviews/lessons}" class="small"><i class="bi bi-arrow-left" aria-hidden="true"></i>
+        <span th:text="#{reviews.backToLessons}">All lessons</span></a>
+
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mt-2 mb-3">
+        <div>
+            <h3 class="mb-1"><span class="ref" th:text="${s.reference}">L1</span>
+                <span th:replace="~{reviews/fragments :: lessonState(${s.state})}"></span>
+                <span class="small text-secondary" th:if="${s.activeRevision != null}" th:text="|@${s.activeRevision}|">@1</span></h3>
+            <div class="text-secondary small">
+                <span th:text="|${s.repoOwner}/${s.repoName}|">owner/repo</span> · <span th:text="${lesson.botName}">bot</span>
+                · <span th:text="#{reviews.learningMode(${lesson.learningMode})}">learning mode CURATED</span>
+                · <span th:text="#{reviews.usedIn(${s.usageCount})}">used in 0 reviews</span>
+            </div>
+        </div>
+        <!-- Maintainer actions; each is the matching learning command -->
+        <div class="d-flex gap-2 flex-wrap">
+            <form method="post" th:if="${lesson.canActivate()}"
+                  th:action="@{/reviews/lessons/{ref}/activate(ref=${s.reference})}"
+                  th:data-confirm="${#messages.msg('reviews.confirm.activate', s.reference + '@' + lesson.latest.number)}">
+                <input type="hidden" name="revision" th:value="${lesson.latest.number}"/>
+                <input type="hidden" name="requestId" th:value="${requestId}"/>
+                <button type="submit" class="btn btn-sm btn-primary" th:disabled="${!lesson.curated}"
+                        th:title="${lesson.curated} ? null : #{reviews.curatedOffHint}">
+                    <i class="bi bi-play-circle" aria-hidden="true"></i>
+                    <span th:text="#{reviews.action.activateRevision(${lesson.latest.number})}">Activate @1</span></button>
+            </form>
+            <form method="post" th:if="${lesson.canReject()}"
+                  th:action="@{/reviews/lessons/{ref}/reject(ref=${s.reference})}"
+                  th:data-confirm="${#messages.msg('reviews.confirm.reject', s.reference + '@' + lesson.latest.number)}">
+                <input type="hidden" name="revision" th:value="${lesson.latest.number}"/>
+                <input type="hidden" name="requestId" th:value="${requestId}"/>
+                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-hand-thumbs-down" aria-hidden="true"></i>
+                    <span th:text="#{reviews.action.rejectRevision(${lesson.latest.number})}">Reject @1</span></button>
+            </form>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#reviseModal"
+                    th:disabled="${!lesson.curated}" th:title="${lesson.curated} ? null : #{reviews.curatedOffHint}">
+                <i class="bi bi-pencil" aria-hidden="true"></i> <span th:text="#{reviews.action.revise}">Revise</span></button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-bs-toggle="modal" data-bs-target="#disableModal"
+                    th:if="${lesson.canDisable()}">
+                <i class="bi bi-pause-circle" aria-hidden="true"></i> <span th:text="#{reviews.action.disable}">Disable</span></button>
+        </div>
+    </div>
+
+    <div class="alert alert-light border small" th:unless="${lesson.curated}" th:text="#{reviews.lesson.curatedOff(${lesson.learningMode})}">
+        Curated learning is off for this bot.</div>
+    <div class="alert alert-warning small" th:if="${!s.validation.valid() or s.reviewRequired}">
+        <strong th:text="${s.state.name() == 'ACTIVE'} ? #{reviews.lesson.notSupplied} : #{reviews.lesson.validationIssues}">Not supplied to reviews until resolved.</strong>
+        <ul class="mb-0 mt-1">
+            <li th:each="issue : ${s.validation.issues}" th:text="${issue}">issue</li>
+            <li th:each="c : ${s.validation.conflicts}" th:text="${c}">conflict</li>
+        </ul>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card mb-4" th:if="${s.current != null}">
+                <div class="card-header"><h5 class="mb-0"><span th:text="#{reviews.lesson.current}">Current guidance</span>
+                    <span class="ref text-secondary small" th:text="|@${s.current.number}|">@1</span></h5></div>
+                <div class="card-body">
+                    <div class="lesson-text md text-pre" th:text="${s.current.text}">text</div>
+                    <div class="small text-secondary mt-2">
+                        <span th:text="#{reviews.col.appliesTo}">Applies to</span>:
+                        <span class="loc" th:text="${s.current.paths.isEmpty()} ? #{reviews.repositoryWide} : ${#strings.listJoin(s.current.paths, ', ')}">paths</span>
+                        <span th:if="${s.current.category != null}" th:text="|· ${s.current.category}|">· category</span>
+                    </div>
+                </div>
+            </div>
+            <div class="card mb-4 border-primary-subtle" th:if="${pending != null}">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.lesson.waiting(${pending.number}, ${pending.createdBy.startsWith('admin:') ? pending.createdBy : '@' + pending.createdBy})}">Candidate @2 waiting</h6></div>
+                <div class="card-body small">
+                    <div class="lesson-text md text-pre" th:text="${pending.text}">text</div>
+                    <div class="text-secondary mt-2"><span th:text="#{reviews.col.appliesTo}">Applies to</span>:
+                        <span class="loc" th:text="${pending.paths.isEmpty()} ? #{reviews.repositoryWide} : ${#strings.listJoin(pending.paths, ', ')}">paths</span></div>
+                </div>
+            </div>
+            <div class="card mb-4">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.lesson.revisions}">Revisions</h6></div>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0 small">
+                        <thead><tr><th>#</th><th th:text="#{reviews.col.state}">State</th><th th:text="#{reviews.lesson.written}">Written</th>
+                            <th th:text="#{reviews.lesson.activated}">Activated</th><th th:text="#{reviews.lesson.ended}">Ended</th></tr></thead>
+                        <tbody>
+                        <tr th:each="v : ${d.revisions}" th:classappend="${s.activeRevision != null and v.number == s.activeRevision} ? 'table-primary'">
+                            <td class="ref" th:text="|@${v.number}|">@1</td>
+                            <td th:text="${#messages.msg('reviews.lessonState.' + v.state.name())}">state</td>
+                            <td><span th:replace="~{reviews/fragments :: actor(${v.createdBy})}"></span> · <span th:text="${#temporals.format(v.createdAt, 'yyyy-MM-dd')}">date</span></td>
+                            <td><th:block th:if="${v.activatedAt != null}"><span th:replace="~{reviews/fragments :: actor(${v.activatedBy})}"></span> ·
+                                <span th:text="${#temporals.format(v.activatedAt, 'yyyy-MM-dd')}">date</span></th:block></td>
+                            <td><th:block th:if="${v.endedAt != null}"><span th:replace="~{reviews/fragments :: actor(${v.endedBy})}"></span> ·
+                                <span th:text="${#temporals.format(v.endedAt, 'yyyy-MM-dd')}">date</span></th:block></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" th:if="${s.current != null}">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.lesson.evidence}">Evidence</h6></div>
+                <ul class="list-group list-group-flush small">
+                    <li class="list-group-item" th:each="e : ${s.current.evidence}">
+                        <span class="ref" th:text="${e.feedbackReference}">FB1</span>
+                        <th:block th:if="${e.verdict != null}"><span th:replace="~{reviews/fragments :: verdict(${e.verdict})}"></span></th:block>
+                        <span th:text="#{reviews.lesson.evidenceOn}">on</span>
+                        <a class="ref" th:href="@{/reviews/{ref}(ref=${#strings.substringBefore(e.targetReference + '-', '-')})}"
+                           th:text="${e.targetReference}">O1-F1</a>
+                        <th:block th:if="${e.actor != null}"><span th:replace="~{reviews/fragments :: actor(${e.actor})}"></span></th:block>
+                        <span class="badge" th:classappend="${e.effective()} ? 'text-bg-success' : 'text-bg-warning'"
+                              th:text="${e.state == null} ? #{reviews.lesson.evidenceMissing} : ${#messages.msg('reviews.feedbackState.' + e.state.name())}">effective</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card mb-4">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.lesson.history}">History</h6></div>
+                <ul class="list-group list-group-flush small">
+                    <li class="list-group-item" th:each="h : ${d.history}">
+                        <strong th:text="${#messages.msgOrNull('reviews.event.' + h.type.name()) ?: h.type.name()}">activated</strong>
+                        <span class="ref" th:if="${h.revision != null}" th:text="|@${h.revision}|">@1</span>
+                        · <span th:replace="~{reviews/fragments :: actor(${h.actor})}"></span>
+                        <span class="text-secondary" th:text="${#temporals.format(h.at, 'yyyy-MM-dd HH:mm')}">date</span>
+                        <div class="text-secondary text-pre" th:if="${h.detail != null}" th:text="${h.detail}">detail</div>
+                    </li>
+                </ul>
+            </div>
+            <div class="card">
+                <div class="card-header"><h6 class="mb-0" th:text="#{reviews.lesson.usage}">Recent usage</h6></div>
+                <ul class="list-group list-group-flush small">
+                    <li class="list-group-item text-secondary" th:if="${lesson.usage.isEmpty()}" th:text="#{reviews.lesson.notUsed}">Not supplied to a review yet.</li>
+                    <li class="list-group-item d-flex justify-content-between" th:each="u : ${lesson.usage}">
+                        <span><a class="ref" th:href="@{/reviews/{ref}(ref=${u.outputReference})}" th:text="${u.outputReference}">O1</a>
+                            <span th:if="${u.prNumber != null}" th:text="|#${u.prNumber}|">#1</span></span>
+                        <span class="text-secondary"><span class="ref" th:text="|@${u.revision}|">@1</span> ·
+                            <span th:text="${#temporals.format(u.suppliedAt, 'yyyy-MM-dd HH:mm')}">date</span></span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Revise: writes the next candidate revision -->
+    <div class="modal fade" id="reviseModal" tabindex="-1" aria-labelledby="reviseTitle" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <form class="modal-content" method="post" th:action="@{/reviews/lessons/{ref}/revise(ref=${s.reference})}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="reviseTitle" th:text="#{reviews.revise.title(${s.reference})}">Revise</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{button.close}"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-secondary" th:text="#{reviews.revise.hint}">Writes a new candidate.</p>
+                    <input type="hidden" name="requestId" th:value="${requestId}"/>
+                    <div class="mb-3">
+                        <label for="reviseText" class="form-label" th:text="#{reviews.form.guidance}">Guidance</label>
+                        <textarea class="form-control" id="reviseText" name="text" rows="4" maxlength="2000" required
+                                  th:text="${lesson.latest != null ? lesson.latest.text : ''}"></textarea>
+                    </div>
+                    <div class="mb-1">
+                        <label for="revisePaths" class="form-label" th:text="#{reviews.form.paths}">Applies to</label>
+                        <input type="text" class="form-control loc" id="revisePaths" name="paths" th:value="${lesson.revisePaths}"/>
+                        <div class="form-text" th:text="#{reviews.form.pathsHint}">Glob patterns.</div>
+                    </div>
+                </div>
+                <div class="modal-footer justify-content-between">
+                    <small class="text-secondary" th:text="#{reviews.form.sameAsCommand('learning revise')}">Same as the Git command.</small>
+                    <div>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{button.cancel}">Cancel</button>
+                        <button type="submit" class="btn btn-primary" th:text="#{reviews.action.revise}">Revise</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Disable: stops future use at once -->
+    <div class="modal fade" id="disableModal" tabindex="-1" aria-labelledby="disableTitle" aria-hidden="true" th:if="${lesson.canDisable()}">
+        <div class="modal-dialog">
+            <form class="modal-content" method="post" th:action="@{/reviews/lessons/{ref}/disable(ref=${s.reference})}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="disableTitle" th:text="#{reviews.disable.title(${s.reference})}">Disable</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{button.close}"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small" th:text="#{reviews.disable.hint}">Reviews stop receiving the lesson at once.</p>
+                    <input type="hidden" name="requestId" th:value="${requestId}"/>
+                    <label for="disableReason" class="form-label" th:text="#{reviews.form.reason}">Reason</label>
+                    <input type="text" class="form-control" id="disableReason" name="reason" maxlength="500" required/>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{button.cancel}">Cancel</button>
+                    <button type="submit" class="btn btn-danger" th:text="#{reviews.action.disable}">Disable</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script th:replace="~{reviews/fragments :: markdownScripts}"></script>
+    <script th:src="@{/js/reviews.js}"></script>
+</div>
+</body>
+</html>

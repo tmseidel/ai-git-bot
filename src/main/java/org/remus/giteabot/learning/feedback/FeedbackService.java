@@ -189,6 +189,22 @@ public class FeedbackService {
     @Transactional
     public Recorded retract(FeedbackScope scope, String reference, String actor,
                             boolean actorIsLearningMaintainer) {
+        return withdraw(scope, reference, actor, actorIsLearningMaintainer,
+                FeedbackAcknowledgement.PENDING);
+    }
+
+    /**
+     * Withdraws a record from the admin panel, with a learning maintainer's standing. The retraction
+     * is answered in the panel, so no pull-request confirmation is left pending.
+     */
+    @Transactional
+    public Recorded retractFromAdminPanel(FeedbackScope scope, String reference, String actor) {
+        return withdraw(scope, reference, actor, true, null);
+    }
+
+    private Recorded withdraw(FeedbackScope scope, String reference, String actor,
+                              boolean actorIsLearningMaintainer,
+                              FeedbackAcknowledgement acknowledgement) {
         WorkflowFeedback record = requireInScope(scope, reference);
         String normalizedActor = actor == null ? null : actor.trim();
         boolean author = normalizedActor != null && normalizedActor.equalsIgnoreCase(record.getActor());
@@ -208,7 +224,7 @@ public class FeedbackService {
         }
         record.setState(FeedbackState.RETRACTED);
         WorkflowFeedbackEvent retracted = appendEvent(record.getId(), FeedbackEventType.RETRACTED,
-                normalizedActor, null, FeedbackAcknowledgement.PENDING);
+                normalizedActor, null, acknowledgement);
         eventPublisher.publishEvent(new FeedbackWithdrawnEvent(record.getId(), record.getReference(),
                 FeedbackState.RETRACTED, null, normalizedActor));
         return recorded(record, false, retracted);

@@ -619,6 +619,34 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
     }
 
     /**
+     * Summaries — with the validation {@code learning show} reports — of the given lessons, in the
+     * order given, for listings that span repositories (the admin panel). A fixed number of queries
+     * whatever the number of lessons; ids that do not exist are left out. Callers decide the scope.
+     */
+    @Transactional(readOnly = true)
+    public List<Summary> summaries(List<Long> lessonIds) {
+        if (lessonIds == null || lessonIds.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, KnowledgeLesson> byId = new HashMap<>();
+        for (KnowledgeLesson lesson : lessonRepository.findAllById(lessonIds)) {
+            byId.put(lesson.getId(), lesson);
+        }
+        List<KnowledgeLesson> lessons = lessonIds.stream().map(byId::get).filter(Objects::nonNull)
+                .toList();
+        Map<Long, List<KnowledgeLessonRevision>> revisionsByLesson = revisionsOf(lessons);
+        Reads reads = read(revisionsByLesson.values().stream().flatMap(List::stream).toList(), true);
+        Instant now = Instant.now();
+        List<Summary> summaries = new ArrayList<>(lessons.size());
+        for (KnowledgeLesson lesson : lessons) {
+            List<RevisionView> views = revisionsByLesson.getOrDefault(lesson.getId(), List.of())
+                    .stream().map(row -> view(row, reads)).toList();
+            summaries.add(summarize(lesson, views, reads, now));
+        }
+        return summaries;
+    }
+
+    /**
      * The current standing of lesson revisions a running review received, for its round-boundary
      * revocation check: the same validation {@link #activeLessons} applies at selection, but only
      * for the given revisions and with a fixed number of queries.
@@ -771,7 +799,9 @@ public class KnowledgeLessonService implements LessonsCitingFeedback {
         event.setDetail(detail == null ? null : bound(detail, MAX_DETAIL_CHARS));
         event.setRelatedReference(relatedReference);
         event.setSourceKey(source == null ? null : source.sourceKey());
-        event.setAcknowledgement(confirmed ? FeedbackAcknowledgement.PENDING : null);
+        // An admin-panel action is answered in the panel; there is no pull-request confirmation.
+        boolean confirmedOnPullRequest = confirmed && (source == null || !source.isAdminUi());
+        event.setAcknowledgement(confirmedOnPullRequest ? FeedbackAcknowledgement.PENDING : null);
         return eventRepository.saveAndFlush(event);
     }
 

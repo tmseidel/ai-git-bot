@@ -30,7 +30,9 @@ public record FeedbackSource(Long gitIntegrationId, Long botId, String repoOwner
 
     public enum SubjectKind {
         PR("pr"),
-        ISSUE("issue");
+        ISSUE("issue"),
+        /** An action taken in the admin panel; it has no pull request or comment. */
+        ADMIN_UI("ui");
 
         private final String token;
 
@@ -41,6 +43,26 @@ public record FeedbackSource(Long gitIntegrationId, Long botId, String repoOwner
         public String token() {
             return token;
         }
+    }
+
+    /** What an admin-panel action carries in place of a comment kind. */
+    public static final String ADMIN_UI_KIND = "ADMIN_UI";
+
+    /**
+     * The identity of one admin-panel action on a repository's learning data. {@code requestId} is
+     * the idempotency key the submitted form carries, so a double submit is one action — exactly as a
+     * redelivered webhook is one comment.
+     */
+    public static FeedbackSource adminUi(Long gitIntegrationId, Long botId, String repoOwner,
+                                         String repoName, String providerRepositoryId,
+                                         String requestId) {
+        return new FeedbackSource(gitIntegrationId, botId, repoOwner, repoName, providerRepositoryId,
+                SubjectKind.ADMIN_UI, 0L, ADMIN_UI_KIND, requestId);
+    }
+
+    /** Whether this source is an admin-panel action, which is never confirmed on a pull request. */
+    public boolean isAdminUi() {
+        return subjectKind == SubjectKind.ADMIN_UI;
     }
 
     /** Whether every component deduplication depends on is present. */

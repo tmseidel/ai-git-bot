@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviews}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="lessonsPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <div th:replace="~{reviews/fragments :: header('lessons')}"></div>
+
+    <form method="get" th:action="@{/reviews/lessons}" class="row g-2 align-items-end mb-3">
+        <th:block th:replace="~{reviews/fragments :: scopeFields}"></th:block>
+        <div class="col-auto" style="width: 14rem;">
+            <label for="filterLessonState" class="form-label mb-0 small" th:text="#{reviews.filter.state}">State</label>
+            <select class="form-select form-select-sm" id="filterLessonState" name="lessonState">
+                <option th:each="s : ${ {'all', 'attention', 'ACTIVE', 'CANDIDATE', 'DISABLED', 'STALE', 'REJECTED'} }"
+                        th:value="${s}" th:text="${#messages.msg('reviews.lessonFilter.' + s)}"
+                        th:selected="${s == filter.effectiveLessonState()}">state</option>
+            </select>
+        </div>
+        <div th:replace="~{reviews/fragments :: filterButtons('/reviews/lessons')}"></div>
+    </form>
+    <p class="small text-secondary" th:if="${filter.effectiveLessonState() == 'attention'}" th:text="#{reviews.lessons.attentionHint}">
+        Candidates waiting for a decision and lessons kept out of reviews by their validation.</p>
+    <div class="alert alert-warning small" th:if="${lessons.truncated}"
+         th:text="#{reviews.lessons.truncated(${lessons.scanLimit})}">Only the newest lessons were read.</div>
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                <tr>
+                    <th th:text="#{reviews.col.lesson}">Lesson</th>
+                    <th th:text="#{reviews.col.state}">State</th>
+                    <th th:text="#{reviews.col.guidance}">Guidance</th>
+                    <th th:text="#{reviews.col.appliesTo}">Applies to</th>
+                    <th class="text-end w-1" th:text="#{reviews.col.used}">Used</th>
+                    <th th:text="#{reviews.col.validation}">Validation</th>
+                </tr>
+                </thead>
+                <tbody class="table-group-divider">
+                <tr th:if="${lessons.page.rows.isEmpty()}">
+                    <td colspan="6" class="text-center text-secondary py-4" th:text="#{reviews.lessons.empty}">No lessons match.</td>
+                </tr>
+                <tr th:each="row : ${lessons.page.rows}" th:with="s=${row.summary}">
+                    <td><a th:href="@{/reviews/lessons/{ref}(ref=${s.reference})}" class="ref fw-semibold" th:text="${s.reference}">L1</a>
+                        <div class="small text-secondary" th:text="${row.project()}">owner/repo</div>
+                        <div class="small text-secondary" th:text="${row.botName}">bot</div></td>
+                    <td><span th:replace="~{reviews/fragments :: lessonState(${s.state})}"></span>
+                        <span class="small text-secondary" th:if="${s.activeRevision != null}" th:text="|@${s.activeRevision}|">@1</span>
+                        <div th:if="${s.pendingRevision != null}"><span class="badge text-bg-primary-subtle text-primary-emphasis border border-primary-subtle"
+                             th:text="#{reviews.candidateWaiting(${s.pendingRevision})}">candidate @2 waiting</span></div></td>
+                    <td class="small" style="min-width: 18rem; max-width: 30rem;">
+                        <div class="md text-pre" th:text="${s.current != null ? s.current.text : ''}">text</div>
+                        <div class="text-secondary" th:if="${s.current != null and s.current.category != null}" th:text="${s.current.category}">category</div></td>
+                    <td class="small loc">
+                        <th:block th:if="${s.current != null and !s.current.paths.isEmpty()}">
+                            <div th:each="p : ${s.current.paths}" th:text="${p}">path</div></th:block>
+                        <span th:if="${s.current == null or s.current.paths.isEmpty()}" class="text-secondary" th:text="#{reviews.repositoryWide}">whole repository</span></td>
+                    <td class="text-end" th:text="${s.usageCount}">0</td>
+                    <td class="small">
+                        <span th:if="${s.validation.valid() and !s.reviewRequired}" class="text-success"><i class="bi bi-check-circle" aria-hidden="true"></i>
+                            <span th:text="#{reviews.valid}">valid</span></span>
+                        <th:block th:unless="${s.validation.valid() and !s.reviewRequired}">
+                            <div th:each="issue : ${s.validation.issues}" class="text-warning-emphasis"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+                                <span th:text="${issue}">issue</span></div>
+                            <div th:each="c : ${s.validation.conflicts}" class="text-warning-emphasis"><i class="bi bi-intersect" aria-hidden="true"></i>
+                                <span th:text="${c}">conflict</span></div>
+                            <div class="text-secondary" th:if="${s.state.name() == 'ACTIVE'}" th:text="#{reviews.notSupplied}">not supplied to reviews</div>
+                        </th:block>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div th:replace="~{reviews/fragments :: pager(${lessons.page}, '/reviews/lessons')}"></div>
+    <script th:replace="~{reviews/fragments :: markdownScripts}"></script>
+    <script th:src="@{/js/reviews.js}"></script>
+</div>
+</body>
+</html>
