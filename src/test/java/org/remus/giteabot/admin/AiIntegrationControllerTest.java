@@ -134,6 +134,34 @@ class AiIntegrationControllerTest {
     }
 
     @Test
+    void save_bindsTokenPrices() throws Exception {
+        mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .param("providerType", "ANTHROPIC").param("name", "Claude").param("model", "claude")
+                        .param("priceInputPerMtok", "3").param("priceOutputPerMtok", "15.5")
+                        .param("priceCacheWritePerMtok", "").param("priceCacheReadPerMtok", "0.30"))
+                .andExpect(redirectedUrl("/ai-integrations"));
+
+        verify(aiIntegrationService).save(argThat(integration ->
+                new java.math.BigDecimal("3").compareTo(integration.getPriceInputPerMtok()) == 0
+                        && new java.math.BigDecimal("15.5").compareTo(integration.getPriceOutputPerMtok()) == 0
+                        && integration.getPriceCacheWritePerMtok() == null
+                        && new java.math.BigDecimal("0.30").compareTo(integration.getPriceCacheReadPerMtok()) == 0),
+                eq(false));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"priceInputPerMtok, -1", "priceOutputPerMtok, private-invalid-value", "priceCacheReadPerMtok, -0.01"})
+    void save_invalidTokenPricesShowASafeFlashMessage(String field, String value) throws Exception {
+        mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
+                        .locale(Locale.ENGLISH)
+                        .param("providerType", "ANTHROPIC").param(field, value))
+                .andExpect(redirectedUrl("/ai-integrations"))
+                .andExpect(flash().attribute("error", "Token prices must be empty or a number of at least 0."));
+
+        verifyNoInteractions(aiIntegrationService);
+    }
+
+    @Test
     void save_rejectsUnknownOpenRouterRegionBeforeCallingTheService() throws Exception {
         mockMvc.perform(post("/ai-integrations/save").with(user("admin").roles("ADMIN")).with(csrf())
                         .param("providerType", "OPENROUTER").param("apiKey", "private-new-key")

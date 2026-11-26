@@ -1,0 +1,64 @@
+-- ---------------------------------------------------------------------------------------------
+-- Review-quality dashboard (#610)
+--
+-- New facts recorded with each agentic review, so the dashboard can relate findings to the pull
+-- request they were raised on:
+--   * workflow_outputs: the pull request's author and title at review time, and the workflow run
+--     (AI usage) the review ran in, for its cost.
+--   * review_records: the size of the reviewed diff, and whether its findings were matched against
+--     the pull request's previous review (reviews before this migration were not).
+--   * review_findings: the finding's fingerprint, the finding of the previous review it continues,
+--     and the first finding of that chain, so "resolved / persisting / new" is a grouped count.
+--   * pr_outcomes: whether a reviewed pull request was merged or closed, and when.
+--   * ai_integrations: optional token prices, so token usage can be shown as money.
+--   * review_quality_settings: the installation's assumptions for the estimated return.
+--
+-- Nothing is backfilled: the dashboard says since when each fact exists.
+-- Idempotent: every statement can be re-applied.
+-- ---------------------------------------------------------------------------------------------
+
+ALTER TABLE workflow_outputs ADD COLUMN IF NOT EXISTS pr_author VARCHAR(255);
+ALTER TABLE workflow_outputs ADD COLUMN IF NOT EXISTS pr_title VARCHAR(512);
+ALTER TABLE workflow_outputs ADD COLUMN IF NOT EXISTS workflow_run_id BIGINT;
+CREATE INDEX IF NOT EXISTS idx_workflow_outputs_key_created ON workflow_outputs (workflow_key, created_at);
+
+ALTER TABLE review_records ADD COLUMN IF NOT EXISTS diff_files INTEGER;
+ALTER TABLE review_records ADD COLUMN IF NOT EXISTS diff_additions INTEGER;
+ALTER TABLE review_records ADD COLUMN IF NOT EXISTS diff_deletions INTEGER;
+ALTER TABLE review_records ADD COLUMN IF NOT EXISTS fingerprinted BOOLEAN DEFAULT FALSE NOT NULL;
+
+ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(64);
+ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS previous_finding_id BIGINT;
+ALTER TABLE review_findings ADD COLUMN IF NOT EXISTS origin_finding_id BIGINT;
+
+ALTER TABLE ai_integrations ADD COLUMN IF NOT EXISTS price_input_per_mtok NUMERIC(12, 4);
+ALTER TABLE ai_integrations ADD COLUMN IF NOT EXISTS price_output_per_mtok NUMERIC(12, 4);
+ALTER TABLE ai_integrations ADD COLUMN IF NOT EXISTS price_cache_write_per_mtok NUMERIC(12, 4);
+ALTER TABLE ai_integrations ADD COLUMN IF NOT EXISTS price_cache_read_per_mtok NUMERIC(12, 4);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_run_type_started ON workflow_run (workflow_type, started_at);
+
+CREATE TABLE IF NOT EXISTS pr_outcomes (
+    id                 BIGSERIAL PRIMARY KEY,
+    git_integration_id BIGINT       NOT NULL,
+    bot_id             BIGINT       NOT NULL,
+    repo_owner         VARCHAR(255) NOT NULL,
+    repo_name          VARCHAR(255) NOT NULL,
+    pr_number          BIGINT       NOT NULL,
+    state              VARCHAR(16)  NOT NULL,
+    closed_at          TIMESTAMP,
+    updated_at         TIMESTAMP    NOT NULL,
+    CONSTRAINT uk_pr_outcomes_pr UNIQUE (git_integration_id, bot_id, repo_owner, repo_name, pr_number)
+);
+
+CREATE TABLE IF NOT EXISTS review_quality_settings (
+    id                BIGINT         NOT NULL PRIMARY KEY,
+    minutes_blocker   INTEGER        NOT NULL,
+    minutes_medium    INTEGER        NOT NULL,
+    minutes_low       INTEGER        NOT NULL,
+    minutes_incorrect INTEGER        NOT NULL,
+    hourly_rate       NUMERIC(12, 2) NOT NULL,
+    currency          VARCHAR(8)     NOT NULL,
+    updated_by        VARCHAR(255),
+    updated_at        TIMESTAMP      NOT NULL
+);

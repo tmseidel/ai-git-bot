@@ -90,6 +90,18 @@ public class ReviewFinding {
     @Column(name = "withdrawal_reason", length = 1024)
     private String withdrawalReason;
 
+    /** Hash of the normalised first path, category and title words ({@link FindingMatcher}). */
+    @Column(name = "fingerprint", length = 64)
+    private String fingerprint;
+
+    /** The finding of the pull request's previous review this one continues; {@code null} if new. */
+    @Column(name = "previous_finding_id")
+    private Long previousFindingId;
+
+    /** The first finding of the chain this one continues (itself when it is new). */
+    @Column(name = "origin_finding_id")
+    private Long originFindingId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

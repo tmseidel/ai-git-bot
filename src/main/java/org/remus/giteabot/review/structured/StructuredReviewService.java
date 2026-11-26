@@ -5,8 +5,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
+
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -68,6 +72,8 @@ public class StructuredReviewService {
         output.setStage(STAGE_REVIEW);
         output.setPrWorkflowRunId(request.prWorkflowRunId());
         output.setInvocationId(requireText(request.invocationId(), 36, "invocationId"));
+        output.setPrAuthor(clip(request.prAuthor(), 255));
+        output.setPrTitle(clip(request.prTitle(), 512));
         outputRepository.save(output);
 
         ReviewRecord record = new ReviewRecord();
@@ -76,6 +82,9 @@ public class StructuredReviewService {
         record.setSchemaVersion(SCHEMA_VERSION);
         record.setBaseSha(optionalText(request.baseSha(), 64, "baseSha"));
         record.setHeadSha(optionalText(request.headSha(), 64, "headSha"));
+        record.setDiffFiles(nonNegative(request.diffFiles()));
+        record.setDiffAdditions(nonNegative(request.diffAdditions()));
+        record.setDiffDeletions(nonNegative(request.diffDeletions()));
         record.setDraftRevision(0);
         reviewRepository.save(record);
 
@@ -280,9 +289,71 @@ public class StructuredReviewService {
         review.setFinalizedAt(Instant.now());
         FinalizedReview finalized = toFinalized(review);
         review.setContentHash(hash(finalized));
+        matchAgainstEarlierReview(review, active);
         log.debug("Finalized review {} with {} finding(s)", finalized.reference(),
                 finalized.findings().size());
         return toFinalized(review);
+    }
+
+    /**
+     * Records the workflow run (AI usage) a review ran in, for the cost figures of the Review
+     * quality page. The first link wins; a review is never moved to another run.
+     */
+    @Transactional
+    public void linkWorkflowRun(long reviewId, Long workflowRunId) {
+        if (workflowRunId == null) {
+            return;
+        }
+        reviewRepository.findById(reviewId).map(ReviewRecord::getOutput)
+                .filter(output -> output.getWorkflowRunId() == null)
+                .ifPresent(output -> output.setWorkflowRunId(workflowRunId));
+    }
+
+    /**
+     * Fingerprints the findings of a review being finalized and links each to the finding of the
+     * pull request's previous finalized review it continues ({@link FindingMatcher}).
+     */
+    private void matchAgainstEarlierReview(ReviewRecord review, List<ReviewFinding> active) {
+        WorkflowOutput output = review.getOutput();
+        List<ReviewFinding> previous = output == null || output.getId() == null ? List.of()
+                : reviewRepository.findEarlierFinalized(output.getGitIntegrationId(), output.getBotId(),
+                        output.getRepoOwner(), output.getRepoName(), output.getPrNumber(), output.getWorkflowKey(),
+                        output.getId(), PageRequest.of(0, 1))
+                .stream().findFirst().map(StructuredReviewService::activeFindings).orElse(List.of());
+        Map<Long, ReviewFinding> previousById = new HashMap<>();
+        previous.forEach(finding -> previousById.put(finding.getId(), finding));
+        Map<Long, Long> matches = FindingMatcher.match(candidates(active), candidates(previous));
+        for (ReviewFinding finding : active) {
+            ReviewFindingLocation first = finding.getLocations().isEmpty() ? null : finding.getLocations().getFirst();
+            finding.setFingerprint(FindingMatcher.fingerprint(first == null ? null : first.getPath(),
+                    finding.getCategory(), finding.getTitle()));
+            ReviewFinding continued = previousById.get(matches.get(finding.getId()));
+            finding.setPreviousFindingId(continued == null ? null : continued.getId());
+            finding.setOriginFindingId(continued == null ? finding.getId()
+                    : continued.getOriginFindingId() != null ? continued.getOriginFindingId() : continued.getId());
+        }
+        review.setFingerprinted(true);
+    }
+
+    private static List<FindingMatcher.Candidate> candidates(List<ReviewFinding> findings) {
+        return findings.stream().filter(finding -> finding.getId() != null).map(finding -> {
+            ReviewFindingLocation first = finding.getLocations().isEmpty() ? null : finding.getLocations().getFirst();
+            return new FindingMatcher.Candidate(finding.getId(), finding.getOriginFindingId(),
+                    finding.getCategory(), finding.getTitle(), first == null ? null : first.getPath(),
+                    first == null ? null : first.getStartLine(), first == null ? null : first.getEndLine());
+        }).toList();
+    }
+
+    private static String clip(String value, int max) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= max ? trimmed : trimmed.substring(0, max);
+    }
+
+    private static Integer nonNegative(Integer value) {
+        return value == null || value < 0 ? null : value;
     }
 
     /**

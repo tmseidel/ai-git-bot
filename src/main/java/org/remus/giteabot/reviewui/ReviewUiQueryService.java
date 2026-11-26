@@ -15,6 +15,7 @@ import org.remus.giteabot.learning.knowledge.KnowledgeLessonService;
 import org.remus.giteabot.learning.knowledge.LessonState;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettings;
 import org.remus.giteabot.prworkflow.agentreview.AgentReviewLearningSettingsResolver;
+import org.remus.giteabot.review.structured.FindingCategories;
 import org.remus.giteabot.review.structured.FinalizedReview;
 import org.remus.giteabot.review.structured.ReviewConclusion;
 import org.remus.giteabot.review.structured.ReviewPublicationState;
@@ -240,6 +241,10 @@ public class ReviewUiQueryService {
         if (filter.isUncited()) {
             where.and("NOT EXISTS (SELECT e.id FROM KnowledgeLessonEvidence e WHERE e.feedbackId = f.id)");
         }
+        if (filter.getCategory() != null && !filter.getCategory().isBlank()) {
+            where.and("f.findingId IN (SELECT c.id FROM ReviewFinding c WHERE c.category IN :categories)")
+                    .param("categories", rawCategories(FindingCategories.normalize(filter.getCategory())));
+        }
         String from = " FROM WorkflowFeedback f WHERE " + where;
         long total = where.bind(entityManager.createQuery("SELECT COUNT(f)" + from, Long.class))
                 .getSingleResult();
@@ -374,6 +379,18 @@ public class ReviewUiQueryService {
             where.and("LOWER(" + owner + ") = :owner AND LOWER(" + repo + ") = :repo")
                     .param("owner", filter.owner()).param("repo", filter.repo());
         }
+    }
+
+    /**
+     * The stored category spellings that normalise to {@code category} (findings that received
+     * feedback), so the filter matches "Auth" and "authorization" when asked for "security".
+     */
+    private List<String> rawCategories(String category) {
+        List<String> raw = entityManager.createQuery("SELECT DISTINCT c.category FROM ReviewFinding c "
+                        + "WHERE c.id IN (SELECT fb.findingId FROM WorkflowFeedback fb)", String.class)
+                .getResultList().stream().filter(value -> FindingCategories.normalize(value).equals(category))
+                .toList();
+        return raw.isEmpty() ? List.of("\u0000") : raw;
     }
 
     private Map<Long, String> botNames(Collection<Long> botIds) {

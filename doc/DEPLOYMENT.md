@@ -386,6 +386,16 @@ Instance-wide limits for the learning features of agentic reviews: the evidence 
 
 See [Lessons for agentic reviews](WORKFLOW_LESSONS.md#what-a-review-receives) for how lessons are selected.
 
+### Review quality (Optional)
+
+Settings of the admin panel's [Review quality page](USER_GUIDE.md#review-quality). The cost assumptions are edited on the page itself; token prices are set per AI integration.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REVIEW_QUALITY_AUTHOR_METRICS` | `false` | Show figures per pull-request author on the **Authors** tab. Meant for coaching and onboarding; the table is sorted by name and never ranked. |
+| `REVIEW_QUALITY_MIN_SAMPLE` | `10` | Smallest number of items a rate is computed from; below it the page shows "–". Values below `1` are raised to `1`, values above `1000` capped at `1000`. |
+| `REVIEW_QUALITY_AUTHOR_MIN_PRS` | `5` | Authors with fewer reviewed pull requests in the period are grouped as *others* (minimum `1`). |
+
 ## Configuration via Web UI
 
 All AI provider and Git configuration is managed through the web interface:

@@ -31,6 +31,7 @@ import org.remus.giteabot.repository.Reactions;
 import org.remus.giteabot.repository.RepositoryPlatform;
 import org.remus.giteabot.repository.model.RepositoryUser;
 import org.remus.giteabot.review.CodeReviewService;
+import org.remus.giteabot.reviewquality.PrOutcomeService;
 import org.remus.giteabot.util.BotMention;
 import org.remus.giteabot.util.BranchFilter;
 import org.springframework.scheduling.annotation.Async;
@@ -97,6 +98,7 @@ public class BotWebhookService {
     private final LearningCommandHandler learningCommandHandler;
     private final WorkflowSelectionService workflowSelectionService;
     private final IssueWorkflowOrchestrator issueWorkflowOrchestrator;
+    private final PrOutcomeService prOutcomeService;
 
     public BotWebhookService(RepositoryPlatformFactory repositoryPlatformFactory,
                              AgentSessionService agentSessionService,
@@ -111,7 +113,8 @@ public class BotWebhookService {
                              FeedbackCommandHandler feedbackCommandHandler,
                              LearningCommandHandler learningCommandHandler,
                              WorkflowSelectionService workflowSelectionService,
-                             IssueWorkflowOrchestrator issueWorkflowOrchestrator) {
+                             IssueWorkflowOrchestrator issueWorkflowOrchestrator,
+                             PrOutcomeService prOutcomeService) {
         this.repositoryPlatformFactory = repositoryPlatformFactory;
         this.agentSessionService = agentSessionService;
         this.botService = botService;
@@ -126,6 +129,7 @@ public class BotWebhookService {
         this.learningCommandHandler = learningCommandHandler;
         this.workflowSelectionService = workflowSelectionService;
         this.issueWorkflowOrchestrator = issueWorkflowOrchestrator;
+        this.prOutcomeService = prOutcomeService;
     }
 
     /**
@@ -536,6 +540,24 @@ public class BotWebhookService {
         } catch (RuntimeException e) {
             log.warn("[Bot '{}'] E2eTestPrCloseHandler threw {} — ignoring",
                     bot.getName(), e.toString());
+        }
+        try {
+            prOutcomeService.closed(bot, payload);
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Could not record the pull request's outcome: {}", bot.getName(), e.toString());
+        }
+    }
+
+    /**
+     * A pull request was reopened: its recorded outcome (Review quality page) is open again. The
+     * review the reopen may trigger is dispatched separately.
+     */
+    public void handlePrReopened(Bot bot, WebhookPayload payload) {
+        try {
+            prOutcomeService.reopened(bot, payload);
+        } catch (RuntimeException e) {
+            log.warn("[Bot '{}'] Could not record that the pull request was reopened: {}", bot.getName(),
+                    e.toString());
         }
     }
 

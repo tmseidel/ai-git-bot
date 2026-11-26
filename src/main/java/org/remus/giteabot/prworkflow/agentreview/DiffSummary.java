@@ -303,6 +303,16 @@ public final class DiffSummary {
         return entries.size();
     }
 
+    /** Lines added over all files. */
+    public int totalAdditions() {
+        return totalAdditions;
+    }
+
+    /** Lines deleted over all files. */
+    public int totalDeletions() {
+        return totalDeletions;
+    }
+
     /**
      * Returns true if this summary has no entries.
      */

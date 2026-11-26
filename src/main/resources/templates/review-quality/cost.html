@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviewQuality}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewQualityPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <style th:replace="~{review-quality/fragments :: styles}"></style>
+    <div th:replace="~{review-quality/fragments :: header('cost')}"></div>
+    <form th:replace="~{review-quality/fragments :: filters('/review-quality/cost', false)}"></form>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0" th:text="#{reviewQuality.cost.title}">Cost and estimated return</h5>
+            <small class="text-secondary" th:text="#{reviewQuality.cost.hint}">Cost is measured; the return is an estimate.</small>
+        </div>
+        <div class="card-body">
+            <div class="row g-4">
+                <div class="col-lg-4">
+                    <h6 class="small text-uppercase text-secondary" th:text="#{reviewQuality.cost.assumptions}">Assumptions</h6>
+                    <form method="post" th:action="@{/review-quality/assumptions}" class="row g-2 small align-items-center">
+                        <input type="hidden" name="returnQuery" th:value="${filter.scope()}"/>
+                        <div class="col-7"><label for="minutesBlocker" th:text="#{reviewQuality.cost.minutesBlocker}">Minutes saved per accepted blocker</label></div>
+                        <div class="col-5"><input type="number" min="0" max="100000" class="form-control form-control-sm" id="minutesBlocker" name="minutesBlocker" th:value="${view.assumptions.minutesBlocker}" required/></div>
+                        <div class="col-7"><label for="minutesMedium" th:text="#{reviewQuality.cost.minutesMedium}">… per accepted medium</label></div>
+                        <div class="col-5"><input type="number" min="0" max="100000" class="form-control form-control-sm" id="minutesMedium" name="minutesMedium" th:value="${view.assumptions.minutesMedium}" required/></div>
+                        <div class="col-7"><label for="minutesLow" th:text="#{reviewQuality.cost.minutesLow}">… per accepted low</label></div>
+                        <div class="col-5"><input type="number" min="0" max="100000" class="form-control form-control-sm" id="minutesLow" name="minutesLow" th:value="${view.assumptions.minutesLow}" required/></div>
+                        <div class="col-7"><label for="minutesIncorrect" th:text="#{reviewQuality.cost.minutesIncorrect}">Minutes lost per incorrect finding</label></div>
+                        <div class="col-5"><input type="number" min="0" max="100000" class="form-control form-control-sm" id="minutesIncorrect" name="minutesIncorrect" th:value="${view.assumptions.minutesIncorrect}" required/></div>
+                        <div class="col-7"><label for="hourlyRate" th:text="#{reviewQuality.cost.hourlyRate}">Engineering cost per hour</label></div>
+                        <div class="col-5"><input type="number" min="0" step="0.01" class="form-control form-control-sm" id="hourlyRate" name="hourlyRate" th:value="${view.assumptions.hourlyRate}" required/></div>
+                        <div class="col-7"><label for="currency" th:text="#{reviewQuality.cost.currency}">Currency</label></div>
+                        <div class="col-5"><input type="text" maxlength="8" class="form-control form-control-sm" id="currency" name="currency" th:value="${view.assumptions.currency}" required/></div>
+                        <div class="col-12 form-text" th:text="#{reviewQuality.cost.accepted}">"Accepted" = resolved in a later round or marked useful.</div>
+                        <div class="col-12">
+                            <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check-lg" aria-hidden="true"></i>
+                                <span th:text="#{button.save}">Save</span></button>
+                        </div>
+                    </form>
+                </div>
+                <div class="col-lg-8">
+                    <div th:replace="~{review-quality/fragments :: kpis(${view.kpis})}"></div>
+                    <div class="chart-box"><canvas id="costChart"></canvas></div>
+                    <div class="src mt-2">
+                        <div th:text="#{reviewQuality.cost.split(${view.reviewCost}, ${view.followUpCost})}">Reviews · follow-up answers</div>
+                        <div th:unless="${view.money}" th:text="#{reviewQuality.cost.noPrices}">Set token prices on the AI integrations to see cost in money.</div>
+                        <div th:if="${view.unpricedTokens != null}" th:text="#{reviewQuality.cost.unpriced(${view.unpricedTokens})}">Some tokens have no price.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div th:replace="~{review-quality/fragments :: notes(${view.notes})}"></div>
+
+    <div th:replace="~{review-quality/fragments :: definitions}"></div>
+    <th:block th:replace="~{review-quality/fragments :: scripts}"></th:block>
+</div>
+</body>
+</html>

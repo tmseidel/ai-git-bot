@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviewQuality}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewQualityPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <style th:replace="~{review-quality/fragments :: styles}"></style>
+    <div th:replace="~{review-quality/fragments :: header('repositories')}"></div>
+    <form th:replace="~{review-quality/fragments :: filters('/review-quality/repositories', false)}"></form>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0" th:text="#{reviewQuality.tab.repositories}">Repositories</h5>
+            <small class="text-secondary" th:text="#{reviewQuality.repositories.hint}">Sorted by blockers per PR.</small>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 small">
+                <thead>
+                <tr>
+                    <th th:text="#{reviews.filter.repository}">Repository</th>
+                    <th class="num" th:text="#{reviewQuality.col.prs}">PRs</th>
+                    <th class="num" th:text="#{reviewQuality.col.reviews}">Reviews</th>
+                    <th class="num" th:text="#{reviewQuality.col.reviewsPerPr}">Reviews / PR</th>
+                    <th class="num" th:text="#{reviewQuality.col.findingsPerPr}">Findings / PR</th>
+                    <th class="num" th:text="#{reviewQuality.col.blockersPerPr}">Blockers / PR</th>
+                    <th th:text="#{reviewQuality.col.mix}">Severity mix</th>
+                    <th class="num" th:text="#{reviewQuality.col.resolved}">Resolved</th>
+                    <th class="num" th:text="#{reviewQuality.col.precision}">Precision</th>
+                    <th th:text="#{reviewQuality.col.trend}">Trend</th>
+                    <th class="num" th:text="#{reviewQuality.col.costPerPr}">Cost / PR</th>
+                </tr>
+                </thead>
+                <tbody class="table-group-divider">
+                <tr th:if="${view.rows.rows.isEmpty()}">
+                    <td colspan="11" class="text-center text-secondary py-4" th:text="#{reviewQuality.empty}">No agentic review in this period.</td>
+                </tr>
+                <tr th:each="row : ${view.rows.rows}">
+                    <td><a class="text-nowrap" th:href="|@{/reviews}?${row.reviewsQuery}|" th:text="${row.project}">owner/repo</a></td>
+                    <td class="num" th:text="${row.prs}">0</td>
+                    <td class="num" th:text="${row.reviews}">0</td>
+                    <td class="num" th:text="${row.reviewsPerPr}">0</td>
+                    <td class="num" th:text="${row.findingsPerPr}">0</td>
+                    <td class="num" th:text="${row.blockersPerPr}">0</td>
+                    <td><div class="mix" th:title="|${row.mix.blocker}% / ${row.mix.medium}% / ${row.mix.low}%|">
+                        <span th:style="|width: ${row.mix.blocker}%; background: #dc3545|"></span>
+                        <span th:style="|width: ${row.mix.medium}%; background: #e0a800|"></span>
+                        <span th:style="|width: ${row.mix.low}%; background: #8c959f|"></span></div></td>
+                    <td class="num"><span th:replace="~{review-quality/fragments :: rate(${row.resolved})}"></span></td>
+                    <td class="num"><span th:replace="~{review-quality/fragments :: rate(${row.precision})}"></span></td>
+                    <td><th:block th:replace="~{review-quality/fragments :: spark(${row.trend}, false)}"></th:block></td>
+                    <td class="num" th:text="${row.costPerPr}">0</td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card-body pt-0">
+            <div th:replace="~{reviews/fragments :: pager(${view.rows}, '/review-quality/repositories')}"></div>
+        </div>
+    </div>
+    <div th:replace="~{review-quality/fragments :: notes(${view.notes})}"></div>
+
+    <div th:replace="~{review-quality/fragments :: definitions}"></div>
+    <th:block th:replace="~{review-quality/fragments :: scripts}"></th:block>
+</div>
+</body>
+</html>

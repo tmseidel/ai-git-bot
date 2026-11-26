@@ -21,6 +21,11 @@
                         th:text="${#messages.msg('reviews.verdict.' + v)}" th:selected="${v == filter.verdict}">verdict</option>
             </select>
         </div>
+        <div class="col-auto" style="width: 11rem;">
+            <label for="filterCategory" class="form-label mb-0 small" th:text="#{reviews.filter.category}">Category</label>
+            <input type="text" class="form-control form-control-sm" id="filterCategory" name="category" maxlength="64"
+                   th:value="${filter.category}"/>
+        </div>
         <div class="col-auto pb-1">
             <div class="form-check mb-0">
                 <input class="form-check-input" type="checkbox" id="filterUncited" name="uncited" value="true"

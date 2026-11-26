@@ -178,6 +178,38 @@
                         </div>
                         <div class="col-12">
                             <hr/>
+                            <h5 class="mb-1">
+                                <i class="bi bi-cash-coin"></i> <span th:text="#{label.tokenPrices}">Token prices (optional)</span>
+                            </h5>
+                            <div class="form-text mb-3" th:text="#{help.ai.tokenPrices}">
+                                Price per million tokens, in the currency of the Review quality assumptions. Used only to
+                                show recorded token usage as cost on the Review quality page; leave empty to show tokens.
+                            </div>
+                            <div class="row g-3">
+                                <div class="col-md-3">
+                                    <label for="priceInputPerMtok" class="form-label" th:text="#{label.priceInput}">Input</label>
+                                    <input type="number" class="form-control" id="priceInputPerMtok"
+                                           th:field="*{priceInputPerMtok}" min="0" step="0.0001"/>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="priceOutputPerMtok" class="form-label" th:text="#{label.priceOutput}">Output</label>
+                                    <input type="number" class="form-control" id="priceOutputPerMtok"
+                                           th:field="*{priceOutputPerMtok}" min="0" step="0.0001"/>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="priceCacheWritePerMtok" class="form-label" th:text="#{label.priceCacheWrite}">Cache write</label>
+                                    <input type="number" class="form-control" id="priceCacheWritePerMtok"
+                                           th:field="*{priceCacheWritePerMtok}" min="0" step="0.0001"/>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="priceCacheReadPerMtok" class="form-label" th:text="#{label.priceCacheRead}">Cache read</label>
+                                    <input type="number" class="form-control" id="priceCacheReadPerMtok"
+                                           th:field="*{priceCacheReadPerMtok}" min="0" step="0.0001"/>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <hr/>
                             <h5 class="mb-3">
                                 <i class="bi bi-tools"></i> <span th:text="#{label.toolCalling}">Tool calling</span>
                             </h5>

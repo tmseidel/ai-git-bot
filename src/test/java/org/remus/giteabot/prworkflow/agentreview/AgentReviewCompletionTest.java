@@ -315,6 +315,24 @@ class AgentReviewCompletionTest {
     }
 
     @Test
+    void theReviewRecordsThePullRequestsAuthorTitleAndDiffSize() {
+        WebhookPayload.Owner author = new WebhookPayload.Owner();
+        author.setLogin("alex");
+        payload.getPullRequest().setUser(author);
+        when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
+                .thenReturn(findingTurn("auth"), assessmentTurn(1), completionTurn(2, 1));
+
+        assertThat(review()).isEqualTo(AgentReviewService.ReviewResult.POSTED);
+
+        org.remus.giteabot.review.structured.WorkflowOutput output = storedOutputs.get("O1234");
+        assertThat(output.getPrAuthor()).isEqualTo("alex");
+        assertThat(output.getPrTitle()).isEqualTo("Update example");
+        ReviewRecord record = storedReviews.values().iterator().next();
+        assertThat(List.of(record.getDiffFiles(), record.getDiffAdditions(), record.getDiffDeletions()))
+                .containsExactly(1, 1, 1);
+    }
+
+    @Test
     void aTextOnlyReplyIsNeverPublishedAndGivesUpAfterBoundedReminders() {
         when(aiClient.chatWithTools(anyList(), any(), anyList(), anyString(), isNull(), anyInt()))
                 .thenReturn(ChatTurn.text("Looks good to me."),

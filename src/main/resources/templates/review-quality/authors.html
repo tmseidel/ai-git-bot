@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviewQuality}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewQualityPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <style th:replace="~{review-quality/fragments :: styles}"></style>
+    <div th:replace="~{review-quality/fragments :: header('authors')}"></div>
+    <form th:replace="~{review-quality/fragments :: filters('/review-quality/authors', false)}"></form>
+
+    <div class="card">
+        <div class="card-header">
+            <h5 class="mb-0" th:text="#{reviewQuality.tab.authors}">PR authors</h5>
+            <small class="text-secondary" th:text="#{reviewQuality.authors.hint(${view.minPrs})}">For coaching and onboarding, not for rating people.</small>
+        </div>
+        <div class="card-body" th:unless="${view.enabled}">
+            <div class="alert alert-light border small mb-0">
+                <i class="bi bi-eye-slash" aria-hidden="true"></i>
+                <span th:text="#{reviewQuality.authors.off}">Per-author figures are off.</span>
+                <code>REVIEW_QUALITY_AUTHOR_METRICS=true</code>
+            </div>
+        </div>
+        <th:block th:if="${view.enabled}">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 small">
+                    <thead>
+                    <tr>
+                        <th th:text="#{reviewQuality.col.author}">Author</th>
+                        <th class="num" th:text="#{reviewQuality.col.prs}">PRs</th>
+                        <th class="num" th:text="#{reviewQuality.col.findingsPerPrFirst}">Findings / PR (first review)</th>
+                        <th class="num" th:text="#{reviewQuality.col.blockersPerPr}">Blockers / PR</th>
+                        <th th:text="#{reviewQuality.col.categories}">Most frequent categories</th>
+                        <th class="num" th:text="#{reviewQuality.col.resolved}">Resolved</th>
+                        <th class="num" th:text="#{reviewQuality.col.rounds}">Avg. rounds</th>
+                        <th th:text="#{reviewQuality.col.trend}">Trend</th>
+                    </tr>
+                    </thead>
+                    <tbody class="table-group-divider">
+                    <tr th:if="${view.rows.rows.isEmpty()}">
+                        <td colspan="8" class="text-center text-secondary py-4" th:text="#{reviewQuality.authors.empty}">No author was recorded in this period.</td>
+                    </tr>
+                    <tr th:each="row : ${view.rows.rows}">
+                        <td><span th:if="${!row.others}" th:text="|@${row.author}|">@login</span>
+                            <span th:if="${row.others}" class="text-secondary" th:text="#{reviewQuality.authors.others(${row.othersCount})}">others</span></td>
+                        <td class="num" th:text="${row.prs}">0</td>
+                        <td class="num" th:text="${row.findingsPerPr}">0</td>
+                        <td class="num" th:text="${row.blockersPerPr}">0</td>
+                        <td th:text="${#strings.listJoin(row.categories, ', ')}">categories</td>
+                        <td class="num"><span th:replace="~{review-quality/fragments :: rate(${row.resolved})}"></span></td>
+                        <td class="num" th:text="${row.averageRounds}">0</td>
+                        <td><th:block th:replace="~{review-quality/fragments :: spark(${row.trend}, true)}"></th:block></td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-body pt-0">
+                <div th:replace="~{reviews/fragments :: pager(${view.rows}, '/review-quality/authors')}"></div>
+            </div>
+        </th:block>
+    </div>
+    <div th:replace="~{review-quality/fragments :: notes(${view.notes})}"></div>
+
+    <div th:replace="~{review-quality/fragments :: definitions}"></div>
+    <th:block th:replace="~{review-quality/fragments :: scripts}"></th:block>
+</div>
+</body>
+</html>

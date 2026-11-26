@@ -176,6 +176,59 @@ The page offers the same actions as the Git commands, and they change state exac
 - **Feedback on a finding stays a Git action.** The reviewers of a pull request judge its findings there.
 - **Confirmation.** Retracting, activating and rejecting ask for confirmation; revising and disabling open a form. Submitting a form twice performs the action once.
 
+## Review quality
+
+The Review quality page (`/review-quality`) answers four questions about the [agentic reviews](PR_WORKFLOWS_AGENTIC_REVIEW.md) of a period: what they find, whether it gets fixed, whether the reviewers of the pull requests agree with it, and what it costs. It reads the same records as the [Reviews page](#reviews) and only reports; nothing on it changes a review, a finding or a lesson. Normal (non-agentic) reviews keep no structured record and are not counted.
+
+Every tab shares one filter bar: **Bot**, **Repository**, **Period** (last 30 days, last 12 weeks, this quarter or a custom range of up to two years), **Compare with** (the previous period of the same length, or nothing), **Severity** (all findings, blocker + medium, or blockers only) and **Bucket** (week or month) for the charts. The filters are part of the page's address, so a view can be bookmarked or shared, and switching tabs keeps them. Tables page with **Rows per page** and page links, as on the [Workflow runs page](#workflow-runs). **Metric definitions** opens the counting rules next to the figures, and hovering a figure shows how it is computed.
+
+### Counting rules
+
+- **A pull request counts once**, per Git integration, bot, repository and number, in the period of its first finalized agentic review. Finding figures use that first review, so a pull request reviewed five times weighs as much as one reviewed once.
+- **Only finalized reviews count.** Failed, cancelled and abandoned runs appear only in **Review conclusions**. Withdrawn findings never count.
+- **Feedback** counts the record in effect per reviewer and target; superseded and retracted feedback is history.
+- **Precision** = useful ÷ (useful + incorrect + irrelevant), from feedback on findings. *Needs improvement* is feedback, but neither right nor wrong.
+- **Small samples show "–".** A rate computed from fewer than `REVIEW_QUALITY_MIN_SAMPLE` items (default 10) shows "–" instead of a percentage; hovering it still shows the counts.
+- **Dates are in UTC**; weeks start on Monday.
+
+### Tabs
+
+| Tab | What it shows |
+|---|---|
+| **Overview** | Pull requests reviewed, findings and blockers per pull request, the share of first-review findings resolved by the last review, precision and AI cost per pull request, each against the comparison period. A chart of findings per pull request by severity, per bucket (switchable to findings per 1,000 changed lines), and the conclusions of all reviews. |
+| **Per PR** | Pull requests reviewed at least twice: the findings of the first and the last review by severity, how many were **resolved** (in the first review, not matched in the last), **persisting** (matched in both) and **new** (only in the last), blockers left, and whether the pull request was merged or closed. A row is red when it was merged with a blocker left. Above the table: the median number of reviews until no blocker was left, the share of merged pull requests with blockers left, and the average open findings per review round. |
+| **Repositories** | One row per repository: pull requests, reviews, findings and blockers per pull request, the severity mix, resolved share, precision, a trend line and AI cost per pull request. Sorted by blockers per pull request. |
+| **Authors** | Off unless `REVIEW_QUALITY_AUTHOR_METRICS=true`; see below. |
+| **Categories & hot spots** | The share of findings per category with the change against the comparison period, and the directories with the most blocker and medium findings. **Directory depth** sets how many directory levels are grouped. Categories are chosen freely by the model; the page normalises case and spelling and folds a small list of aliases (for example *auth* into *security*). |
+| **Accuracy & lessons** | Precision and feedback coverage, the verdicts per bucket, and the categories in which the reviewer is most often judged incorrect or irrelevant. Where no lesson covers such a category, **propose…** opens the matching feedback on the Reviews page's Feedback tab, filtered by category and to feedback no lesson cites yet. Below: every active lesson with how often it was supplied, and the incorrect rate and findings per review in its category and paths during the 30 days before and after activation — an association, not proof. |
+| **Cost & return** | The AI cost of the period, cost per accepted blocker, and an estimate of the hours saved and the return, next to the assumptions behind the estimate. |
+
+<img src="screenshots/review-quality/overview.png" alt="Review quality — overview with KPIs, findings per reviewed PR and review conclusions" width="700"/>
+
+<img src="screenshots/review-quality/prs.png" alt="Review quality — how findings develop across repeated reviews of a pull request" width="700"/>
+
+<img src="screenshots/review-quality/accuracy.png" alt="Review quality — feedback verdicts, categories the reviewer gets wrong, and active lessons before and after activation" width="700"/>
+
+### Resolved, persisting and new
+
+When an agentic review is finalized, each of its findings is matched against the findings of the previous review of the same pull request: the same file and titles sharing at least half of their words, or the same category, nearby lines and some shared words. A finding that matches continues the earlier one; the rest are new. This is a heuristic, not proof that the same problem was meant. Reviews finalized before this was introduced are not matched, so **Resolved** shows "–" for pull requests whose reviews predate it.
+
+### Cost and return
+
+**Cost** is the recorded token usage of agentic-review workflow runs — the reviews and the follow-up answers on the pull request — priced with the **Token prices** of the AI integration that served them (see [Creating an AI Integration](#creating-an-ai-integration)). Without prices the page shows tokens instead of money, and tokens of integrations without a price are listed separately rather than counted as free. Changing a price recalculates past cost.
+
+The **return** is an estimate. The **Assumptions** form on the tab sets the minutes saved per accepted blocker, medium and low finding, the minutes lost per incorrect finding, the engineering cost per hour and the currency; they apply to the whole installation. A finding counts as *accepted* when a later review no longer reports it or a reviewer marked it useful. Saving the assumptions changes only the estimate, never a measured figure.
+
+<img src="screenshots/review-quality/cost.png" alt="Review quality — AI cost, cost per accepted blocker and the estimated return with its assumptions" width="700"/>
+
+### Authors
+
+Figures per pull-request author are off by default. An administrator can enable them with `REVIEW_QUALITY_AUTHOR_METRICS=true` (see [Deployment](DEPLOYMENT.md#review-quality-optional)). The table is meant for coaching and onboarding, not for rating people: it is sorted by name, never ranked, has no combined score, and authors with fewer than `REVIEW_QUALITY_AUTHOR_MIN_PRS` reviewed pull requests (default 5) are grouped as *others*.
+
+### Data recorded from now on
+
+Some figures need data that older versions did not record: the author, title and diff size of a reviewed pull request, the link from a review to its workflow run, whether a pull request was merged or closed, and the finding matching above. There is no backfill. Where a figure depends on such data, a note under the tab shows since when it is recorded.
+
 ## Managing AI Integrations
 
 AI Integrations define connections to AI providers. Navigate to **AI Integrations** from the dashboard or navbar.
@@ -204,6 +257,7 @@ AI Integrations define connections to AI providers. Navigate to **AI Integration
    - **Max Tokens**: Maximum tokens per AI response, used for reviews and comment replies (default: 16000 for hosted providers, 4096 for Ollama and llama.cpp)
    - **Parallel Worker Limit**: Maximum number of jobs that may run at the same time for this integration (`0` = unlimited, `1`–`20` = cap). See [Parallel worker limit](#parallel-worker-limit)
    - **Context Window (tokens)**: The model's total context window, used for proactive history compaction
+   - **Token prices (optional)**: Price per million input, output, cache-write and cache-read tokens, in the currency of the [Review quality](#review-quality) assumptions. Only used to show recorded token usage as cost on that page; leave empty to see tokens. Cache prices fall back to the input price.
 3. Click **Save**
 
 Diff chunking for reviews (**Max diff chars per chunk**, **Max diff chunks**, **Retry truncated chunk chars**) is configured per review workflow, not on the AI Integration.
