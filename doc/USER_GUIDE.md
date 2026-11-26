@@ -52,183 +52,6 @@ When no language has been chosen, the interface follows your browser's `Accept-L
 
 Only the web UI is localized. Everything the bot says or sends to an AI model — system prompts, tool descriptions, and log output — remains in English.
 
-## Workflow runs
-
-The Workflow runs page (`/workflow-runs`) shows what the bot did with the AI: one entry per triggered workflow (a review, a Writer Agent run, …), each with its AI interactions (rounds) and the tool calls the model requested.
-
-### Run list
-
-Each run shows its **state** (Succeeded, Error or Running), its **workflow type**, the **bot**, what **triggered** it (the repository and a link to the pull request or issue in the Git provider), when it **started**, its **duration**, the number of **rounds**, its **tool calls** (with the number that failed) and its **tokens in / out**. Runs are sorted by start, newest first; click **Started** to reverse the order. **Rows per page** and the page links work as elsewhere in the app.
-
-<img src="screenshots/workflow-runs/run-list.png" alt="Workflow runs — filters and a run expanded to its rounds" width="700"/>
-
-Two warnings are shown next to the state:
-
-- **Round limit reached**: an agent loop of the run ran out of rounds while the model still wanted to call tools, so the result may be incomplete.
-- **Output truncated**: a round ended because the model hit its output token limit.
-
-Click the chevron in front of a run (or **Expand all** / **Collapse all**) to see its details: the run ID, the AI and Git integrations, the cache write/read tokens and cache hit rate, the time spent in the model and in tools, and the rounds table. Each row of the rounds table is one request to the AI provider; when the provider was unavailable and the request was retried, the retries appear as indented *attempt* rows of the same round. Failed requests are highlighted red, a request still in progress blue, and rounds with a warning yellow.
-
-<img src="screenshots/workflow-runs/run-with-failed-round.png" alt="Workflow runs — a run whose last round failed" width="700"/>
-
-<img src="screenshots/workflow-runs/run-in-progress.png" alt="Workflow runs — a run with a round still in progress" width="700"/>
-
-Times and numbers are shown in your browser's time zone and in the interface language.
-
-### Filters
-
-Filter by **Workflow run ID**, **Project**, **PR / issue number**, **Workflow type**, **Bot** and **State** (the state buttons show how many runs match the other filters). **Only runs with warnings** keeps the runs with one of the warnings above; **Only runs with failed AI calls** keeps the runs where a request to the AI provider failed and was not retried successfully, whatever the run's own state. **Started from** / **Started until** restrict the runs by their start, in your browser's time zone. All filters are part of the page's address, so a filtered list can be bookmarked or shared.
-
-### AI interaction details
-
-Click **Details** on a round to open the details of that request: when it started and how long it took (split into model and tool time), the stop reason, the run it belongs to (**Show run** opens the run list filtered to it), the token usage, and every tool call with its source (an MCP server or `built-in`), duration and result. A failed tool call shows its error; click a tool call to see its arguments. For a failed request, the error message and the stack trace are shown at the top. While a request is still waiting for the provider, its duration counts the time so far.
-
-<img src="screenshots/workflow-runs/interaction-details.png" alt="AI interaction details — tool calls with arguments and a failed call" width="700"/>
-
-<img src="screenshots/workflow-runs/interaction-details-failed.png" alt="AI interaction details — a failed request with its error and stack trace" width="700"/>
-
-**Raw request / response** opens the raw JSON request sent to the AI provider and the raw JSON response received back. This is useful for debugging provider-specific behavior, token accounting discrepancies, or unexpected completions. The payloads are loaded only when you open them, so the page stays fast however large they are.
-
-Raw payload capture is **disabled by default** because the payloads can be large and may contain sensitive prompt content. When disabled, the button is not shown. To enable it, set the configuration property `ai-usage.raw-payloads-enabled=true` (for example, in `application.properties`, `application.yml`, or via the `AI_USAGE_RAW_PAYLOADS_ENABLED` environment variable when running under Docker). You can also cap the stored payload size with `ai-usage.max-raw-payload-length` (default: 65535). Set it to `0` to store payloads in full, for example to inspect the complete conversation of a long agent run; the database then grows with every recorded request. The modal shows **—** when a payload is not available.
-
-### Export and clearing
-
-**Export as JSON** downloads the runs matching the current filters, each with its AI interactions and tool calls (without raw payloads). **Clear all** (a confirmation dialog is shown) removes every finished run with its interactions and tool calls; runs that are still running are kept.
-
-Runs recorded before this page existed (from the former usage and error logs) appear as runs of type **Legacy**, one per pull request or issue. Such a run can cover several workflows.
-
-## Reviews
-
-The Reviews page (`/reviews`) shows three things: what the [agentic review](PR_WORKFLOWS_AGENTIC_REVIEW.md) found, what reviewers said about it ([feedback](WORKFLOW_FEEDBACK.md)), and the [lessons](WORKFLOW_LESSONS.md) maintainers drew from that feedback. It reads the stored records, so it shows exactly what the `@bot feedback …` and `@bot learning …` commands show, for all bots and repositories in one place. Normal (non-agentic) reviews keep no structured record and do not appear here.
-
-The page has three tabs. Each tab has a **Bot** and a **Repository** filter. All filters are part of the page's address, so a filtered view can be bookmarked or shared. **Rows per page** and the page links work as on the [Workflow runs page](#workflow-runs).
-
-### Reviews tab
-
-The tab lists one row per agentic review, newest first. Each row shows:
-
-- the review's reference (`O412`), repository and pull request
-- when it was finalized, and on which head commit
-- its conclusion
-- its findings by severity (blocker / medium / low); withdrawn findings are not counted
-- how much feedback was given on it (on the review, its assessment or its findings)
-- how many lessons it was given
-- whether it was published on the pull request
-
-You can filter by **PR** number, by **State** (finalized, failed, cancelled, …) or by **With blockers**.
-
-<img src="screenshots/reviews/reviews.png" alt="Reviews — agentic reviews with findings by severity, feedback and publication" width="700"/>
-
-Click a reference to open the review. It shows the assessment, every finding with its location, explanation, impact and recommendation, and the feedback given on each finding. Review texts, feedback reasons and lesson guidance are rendered as Markdown, as on the pull request. The side panel lists:
-
-- the other reviews of the same pull request, so you can see whether a finding persisted from one review to the next
-- the lessons the review was given, each with the revision it saw
-
-**Workflow runs** opens the runs of that pull request.
-
-<img src="screenshots/reviews/review.png" alt="Review details — assessment, findings with feedback, and the other reviews of the pull request" width="700"/>
-
-### Feedback tab
-
-The tab lists every feedback record. Each record shows what it is about (a finding, the assessment or the whole review), the verdict, the reason, who gave it, and the lessons citing it. By default only the feedback in effect is listed. You can filter by:
-
-- **PR**
-- **Verdict**
-- **Not yet cited by a lesson**: corrections nobody has turned into guidance yet
-- **Include superseded and retracted**
-
-<img src="screenshots/reviews/feedback.png" alt="Feedback — verdicts and reasons with the lessons citing them" width="700"/>
-
-### Lessons tab
-
-The tab lists every lesson, newest first; pick a state to narrow the list. **Needs attention** lists the candidates waiting for a decision, and the lessons that their validation keeps out of reviews: review required, recheck due, withdrawn evidence, or conflicts. Each row shows the current guidance, where it applies, how often it was supplied to a review, and its validation.
-
-<img src="screenshots/reviews/lessons.png" alt="Lessons — current guidance, scope, usage and validation" width="700"/>
-
-Click a lesson to see:
-
-- its current guidance
-- a candidate waiting for activation
-- all revisions
-- the evidence (feedback) it is based on
-- its history
-- the reviews it was recently supplied to
-
-<img src="screenshots/reviews/lesson.png" alt="Lesson details — active guidance, a waiting candidate, revisions, evidence and history" width="700"/>
-
-<img src="screenshots/reviews/lesson_2.png" alt="Lesson details — active guidance, a waiting candidate, revisions, evidence and history" width="700"/>
-
-### Actions
-
-The page offers the same actions as the Git commands, and they change state exactly as the commands do:
-
-| Action | Where | Git command |
-|---|---|---|
-| Retract feedback | Feedback tab, **Actions** | `@bot feedback retract FB…` |
-| Propose a lesson from feedback | Feedback tab, **Actions** | `@bot learning propose FB…` |
-| Activate or reject a candidate revision | Lesson | `@bot learning activate L…@n`, `@bot learning reject L…@n` |
-| Revise a lesson | Lesson | `@bot learning revise L…` |
-| Disable a lesson | Lesson | `@bot learning disable L…` |
-
-- **Recorded as you.** Actions are recorded as `admin:<your user name>`. The lesson and feedback histories show Git accounts as `@login`, so the two are easy to tell apart. The bot's list of learning maintainers does not apply to administrators.
-- **Learning mode still applies.** When curated learning is off for the bot, lessons cannot be proposed, revised or activated; those buttons are disabled with a note. Rejecting and disabling keep working.
-- **Nothing is posted on the pull request.** The action appears only in the record's history.
-- **Feedback on a finding stays a Git action.** The reviewers of a pull request judge its findings there.
-- **Confirmation.** Retracting, activating and rejecting ask for confirmation; revising and disabling open a form. Submitting a form twice performs the action once.
-
-## Review quality
-
-The Review quality page (`/review-quality`) answers four questions about the [agentic reviews](PR_WORKFLOWS_AGENTIC_REVIEW.md) of a period: what they find, whether it gets fixed, whether the reviewers of the pull requests agree with it, and what it costs. It reads the same records as the [Reviews page](#reviews) and only reports; nothing on it changes a review, a finding or a lesson. Normal (non-agentic) reviews keep no structured record and are not counted.
-
-Every tab shares one filter bar: **Bot**, **Repository**, **Period** (last 30 days, last 12 weeks, this quarter or a custom range of up to two years), **Compare with** (the previous period of the same length, or nothing), **Severity** (all findings, blocker + medium, or blockers only) and **Bucket** (week or month) for the charts. The filters are part of the page's address, so a view can be bookmarked or shared, and switching tabs keeps them. Tables page with **Rows per page** and page links, as on the [Workflow runs page](#workflow-runs). **Metric definitions** opens the counting rules next to the figures, and hovering a figure shows how it is computed.
-
-### Counting rules
-
-- **A pull request counts once**, per Git integration, bot, repository and number, in the period of its first finalized agentic review. Finding figures use that first review, so a pull request reviewed five times weighs as much as one reviewed once.
-- **Only finalized reviews count.** Failed, cancelled and abandoned runs appear only in **Review conclusions**. Withdrawn findings never count.
-- **Feedback** counts the record in effect per reviewer and target; superseded and retracted feedback is history.
-- **Precision** = useful ÷ (useful + incorrect + irrelevant), from feedback on findings. *Needs improvement* is feedback, but neither right nor wrong.
-- **Small samples show "–".** A rate computed from fewer than `REVIEW_QUALITY_MIN_SAMPLE` items (default 10) shows "–" instead of a percentage; hovering it still shows the counts.
-- **Dates are in UTC**; weeks start on Monday.
-
-### Tabs
-
-| Tab | What it shows |
-|---|---|
-| **Overview** | Pull requests reviewed, findings and blockers per pull request, the share of first-review findings resolved by the last review, precision and AI cost per pull request, each against the comparison period. A chart of findings per pull request by severity, per bucket (switchable to findings per 1,000 changed lines), and the conclusions of all reviews. |
-| **Per PR** | Pull requests reviewed at least twice: the findings of the first and the last review by severity, how many were **resolved** (in the first review, not matched in the last), **persisting** (matched in both) and **new** (only in the last), blockers left, and whether the pull request was merged or closed. A row is red when it was merged with a blocker left. Above the table: the median number of reviews until no blocker was left, the share of merged pull requests with blockers left, and the average open findings per review round. |
-| **Repositories** | One row per repository: pull requests, reviews, findings and blockers per pull request, the severity mix, resolved share, precision, a trend line and AI cost per pull request. Sorted by blockers per pull request. |
-| **Authors** | Off unless `REVIEW_QUALITY_AUTHOR_METRICS=true`; see below. |
-| **Categories & hot spots** | The share of findings per category with the change against the comparison period, and the directories with the most blocker and medium findings. **Directory depth** sets how many directory levels are grouped. Categories are chosen freely by the model; the page normalises case and spelling and folds a small list of aliases (for example *auth* into *security*). |
-| **Accuracy & lessons** | Precision and feedback coverage, the verdicts per bucket, and the categories in which the reviewer is most often judged incorrect or irrelevant. Where no lesson covers such a category, **propose…** opens the matching feedback on the Reviews page's Feedback tab, filtered by category and to feedback no lesson cites yet. Below: every active lesson with how often it was supplied, and the incorrect rate and findings per review in its category and paths during the 30 days before and after activation — an association, not proof. |
-| **Cost & return** | The AI cost of the period, cost per accepted blocker, and an estimate of the hours saved and the return, next to the assumptions behind the estimate. |
-
-<img src="screenshots/review-quality/overview.png" alt="Review quality — overview with KPIs, findings per reviewed PR and review conclusions" width="700"/>
-
-<img src="screenshots/review-quality/prs.png" alt="Review quality — how findings develop across repeated reviews of a pull request" width="700"/>
-
-<img src="screenshots/review-quality/accuracy.png" alt="Review quality — feedback verdicts, categories the reviewer gets wrong, and active lessons before and after activation" width="700"/>
-
-### Resolved, persisting and new
-
-When an agentic review is finalized, each of its findings is matched against the findings of the previous review of the same pull request: the same file and titles sharing at least half of their words, or the same category, nearby lines and some shared words. A finding that matches continues the earlier one; the rest are new. This is a heuristic, not proof that the same problem was meant. Reviews finalized before this was introduced are not matched, so **Resolved** shows "–" for pull requests whose reviews predate it.
-
-### Cost and return
-
-**Cost** is the recorded token usage of agentic-review workflow runs — the reviews and the follow-up answers on the pull request — priced with the **Token prices** of the AI integration that served them (see [Creating an AI Integration](#creating-an-ai-integration)). Without prices the page shows tokens instead of money, and tokens of integrations without a price are listed separately rather than counted as free. Changing a price recalculates past cost.
-
-The **return** is an estimate. The **Assumptions** form on the tab sets the minutes saved per accepted blocker, medium and low finding, the minutes lost per incorrect finding, the engineering cost per hour and the currency; they apply to the whole installation. A finding counts as *accepted* when a later review no longer reports it or a reviewer marked it useful. Saving the assumptions changes only the estimate, never a measured figure.
-
-<img src="screenshots/review-quality/cost.png" alt="Review quality — AI cost, cost per accepted blocker and the estimated return with its assumptions" width="700"/>
-
-### Authors
-
-Figures per pull-request author are off by default. An administrator can enable them with `REVIEW_QUALITY_AUTHOR_METRICS=true` (see [Deployment](DEPLOYMENT.md#review-quality-optional)). The table is meant for coaching and onboarding, not for rating people: it is sorted by name, never ranked, has no combined score, and authors with fewer than `REVIEW_QUALITY_AUTHOR_MIN_PRS` reviewed pull requests (default 5) are grouped as *others*.
-
-### Data recorded from now on
-
-Some figures need data that older versions did not record: the author, title and diff size of a reviewed pull request, the link from a review to its workflow run, whether a pull request was merged or closed, and the finding matching above. There is no backfill. Where a figure depends on such data, a note under the tab shows since when it is recorded.
-
 ## Managing AI Integrations
 
 AI Integrations define connections to AI providers. Navigate to **AI Integrations** from the dashboard or navbar.
@@ -511,6 +334,183 @@ Bots are the core entities that connect an AI provider with a Git provider. Navi
    - **User Whitelist** *(optional)*: Restrict AI-spending interactions to a set of Git usernames. This is recommended for public repositories: without a whitelist, anyone who mentions the bot in a pull request conversation comment can trigger it. See [PR Workflows → Trigger conditions](PR_WORKFLOWS.md#trigger-conditions) for who may trigger the bot from which kind of comment.
    - **Enabled**: Whether the bot is active
 3. Click **Save**
+
+## Workflow runs
+
+The Workflow runs page (`/workflow-runs`) shows what the bot did with the AI: one entry per triggered workflow (a review, a Writer Agent run, …), each with its AI interactions (rounds) and the tool calls the model requested.
+
+### Run list
+
+Each run shows its **state** (Succeeded, Error or Running), its **workflow type**, the **bot**, what **triggered** it (the repository and a link to the pull request or issue in the Git provider), when it **started**, its **duration**, the number of **rounds**, its **tool calls** (with the number that failed) and its **tokens in / out**. Runs are sorted by start, newest first; click **Started** to reverse the order. **Rows per page** and the page links work as elsewhere in the app.
+
+<img src="screenshots/workflow-runs/run-list.png" alt="Workflow runs — filters and a run expanded to its rounds" width="700"/>
+
+Two warnings are shown next to the state:
+
+- **Round limit reached**: an agent loop of the run ran out of rounds while the model still wanted to call tools, so the result may be incomplete.
+- **Output truncated**: a round ended because the model hit its output token limit.
+
+Click the chevron in front of a run (or **Expand all** / **Collapse all**) to see its details: the run ID, the AI and Git integrations, the cache write/read tokens and cache hit rate, the time spent in the model and in tools, and the rounds table. Each row of the rounds table is one request to the AI provider; when the provider was unavailable and the request was retried, the retries appear as indented *attempt* rows of the same round. Failed requests are highlighted red, a request still in progress blue, and rounds with a warning yellow.
+
+<img src="screenshots/workflow-runs/run-with-failed-round.png" alt="Workflow runs — a run whose last round failed" width="700"/>
+
+<img src="screenshots/workflow-runs/run-in-progress.png" alt="Workflow runs — a run with a round still in progress" width="700"/>
+
+Times and numbers are shown in your browser's time zone and in the interface language.
+
+### Filters
+
+Filter by **Workflow run ID**, **Project**, **PR / issue number**, **Workflow type**, **Bot** and **State** (the state buttons show how many runs match the other filters). **Only runs with warnings** keeps the runs with one of the warnings above; **Only runs with failed AI calls** keeps the runs where a request to the AI provider failed and was not retried successfully, whatever the run's own state. **Started from** / **Started until** restrict the runs by their start, in your browser's time zone. All filters are part of the page's address, so a filtered list can be bookmarked or shared.
+
+### AI interaction details
+
+Click **Details** on a round to open the details of that request: when it started and how long it took (split into model and tool time), the stop reason, the run it belongs to (**Show run** opens the run list filtered to it), the token usage, and every tool call with its source (an MCP server or `built-in`), duration and result. A failed tool call shows its error; click a tool call to see its arguments. For a failed request, the error message and the stack trace are shown at the top. While a request is still waiting for the provider, its duration counts the time so far.
+
+<img src="screenshots/workflow-runs/interaction-details.png" alt="AI interaction details — tool calls with arguments and a failed call" width="700"/>
+
+<img src="screenshots/workflow-runs/interaction-details-failed.png" alt="AI interaction details — a failed request with its error and stack trace" width="700"/>
+
+**Raw request / response** opens the raw JSON request sent to the AI provider and the raw JSON response received back. This is useful for debugging provider-specific behavior, token accounting discrepancies, or unexpected completions. The payloads are loaded only when you open them, so the page stays fast however large they are.
+
+Raw payload capture is **disabled by default** because the payloads can be large and may contain sensitive prompt content. When disabled, the button is not shown. To enable it, set the configuration property `ai-usage.raw-payloads-enabled=true` (for example, in `application.properties`, `application.yml`, or via the `AI_USAGE_RAW_PAYLOADS_ENABLED` environment variable when running under Docker). You can also cap the stored payload size with `ai-usage.max-raw-payload-length` (default: 65535). Set it to `0` to store payloads in full, for example to inspect the complete conversation of a long agent run; the database then grows with every recorded request. The modal shows **—** when a payload is not available.
+
+### Export and clearing
+
+**Export as JSON** downloads the runs matching the current filters, each with its AI interactions and tool calls (without raw payloads). **Clear all** (a confirmation dialog is shown) removes every finished run with its interactions and tool calls; runs that are still running are kept.
+
+Runs recorded before this page existed (from the former usage and error logs) appear as runs of type **Legacy**, one per pull request or issue. Such a run can cover several workflows.
+
+## Reviews
+
+The Reviews page (`/reviews`) shows three things: what the [agentic review](PR_WORKFLOWS_AGENTIC_REVIEW.md) found, what reviewers said about it ([feedback](WORKFLOW_FEEDBACK.md)), and the [lessons](WORKFLOW_LESSONS.md) maintainers drew from that feedback. It reads the stored records, so it shows exactly what the `@bot feedback …` and `@bot learning …` commands show, for all bots and repositories in one place. Normal (non-agentic) reviews keep no structured record and do not appear here.
+
+The page has three tabs. Each tab has a **Bot** and a **Repository** filter. All filters are part of the page's address, so a filtered view can be bookmarked or shared. **Rows per page** and the page links work as on the [Workflow runs page](#workflow-runs).
+
+### Reviews tab
+
+The tab lists one row per agentic review, newest first. Each row shows:
+
+- the review's reference (`O412`), repository and pull request
+- when it was finalized, and on which head commit
+- its conclusion
+- its findings by severity (blocker / medium / low); withdrawn findings are not counted
+- how much feedback was given on it (on the review, its assessment or its findings)
+- how many lessons it was given
+- whether it was published on the pull request
+
+You can filter by **PR** number, by **State** (finalized, failed, cancelled, …) or by **With blockers**.
+
+<img src="screenshots/reviews/reviews.png" alt="Reviews — agentic reviews with findings by severity, feedback and publication" width="700"/>
+
+Click a reference to open the review. It shows the assessment, every finding with its location, explanation, impact and recommendation, and the feedback given on each finding. Review texts, feedback reasons and lesson guidance are rendered as Markdown, as on the pull request. The side panel lists:
+
+- the other reviews of the same pull request, so you can see whether a finding persisted from one review to the next
+- the lessons the review was given, each with the revision it saw
+
+**Workflow runs** opens the runs of that pull request.
+
+<img src="screenshots/reviews/review.png" alt="Review details — assessment, findings with feedback, and the other reviews of the pull request" width="700"/>
+
+### Feedback tab
+
+The tab lists every feedback record. Each record shows what it is about (a finding, the assessment or the whole review), the verdict, the reason, who gave it, and the lessons citing it. By default only the feedback in effect is listed. You can filter by:
+
+- **PR**
+- **Verdict**
+- **Not yet cited by a lesson**: corrections nobody has turned into guidance yet
+- **Include superseded and retracted**
+
+<img src="screenshots/reviews/feedback.png" alt="Feedback — verdicts and reasons with the lessons citing them" width="700"/>
+
+### Lessons tab
+
+The tab lists every lesson, newest first; pick a state to narrow the list. **Needs attention** lists the candidates waiting for a decision, and the lessons that their validation keeps out of reviews: review required, recheck due, withdrawn evidence, or conflicts. Each row shows the current guidance, where it applies, how often it was supplied to a review, and its validation.
+
+<img src="screenshots/reviews/lessons.png" alt="Lessons — current guidance, scope, usage and validation" width="700"/>
+
+Click a lesson to see:
+
+- its current guidance
+- a candidate waiting for activation
+- all revisions
+- the evidence (feedback) it is based on
+- its history
+- the reviews it was recently supplied to
+
+<img src="screenshots/reviews/lesson.png" alt="Lesson details — active guidance, a waiting candidate, revisions, evidence and history" width="700"/>
+
+<img src="screenshots/reviews/lesson_2.png" alt="Lesson details — active guidance, a waiting candidate, revisions, evidence and history" width="700"/>
+
+### Actions
+
+The page offers the same actions as the Git commands, and they change state exactly as the commands do:
+
+| Action | Where | Git command |
+|---|---|---|
+| Retract feedback | Feedback tab, **Actions** | `@bot feedback retract FB…` |
+| Propose a lesson from feedback | Feedback tab, **Actions** | `@bot learning propose FB…` |
+| Activate or reject a candidate revision | Lesson | `@bot learning activate L…@n`, `@bot learning reject L…@n` |
+| Revise a lesson | Lesson | `@bot learning revise L…` |
+| Disable a lesson | Lesson | `@bot learning disable L…` |
+
+- **Recorded as you.** Actions are recorded as `admin:<your user name>`. The lesson and feedback histories show Git accounts as `@login`, so the two are easy to tell apart. The bot's list of learning maintainers does not apply to administrators.
+- **Learning mode still applies.** When curated learning is off for the bot, lessons cannot be proposed, revised or activated; those buttons are disabled with a note. Rejecting and disabling keep working.
+- **Nothing is posted on the pull request.** The action appears only in the record's history.
+- **Feedback on a finding stays a Git action.** The reviewers of a pull request judge its findings there.
+- **Confirmation.** Retracting, activating and rejecting ask for confirmation; revising and disabling open a form. Submitting a form twice performs the action once.
+
+## Review quality
+
+The Review quality page (`/review-quality`) answers four questions about the [agentic reviews](PR_WORKFLOWS_AGENTIC_REVIEW.md) of a period: what they find, whether it gets fixed, whether the reviewers of the pull requests agree with it, and what it costs. It reads the same records as the [Reviews page](#reviews) and only reports; nothing on it changes a review, a finding or a lesson. Normal (non-agentic) reviews keep no structured record and are not counted.
+
+Every tab shares one filter bar: **Bot**, **Repository**, **Period** (last 30 days, last 12 weeks, this quarter or a custom range of up to two years), **Compare with** (the previous period of the same length, or nothing), **Severity** (all findings, blocker + medium, or blockers only) and **Bucket** (week or month) for the charts. The filters are part of the page's address, so a view can be bookmarked or shared, and switching tabs keeps them. Tables page with **Rows per page** and page links, as on the [Workflow runs page](#workflow-runs). **Metric definitions** opens the counting rules next to the figures, and hovering a figure shows how it is computed.
+
+### Counting rules
+
+- **A pull request counts once**, per Git integration, bot, repository and number, in the period of its first finalized agentic review. Finding figures use that first review, so a pull request reviewed five times weighs as much as one reviewed once.
+- **Only finalized reviews count.** Failed, cancelled and abandoned runs appear only in **Review conclusions**. Withdrawn findings never count.
+- **Feedback** counts the record in effect per reviewer and target; superseded and retracted feedback is history.
+- **Precision** = useful ÷ (useful + incorrect + irrelevant), from feedback on findings. *Needs improvement* is feedback, but neither right nor wrong.
+- **Small samples show "–".** A rate computed from fewer than `REVIEW_QUALITY_MIN_SAMPLE` items (default 10) shows "–" instead of a percentage; hovering it still shows the counts.
+- **Dates are in UTC**; weeks start on Monday.
+
+### Tabs
+
+| Tab | What it shows |
+|---|---|
+| **Overview** | Pull requests reviewed, findings and blockers per pull request, the share of first-review findings resolved by the last review, precision and AI cost per pull request, each against the comparison period. A chart of findings per pull request by severity, per bucket (switchable to findings per 1,000 changed lines), and the conclusions of all reviews. |
+| **Per PR** | Pull requests reviewed at least twice: the findings of the first and the last review by severity, how many were **resolved** (in the first review, not matched in the last), **persisting** (matched in both) and **new** (only in the last), blockers left, and whether the pull request was merged or closed. A row is red when it was merged with a blocker left. Above the table: the median number of reviews until no blocker was left, the share of merged pull requests with blockers left, and the average open findings per review round. |
+| **Repositories** | One row per repository: pull requests, reviews, findings and blockers per pull request, the severity mix, resolved share, precision, a trend line and AI cost per pull request. Sorted by blockers per pull request. |
+| **Authors** | Off unless `REVIEW_QUALITY_AUTHOR_METRICS=true`; see below. |
+| **Categories & hot spots** | The share of findings per category with the change against the comparison period, and the directories with the most blocker and medium findings. **Directory depth** sets how many directory levels are grouped. Categories are chosen freely by the model; the page normalises case and spelling and folds a small list of aliases (for example *auth* into *security*). |
+| **Accuracy & lessons** | Precision and feedback coverage, the verdicts per bucket, and the categories in which the reviewer is most often judged incorrect or irrelevant. Where no lesson covers such a category, **propose…** opens the matching feedback on the Reviews page's Feedback tab, filtered by category and to feedback no lesson cites yet. Below: every active lesson with how often it was supplied, and the incorrect rate and findings per review in its category and paths during the 30 days before and after activation — an association, not proof. |
+| **Cost & return** | The AI cost of the period, cost per accepted blocker, and an estimate of the hours saved and the return, next to the assumptions behind the estimate. |
+
+<img src="screenshots/review-quality/overview.png" alt="Review quality — overview with KPIs, findings per reviewed PR and review conclusions" width="700"/>
+
+<img src="screenshots/review-quality/prs.png" alt="Review quality — how findings develop across repeated reviews of a pull request" width="700"/>
+
+<img src="screenshots/review-quality/accuracy.png" alt="Review quality — feedback verdicts, categories the reviewer gets wrong, and active lessons before and after activation" width="700"/>
+
+### Resolved, persisting and new
+
+When an agentic review is finalized, each of its findings is matched against the findings of the previous review of the same pull request: the same file and titles sharing at least half of their words, or the same category, nearby lines and some shared words. A finding that matches continues the earlier one; the rest are new. This is a heuristic, not proof that the same problem was meant. Reviews finalized before this was introduced are not matched, so **Resolved** shows "–" for pull requests whose reviews predate it.
+
+### Cost and return
+
+**Cost** is the recorded token usage of agentic-review workflow runs — the reviews and the follow-up answers on the pull request — priced with the **Token prices** of the AI integration that served them (see [Creating an AI Integration](#creating-an-ai-integration)). Without prices the page shows tokens instead of money, and tokens of integrations without a price are listed separately rather than counted as free. Changing a price recalculates past cost.
+
+The **return** is an estimate. The **Assumptions** form on the tab sets the minutes saved per accepted blocker, medium and low finding, the minutes lost per incorrect finding, the engineering cost per hour and the currency; they apply to the whole installation. A finding counts as *accepted* when a later review no longer reports it or a reviewer marked it useful. Saving the assumptions changes only the estimate, never a measured figure.
+
+<img src="screenshots/review-quality/cost.png" alt="Review quality — AI cost, cost per accepted blocker and the estimated return with its assumptions" width="700"/>
+
+### Authors
+
+Figures per pull-request author are off by default. An administrator can enable them with `REVIEW_QUALITY_AUTHOR_METRICS=true` (see [Deployment](DEPLOYMENT.md#review-quality-optional)). The table is meant for coaching and onboarding, not for rating people: it is sorted by name, never ranked, has no combined score, and authors with fewer than `REVIEW_QUALITY_AUTHOR_MIN_PRS` reviewed pull requests (default 5) are grouped as *others*.
+
+### Data recorded from now on
+
+Some figures need data that older versions did not record: the author, title and diff size of a reviewed pull request, the link from a review to its workflow run, whether a pull request was merged or closed, and the finding matching above. There is no backfill. Where a figure depends on such data, a note under the tab shows since when it is recorded.
 
 ## Workflow Configurations
 

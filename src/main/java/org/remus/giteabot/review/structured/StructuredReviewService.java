@@ -8,6 +8,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.PageRequest;
 
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -289,7 +290,14 @@ public class StructuredReviewService {
         review.setFinalizedAt(Instant.now());
         FinalizedReview finalized = toFinalized(review);
         review.setContentHash(hash(finalized));
-        matchAgainstEarlierReview(review, active);
+        try {
+            matchAgainstEarlierReview(review, active);
+        } catch (RuntimeException e) {
+            // Matching is reporting metadata (Review quality page); never block publishing the review.
+            log.warn("Could not match the findings of review {} against the previous review: {}",
+                    review.getId(), e.toString());
+            review.setFingerprinted(false);
+        }
         log.debug("Finalized review {} with {} finding(s)", finalized.reference(),
                 finalized.findings().size());
         return toFinalized(review);
@@ -312,6 +320,11 @@ public class StructuredReviewService {
     /**
      * Fingerprints the findings of a review being finalized and links each to the finding of the
      * pull request's previous finalized review it continues ({@link FindingMatcher}).
+     * <p>
+     * Runs after the content hash is computed: the columns written here (fingerprint, previous and
+     * origin finding, the record's {@code fingerprinted} flag) must stay out of {@link FinalizedReview}
+     * and {@link #hash(FinalizedReview)}. Everything is computed before the first finding is changed,
+     * so a failure leaves no finding half-matched.
      */
     private void matchAgainstEarlierReview(ReviewRecord review, List<ReviewFinding> active) {
         WorkflowOutput output = review.getOutput();
@@ -323,10 +336,14 @@ public class StructuredReviewService {
         Map<Long, ReviewFinding> previousById = new HashMap<>();
         previous.forEach(finding -> previousById.put(finding.getId(), finding));
         Map<Long, Long> matches = FindingMatcher.match(candidates(active), candidates(previous));
+        Map<ReviewFinding, String> fingerprints = new HashMap<>();
         for (ReviewFinding finding : active) {
-            ReviewFindingLocation first = finding.getLocations().isEmpty() ? null : finding.getLocations().getFirst();
-            finding.setFingerprint(FindingMatcher.fingerprint(first == null ? null : first.getPath(),
+            ReviewFindingLocation first = firstLocation(finding);
+            fingerprints.put(finding, FindingMatcher.fingerprint(first == null ? null : first.getPath(),
                     finding.getCategory(), finding.getTitle()));
+        }
+        for (ReviewFinding finding : active) {
+            finding.setFingerprint(fingerprints.get(finding));
             ReviewFinding continued = previousById.get(matches.get(finding.getId()));
             finding.setPreviousFindingId(continued == null ? null : continued.getId());
             finding.setOriginFindingId(continued == null ? finding.getId()
@@ -337,11 +354,16 @@ public class StructuredReviewService {
 
     private static List<FindingMatcher.Candidate> candidates(List<ReviewFinding> findings) {
         return findings.stream().filter(finding -> finding.getId() != null).map(finding -> {
-            ReviewFindingLocation first = finding.getLocations().isEmpty() ? null : finding.getLocations().getFirst();
+            ReviewFindingLocation first = firstLocation(finding);
             return new FindingMatcher.Candidate(finding.getId(), finding.getOriginFindingId(),
                     finding.getCategory(), finding.getTitle(), first == null ? null : first.getPath(),
                     first == null ? null : first.getStartLine(), first == null ? null : first.getEndLine());
         }).toList();
+    }
+
+    private static ReviewFindingLocation firstLocation(ReviewFinding finding) {
+        List<ReviewFindingLocation> locations = finding.getLocations();
+        return locations == null || locations.isEmpty() ? null : locations.getFirst();
     }
 
     private static String clip(String value, int max) {
@@ -391,19 +413,6 @@ public class StructuredReviewService {
                 .map(StructuredReviewService::toFinalized);
     }
 
-    /**
-     * Numeric review id behind an {@code O<n>} reference, when it exists. Publication and snapshot
-     * bookkeeping address a review by its public reference; this is the one place that maps it back.
-     */
-    @Transactional(readOnly = true)
-    public Optional<Long> findReviewIdByReference(String outputReference) {
-        if (outputReference == null || outputReference.isBlank()) {
-            return Optional.empty();
-        }
-        return outputRepository.findByReference(outputReference.trim())
-                .flatMap(output -> reviewRepository.findByOutputId(output.getId()))
-                .map(ReviewRecord::getId);
-    }
 
     /** Draft snapshot for a later re-read, e.g. after a conflict or a context compaction. */
     @Transactional(readOnly = true)
@@ -530,7 +539,7 @@ public class StructuredReviewService {
     private static List<ReviewFinding> activeFindings(ReviewRecord review) {
         return review.getFindings().stream()
                 .filter(finding -> !finding.isWithdrawn())
-                .sorted((left, right) -> Integer.compare(left.getOrdinal(), right.getOrdinal()))
+                .sorted(Comparator.comparingInt(ReviewFinding::getOrdinal))
                 .toList();
     }
 
