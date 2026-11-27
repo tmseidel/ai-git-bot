@@ -4,7 +4,7 @@ This guide covers building, testing, and running AI-Git-Bot locally for developm
 
 ## Prerequisites
 
-- **Java 21** or later
+- **Java 25** or later
 - **Maven 3.9+**
 - **Docker** and **Docker Compose** (for the local Gitea instance)
 - **OpenSSH client tools** (`ssh`, `ssh-keygen`, and `ssh-keyscan`) on `PATH`

@@ -6,7 +6,7 @@ We welcome contributions to AI-Git-Bot! This document provides guidelines and in
 
 ### Prerequisites
 
-- Java 21 or later
+- Java 25 or later
 - Maven 3.9+
 - A Git hosting platform for integration testing (Gitea or GitHub)
 - An AI provider API key (Anthropic, OpenAI) or local setup (Ollama, llama.cpp)

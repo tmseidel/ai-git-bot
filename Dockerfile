@@ -4,7 +4,7 @@
 # therefore architecture independent, so there is no point in running Maven
 # under QEMU emulation when cross-building the linux/arm64 image. On a native
 # arm64 builder $BUILDPLATFORM already *is* linux/arm64, so nothing changes.
-FROM --platform=$BUILDPLATFORM eclipse-temurin:21-jdk-alpine AS build
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk-alpine AS build
 
 WORKDIR /app
 
@@ -28,7 +28,7 @@ RUN mvn clean package -DskipTests -o
 # This stage is built for the *target* platform. Both linux/amd64 and
 # linux/arm64 are supported; see the k6 step below for the only toolchain
 # component that needs an architecture-specific install path.
-FROM eclipse-temurin:21-jre-noble
+FROM eclipse-temurin:25-jre-noble
 
 # Provided automatically by BuildKit ("amd64" / "arm64"), but has to be
 # re-declared inside the stage to be consumable by RUN instructions.
