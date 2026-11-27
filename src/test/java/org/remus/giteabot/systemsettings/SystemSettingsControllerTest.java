@@ -97,6 +97,9 @@ class SystemSettingsControllerTest {
 
         String view = controller.saveMcpToolSelection(7L,
                 List.of("mcp:github:search", "mcp:github:get_file"),
+                null, null, null, new org.springframework.mock.web.MockHttpSession(),
+                org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(
+                        "admin", "", List.of(new org.springframework.security.core.authority.SimpleGrantedAuthority("ROLE_ADMIN"))),
                 new RedirectAttributesModelMap());
 
         assertEquals("redirect:/system-settings", view);
