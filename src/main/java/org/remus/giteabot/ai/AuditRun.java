@@ -1,6 +1,7 @@
 package org.remus.giteabot.ai;
 
 import lombok.Getter;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
@@ -60,12 +61,16 @@ public final class AuditRun implements AutoCloseable {
     private int round;
     private int attempt;
     private boolean retryPending;
+    @Setter
     private Long interactionId;
     private int toolSequence;
     private Instant attemptStartedAt;
     private long attemptStartNanos;
     private boolean attemptOpen;
+    @Setter
     private PendingUsage pendingUsage;
+    @Setter
+    private TokenPrices attemptPrices;
 
     private boolean roundLimitReached;
     private String failureMessage;
@@ -97,6 +102,7 @@ public final class AuditRun implements AutoCloseable {
         attemptStartNanos = System.nanoTime();
         attemptOpen = true;
         pendingUsage = null;
+        attemptPrices = null;
         interactionId = null;
         toolSequence = 0;
     }
@@ -109,14 +115,6 @@ public final class AuditRun implements AutoCloseable {
     /** Ends the current attempt; the interaction stays current for the tool calls that follow. */
     public void endAttempt() {
         attemptOpen = false;
-    }
-
-    public void setPendingUsage(PendingUsage pendingUsage) {
-        this.pendingUsage = pendingUsage;
-    }
-
-    public void setInteractionId(Long interactionId) {
-        this.interactionId = interactionId;
     }
 
     /** The sequence number of the next tool call of the current interaction (1-based). */

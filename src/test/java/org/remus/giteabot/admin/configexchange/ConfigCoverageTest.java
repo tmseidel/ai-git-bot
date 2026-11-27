@@ -33,6 +33,8 @@ import org.remus.giteabot.review.structured.ReviewRecord;
 import org.remus.giteabot.review.structured.ReviewToolOperation;
 import org.remus.giteabot.review.structured.WorkflowOutput;
 import org.remus.giteabot.review.structured.WorkflowOutputSnapshot;
+import org.remus.giteabot.reviewquality.PrOutcome;
+import org.remus.giteabot.reviewquality.ReviewQualitySettings;
 import org.remus.giteabot.session.ConversationMessage;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.systemsettings.BotToolSelection;
@@ -107,6 +109,9 @@ class ConfigCoverageTest {
         NOT_A_TABLE.put(LearningEvent.class, "runtime lesson history");
         NOT_A_TABLE.put(LessonUsage.class, "runtime lesson usage records");
         NOT_A_TABLE.put(ReferenceSequence.class, "runtime reference counters");
+        NOT_A_TABLE.put(PrOutcome.class, "runtime pull-request outcomes");
+        NOT_A_TABLE.put(ReviewQualitySettings.class,
+                "estimate assumptions of the Review quality page, edited there");
     }
 
     @Autowired

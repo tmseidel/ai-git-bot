@@ -1,6 +1,7 @@
 package org.remus.giteabot.admin;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.Data;
@@ -10,6 +11,7 @@ import org.remus.giteabot.ai.AiProviderType;
 import org.remus.giteabot.ai.openrouter.OpenRouterDataCollection;
 import org.remus.giteabot.ai.openrouter.OpenRouterRegion;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 @Data
@@ -101,6 +103,27 @@ public class AiIntegration {
      */
     @Column(name = "model_flavor", nullable = false)
     private String modelFlavor = "standard";
+
+    /**
+     * Optional token prices per million tokens, in the currency of the review-quality assumptions.
+     * Only used to show recorded token usage as money on the Review quality page; empty means
+     * the usage is shown in tokens. Cache prices fall back to the input price.
+     */
+    @DecimalMin("0")
+    @Column(name = "price_input_per_mtok", precision = 12, scale = 4)
+    private BigDecimal priceInputPerMtok;
+
+    @DecimalMin("0")
+    @Column(name = "price_output_per_mtok", precision = 12, scale = 4)
+    private BigDecimal priceOutputPerMtok;
+
+    @DecimalMin("0")
+    @Column(name = "price_cache_write_per_mtok", precision = 12, scale = 4)
+    private BigDecimal priceCacheWritePerMtok;
+
+    @DecimalMin("0")
+    @Column(name = "price_cache_read_per_mtok", precision = 12, scale = 4)
+    private BigDecimal priceCacheReadPerMtok;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "openrouter_region", nullable = false, length = 16)

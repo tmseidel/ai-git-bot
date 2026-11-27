@@ -1,14 +1,13 @@
 package org.remus.giteabot.aiusage;
 
 import org.remus.giteabot.workflowrun.RunStatus;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -77,13 +76,14 @@ public interface AiInteractionRepository extends JpaRepository<AiInteraction, Lo
             + "i.inputTokens = :inputTokens, i.outputTokens = :outputTokens, "
             + "i.cacheCreationInputTokens = :cacheCreation, i.cacheReadInputTokens = :cacheRead, "
             + "i.errorMessage = :errorMessage, i.stackTrace = :stackTrace, "
-            + "i.rawRequest = :rawRequest, i.rawResponse = :rawResponse where i.id = :id")
+            + "i.rawRequest = :rawRequest, i.rawResponse = :rawResponse, i.cost = :cost where i.id = :id")
     void finish(@Param("id") Long id, @Param("status") RunStatus status,
                @Param("durationMs") long durationMs, @Param("stopReason") String stopReason,
                @Param("inputTokens") long inputTokens, @Param("outputTokens") long outputTokens,
                @Param("cacheCreation") long cacheCreation, @Param("cacheRead") long cacheRead,
                @Param("errorMessage") String errorMessage, @Param("stackTrace") String stackTrace,
-               @Param("rawRequest") String rawRequest, @Param("rawResponse") String rawResponse);
+               @Param("rawRequest") String rawRequest, @Param("rawResponse") String rawResponse,
+               @Param("cost") BigDecimal cost);
 
     /** Marks every interaction that is still running as failed (startup recovery). */
     @Modifying

@@ -73,6 +73,18 @@ public class WorkflowOutput {
     @Column(name = "pr_workflow_run_id")
     private Long prWorkflowRunId;
 
+    /** Login of the pull request's author at review time; {@code null} before it was recorded. */
+    @Column(name = "pr_author", length = 255)
+    private String prAuthor;
+
+    /** Title of the pull request at review time; {@code null} before it was recorded. */
+    @Column(name = "pr_title", length = 512)
+    private String prTitle;
+
+    /** The workflow run (AI usage) this output was produced in, for its cost; no foreign key. */
+    @Column(name = "workflow_run_id")
+    private Long workflowRunId;
+
     /** Identity of one review attempt; a resumed or retried attempt reuses it. */
     @Column(name = "invocation_id", nullable = false, length = 36)
     private String invocationId;

@@ -82,7 +82,11 @@ public class AiIntegrationController {
         // Numeric form mistakes get a safe flash message; malformed non-numeric settings stay HTTP 400.
         int numericErrors = bindingResult.getFieldErrorCount("maxTokens")
                 + bindingResult.getFieldErrorCount("contextWindowTokens")
-                + bindingResult.getFieldErrorCount("parallelWorkerLimit");
+                + bindingResult.getFieldErrorCount("parallelWorkerLimit")
+                + bindingResult.getFieldErrorCount("priceInputPerMtok")
+                + bindingResult.getFieldErrorCount("priceOutputPerMtok")
+                + bindingResult.getFieldErrorCount("priceCacheWritePerMtok")
+                + bindingResult.getFieldErrorCount("priceCacheReadPerMtok");
         if (bindingResult.getErrorCount() > numericErrors) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid AI integration settings");
         }
@@ -140,6 +144,13 @@ public class AiIntegrationController {
     }
 
     private static String bindingErrorMessageKey(BindingResult bindingResult) {
+        int priceErrors = bindingResult.getFieldErrorCount("priceInputPerMtok")
+                + bindingResult.getFieldErrorCount("priceOutputPerMtok")
+                + bindingResult.getFieldErrorCount("priceCacheWritePerMtok")
+                + bindingResult.getFieldErrorCount("priceCacheReadPerMtok");
+        if (bindingResult.getErrorCount() == priceErrors) {
+            return "flash.aiPricesInvalid";
+        }
         return bindingResult.getErrorCount() == bindingResult.getFieldErrorCount("parallelWorkerLimit")
                 ? "flash.aiWorkerLimitOutOfRange" : "flash.aiNumericFieldsInvalid";
     }

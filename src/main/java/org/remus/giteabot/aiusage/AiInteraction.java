@@ -18,6 +18,7 @@ import lombok.ToString;
 import org.remus.giteabot.workflowrun.RunStatus;
 import org.remus.giteabot.workflowrun.WorkflowRun;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -94,6 +95,14 @@ public class AiInteraction {
     /** Tokens read back from the provider's prompt cache (0 when unsupported). */
     @Column(name = "cache_read_input_tokens", nullable = false)
     private long cacheReadInputTokens;
+
+    /**
+     * Cost of the interaction, computed when it ended with the AI integration's token prices in
+     * effect then ({@link org.remus.giteabot.ai.TokenPrices}). {@code null}: the integration had no
+     * prices, so only the tokens count. Never recomputed when a price changes later.
+     */
+    @Column(name = "cost", precision = 18, scale = 8)
+    private BigDecimal cost;
 
     @Column(name = "error_message", length = 2000)
     private String errorMessage;

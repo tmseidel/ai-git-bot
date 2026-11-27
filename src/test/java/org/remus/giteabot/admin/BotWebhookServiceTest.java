@@ -103,6 +103,7 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.eventhook.EventHookPublisher eventHookPublisher;
     @Mock private org.remus.giteabot.notification.WorkflowRetryNotices retryNotices;
     @Mock private org.remus.giteabot.notification.IssueCommentAcknowledgement commentAcknowledgement;
+    @Mock private org.remus.giteabot.reviewquality.PrOutcomeService prOutcomeService;
 
     private BotWebhookService botWebhookService;
     private org.remus.giteabot.prworkflow.config.WorkflowConfiguration codingIssueConfiguration;
@@ -140,7 +141,7 @@ class BotWebhookServiceTest {
                 agentReviewSlashCommandHandler, readmeSyncSlashCommandHandler,
                 i18nCoverageSlashCommandHandler,
                 feedbackCommandHandler, learningCommandHandler, workflowSelectionService,
-                issueWorkflowOrchestrator);
+                issueWorkflowOrchestrator, prOutcomeService);
         codingIssueConfiguration = namedConfiguration(101L, "coding-issue-cfg");
         writerIssueConfiguration = namedConfiguration(102L, "writer-issue-cfg");
         emptyPrConfiguration = namedConfiguration(103L, "empty-pr-cfg");

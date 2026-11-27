@@ -20,7 +20,9 @@ import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
+import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
+import org.remus.giteabot.ai.AuditRun;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.event.model.WebhookPayload;
 import org.remus.giteabot.learning.context.LearningContextProvider;
@@ -182,7 +184,8 @@ public class AgentReviewExecution {
             return new Result(Outcome.FAILED, null, null, null);
         }
 
-        ReviewDraftRequest request = draftRequest(payload, owner, repo, prNumber, options.runId());
+        ReviewDraftRequest request = draftRequest(payload, owner, repo, prNumber, options.runId(),
+                diffSummary);
         ReviewDraftHandle draft = reviewService.createDraft(request);
         ReviewProgress progress = options.enableProgressComments()
                 ? new ReviewProgress(repositoryClient, owner, repo, prNumber, Clock.systemUTC()) : null;
@@ -236,9 +239,26 @@ public class AgentReviewExecution {
             reviewService.closeDraft(draft.reviewId(), ReviewState.FAILED);
             throw e;
         } finally {
+            linkWorkflowRun(draft.reviewId());
             if (progress != null) {
                 progress.finish(finalized);
             }
+        }
+    }
+
+    /**
+     * Records the workflow run the review's AI calls were made in, for its cost. The run row exists
+     * once the first AI request was sent; a review that never called the model has none.
+     */
+    private void linkWorkflowRun(long reviewId) {
+        AuditRun run = AiAuditContext.currentRun();
+        if (run == null || !run.isPersisted()) {
+            return;
+        }
+        try {
+            reviewService.linkWorkflowRun(reviewId, run.getRunId());
+        } catch (RuntimeException e) {
+            log.warn("Could not link review {} to workflow run {}: {}", reviewId, run.getRunId(), e.getMessage());
         }
     }
 
@@ -611,13 +631,16 @@ public class AgentReviewExecution {
     }
 
     private ReviewDraftRequest draftRequest(WebhookPayload payload, String owner, String repo,
-                                            Long prNumber, Long runId) {
+                                            Long prNumber, Long runId, DiffSummary diffSummary) {
         Long integrationId = bot.getGitIntegration() != null ? bot.getGitIntegration().getId() : null;
         Long providerRepositoryId = payload.getRepository().getId();
+        WebhookPayload.Owner author = payload.getPullRequest().getUser();
         return new ReviewDraftRequest(integrationId, bot.getId(), owner, repo,
                 providerRepositoryId == null ? null : String.valueOf(providerRepositoryId),
                 prNumber, runId, UUID.randomUUID().toString(),
-                resolveReviewedSha(payload.getPullRequest().getBase()), resolveReviewedSha(payload.getPullRequest().getHead()));
+                resolveReviewedSha(payload.getPullRequest().getBase()), resolveReviewedSha(payload.getPullRequest().getHead()),
+                author == null ? null : author.getLogin(), payload.getPullRequest().getTitle(),
+                diffSummary.fileCount(), diffSummary.totalAdditions(), diffSummary.totalDeletions());
     }
 
     private String fetchFiles(String owner, String repo, String ref, List<String> filePaths) {

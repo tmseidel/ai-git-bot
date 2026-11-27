@@ -1,0 +1,13 @@
+-- ---------------------------------------------------------------------------------------------
+-- Cost of AI interactions (#610)
+--
+-- The cost of each AI interaction is computed once, when it ends, with the token prices its AI
+-- integration had then, and stored here. A later price change, a model switch or a renamed
+-- integration never rewrites past cost. NULL: the integration had no prices when the interaction
+-- was recorded, so only its tokens count.
+--
+-- Nothing is backfilled: interactions recorded before this migration have no price in effect to
+-- record and stay unpriced.
+-- Idempotent: the statement can be re-applied.
+-- ---------------------------------------------------------------------------------------------
+ALTER TABLE ai_interaction ADD COLUMN IF NOT EXISTS cost NUMERIC(18, 8);

@@ -23,10 +23,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -132,7 +130,7 @@ class AiUsageServiceTest {
             ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
             ArgumentCaptor<String> stackTrace = ArgumentCaptor.forClass(String.class);
             verify(interactionRepository).finish(any(), eq(RunStatus.ERROR), anyLong(), isNull(),
-                    eq(0L), eq(0L), eq(0L), eq(0L), message.capture(), stackTrace.capture(), isNull(), isNull());
+                    eq(0L), eq(0L), eq(0L), eq(0L), message.capture(), stackTrace.capture(), isNull(), isNull(), isNull());
             assertEquals("401 Unauthorized", message.getValue());
             assertTrue(stackTrace.getValue().contains("IllegalStateException"));
         }
@@ -146,7 +144,7 @@ class AiUsageServiceTest {
 
         ArgumentCaptor<String> message = ArgumentCaptor.forClass(String.class);
         verify(interactionRepository).finish(any(), eq(RunStatus.ERROR), anyLong(), isNull(),
-                anyLong(), anyLong(), anyLong(), anyLong(), message.capture(), any(), isNull(), isNull());
+                anyLong(), anyLong(), anyLong(), anyLong(), message.capture(), any(), isNull(), isNull(), isNull());
         assertEquals(IllegalStateException.class.getName(), message.getValue());
     }
 
@@ -167,7 +165,7 @@ class AiUsageServiceTest {
         service.attemptSucceeded(StopReason.END_TURN);
 
         verify(interactionRepository).finish(any(), eq(RunStatus.SUCCEEDED), anyLong(), eq("END_TURN"),
-                eq(5L), eq(6L), eq(1L), eq(2L), isNull(), isNull(), isNull(), isNull());
+                eq(5L), eq(6L), eq(1L), eq(2L), isNull(), isNull(), isNull(), isNull(), isNull());
     }
 
     @Test
@@ -186,7 +184,7 @@ class AiUsageServiceTest {
         service.attemptSucceeded(StopReason.END_TURN);
 
         verify(interactionRepository).finish(any(), any(), anyLong(), any(), anyLong(), anyLong(), anyLong(),
-                anyLong(), any(), any(), isNull(), isNull());
+                anyLong(), any(), any(), isNull(), isNull(), isNull());
     }
 
     @Test
@@ -199,7 +197,7 @@ class AiUsageServiceTest {
         service.attemptSucceeded(StopReason.END_TURN);
 
         verify(interactionRepository).finish(any(), any(), anyLong(), any(), anyLong(), anyLong(), anyLong(),
-                anyLong(), any(), any(), eq("abcde"), eq("xyz"));
+                anyLong(), any(), any(), eq("abcde"), eq("xyz"), isNull());
     }
 
     @Test
@@ -237,6 +235,6 @@ class AiUsageServiceTest {
             service.attemptSucceeded(StopReason.END_TURN);
         });
         verify(interactionRepository, never()).finish(any(), any(), anyLong(), any(), anyLong(), anyLong(),
-                anyLong(), anyLong(), any(), any(), any(), any());
+                anyLong(), anyLong(), any(), any(), any(), any(), any());
     }
 }

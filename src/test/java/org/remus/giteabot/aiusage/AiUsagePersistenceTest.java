@@ -11,6 +11,7 @@ import org.remus.giteabot.ai.AiMessage;
 import org.remus.giteabot.ai.AuditRun;
 import org.remus.giteabot.ai.AuditTrigger;
 import org.remus.giteabot.ai.StopReason;
+import org.remus.giteabot.ai.TokenPrices;
 import org.remus.giteabot.ai.ToolCallAudit;
 import org.remus.giteabot.ai.TriggerKind;
 import org.remus.giteabot.workflowrun.RunStatus;
@@ -24,6 +25,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -145,10 +147,32 @@ class AiUsagePersistenceTest {
         assertThat(interactions).extracting(AiInteraction::getStatus).containsExactly(
                 RunStatus.ERROR, RunStatus.SUCCEEDED, RunStatus.ERROR);
         assertThat(interactions).extracting(AiInteraction::getAiIntegrationName).containsOnly("claude");
+        assertThat(interactions).extracting(AiInteraction::getCost).as("no prices: tokens only").containsOnlyNulls();
         assertThat(interactions.get(1).getInputTokens()).isEqualTo(10);
         assertThat(interactions.get(2).getErrorMessage()).contains("401");
 
         assertThat(runRepository.findById(runId)).isPresent();
+    }
+
+    @Test
+    void theCostIsStoredWithThePricesInEffectAndNeverRecomputedAfterAPriceChange() {
+        AiClient before = clientFactory.decorate(new FakeProvider(), "claude",
+                new TokenPrices(new BigDecimal("3"), new BigDecimal("15"), null, null));
+        // The factory rebuilds a cached client when its integration changes, e.g. a new price.
+        AiClient after = clientFactory.decorate(new FakeProvider(), "claude",
+                new TokenPrices(new BigDecimal("6"), new BigDecimal("30"), null, null));
+        Long runId;
+        try (AuditRun run = AiAuditContext.openRun("review", TRIGGER)) {
+            before.submitReviewPrompt("sys", null, "diff");
+            after.submitReviewPrompt("sys", null, "diff");
+            runId = run.getRunId();
+        }
+
+        List<AiInteraction> interactions = interactionsOf(runId);
+        // Each client: a failed attempt without usage, then 10 input and 5 output tokens.
+        assertThat(interactions).extracting(AiInteraction::getCost).usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(BigDecimal.ZERO, new BigDecimal("0.000105"), BigDecimal.ZERO,
+                        new BigDecimal("0.00021"));
     }
 
     /** Fails the first review request with an outage, then answers; every chat is rejected. */

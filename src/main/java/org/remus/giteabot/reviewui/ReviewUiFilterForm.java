@@ -39,6 +39,8 @@ public class ReviewUiFilterForm {
     private boolean all;
     /** Feedback: only records no lesson cites. */
     private boolean uncited;
+    /** Feedback: only records on findings of this (normalised) category. */
+    private String category;
     /** Lesson state, {@link #ALL} (default) or {@link #ATTENTION}. */
     private String lessonState;
     /** 1-based page number. */
@@ -111,6 +113,7 @@ public class ReviewUiFilterForm {
         params.put("verdict", verdict);
         params.put("all", all);
         params.put("uncited", uncited);
+        params.put("category", category);
         params.put("lessonState", lessonState);
         params.put("page", page > 1 ? page : null);
         params.put("size", effectiveSize());

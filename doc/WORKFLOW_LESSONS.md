@@ -185,7 +185,9 @@ cannot be activated; propose a lesson from current feedback instead.
 
 The admin panel's [Reviews page](USER_GUIDE.md#reviews) lists the lessons of every bot and
 repository, with a filter for those needing attention, and offers propose, revise, activate,
-reject and disable as buttons. The Git commands work the same way:
+reject and disable as buttons. Its [Review quality page](USER_GUIDE.md#review-quality) shows the
+categories in which reviews are most often judged wrong, and for each active lesson what happened in
+its scope before and after activation. The Git commands work the same way:
 
 ```text
 @bot learning list                  # every lesson of this bot and repository

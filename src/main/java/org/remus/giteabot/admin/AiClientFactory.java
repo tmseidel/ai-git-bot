@@ -10,6 +10,7 @@ import org.remus.giteabot.ai.AiProviderRegistry;
 import org.remus.giteabot.ai.ProviderRetryNotifier;
 import org.remus.giteabot.ai.RetryAiClient;
 import org.remus.giteabot.ai.StopReason;
+import org.remus.giteabot.ai.TokenPrices;
 import org.remus.giteabot.aiusage.AiUsageService;
 import org.remus.giteabot.config.AiRetryProperties;
 import org.remus.giteabot.config.AiUsageProperties;
@@ -69,7 +70,9 @@ public class AiClientFactory {
         AiProviderMetadata provider = providerRegistry.getProviderOrThrow(integration.getProviderType());
         String decryptedApiKey = provider.requiresApiKey() ? aiIntegrationService.decryptApiKey(integration) : null;
         AiClient client = createUnwrappedClient(provider, integration, decryptedApiKey);
-        return decorate(client, integration.getName());
+        return decorate(client, integration.getName(), TokenPrices.ofNullable(integration.getPriceInputPerMtok(),
+                integration.getPriceOutputPerMtok(), integration.getPriceCacheWritePerMtok(),
+                integration.getPriceCacheReadPerMtok()));
     }
 
     /**
@@ -78,7 +81,16 @@ public class AiClientFactory {
      * tagged with {@code integrationName}.
      */
     public AiClient decorate(AiClient client, String integrationName) {
-        AiAuditRecorder recorder = new IntegrationAuditRecorder(integrationName, aiUsageService);
+        return decorate(client, integrationName, null);
+    }
+
+    /**
+     * As {@link #decorate(AiClient, String)}, pricing every recorded attempt with {@code prices}
+     * ({@code null}: unpriced). The cached client is rebuilt when the integration changes, so the
+     * prices are those in effect when the usage is recorded.
+     */
+    public AiClient decorate(AiClient client, String integrationName, TokenPrices prices) {
+        AiAuditRecorder recorder = new IntegrationAuditRecorder(integrationName, prices, aiUsageService);
         if (client instanceof AbstractAiClient abstractClient) {
             abstractClient.setAuditRecorder(recorder);
             abstractClient.setUsageProperties(usageProperties);
@@ -91,12 +103,12 @@ public class AiClientFactory {
      * with the integration name. The service attaches it to the current workflow run from the
      * {@link org.remus.giteabot.ai.AiAuditContext} thread-local.
      */
-    private record IntegrationAuditRecorder(String integrationName,
+    private record IntegrationAuditRecorder(String integrationName, TokenPrices prices,
                                             AiUsageService aiUsageService) implements AiAuditRecorder {
 
         @Override
         public void attemptStarted() {
-            aiUsageService.attemptStarted(integrationName);
+            aiUsageService.attemptStarted(integrationName, prices);
         }
 
         @Override
