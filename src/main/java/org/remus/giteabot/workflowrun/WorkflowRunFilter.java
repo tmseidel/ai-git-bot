@@ -29,6 +29,11 @@ public record WorkflowRunFilter(Long runId,
                                 Instant startedFrom,
                                 Instant startedUntil) {
 
+    /** No filter: matches every run. */
+    public static WorkflowRunFilter none() {
+        return new WorkflowRunFilter(null, null, null, null, null, null, false, false, null, null);
+    }
+
     /** The same filter with another state (the state button counts ignore the selected state). */
     public WorkflowRunFilter withState(RunStatus newState) {
         return new WorkflowRunFilter(runId, project, number, workflowType, botId, newState, onlyWarnings,

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <th:block th:fragment="layout(title, content)"
           th:replace="~{::layoutWithExtras(${title}, ${content}, null, null)}"></th:block>
-<html lang="en" xmlns:th="http://www.thymeleaf.org"
+<html lang="en" th:lang="${#locale.toLanguageTag()}" xmlns:th="http://www.thymeleaf.org"
       th:fragment="layoutWithExtras(title, content, extraHead, extraScripts)">
 <head>
     <meta charset="UTF-8"/>

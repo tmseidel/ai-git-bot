@@ -1,6 +1,14 @@
 package org.remus.giteabot.admin;
 
 import org.junit.jupiter.api.Test;
+import org.remus.giteabot.ai.TriggerKind;
+import org.remus.giteabot.aiusage.InteractionRow;
+import org.remus.giteabot.aiusage.ToolTotals;
+import org.remus.giteabot.workflowrun.AttemptView;
+import org.remus.giteabot.workflowrun.RunStatus;
+import org.remus.giteabot.workflowrun.RunView;
+import org.remus.giteabot.workflowrun.WorkflowRun;
+import org.remus.giteabot.workflowrun.WorkflowRunQueryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
 import org.springframework.boot.security.autoconfigure.SecurityAutoConfiguration;
@@ -48,6 +56,9 @@ class DashboardControllerTest {
 
     @MockitoBean
     private RepositoryPlatformFactory repositoryPlatformFactory;
+
+    @MockitoBean
+    private WorkflowRunQueryService workflowRunQueryService;
 
     @Test
     void dashboard_rendersFaviconInsideTheDocumentHead() throws Exception {
@@ -104,6 +115,67 @@ class DashboardControllerTest {
                 .atZone(java.time.ZoneId.systemDefault()).toInstant();
         assertThat(from).isBetween(before.minus(java.time.Duration.ofMinutes(1)),
                 java.time.Instant.now().minus(java.time.Duration.ofDays(7)));
+    }
+
+    @Test
+    void recentRunsCardOpensEachRunExpandedOnTheWorkflowRunsPage() throws Exception {
+        when(botService.findAll()).thenReturn(List.of());
+        java.time.Instant started = java.time.Instant.parse("2026-11-20T10:00:00Z");
+        WorkflowRun run = new WorkflowRun();
+        run.setId(42L);
+        run.setWorkflowType("agentic-review");
+        run.setBotName("Default Bot");
+        run.setRepoOwner("owner");
+        run.setRepoName("repo");
+        run.setTriggerKind(TriggerKind.PULL_REQUEST);
+        run.setTriggerNumber(7L);
+        run.setState(RunStatus.SUCCEEDED);
+        run.setStartedAt(started);
+        run.setEndedAt(started.plusSeconds(30));
+        run.setRoundLimitReached(true);
+        InteractionRow row = new InteractionRow(100L, 42L, 1, 1, "claude", RunStatus.SUCCEEDED, started, 2_000L,
+                "END_TURN", 100, 10, 0, 0, null);
+        when(workflowRunQueryService.latestRuns(DashboardController.RECENT_RUNS)).thenReturn(List.of(RunView.of(run,
+                List.of(new AttemptView(row, ToolTotals.none(100L), true)), "https://git/owner/repo/pulls/7",
+                started.plusSeconds(60))));
+
+        String html = mockMvc.perform(get("/dashboard").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(html)
+                .contains("href=\"/workflow-runs?runId=42&amp;expand=42\"")
+                .contains("Round limit reached", "owner/repo", "PR #7", "Default Bot", "#42")
+                .contains("data-duration-ms=\"30000\"")
+                // The navbar links to /workflow-runs too, so match the card's button itself.
+                .contains("<a href=\"/workflow-runs\" class=\"btn btn-sm btn-outline-secondary\">View all</a>")
+                // Only the badges sit above the row's stretched link: their warning hints show on hover,
+                // and the rest of the cell still opens the run.
+                .contains("<td><span class=\"d-inline-block position-relative z-2\"><div class=\"d-flex flex-wrap gap-1\">")
+                .doesNotContain("<td class=\"position-relative z-2\">");
+        // Between the quick links and the bots table.
+        assertThat(html.indexOf("Recent workflow runs"))
+                .isGreaterThan(html.indexOf("/git-integrations\" class=\"btn"))
+                .isLessThan(html.indexOf("<!-- Bots Table -->"));
+    }
+
+    @Test
+    void pageLanguageIsTheRequestLocale_whichTheBrowserFormatsTimesAndDurationsIn() throws Exception {
+        when(botService.findAll()).thenReturn(List.of());
+
+        mockMvc.perform(get("/dashboard").locale(java.util.Locale.SIMPLIFIED_CHINESE)
+                        .with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("<html lang=\"zh-CN\"")));
+    }
+
+    @Test
+    void recentRunsCardSaysSoWhenThereAreNoRuns() throws Exception {
+        when(botService.findAll()).thenReturn(List.of());
+
+        mockMvc.perform(get("/dashboard").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("No workflow runs recorded yet.")));
     }
 
     @Test

@@ -2,7 +2,7 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org"
       th:replace="~{layout :: layout(#{nav.workflowRuns}, ~{::pageContent})}">
 <body>
-    <div th:fragment="pageContent" id="workflowRunsPage" th:data-locale="${#locale.toLanguageTag()}">
+    <div th:fragment="pageContent" id="workflowRunsPage">
 
         <div class="d-flex justify-content-between align-items-center mb-4">
             <h2><i class="bi bi-graph-up" aria-hidden="true"></i> <span th:text="#{nav.workflowRuns}">Workflow runs</span></h2>
@@ -180,17 +180,7 @@
                             </td>
                             <td><code th:text="|#${r.run.id}|">#1</code></td>
                             <td>
-                                <div class="d-flex flex-wrap gap-1">
-                                    <th:block th:replace="~{workflow-runs/list :: stateBadge(${r.run.state.name()})}"></th:block>
-                                    <span th:if="${r.run.roundLimitReached}" class="badge text-bg-warning"
-                                          th:title="#{workflowRuns.warning.roundLimitHint}">
-                                        <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> <span th:text="#{workflowRuns.warning.roundLimit}">Round limit reached</span>
-                                    </span>
-                                    <span th:if="${r.outputTruncated}" class="badge text-bg-warning"
-                                          th:title="#{workflowRuns.warning.truncatedHint}">
-                                        <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> <span th:text="#{workflowRuns.warning.truncated}">Output truncated</span>
-                                    </span>
-                                </div>
+                                <div th:replace="~{workflow-runs/list :: runBadges(${r})}"></div>
                             </td>
                             <td th:text="${#messages.msgOrNull('workflow.' + r.run.workflowType + '.name') ?: r.run.workflowType}">type</td>
                             <td th:text="${r.run.botName != null ? r.run.botName : '—'}">bot</td>
@@ -367,10 +357,24 @@
             </div>
         </div>
 
+        <script th:src="@{/js/locale-format.js}"></script>
         <script th:src="@{/js/workflow-runs.js}"></script>
     </div>
 
-    <!-- State badge: icon and text, never colour alone. Outside pageContent, so it only renders where it is inserted. -->
+    <!-- The run's state and warning badges (the list and the dashboard). -->
+    <div th:fragment="runBadges(r)" class="d-flex flex-wrap gap-1">
+        <th:block th:replace="~{workflow-runs/list :: stateBadge(${r.run.state.name()})}"></th:block>
+        <span th:if="${r.run.roundLimitReached}" class="badge text-bg-warning"
+              th:title="#{workflowRuns.warning.roundLimitHint}">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> <span th:text="#{workflowRuns.warning.roundLimit}">Round limit reached</span>
+        </span>
+        <span th:if="${r.outputTruncated}" class="badge text-bg-warning"
+              th:title="#{workflowRuns.warning.truncatedHint}">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i> <span th:text="#{workflowRuns.warning.truncated}">Output truncated</span>
+        </span>
+    </div>
+
+    <!-- State badge: icon and text, never colour alone. Fragments sit outside pageContent, so they only render where they are inserted. -->
     <th:block th:fragment="stateBadge(state)">
         <span th:if="${state == 'SUCCEEDED'}" class="badge text-bg-success"><i class="bi bi-check-circle" aria-hidden="true"></i> <span th:text="#{workflowRuns.state.SUCCEEDED}">Succeeded</span></span>
         <span th:if="${state == 'ERROR'}" class="badge text-bg-danger"><i class="bi bi-x-octagon" aria-hidden="true"></i> <span th:text="#{workflowRuns.state.ERROR}">Error</span></span>

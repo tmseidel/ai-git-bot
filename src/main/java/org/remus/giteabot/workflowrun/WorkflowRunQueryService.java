@@ -49,6 +49,9 @@ public class WorkflowRunQueryService {
     /** Runs per batch when exporting — keeps heap bounded however many runs match. */
     private static final int EXPORT_BATCH_SIZE = 50;
 
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "startedAt")
+            .and(Sort.by(Sort.Direction.DESC, "id"));
+
     private final WorkflowRunRepository runRepository;
     private final AiInteractionRepository interactionRepository;
     private final AiToolCallRepository toolCallRepository;
@@ -64,16 +67,33 @@ public class WorkflowRunQueryService {
         Page<WorkflowRun> runs = runRepository.findAll(WorkflowRunSpecifications.matching(filter),
                 PageRequest.of(Math.max(0, page), effectivePageSize(pageSize),
                         Sort.by(direction, "startedAt").and(Sort.by(direction, "id"))));
-        List<Long> runIds = runs.getContent().stream().map(WorkflowRun::getId).toList();
-        if (runIds.isEmpty()) {
-            return new PageImpl<>(List.of(), runs.getPageable(), runs.getTotalElements());
+        List<RunView> views = views(runs.getContent(), triggerLinks.urlsOf(runs.getContent()));
+        return new PageImpl<>(views, runs.getPageable(), runs.getTotalElements());
+    }
+
+    /**
+     * The {@code count} most recently started runs, newest first, with their attempts and totals
+     * (the dashboard's card). Without a count query and without trigger links, which the card
+     * does not show.
+     */
+    @Transactional(readOnly = true)
+    public List<RunView> latestRuns(int count) {
+        List<WorkflowRun> runs = runRepository.findBy(WorkflowRunSpecifications.matching(WorkflowRunFilter.none()),
+                query -> query.sortBy(NEWEST_FIRST).limit(count).all());
+        return views(runs, Map.of());
+    }
+
+    /** The runs with their attempts (in round and attempt order) and the totals summed from them. */
+    private List<RunView> views(List<WorkflowRun> runs, Map<Long, String> triggerUrls) {
+        if (runs.isEmpty()) {
+            return List.of();
         }
+        List<Long> runIds = runs.stream().map(WorkflowRun::getId).toList();
         Map<Long, List<InteractionRow>> rowsByRun = rowsByRun(runIds);
         Map<Long, ToolTotals> toolTotals = toolCallRepository.totalsByInteraction(runIds).stream()
                 .collect(Collectors.toMap(ToolTotals::interactionId, Function.identity()));
-        Map<Long, String> links = triggerLinks.urlsOf(runs.getContent());
         Instant now = Instant.now();
-        return runs.map(run -> {
+        return runs.stream().map(run -> {
             List<InteractionRow> rows = rowsByRun.getOrDefault(run.getId(), List.of());
             List<AttemptView> attempts = new ArrayList<>(rows.size());
             for (int i = 0; i < rows.size(); i++) {
@@ -82,8 +102,8 @@ public class WorkflowRunQueryService {
                         toolTotals.getOrDefault(row.id(), ToolTotals.none(row.id())),
                         i == rows.size() - 1 && run.isRoundLimitReached()));
             }
-            return RunView.of(run, attempts, links.get(run.getId()), now);
-        });
+            return RunView.of(run, attempts, triggerUrls.get(run.getId()), now);
+        }).toList();
     }
 
     /** How many runs match {@code filter} in each state, ignoring the filter's own state. */
@@ -143,14 +163,13 @@ public class WorkflowRunQueryService {
 
     void export(WorkflowRunFilter filter, OutputStream outputStream, int batchSize) {
         Specification<WorkflowRun> matching = WorkflowRunSpecifications.matching(filter);
-        Sort newestFirst = Sort.by(Sort.Direction.DESC, "startedAt").and(Sort.by(Sort.Direction.DESC, "id"));
         try (SequenceWriter writer = objectMapper.writer().writeValuesAsArray(outputStream)) {
             WorkflowRun last = null;
             List<WorkflowRun> batch;
             do {
                 Specification<WorkflowRun> next = last == null
                         ? matching : matching.and(WorkflowRunSpecifications.startedBefore(last));
-                batch = runRepository.findBy(next, query -> query.sortBy(newestFirst).limit(batchSize).all());
+                batch = runRepository.findBy(next, query -> query.sortBy(NEWEST_FIRST).limit(batchSize).all());
                 if (!batch.isEmpty()) {
                     List<Long> runIds = batch.stream().map(WorkflowRun::getId).toList();
                     Map<Long, List<InteractionRow>> rowsByRun = rowsByRun(runIds);
