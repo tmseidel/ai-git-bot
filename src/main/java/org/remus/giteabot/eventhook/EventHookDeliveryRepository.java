@@ -11,6 +11,8 @@ import java.util.List;
 
 public interface EventHookDeliveryRepository extends JpaRepository<EventHookDelivery, Long> {
 
+    List<EventHookDelivery> findByEventKeyOrderByEndpointIdAsc(String eventKey);
+
     @Query("SELECT d FROM EventHookDelivery d WHERE d.status = org.remus.giteabot.eventhook.DeliveryStatus.PENDING "
             + "OR (d.status = org.remus.giteabot.eventhook.DeliveryStatus.RETRYING AND d.nextAttemptAt <= :now) "
             + "ORDER BY d.id ASC")
