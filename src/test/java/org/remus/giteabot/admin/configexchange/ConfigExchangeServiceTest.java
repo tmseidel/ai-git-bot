@@ -152,6 +152,24 @@ class ConfigExchangeServiceTest {
     }
 
     @Test
+    void rejectsAnInvalidLearningConfigurationAndNamesTheEntry() throws IOException {
+        ObjectNode root = (ObjectNode) document();
+        ObjectNode selection = (ObjectNode) root.path("workflowConfigurations").get(0)
+                .path("selectedWorkflows").get(0);
+        var params = selection.putArray("params");
+        params.addObject().put("name", "learningMode").put("value", "EVERYTHING");
+        params.addObject().put("name", "learningMaintainers").put("value", "alex");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> configExchangeService.importDocument(root));
+
+        assertTrue(error.getMessage().contains("agentic-review"),
+                () -> "message should name the workflow, was: " + error.getMessage());
+        assertTrue(error.getMessage().contains("learningMode"),
+                () -> "message should name the field, was: " + error.getMessage());
+    }
+
+    @Test
     void rejectsReferenceToUndeclaredIntegration() throws IOException {
         ObjectNode root = (ObjectNode) document();
         ((ObjectNode) root.path("bots").get(0)).putObject("aiIntegration").put("name", "Missing AI");

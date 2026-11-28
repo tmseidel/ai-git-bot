@@ -38,6 +38,7 @@ public class FeedbackCommandHandler {
     private final FeedbackAuthorizationService authorizationService;
     private final AgentReviewLearningSettingsResolver learningSettingsResolver;
     private final RepositoryPlatformFactory repositoryPlatformFactory;
+    private final LessonsCitingFeedback lessonsCitingFeedback;
 
     /** The text, identity and author of whatever carried the command. */
     private record Source(String body, String id, String author) {
@@ -76,7 +77,8 @@ public class FeedbackCommandHandler {
             return false;
         }
 
-        boolean collecting = collectionEnabled(bot);
+        AgentReviewLearningSettings settings = learningSettingsResolver.resolve(bot);
+        boolean collecting = settings.feedbackEnabled();
         // A bot that collects no feedback only consumes text that is unmistakably addressed to it: a
         // target (O1234-F2) or a subcommand (retract/list/show). Prose like "@bot feedback please, is
         // this approach OK?" keeps the routing it had before feedback commands existed.
@@ -99,7 +101,7 @@ public class FeedbackCommandHandler {
         }
         Reply reply;
         try {
-            reply = execute(bot, payload, commentKind, source, parsed.get(), alias);
+            reply = execute(bot, payload, commentKind, source, parsed.get(), alias, settings);
         } catch (FeedbackRejectedException rejected) {
             reply = Reply.untracked(FeedbackReplyRenderer.rejected(rejected));
         } catch (RuntimeException e) {
@@ -115,7 +117,8 @@ public class FeedbackCommandHandler {
 
     private Reply execute(Bot bot, WebhookPayload payload, PullRequestCommentKind commentKind,
                           Source source,
-                          FeedbackCommand command, String mention) {
+                          FeedbackCommand command, String mention,
+                          AgentReviewLearningSettings settings) {
         if (command instanceof FeedbackCommand.Help(String message)) {
             return Reply.untracked(FeedbackReplyRenderer.help(message));
         }
@@ -126,12 +129,14 @@ public class FeedbackCommandHandler {
                             submit.target(), submit.verdict(), submit.reason(), source.author()),
                     FeedbackReplyRenderer::acknowledged);
             case FeedbackCommand.Retract retract -> confirmation(
-                    feedbackService.retract(scope, retract.reference(), source.author()),
+                    feedbackService.retract(scope, retract.reference(), source.author(),
+                            settings.isLearningMaintainer(source.author())),
                     FeedbackReplyRenderer::retracted);
             case FeedbackCommand.Show show -> Reply.untracked(feedbackService
                     .show(scope, show.reference())
                     .map(detail -> FeedbackReplyRenderer.show(detail, bot.getName(), mention,
-                            linksOf(bot, scope)))
+                            linksOf(bot, scope),
+                            lessonsCitingFeedback.lessonsCiting(scope, detail.summary().id())))
                     .orElse("No feedback " + show.reference() + " is available here."));
             case FeedbackCommand.ListRecords list -> Reply.untracked(FeedbackReplyRenderer.list(
                     list.repositoryWide(),
@@ -196,11 +201,6 @@ public class FeedbackCommandHandler {
                     bot.getName(), outcome, e.getMessage());
             return outcome;
         }
-    }
-
-    private boolean collectionEnabled(Bot bot) {
-        AgentReviewLearningSettings settings = learningSettingsResolver.resolve(bot);
-        return settings.feedbackEnabled();
     }
 
     private FeedbackLinks linksOf(Bot bot, FeedbackScope scope) {

@@ -74,6 +74,24 @@ public class ReviewRecord {
     @Column(name = "content_hash", length = 64)
     private String contentHash;
 
+    /** Size of the reviewed diff; {@code null} before it was recorded. */
+    @Column(name = "diff_files")
+    private Integer diffFiles;
+
+    @Column(name = "diff_additions")
+    private Integer diffAdditions;
+
+    @Column(name = "diff_deletions")
+    private Integer diffDeletions;
+
+    /**
+     * Whether the findings were matched against the pull request's previous review when this review
+     * was finalized. Reviews finalized before matching existed were not, so they are left out of the
+     * resolved / persisting / new figures.
+     */
+    @Column(name = "fingerprinted", nullable = false)
+    private boolean fingerprinted;
+
     @Column(name = "finalized_at")
     private Instant finalizedAt;
 

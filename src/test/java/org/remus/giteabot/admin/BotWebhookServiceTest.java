@@ -17,7 +17,6 @@ import org.remus.giteabot.agent.validation.ToolResult;
 import org.remus.giteabot.agent.validation.Workspace;
 import org.remus.giteabot.agent.validation.WorkspaceResult;
 import org.remus.giteabot.agent.validation.WorkspaceService;
-import org.remus.giteabot.ai.AiAuditContext;
 import org.remus.giteabot.ai.AiClient;
 import org.remus.giteabot.config.AgentConfigProperties;
 import org.remus.giteabot.config.PromptService;
@@ -99,10 +98,12 @@ class BotWebhookServiceTest {
     @Mock private org.remus.giteabot.prworkflow.i18n.I18nCoverageSlashCommandHandler i18nCoverageSlashCommandHandler;
     @Mock private org.remus.giteabot.prworkflow.config.WorkflowSelectionService workflowSelectionService;
     @Mock private org.remus.giteabot.learning.feedback.FeedbackCommandHandler feedbackCommandHandler;
+    @Mock private org.remus.giteabot.learning.knowledge.LearningCommandHandler learningCommandHandler;
     @Mock private ReviewChunkingProperties chunkingProperties;
     @Mock private org.remus.giteabot.eventhook.EventHookPublisher eventHookPublisher;
     @Mock private org.remus.giteabot.notification.WorkflowRetryNotices retryNotices;
     @Mock private org.remus.giteabot.notification.IssueCommentAcknowledgement commentAcknowledgement;
+    @Mock private org.remus.giteabot.reviewquality.PrOutcomeService prOutcomeService;
 
     private BotWebhookService botWebhookService;
     private org.remus.giteabot.prworkflow.config.WorkflowConfiguration codingIssueConfiguration;
@@ -139,8 +140,8 @@ class BotWebhookServiceTest {
                 e2eTestSlashCommandHandler, unitTestSlashCommandHandler,
                 agentReviewSlashCommandHandler, readmeSyncSlashCommandHandler,
                 i18nCoverageSlashCommandHandler,
-                feedbackCommandHandler, workflowSelectionService,
-                issueWorkflowOrchestrator);
+                feedbackCommandHandler, learningCommandHandler, workflowSelectionService,
+                issueWorkflowOrchestrator, prOutcomeService);
         codingIssueConfiguration = namedConfiguration(101L, "coding-issue-cfg");
         writerIssueConfiguration = namedConfiguration(102L, "writer-issue-cfg");
         emptyPrConfiguration = namedConfiguration(103L, "empty-pr-cfg");
@@ -1844,75 +1845,6 @@ class BotWebhookServiceTest {
         verify(eventHookPublisher, never()).publish(any(), any(), any(), any(), any(), any(), anyMap());
     }
 
-    /**
-     * The audit session id is thread-local state on a worker that serves many webhook
-     * tasks in a row: it must cover the whole task and be gone before the worker takes
-     * the next one. The bounded provider-retry backoff keeps a task alive for minutes,
-     * which makes a leftover session id far likelier to be inherited by unrelated later
-     * work — every entrypoint that sets it therefore clears it in a {@code finally}.
-     */
-    @Nested
-    class AuditSessionLifecycle {
-
-        @AfterEach
-        void clearAuditContext() {
-            AiAuditContext.clear();
-        }
-
-        @Test
-        void reviewPullRequest_tagsTheRunWithTheSessionAndClearsItAfterwards() {
-            Bot bot = createBot("review-bot", "claude_bot");
-            WebhookPayload payload = buildPrCommentPayload("Test", "my-repo", 140L, 9L, "please review");
-            AtomicReference<String> duringRun = new AtomicReference<>();
-            doAnswer(invocation -> {
-                duringRun.set(AiAuditContext.getSessionId());
-                return java.util.List.of();
-            }).when(prWorkflowOrchestrator).runAll(any(Bot.class), any(WebhookPayload.class));
-
-            botWebhookService.reviewPullRequest(bot, payload, WebhookEventKind.PR_COMMENT);
-
-            assertEquals("Test/my-repo#140", duringRun.get());
-            assertNull(AiAuditContext.getSessionId(), "the audit session must not outlive the webhook task");
-        }
-
-        @Test
-        void handleIssueComment_clearsTheSessionAfterwards() {
-            Bot bot = createBot("coder", "coder_bot");
-            org.remus.giteabot.prworkflow.config.WorkflowConfiguration emptyIssueConfiguration =
-                    namedConfiguration(104L, "empty-issue-cfg");
-            bot.setIssueWorkflowConfiguration(emptyIssueConfiguration);
-            when(workflowSelectionService.enabledWorkflowKeys(104L)).thenReturn(java.util.List.of());
-            WebhookPayload payload = buildIssueCommentPayload("Test", "my-repo", 12L,
-                    "Implement feature", "Body", "tom", "Please continue");
-
-            botWebhookService.handleIssueComment(bot, payload);
-
-            assertNull(AiAuditContext.getSessionId(), "the audit session must not outlive the webhook task");
-        }
-
-        @Test
-        void handleIssueCreated_earlyReturnStillClearsTheSession() {
-            Bot bot = createBot("writer", "writer_bot");
-            bot.setRunOnIssueCreation(false);
-            WebhookPayload payload = buildIssueCreationPayload("Test", "my-repo", 12L,
-                    "Vague issue", "Body");
-
-            botWebhookService.handleIssueCreated(bot, payload);
-
-            assertNull(AiAuditContext.getSessionId(), "an early return must not leave the session behind");
-        }
-
-        @Test
-        void handlePrComment_earlyReturnStillClearsTheSession() {
-            Bot bot = createBotWithWorkflows("writer", "writer_bot", java.util.List.of());
-            WebhookPayload payload = buildPrCommentPayload("Test", "my-repo", 140L, 9L, "hello bot");
-
-            botWebhookService.handlePrComment(bot, payload);
-
-            assertNull(AiAuditContext.getSessionId(), "an early return must not leave the session behind");
-        }
-    }
-
     @Nested
     class LearningCommandTests {
 
@@ -1938,10 +1870,45 @@ class BotWebhookServiceTest {
         @Test
         void ordinaryCommentIsNotConsumed() {
             when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
+            when(learningCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
 
             assertFalse(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
                     feedbackPayload(),
                     PullRequestCommentKind.PR_COMMENT, null));
+        }
+
+        @Test
+        void aLessonCommandIsConsumedThroughTheSameSeam() {
+            WebhookPayload payload = buildPrCommentPayload("Test", "my-repo", 140L, 1056L,
+                    "@claude_bot learning activate L17@1");
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
+            when(learningCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(true);
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    payload, PullRequestCommentKind.INLINE_COMMENT, "@AI_Bot"));
+
+            verify(learningCommandHandler).tryHandle(any(), eq(payload),
+                    eq(PullRequestCommentKind.INLINE_COMMENT), eq("@AI_Bot"));
+        }
+
+        @Test
+        void aFeedbackCommandNeverReachesTheLessonHandler() {
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(true);
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    feedbackPayload(), PullRequestCommentKind.PR_COMMENT, null));
+
+            verify(learningCommandHandler, never()).tryHandle(any(), any(), any(), any());
+        }
+
+        @Test
+        void aFailingLessonCommandIsStillConsumed() {
+            when(feedbackCommandHandler.tryHandle(any(), any(), any(), any())).thenReturn(false);
+            when(learningCommandHandler.tryHandle(any(), any(), any(), any()))
+                    .thenThrow(new IllegalStateException("lesson store unavailable"));
+
+            assertTrue(botWebhookService.tryHandleLearningCommand(createBot("bot", "claude_bot"),
+                    feedbackPayload(), PullRequestCommentKind.PR_COMMENT, null));
         }
 
         @Test
@@ -1963,7 +1930,12 @@ class BotWebhookServiceTest {
         Bot bot = new Bot();
         bot.setName(name);
         GitIntegration gitIntegration = new GitIntegration();
+        gitIntegration.setName("test-git");
         bot.setGitIntegration(gitIntegration);
+        // A bot always has an AI integration (not nullable); the audit trigger reads its name.
+        AiIntegration aiIntegration = new AiIntegration();
+        aiIntegration.setName("test-ai");
+        bot.setAiIntegration(aiIntegration);
         SystemPrompt systemPrompt = new SystemPrompt();
         systemPrompt.setId(1L);
         systemPrompt.setReviewSystemPrompt("Review prompt");

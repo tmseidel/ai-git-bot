@@ -93,6 +93,7 @@ class ProcessPythonExecutionServiceTest {
 
     @Test
     void multiByteOutputWithinTheCapIsNotCalledTruncated() {
+        Assumptions.assumeTrue(pythonAvailable, "python3 is not installed");
         PythonExecutionOutcome outcome =
                 service(config -> config.getBudget().setMaxToolResultChars(50))
                         .execute("print(chr(252) * 40)", scope(List.of(), returns(ok(""))));
@@ -103,6 +104,7 @@ class ProcessPythonExecutionServiceTest {
 
     @Test
     void truncationKeepsTheCapAndNeverSplitsASurrogatePair() {
+        Assumptions.assumeTrue(pythonAvailable, "python3 is not installed");
         PythonExecutionOutcome outcome =
                 service(config -> config.getBudget().setMaxToolResultChars(5))
                         .execute("print(chr(0x1F600) * 4)", scope(List.of(), returns(ok(""))));
@@ -232,7 +234,7 @@ class ProcessPythonExecutionServiceTest {
         Assumptions.assumeTrue(pythonAvailable, "python3 is not installed");
         Path directory = Files.createTempDirectory("execute-code-slots-");
         try {
-            long slot = SandboxTestSupport.ownGid(directory);
+            long slot = SandboxTestSupport.slotGid(directory);
             Path pool = SandboxTestSupport.poolFile(directory, "execute-code-test", slot, slot);
             Path sudo = SandboxTestSupport.fakeSudo(directory, directory.resolve("sudo.log"));
             ProcessPythonExecutionService sandboxed = service(config -> {
@@ -268,7 +270,7 @@ class ProcessPythonExecutionServiceTest {
         Assumptions.assumeTrue(pythonAvailable, "python3 is not installed");
         Path directory = Files.createTempDirectory("execute-code-slots-");
         try {
-            long slot = SandboxTestSupport.ownGid(directory);
+            long slot = SandboxTestSupport.slotGid(directory);
             Path pool = SandboxTestSupport.poolFile(directory, "execute-code-test", slot, slot);
             Path sudo = SandboxTestSupport.fakeSudo(directory, directory.resolve("sudo.log"));
             ProcessPythonExecutionService sandboxed = service(config -> {

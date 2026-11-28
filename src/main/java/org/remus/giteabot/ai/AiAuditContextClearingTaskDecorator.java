@@ -6,8 +6,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Ensures the {@link AiAuditContext} thread-local never leaks between async
- * tasks: pooled executor threads are reused, so the session id set by one
- * webhook handler must not bleed into the next task running on that thread.
+ * tasks: pooled executor threads are reused, so a workflow run left open by one
+ * webhook task must not receive the AI calls of the next task on that thread.
+ * The workflow orchestrators close their runs themselves; this is the safety net.
  *
  * <p>Registered as a {@code @Component} and explicitly wired into the
  * application's {@code ThreadPoolTaskExecutor} by

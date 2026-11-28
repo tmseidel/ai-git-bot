@@ -25,4 +25,17 @@ public class LearningProperties {
      * that references them are kept independently — only the bulky replay evidence expires.
      */
     private int snapshotRetentionDays = 90;
+
+    /**
+     * At most this many active lessons are supplied to one agentic review. More specific lessons
+     * (a {@code paths:} scope matching the change) win; the rest are left out, never shortened.
+     */
+    private int contextMaxLessons = 5;
+
+    /**
+     * Token allowance of the learned-guidance block in one agentic review (estimated like the
+     * agent loop estimates prompts). A lesson that does not fit is left out whole. The allowance
+     * never exceeds a twentieth of the model's context window.
+     */
+    private int contextMaxTokens = 1_000;
 }

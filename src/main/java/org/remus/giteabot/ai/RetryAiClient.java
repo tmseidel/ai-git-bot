@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -18,6 +19,11 @@ import java.util.function.Supplier;
  * "high demand") with exponential backoff and jitter, and reports every
  * scheduled retry to a {@link ProviderRetryNotifier} so the affected pull
  * request or issue learns when the next attempt happens.
+ *
+ * <p>It also feeds the audit log, because it is the one place that sees both levels: each call
+ * through it is one logical AI call, which starts the next round of the current {@link AuditRun}
+ * ({@link AiAuditContext#beginCall()}), and each request it sends to the provider, retries
+ * included, is one attempt reported to the {@link AiAuditRecorder} with its outcome.</p>
  *
  * <p>The wait happens in place on the calling thread. Workflow webhooks run on
  * virtual threads, so a bounded backoff does not occupy an OS thread; the
@@ -43,40 +49,42 @@ public class RetryAiClient implements AiClient {
 
     private final AiRetryProperties properties;
     private final ProviderRetryNotifier notifier;
+    private final AiAuditRecorder recorder;
     private final Sleeper sleeper;
     private final Random random;
 
     public RetryAiClient(AiClient delegate, AiRetryProperties properties,
-                         ProviderRetryNotifier notifier) {
-        this(delegate, properties, notifier, Thread::sleep, new Random());
+                         ProviderRetryNotifier notifier, AiAuditRecorder recorder) {
+        this(delegate, properties, notifier, recorder, Thread::sleep, new Random());
     }
 
     RetryAiClient(AiClient delegate, AiRetryProperties properties, ProviderRetryNotifier notifier,
-                  Sleeper sleeper, Random random) {
+                  AiAuditRecorder recorder, Sleeper sleeper, Random random) {
         this.delegate = delegate;
         this.properties = properties;
         this.notifier = notifier;
+        this.recorder = recorder;
         this.sleeper = sleeper;
         this.random = random;
     }
 
     @Override
     public String submitReviewPrompt(String systemPrompt, String modelOverride, String userMessage) {
-        return withRetry(() -> delegate.submitReviewPrompt(systemPrompt, modelOverride, userMessage));
+        return withRetry(() -> delegate.submitReviewPrompt(systemPrompt, modelOverride, userMessage), result -> null);
     }
 
     @Override
     public String chat(List<AiMessage> conversationHistory, String newUserMessage,
                        String systemPrompt, String modelOverride) {
         return withRetry(() -> delegate.chat(conversationHistory, newUserMessage,
-                systemPrompt, modelOverride));
+                systemPrompt, modelOverride), result -> null);
     }
 
     @Override
     public String chat(List<AiMessage> conversationHistory, String newUserMessage,
                        String systemPrompt, String modelOverride, Integer maxTokensOverride) {
         return withRetry(() -> delegate.chat(conversationHistory, newUserMessage,
-                systemPrompt, modelOverride, maxTokensOverride));
+                systemPrompt, modelOverride, maxTokensOverride), result -> null);
     }
 
     @Override
@@ -87,7 +95,7 @@ public class RetryAiClient implements AiClient {
                                   String modelOverride,
                                   Integer maxTokensOverride) {
         return withRetry(() -> delegate.chatWithTools(conversationHistory, newUserMessage,
-                tools, systemPrompt, modelOverride, maxTokensOverride));
+                tools, systemPrompt, modelOverride, maxTokensOverride), ChatTurn::stopReason);
     }
 
     @Override
@@ -106,22 +114,29 @@ public class RetryAiClient implements AiClient {
     }
 
     @Override
-    public void reportError(Throwable error) {
-        delegate.reportError(error);
-    }
-
-    @Override
     public String getModel() {
         return delegate.getModel();
     }
 
-    private <T> T withRetry(Supplier<T> call) {
+    /**
+     * One logical call: starts the next audit round, then sends the request, repeating it while
+     * the provider is unavailable. Every request is reported as an attempt.
+     *
+     * @param stopReason why the model stopped, read from a successful result; {@code null} for
+     *                   text-only calls that do not expose it
+     */
+    private <T> T withRetry(Supplier<T> call, Function<T, StopReason> stopReason) {
+        AiAuditContext.beginCall();
         int maxAttempts = Math.max(1, properties.getMaxAttempts());
         List<Duration> plannedDelays = plannedDelays(maxAttempts);
         for (int attempt = 1; ; attempt++) {
+            recorder.attemptStarted();
             try {
-                return call.get();
+                T result = call.get();
+                recorder.attemptSucceeded(result != null ? stopReason.apply(result) : null);
+                return result;
             } catch (RuntimeException e) {
+                recorder.attemptFailed(e);
                 if (!properties.isEnabled() || !delegate.isProviderUnavailableError(e)) {
                     throw e;
                 }

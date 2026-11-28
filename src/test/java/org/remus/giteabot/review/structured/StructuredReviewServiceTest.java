@@ -233,6 +233,21 @@ class StructuredReviewServiceTest {
     }
 
     @Test
+    void aFailureWhileMatchingFindingsNeverBlocksFinalizing() {
+        review.getOutput().setId(9L);
+        when(reviewRepository.findEarlierFinalized(any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("lookup failed"));
+        service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
+        service.setAssessment(1L, 1, assessment(ReviewConclusion.FINDINGS_PRESENT));
+
+        FinalizedReview finalized = service.finalizeReview(1L, 2, 1);
+
+        assertEquals(ReviewState.FINALIZED, review.getState());
+        assertEquals(finalized.contentHash(), review.getContentHash());
+        assertFalse(review.isFingerprinted());
+    }
+
+    @Test
     void finalizeRequiresAssessment() {
         service.upsertFinding(1L, null, finding("settings-auth", ReviewSeverity.MEDIUM, "First"));
 

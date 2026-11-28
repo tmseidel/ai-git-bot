@@ -9,6 +9,7 @@ import org.remus.giteabot.agent.shared.AgentJackson;
 import org.remus.giteabot.agent.shared.McpTools;
 import org.remus.giteabot.agent.validation.ToolExecutionService;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.ai.ToolCallAudit;
 import org.remus.giteabot.ai.ToolDescriptor;
 import org.remus.giteabot.mcp.McpOrchestrationService;
 import org.remus.giteabot.mcp.McpToolCatalog;
@@ -109,6 +110,37 @@ public class AgentToolRouter {
      *               own and a run cannot be reconstructed afterwards.
      */
     private ToolResult execute(Mode mode, ToolCallContext context, String origin) {
+        String tool = context.tool();
+        return ToolCallAudit.record(toolSource(tool), auditedToolName(tool),
+                UrlRedaction.redactAll(argumentsJson(context)),
+                () -> dispatch(mode, context, origin),
+                result -> result == null ? null : result.failureMessage());
+    }
+
+    /** Where the audit log says {@code tool} comes from: its MCP server, or built-in. */
+    private String toolSource(String tool) {
+        var mcpTool = mcpToolCatalog.find(tool);
+        if (mcpTool.isPresent()) {
+            return mcpTool.get().serverName();
+        }
+        // A prefix check only: asking the MCP service would touch it for calls that are refused.
+        return McpTools.looksLikeMcpTool(tool) ? "mcp" : ToolCallAudit.BUILT_IN;
+    }
+
+    /** The tool's own name; for an MCP tool without the server qualifier. */
+    private String auditedToolName(String tool) {
+        return mcpToolCatalog.find(tool).map(definition -> definition.name()).orElse(tool);
+    }
+
+    private static String argumentsJson(ToolCallContext context) {
+        try {
+            return AgentJackson.mapper().writeValueAsString(context.args());
+        } catch (Exception e) {
+            return String.join(" ", context.args());
+        }
+    }
+
+    private ToolResult dispatch(Mode mode, ToolCallContext context, String origin) {
         String tool = context.tool();
         if (tool.isBlank()) {
             return new ToolResult(false, -1, "", "Empty tool name");

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviewQuality}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewQualityPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <style th:replace="~{review-quality/fragments :: styles}"></style>
+    <div th:replace="~{review-quality/fragments :: header('prs')}"></div>
+    <form th:replace="~{review-quality/fragments :: filters('/review-quality/prs', false)}"></form>
+
+    <div class="row g-3 mb-3">
+        <div class="col-lg-4">
+            <div th:replace="~{review-quality/fragments :: kpisStacked(${view.kpis})}"></div>
+        </div>
+        <div class="col-lg-8">
+            <div class="card h-100">
+                <div class="card-header"><h5 class="mb-0" th:text="#{reviewQuality.prs.rounds}">Open findings by review round</h5></div>
+                <div class="card-body">
+                    <div class="chart-box" style="height: 200px;"><canvas id="roundsChart"></canvas></div>
+                    <div class="src mt-2" th:text="#{reviewQuality.prs.roundsSource}">Round 1 is the first review of the PR.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="row g-3">
+        <div class="col-12">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0" th:text="#{reviewQuality.prs.title}">How findings develop across repeated reviews</h5>
+                    <small class="text-secondary" th:text="#{reviewQuality.prs.hint}">PRs with two or more reviews.</small>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0 small">
+                        <thead>
+                        <tr>
+                            <th th:text="#{reviewQuality.col.pr}">PR</th>
+                            <th class="num" th:text="#{reviewQuality.col.rounds}">Rounds</th>
+                            <th th:text="#{reviewQuality.col.firstLast}">First → last</th>
+                            <th class="num" th:text="#{reviewQuality.col.resolved}">Resolved</th>
+                            <th class="num" th:text="#{reviewQuality.col.persisting}">Persisting</th>
+                            <th class="num" th:text="#{reviewQuality.col.new}">New</th>
+                            <th th:text="#{reviewQuality.col.blockersLeft}">Blockers left</th>
+                            <th th:text="#{reviewQuality.col.outcome}">Outcome</th>
+                        </tr>
+                        </thead>
+                        <tbody class="table-group-divider">
+                        <tr th:if="${view.rows.rows.isEmpty()}">
+                            <td colspan="8" class="text-center text-secondary py-4" th:text="#{reviewQuality.prs.empty}">No PR was reviewed twice.</td>
+                        </tr>
+                        <tr th:each="row : ${view.rows.rows}" th:classappend="${row.blockersAtMerge} ? 'table-danger'">
+                            <td><a class="text-nowrap" th:href="|@{/reviews}?${row.reviewsQuery}|">
+                                    <span th:text="${row.project}">owner/repo</span> <span class="text-secondary" th:text="|#${row.number}|">#1</span></a>
+                                <div class="text-secondary text-truncate" style="max-width: 22rem;" th:if="${row.title != null}" th:text="${row.title}">title</div></td>
+                            <td class="num" th:text="${row.rounds}">2</td>
+                            <td class="text-nowrap">
+                                <span class="sev sev-BLOCKER" th:classappend="${row.first.blocker == 0} ? 'sev-none'" th:text="${row.first.blocker}">0</span><span
+                                    class="sev sev-MEDIUM" th:classappend="${row.first.medium == 0} ? 'sev-none'" th:text="${row.first.medium}">0</span><span
+                                    class="sev sev-LOW" th:classappend="${row.first.low == 0} ? 'sev-none'" th:text="${row.first.low}">0</span>
+                                →
+                                <span class="sev sev-BLOCKER" th:classappend="${row.last.blocker == 0} ? 'sev-none'" th:text="${row.last.blocker}">0</span><span
+                                    class="sev sev-MEDIUM" th:classappend="${row.last.medium == 0} ? 'sev-none'" th:text="${row.last.medium}">0</span><span
+                                    class="sev sev-LOW" th:classappend="${row.last.low == 0} ? 'sev-none'" th:text="${row.last.low}">0</span>
+                            </td>
+                            <td class="num" th:text="${row.resolved != null ? row.resolved : '–'}">0</td>
+                            <td class="num" th:text="${row.persisting != null ? row.persisting : '–'}">0</td>
+                            <td class="num" th:text="${row.added != null ? row.added : '–'}">0</td>
+                            <td><span th:if="${row.blockersLeft > 0}" class="badge text-bg-danger"
+                                      th:text="#{reviewQuality.prs.blockers(${row.blockersLeft})}">1 blocker</span>
+                                <span th:if="${row.blockersLeft == 0}" class="text-secondary" th:text="#{reviewQuality.prs.none}">none</span></td>
+                            <td><span th:text="${#messages.msg(row.outcomeKey)}">open</span>
+                                <span class="text-secondary" th:if="${row.daysToMerge != null}"
+                                      th:text="#{reviewQuality.prs.days(${row.daysToMerge})}">· 2 d</span></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-body pt-0">
+                    <div th:replace="~{reviews/fragments :: pager(${view.rows}, '/review-quality/prs')}"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div th:replace="~{review-quality/fragments :: notes(${view.notes})}"></div>
+
+    <div th:replace="~{review-quality/fragments :: definitions}"></div>
+    <th:block th:replace="~{review-quality/fragments :: scripts}"></th:block>
+</div>
+</body>
+</html>

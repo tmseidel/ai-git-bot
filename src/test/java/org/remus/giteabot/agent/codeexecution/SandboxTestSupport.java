@@ -82,6 +82,20 @@ final class SandboxTestSupport {
         return (Integer) Files.getAttribute(path, "unix:gid");
     }
 
+    /** {@code nogroup}: an unprivileged group, for runs whose own group is root's. */
+    static final long UNPRIVILEGED_GID = 65534;
+
+    /**
+     * The group to give a test slot: this run's own group, so the JVM can chgrp a workspace to it —
+     * except when that is group 0. A pool naming gid 0 is refused as a privileged identity, and a
+     * build running as root (a CI container) would trip that check instead of testing anything. Root
+     * may chgrp to any group, so an unprivileged stand-in works there just as well.
+     */
+    static long slotGid(Path path) throws IOException {
+        long gid = ownGid(path);
+        return gid == 0 ? UNPRIVILEGED_GID : gid;
+    }
+
     static void openToGroup(Path path, long gid, String mode) throws IOException {
         Files.setAttribute(path, "unix:gid", (int) gid);
         Files.setPosixFilePermissions(path, PosixFilePermissions.fromString(mode));

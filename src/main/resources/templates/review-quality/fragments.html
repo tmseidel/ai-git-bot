@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!-- Page styles of the Review quality page (on top of the Reviews page styles) -->
+<style th:fragment="styles">
+    .kpi .value { font-size: 1.5rem; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .kpi .label { font-size: .78rem; color: var(--bs-secondary-color); }
+    .kpi .delta { font-size: .78rem; font-variant-numeric: tabular-nums; }
+    .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .spark { width: 90px; height: 22px; }
+    .chart-box { position: relative; height: 260px; }
+    .chart-box.tall { height: 340px; }
+    .src { font-size: .75rem; color: var(--bs-secondary-color); }
+    .mix { height: .55rem; border-radius: .25rem; background: var(--bs-secondary-bg); overflow: hidden; display: flex; min-width: 7rem; }
+    .mix span { display: block; height: 100%; }
+</style>
+
+<!-- Page header and the tabs; every tab keeps the filter -->
+<div th:fragment="header(tab)">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-0"><i class="bi bi-bar-chart-line" aria-hidden="true"></i>
+                <span th:text="#{nav.reviewQuality}">Review quality</span></h2>
+            <small class="text-secondary" th:text="#{reviewQuality.subtitle}">What agentic reviews find, whether it gets fixed, whether reviewers agree, and what it costs.</small>
+        </div>
+        <a href="#" class="small" data-bs-toggle="offcanvas" data-bs-target="#reviewQualityDefinitions">
+            <i class="bi bi-journal-text" aria-hidden="true"></i> <span th:text="#{reviewQuality.definitions}">Metric definitions</span></a>
+    </div>
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item" th:each="t : ${ {'overview', 'prs', 'repositories', 'authors', 'topics', 'accuracy', 'cost'} }">
+            <a class="nav-link" th:classappend="${tab == t} ? 'active'" th:attr="aria-current=${tab == t} ? 'page' : null"
+               th:href="|@{${t == 'overview' ? '/review-quality' : '/review-quality/' + t}}?${filter.scope()}|"
+               th:text="${#messages.msg('reviewQuality.tab.' + t)}">tab</a>
+        </li>
+    </ul>
+</div>
+
+<!-- Filter bar shared by every tab -->
+<form th:fragment="filters(base, showDepth)" method="get" th:action="@{${base}}" class="row g-2 align-items-end mb-3" id="reviewQualityFilters">
+    <th:block th:replace="~{reviews/fragments :: scopeFields}"></th:block>
+    <div class="col-auto" style="width: 11.5rem;">
+        <label for="filterPeriod" class="form-label mb-0 small" th:text="#{reviewQuality.filter.period}">Period</label>
+        <select class="form-select form-select-sm" id="filterPeriod" name="period">
+            <option th:each="p : ${ {'12w', '30d', 'quarter', 'custom'} }" th:value="${p}"
+                    th:text="${#messages.msg('reviewQuality.period.' + p)}" th:selected="${p == filter.effectivePeriod()}">period</option>
+        </select>
+    </div>
+    <div class="col-auto custom-period" style="width: 9.5rem;">
+        <label for="filterFrom" class="form-label mb-0 small" th:text="#{reviewQuality.filter.from}">From</label>
+        <input type="date" class="form-control form-control-sm" id="filterFrom" name="from" th:value="${filter.from}"/>
+    </div>
+    <div class="col-auto custom-period" style="width: 9.5rem;">
+        <label for="filterTo" class="form-label mb-0 small" th:text="#{reviewQuality.filter.to}">To</label>
+        <input type="date" class="form-control form-control-sm" id="filterTo" name="to" th:value="${filter.to}"/>
+    </div>
+    <div class="col-auto" style="width: 11.5rem;">
+        <label for="filterCompare" class="form-label mb-0 small" th:text="#{reviewQuality.filter.compare}">Compare with</label>
+        <select class="form-select form-select-sm" id="filterCompare" name="compare">
+            <option value="previous" th:text="#{reviewQuality.compare.previous}">Previous period</option>
+            <option value="none" th:text="#{reviewQuality.compare.none}" th:selected="${filter.compare == 'none'}">Nothing</option>
+        </select>
+    </div>
+    <div class="col-auto" style="width: 10rem;">
+        <label for="filterSeverity" class="form-label mb-0 small" th:text="#{reviewQuality.filter.severity}">Severity</label>
+        <select class="form-select form-select-sm" id="filterSeverity" name="severity">
+            <option th:each="s : ${ {'all', 'bm', 'b'} }" th:value="${s}" th:text="${#messages.msg('reviewQuality.severity.' + s)}"
+                    th:selected="${s == filter.severity}">severity</option>
+        </select>
+    </div>
+    <div class="col-auto" style="width: 7.5rem;">
+        <label for="filterBucket" class="form-label mb-0 small" th:text="#{reviewQuality.filter.bucket}">Bucket</label>
+        <select class="form-select form-select-sm" id="filterBucket" name="bucket">
+            <option value="week" th:text="#{reviewQuality.bucket.week}">Week</option>
+            <option value="month" th:text="#{reviewQuality.bucket.month}" th:selected="${filter.monthly()}">Month</option>
+        </select>
+    </div>
+    <div class="col-auto" style="width: 8.5rem;" th:if="${showDepth}">
+        <label for="filterDepth" class="form-label mb-0 small text-nowrap" th:text="#{reviewQuality.filter.depth}">Directory depth</label>
+        <input type="number" min="1" max="10" class="form-control form-control-sm" id="filterDepth" name="depth"
+               th:value="${filter.effectiveDepth()}"/>
+    </div>
+    <input type="hidden" name="size" th:value="${filter.effectiveSize()}"/>
+    <div th:replace="~{reviews/fragments :: filterButtons(${base})}"></div>
+</form>
+
+<!-- KPI cards -->
+<div th:fragment="kpis(kpis)" class="row g-3 mb-3">
+    <div class="col-6 col-md-4 col-xl" th:each="k : ${kpis}">
+        <div th:replace="~{review-quality/fragments :: kpiCard(${k})}"></div>
+    </div>
+</div>
+
+<div th:fragment="kpisStacked(kpis)" class="d-flex flex-column gap-2 h-100">
+    <div class="flex-fill" th:each="k : ${kpis}">
+        <div th:replace="~{review-quality/fragments :: kpiCard(${k})}"></div>
+    </div>
+</div>
+
+<div th:fragment="kpiCard(k)" class="card kpi h-100" th:title="${#messages.msg(k.hintKey)}">
+    <div class="card-body py-2">
+        <div class="label" th:text="${#messages.msg(k.labelKey)}">label</div>
+        <div class="value" th:text="${k.value}" th:title="${k.title}">0</div>
+        <div class="delta text-secondary" th:if="${k.detailKey != null}"
+             th:text="${#messages.msgWithParams(k.detailKey, k.detailArgs)}">detail</div>
+        <div class="delta" th:if="${k.delta != null}"
+             th:classappend="${k.tone == 'secondary'} ? 'text-secondary' : |text-${k.tone}-emphasis|"
+             th:text="${k.delta}">delta</div>
+    </div>
+</div>
+
+
+<!-- A rate: the percentage, "–" below the minimum sample; the counts on hover -->
+<span th:fragment="rate(r)" th:title="${r.counts()}" th:text="${r.text()}"
+      th:classappend="${r.percent() == null} ? 'text-secondary'">–</span>
+
+<!-- A sparkline of findings per pull request -->
+<th:block th:fragment="spark(s, neutral)">
+    <svg th:if="${s != null}" class="spark" viewBox="0 0 90 22" aria-hidden="true">
+        <polyline fill="none" stroke-width="1.5"
+                  th:attr="points=${s.points},stroke=${neutral ? '#6c757d' : (s.falling ? '#198754' : '#dc3545')}"/>
+    </svg>
+    <span th:if="${s == null}" class="text-secondary">–</span>
+</th:block>
+
+<!-- Since when the data behind a tab is recorded -->
+<div th:fragment="notes(notes)" class="src mt-2">
+    <div th:each="n : ${notes}">
+        <i class="bi bi-info-circle" aria-hidden="true"></i>
+        <span th:if="${n.since != null}" th:text="${#messages.msg(n.messageKey, #temporals.format(n.since, 'yyyy-MM-dd'))}">since</span>
+        <span th:if="${n.since == null}" th:text="${#messages.msg(n.messageKey + '.none')}">not yet</span>
+    </div>
+</div>
+
+<!-- Chart data and scripts -->
+<th:block th:fragment="scripts">
+    <script type="application/json" id="reviewQualityCharts" th:utext="${chartsJson}">{}</script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script th:src="@{/js/review-quality.js}"></script>
+</th:block>
+
+<!-- Metric definitions -->
+<div th:fragment="definitions" class="offcanvas offcanvas-end" tabindex="-1" id="reviewQualityDefinitions" style="width: 38rem;"
+     aria-labelledby="reviewQualityDefinitionsTitle">
+    <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="reviewQualityDefinitionsTitle"><i class="bi bi-journal-text" aria-hidden="true"></i>
+            <span th:text="#{reviewQuality.definitions}">Metric definitions</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" th:aria-label="#{button.close}"></button>
+    </div>
+    <div class="offcanvas-body small">
+        <h6 th:text="#{reviewQuality.def.counting}">Counting rules</h6>
+        <ul>
+            <li th:text="#{reviewQuality.def.finalized}">Only finalized agentic reviews count.</li>
+            <li th:text="#{reviewQuality.def.pr}">A pull request belongs to the period of its first review.</li>
+            <li th:text="#{reviewQuality.def.feedback}">Feedback counts the effective record.</li>
+            <li th:text="#{reviewQuality.def.sample(${minSample})}">Below the minimum sample a rate shows "–".</li>
+        </ul>
+        <h6 th:text="#{reviewQuality.def.resolution}">Resolved, persisting and new</h6>
+        <p th:text="#{reviewQuality.def.matching}">Matching rule.</p>
+        <h6 th:text="#{reviewQuality.def.cost}">Cost and return</h6>
+        <p th:text="#{reviewQuality.def.costText}">Cost.</p>
+        <h6 th:text="#{reviewQuality.def.notShown}">Deliberately not shown</h6>
+        <ul>
+            <li th:text="#{reviewQuality.def.noScore}">No single code quality score.</li>
+            <li th:text="#{reviewQuality.def.noRanking}">No per-author rankings.</li>
+        </ul>
+        <p class="text-secondary" th:text="#{reviewQuality.def.utc}">Periods and buckets are in UTC.</p>
+    </div>
+</div>
+
+</body>
+</html>

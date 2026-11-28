@@ -1,5 +1,8 @@
 package org.remus.giteabot.prworkflow;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * Catalog-descriptor contract shared by the pluggable workflow SPIs
  * ({@link PrWorkflow} for pull-request events, {@code IssueWorkflow} for
@@ -45,5 +48,19 @@ public interface WorkflowDescriptor {
      */
     default WorkflowParamsSchema paramsSchema() {
         return WorkflowParamsSchema.empty();
+    }
+
+    /**
+     * Cross-field checks the per-field {@link #paramsSchema()} cannot express, run on admin saves,
+     * programmatic enablement and configuration imports — an import must not reach a state the admin
+     * form would refuse.
+     *
+     * <p>The default accepts everything the schema accepts.</p>
+     *
+     * @param params persisted string values, after schema validation where the caller applies it
+     * @return field-specific error messages; empty when the parameters are consistent
+     */
+    default List<String> validateParams(Map<String, String> params) {
+        return List.of();
     }
 }

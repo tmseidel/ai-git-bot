@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviewQuality}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewQualityPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <style th:replace="~{review-quality/fragments :: styles}"></style>
+    <div th:replace="~{review-quality/fragments :: header('accuracy')}"></div>
+    <form th:replace="~{review-quality/fragments :: filters('/review-quality/accuracy', false)}"></form>
+
+    <div th:replace="~{review-quality/fragments :: kpis(${view.kpis})}"></div>
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div class="card h-100">
+                <div class="card-header"><h5 class="mb-0" th:text="#{reviewQuality.accuracy.verdicts}">Do reviewers agree?</h5></div>
+                <div class="card-body">
+                    <div class="chart-box"><canvas id="verdictChart"></canvas></div>
+                    <div class="src mt-2" th:text="#{reviewQuality.accuracy.verdictsSource}">Effective feedback only.</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-5">
+            <div class="card h-100">
+                <div class="card-header"><h5 class="mb-0" th:text="#{reviewQuality.accuracy.wrong}">Where the reviewer is most often wrong</h5></div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0 small">
+                        <thead>
+                        <tr>
+                            <th th:text="#{reviewQuality.col.category}">Category</th>
+                            <th class="num" th:text="#{reviewQuality.col.judged}">Judged</th>
+                            <th class="num" th:text="#{reviewQuality.col.wrong}">Incorrect / irrelevant</th>
+                            <th th:text="#{reviewQuality.col.lesson}">Lesson</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr th:if="${view.wrong.isEmpty()}">
+                            <td colspan="4" class="text-center text-secondary py-4" th:text="#{reviewQuality.accuracy.noFeedback}">No feedback on findings in this period.</td>
+                        </tr>
+                        <tr th:each="row : ${view.wrong}">
+                            <td th:text="${row.category}">category</td>
+                            <td class="num" th:text="${row.judged}">0</td>
+                            <td class="num"><span th:replace="~{review-quality/fragments :: rate(${row.wrong})}"></span></td>
+                            <td><th:block th:each="l : ${row.lessons}"><a class="ref me-1" th:href="@{/reviews/lessons/{ref}(ref=${l})}" th:text="${l}">L1</a></th:block>
+                                <a th:if="${row.lessons.isEmpty()}" class="small" th:href="|@{/reviews/feedback}?${row.proposeQuery}|"
+                                   th:text="#{reviewQuality.accuracy.propose}">propose…</a></td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-body pt-2"><div class="src" th:text="#{reviewQuality.accuracy.wrongSource}">Candidates for a curated lesson.</div></div>
+            </div>
+        </div>
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0" th:text="#{reviewQuality.accuracy.lessons}">Active lessons and what happened after activation</h5>
+                    <small class="text-secondary" th:text="#{reviewQuality.accuracy.lessonsHint(${view.lessonWindowDays})}">An association, not proof.</small>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0 small">
+                        <thead>
+                        <tr>
+                            <th th:text="#{reviewQuality.col.lesson}">Lesson</th>
+                            <th th:text="#{reviews.filter.repository}">Repository</th>
+                            <th th:text="#{reviewQuality.col.scope}">Category · paths</th>
+                            <th th:text="#{reviewQuality.col.activeSince}">Active since</th>
+                            <th class="num" th:text="#{reviewQuality.col.suppliedTo}">Supplied to</th>
+                            <th class="num" th:text="#{reviewQuality.col.incorrectBefore}">Incorrect before</th>
+                            <th class="num" th:text="#{reviewQuality.col.after}">after</th>
+                            <th class="num" th:text="#{reviewQuality.col.findingsBefore}">Findings / review before</th>
+                            <th class="num" th:text="#{reviewQuality.col.after}">after</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr th:if="${view.lessons.rows.isEmpty()}">
+                            <td colspan="9" class="text-center text-secondary py-4" th:text="#{reviewQuality.accuracy.noLessons}">No active lesson.</td>
+                        </tr>
+                        <tr th:each="row : ${view.lessons.rows}">
+                            <td><a class="ref" th:href="@{/reviews/lessons/{ref}(ref=${row.reference})}" th:text="|${row.reference}@${row.revision}|">L1@1</a>
+                                <span th:if="${row.reviewRequired}" class="badge text-bg-warning" th:text="#{reviewQuality.accuracy.reviewRequired}">review required</span></td>
+                            <td th:text="${row.project}">owner/repo</td>
+                            <td><span th:text="${row.category != null ? row.category : '*'}">category</span> ·
+                                <span class="ref" th:text="${row.paths.isEmpty() ? #messages.msg('reviews.repositoryWide') : #strings.listJoin(row.paths, ' ')}">**</span></td>
+                            <td th:text="${#temporals.format(row.activeSince, 'yyyy-MM-dd')}">date</td>
+                            <td class="num" th:text="${row.usage}">0</td>
+                            <td class="num"><span th:replace="~{review-quality/fragments :: rate(${row.incorrectBefore})}"></span></td>
+                            <td class="num"><span th:replace="~{review-quality/fragments :: rate(${row.incorrectAfter})}"></span></td>
+                            <td class="num" th:text="${row.findingsBefore}">0</td>
+                            <td class="num" th:text="${row.findingsAfter}">0</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-body pt-0">
+                    <div th:replace="~{reviews/fragments :: pager(${view.lessons}, '/review-quality/accuracy')}"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div th:replace="~{review-quality/fragments :: definitions}"></div>
+    <th:block th:replace="~{review-quality/fragments :: scripts}"></th:block>
+</div>
+</body>
+</html>

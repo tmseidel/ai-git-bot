@@ -99,6 +99,31 @@ class WorkflowSelectionServiceTest {
     }
 
     @Test
+    void saveSelection_appliesTheWorkflowsCrossFieldRules() {
+        WorkflowConfiguration cfg = configuration();
+        when(configurationRepository.findById(1L)).thenReturn(Optional.of(cfg));
+        when(selectionRepository.findByConfigurationId(1L)).thenReturn(List.of());
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> pickyService().saveSelection(1L, List.of("picky-like"),
+                        Map.of("picky-like", Map.of("level", "forbidden"))));
+        assertTrue(e.getMessage().contains("Picky-like"));
+        assertTrue(e.getMessage().contains("level 'forbidden' is not allowed"));
+        verify(selectionRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void enableWorkflow_appliesTheWorkflowsCrossFieldRules() {
+        WorkflowConfiguration cfg = configuration();
+        when(configurationRepository.findById(1L)).thenReturn(Optional.of(cfg));
+
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> pickyService().enableWorkflow(1L, "picky-like", Map.of("level", "forbidden")));
+        assertTrue(e.getMessage().contains("level 'forbidden' is not allowed"));
+        verify(selectionRepository, never()).save(any());
+    }
+
+    @Test
     void enabledWorkflowKeys_returnsStableOrderByKey() {
         when(selectionRepository.findByConfigurationIdOrderByWorkflowKeyAsc(1L))
                 .thenReturn(List.of(selection("review-like"), selection("tests-like")));
@@ -183,7 +208,28 @@ class WorkflowSelectionServiceTest {
         return s;
     }
 
+    private WorkflowSelectionService pickyService() {
+        return new WorkflowSelectionService(configurationRepository, selectionRepository,
+                new PrWorkflowRegistry(List.of(new PickyLike())), new IssueWorkflowRegistry(List.of()),
+                paramsValidator, new WorkflowTextResolver(new StaticMessageSource()));
+    }
+
     // -------- test workflows --------
+
+    private static final class PickyLike implements PrWorkflow {
+        @Override public String key() { return "picky-like"; }
+        @Override public String displayName() { return "Picky-like"; }
+        @Override public PrWorkflowCategory category() { return PrWorkflowCategory.REVIEW; }
+        @Override public WorkflowResult run(PrWorkflowContext context) { return WorkflowResult.skipped("noop"); }
+        @Override public WorkflowParamsSchema paramsSchema() {
+            return WorkflowParamsSchema.of(new WorkflowParamField("level", "Level",
+                    WorkflowParamField.ParamType.STRING, false, null, "Level", List.of()));
+        }
+        @Override public List<String> validateParams(Map<String, String> params) {
+            return "forbidden".equals(params.get("level"))
+                    ? List.of("level 'forbidden' is not allowed") : List.of();
+        }
+    }
 
     private static final class ReviewLike implements PrWorkflow {
         @Override public String key() { return "review-like"; }

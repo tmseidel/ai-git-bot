@@ -46,6 +46,19 @@ public interface AgentStrategy {
     }
 
     /**
+     * Reference context the whole run must keep, such as the learned guidance of an agentic review.
+     *
+     * <p>The strategy delivers it inside its initial user message. Whenever compaction has dropped
+     * every message carrying it, the loop puts it back — once — at the start of the in-flight
+     * history, so the context is neither lost nor duplicated and still counts toward the prompt
+     * budget. The restored copy is never written to a persisted session, so a later run
+     * reconstructs its own context instead of accumulating stale text. {@code null} pins nothing.</p>
+     */
+    default String pinnedContext() {
+        return null;
+    }
+
+    /**
      * Decide what to do given the AI's latest assistant turn (text path).
      *
      * <p>May execute tools, post comments, mutate {@code ctx} (e.g. update

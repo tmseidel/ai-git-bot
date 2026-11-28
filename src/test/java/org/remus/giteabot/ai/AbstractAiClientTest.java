@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AbstractAiClientTest {
 
-
     @Test
     void submitReviewPrompt_delegatesToSendReviewRequest() {
         TestAiClient client = new TestAiClient("test-model", 1024) {
@@ -138,8 +137,5 @@ class AbstractAiClientTest {
             this.rawResponse = rawResponse;
         }
 
-        @Override
-        public void recordError(Throwable error) {
-        }
     }
 }

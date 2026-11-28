@@ -15,6 +15,7 @@ import org.remus.giteabot.review.structured.ReviewRecordRepository;
 import org.remus.giteabot.review.structured.ReviewState;
 import org.remus.giteabot.review.structured.WorkflowOutput;
 import org.remus.giteabot.review.structured.WorkflowOutputRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -43,6 +44,7 @@ class FeedbackServiceTest {
     @Mock private ReviewRecordRepository reviewRepository;
     @Mock private ReferenceAllocator referenceAllocator;
     @Mock private PlatformTransactionManager transactionManager;
+    @Mock private ApplicationEventPublisher eventPublisher;
 
     private FeedbackService service;
     private ReviewRecord review;
@@ -50,7 +52,7 @@ class FeedbackServiceTest {
     @BeforeEach
     void setUp() {
         service = new FeedbackService(feedbackRepository, eventRepository, outputRepository,
-                reviewRepository, referenceAllocator, transactionManager);
+                reviewRepository, referenceAllocator, transactionManager, eventPublisher);
         lenient().when(transactionManager.getTransaction(any())).thenAnswer(invocation -> new SimpleTransactionStatus());
         WorkflowOutput output = new WorkflowOutput();
         output.setId(10L);
@@ -213,6 +215,9 @@ class FeedbackServiceTest {
 
         assertThat(previous.getState()).isEqualTo(FeedbackState.SUPERSEDED);
         assertThat(previous.getSupersededBy()).isEqualTo("FB7");
+        // Lessons citing FB4 must learn that its author changed their mind.
+        verify(eventPublisher).publishEvent(new FeedbackWithdrawnEvent(null, "FB4",
+                FeedbackState.SUPERSEDED, "FB7", "alice"));
     }
 
     @Test
@@ -236,6 +241,29 @@ class FeedbackServiceTest {
         assertThat(record.getState()).isEqualTo(FeedbackState.EFFECTIVE);
 
         assertThat(service.retract(SCOPE, "FB9", "ALICE").reference()).isEqualTo("FB9");
+        assertThat(record.getState()).isEqualTo(FeedbackState.RETRACTED);
+        verify(eventPublisher).publishEvent(new FeedbackWithdrawnEvent(null, "FB9",
+                FeedbackState.RETRACTED, null, "ALICE"));
+    }
+
+    @Test
+    void aLearningMaintainerMayRetractSomeoneElsesFeedback() {
+        WorkflowFeedback record = new WorkflowFeedback();
+        record.setReference("FB9");
+        record.setGitIntegrationId(1L);
+        record.setBotId(2L);
+        record.setRepoOwner("acme");
+        record.setRepoName("web");
+        record.setActor("alice");
+        record.setState(FeedbackState.EFFECTIVE);
+        record.setTargetReference("O1234");
+        record.setTargetType(FeedbackTargetType.OUTPUT);
+        record.setVerdict(FeedbackVerdict.USEFUL);
+        when(feedbackRepository.findByReference("FB9")).thenReturn(Optional.of(record));
+
+        assertThatThrownBy(() -> service.retract(SCOPE, "FB9", "maria", false))
+                .isInstanceOf(FeedbackRejectedException.class);
+        assertThat(service.retract(SCOPE, "FB9", "maria", true).reference()).isEqualTo("FB9");
         assertThat(record.getState()).isEqualTo(FeedbackState.RETRACTED);
     }
 

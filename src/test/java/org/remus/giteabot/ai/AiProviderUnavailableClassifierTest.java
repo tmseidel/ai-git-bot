@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AiProviderUnavailableClassifierTest {
 
     private final AiClient client = new RetryAiClient(new NoopAiClient(),
-            new AiRetryProperties(), new NoopNotifier());
+            new AiRetryProperties(), new NoopNotifier(), (in, out, cacheWrite, cacheRead, request, response) -> { });
 
     /** Leans on the interface default, exactly like the concrete provider clients do. */
     private static class NoopAiClient implements AiClient {
@@ -37,10 +37,6 @@ class AiProviderUnavailableClassifierTest {
         @Override
         public String chat(List<AiMessage> h, String u, String s, String m, Integer t) {
             return "";
-        }
-
-        @Override
-        public void reportError(Throwable error) {
         }
 
         @Override

@@ -8,7 +8,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.remus.giteabot.ai.AiClient;
-import org.remus.giteabot.ai.AuditingAiClient;
 import org.remus.giteabot.ai.AiProviderRegistry;
 import org.remus.giteabot.ai.ProviderRetryNotifier;
 import org.remus.giteabot.ai.RetryAiClient;
@@ -130,10 +129,8 @@ class AiClientFactoryTest {
     }
 
     private static AiClient unwrap(AiClient client) {
-        assertInstanceOf(AuditingAiClient.class, client);
-        AiClient retrying = ((AuditingAiClient) client).getDelegate();
-        assertInstanceOf(RetryAiClient.class, retrying);
-        return ((RetryAiClient) retrying).getDelegate();
+        assertInstanceOf(RetryAiClient.class, client);
+        return ((RetryAiClient) client).getDelegate();
     }
 
     @Test

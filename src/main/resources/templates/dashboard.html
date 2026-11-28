@@ -68,7 +68,9 @@
                 </div>
             </div>
             <div class="col-md">
-                <a th:href="@{/usage}" class="text-decoration-none d-block h-100">
+                <!-- The Workflow runs page filtered to failed AI calls in the card's window (computed by the
+                     controller); that page's date filter applies to the run's start, which is close enough. -->
+                <a th:href="@{/workflow-runs(failedCalls=true, from=${aiErrorsFrom}, tz=${aiErrorsZone})}" class="text-decoration-none d-block h-100">
                     <div class="card text-white h-100" th:classappend="${aiErrorCount > 0} ? 'bg-danger' : 'bg-secondary'">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-center">
@@ -101,6 +103,53 @@
                 <a th:href="@{/git-integrations}" class="btn btn-outline-secondary">
                     <i class="bi bi-git"></i> <span th:text="#{nav.gitIntegrations}">Git Integrations</span>
                 </a>
+            </div>
+        </div>
+
+        <!-- Recent workflow runs -->
+        <div class="card mb-4" id="recentRuns">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-diagram-3" aria-hidden="true"></i> <span th:text="#{dashboard.recentRuns}">Recent workflow runs</span></h5>
+                <a th:href="@{/workflow-runs}" class="btn btn-sm btn-outline-secondary" th:text="#{dashboard.viewAllRuns}">View all</a>
+            </div>
+            <div class="card-body">
+                <p th:if="${#lists.isEmpty(recentRuns)}" class="text-secondary text-center py-3 mb-0"
+                   th:text="#{workflowRuns.noRuns}">No workflow runs recorded yet.</p>
+                <div th:if="${!#lists.isEmpty(recentRuns)}" class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-group-divider">
+                            <tr>
+                                <th th:text="#{workflowRuns.column.state}">State</th>
+                                <th th:text="#{workflowRuns.column.run}">Run</th>
+                                <th th:text="#{workflowRuns.column.type}">Workflow type</th>
+                                <th th:text="#{workflowRuns.column.bot}">Bot</th>
+                                <th th:text="#{workflowRuns.column.triggeredBy}">Triggered by</th>
+                                <th th:text="#{workflowRuns.column.started}">Started</th>
+                                <th class="text-end" th:text="#{workflowRuns.column.duration}">Duration</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- The whole row opens the run, filtered and expanded (stretched link on the run ID). -->
+                            <tr th:each="r : ${recentRuns}" class="position-relative">
+                                <!-- Only the badges sit above the stretched link's overlay (z-index 1), so their warning hints
+                                     show on hover and the rest of the cell still opens the run. -->
+                                <td><span class="d-inline-block position-relative z-2" th:insert="~{workflow-runs/list :: runBadges(${r})}"></span></td>
+                                <td><a class="stretched-link" th:href="@{/workflow-runs(runId=${r.run.id}, expand=${r.run.id})}"
+                                       th:aria-label="#{dashboard.openRun(${r.run.id})}"><code th:text="|#${r.run.id}|">#1</code></a></td>
+                                <td th:text="${#messages.msgOrNull('workflow.' + r.run.workflowType + '.name') ?: r.run.workflowType}">type</td>
+                                <td th:text="${r.run.botName != null ? r.run.botName : '—'}">bot</td>
+                                <td>
+                                    <span class="text-secondary" th:if="${r.run.repoOwner != null}"
+                                          th:text="|${r.run.repoOwner}/${r.run.repoName}|">owner/repo</span>
+                                    <span th:if="${r.run.triggerNumber != null}"
+                                          th:text="${r.run.triggerKind != null} ? ${#messages.msg('workflowRuns.ref.' + r.run.triggerKind.name(), r.run.triggerNumber)} : |#${r.run.triggerNumber}|">PR #1</span>
+                                </td>
+                                <td class="text-nowrap"><time th:datetime="${r.run.startedAt}" data-format="datetime" th:text="${r.run.startedAt}">start</time></td>
+                                <td class="text-end text-nowrap" th:data-duration-ms="${r.durationMs}" th:text="|${r.durationMs} ms|">0 ms</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
 
@@ -172,6 +221,7 @@
         </div>
 
 
+<script th:src="@{/js/locale-format.js}"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         // Tooltip init
@@ -179,11 +229,12 @@
         tooltipTriggerList.map(function (el) { return new bootstrap.Tooltip(el); });
 
         // Compact number formatting (K / M / B / T) for elements with data-format="compact"
-        var formatter = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+        var locale = document.documentElement.lang || 'en';
+        var formatter = new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 });
         document.querySelectorAll('[data-format="compact"]').forEach(function (el) {
             var raw = parseInt(el.textContent.replace(/,/g, ''), 10);
             if (!isNaN(raw) && raw !== 0) {
-                el.setAttribute('title', raw.toLocaleString('en'));
+                el.setAttribute('title', raw.toLocaleString(locale));
                 el.textContent = formatter.format(raw);
             }
         });

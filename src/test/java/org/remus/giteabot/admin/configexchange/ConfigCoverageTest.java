@@ -5,8 +5,8 @@ import com.tngtech.archunit.core.importer.ClassFileImporter;
 import jakarta.persistence.Entity;
 import org.junit.jupiter.api.Test;
 import org.remus.giteabot.agent.session.AgentSession;
-import org.remus.giteabot.aiusage.AiErrorLog;
-import org.remus.giteabot.aiusage.AiUsageLog;
+import org.remus.giteabot.aiusage.AiInteraction;
+import org.remus.giteabot.aiusage.AiToolCall;
 import org.remus.giteabot.audit.PrAuditEvent;
 import org.remus.giteabot.eventhook.EventHookDelivery;
 import org.remus.giteabot.prworkflow.PrWorkflowRun;
@@ -23,15 +23,23 @@ import org.remus.giteabot.review.structured.ReviewFinding;
 import org.remus.giteabot.review.structured.ReviewFindingLocation;
 import org.remus.giteabot.learning.feedback.WorkflowFeedback;
 import org.remus.giteabot.learning.feedback.WorkflowFeedbackEvent;
+import org.remus.giteabot.learning.knowledge.KnowledgeLesson;
+import org.remus.giteabot.learning.knowledge.KnowledgeLessonEvidence;
+import org.remus.giteabot.learning.knowledge.KnowledgeLessonRevision;
+import org.remus.giteabot.learning.knowledge.LearningEvent;
+import org.remus.giteabot.learning.knowledge.LessonUsage;
 import org.remus.giteabot.review.structured.ReviewPublication;
 import org.remus.giteabot.review.structured.ReviewRecord;
 import org.remus.giteabot.review.structured.ReviewToolOperation;
 import org.remus.giteabot.review.structured.WorkflowOutput;
 import org.remus.giteabot.review.structured.WorkflowOutputSnapshot;
+import org.remus.giteabot.reviewquality.PrOutcome;
+import org.remus.giteabot.reviewquality.ReviewQualitySettings;
 import org.remus.giteabot.session.ConversationMessage;
 import org.remus.giteabot.session.ReviewSession;
 import org.remus.giteabot.systemsettings.BotToolSelection;
 import org.remus.giteabot.systemsettings.McpSelectedTool;
+import org.remus.giteabot.workflowrun.WorkflowRun;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
@@ -81,8 +89,9 @@ class ConfigCoverageTest {
         NOT_A_TABLE.put(PrTestCase.class, "generated test suites");
         NOT_A_TABLE.put(UnitTestSuite.class, "generated test suites");
         NOT_A_TABLE.put(UnitTestCase.class, "generated test suites");
-        NOT_A_TABLE.put(AiUsageLog.class, "usage telemetry");
-        NOT_A_TABLE.put(AiErrorLog.class, "usage telemetry");
+        NOT_A_TABLE.put(AiInteraction.class, "usage telemetry");
+        NOT_A_TABLE.put(AiToolCall.class, "usage telemetry");
+        NOT_A_TABLE.put(WorkflowRun.class, "usage telemetry");
         NOT_A_TABLE.put(EventHookDelivery.class, "delivery log");
         NOT_A_TABLE.put(WorkflowOutput.class, "structured review output");
         NOT_A_TABLE.put(ReviewRecord.class, "structured review draft/final record");
@@ -94,7 +103,15 @@ class ConfigCoverageTest {
         NOT_A_TABLE.put(WorkflowOutputSnapshot.class, "supplemental learning evidence");
         NOT_A_TABLE.put(WorkflowFeedback.class, "runtime feedback records");
         NOT_A_TABLE.put(WorkflowFeedbackEvent.class, "runtime feedback history");
+        NOT_A_TABLE.put(KnowledgeLesson.class, "runtime lessons (bot/repository knowledge)");
+        NOT_A_TABLE.put(KnowledgeLessonRevision.class, "runtime lesson revisions");
+        NOT_A_TABLE.put(KnowledgeLessonEvidence.class, "runtime lesson evidence links");
+        NOT_A_TABLE.put(LearningEvent.class, "runtime lesson history");
+        NOT_A_TABLE.put(LessonUsage.class, "runtime lesson usage records");
         NOT_A_TABLE.put(ReferenceSequence.class, "runtime reference counters");
+        NOT_A_TABLE.put(PrOutcome.class, "runtime pull-request outcomes");
+        NOT_A_TABLE.put(ReviewQualitySettings.class,
+                "estimate assumptions of the Review quality page, edited there");
     }
 
     @Autowired

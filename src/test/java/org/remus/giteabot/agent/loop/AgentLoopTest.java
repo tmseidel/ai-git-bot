@@ -167,34 +167,41 @@ class AgentLoopTest {
     }
 
     @Test
-    void run_publishesAgentLoopRoundDuringEachCall_andClearsItAfter() {
+    void run_retryAfterTransientFailure_keepsTheRoundOfTheAuditRun() {
         AgentLoop loop = new AgentLoop(aiClient, sessionService,
                 new AgentBudget(5, 3, 3, 8000,
                         8_000, 120_000,
                         200_000, 0.7));
         java.util.List<Integer> roundsDuringCalls = new java.util.ArrayList<>();
+        AtomicInteger aiCalls = new AtomicInteger();
         when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
                 .thenAnswer(inv -> {
-                    roundsDuringCalls.add(AiAuditContext.getRound());
-                    return ChatTurn.text("ai-" + roundsDuringCalls.size());
+                    // What the outermost (auditing) client does for every logical call.
+                    AiAuditContext.beginCall();
+                    roundsDuringCalls.add(AiAuditContext.currentRun().getRound());
+                    if (aiCalls.incrementAndGet() == 1) {
+                        throw new ResourceAccessException("Read timed out");
+                    }
+                    return ChatTurn.text("ai-" + aiCalls.get());
                 });
 
-        AtomicInteger calls = new AtomicInteger();
+        AtomicInteger steps = new AtomicInteger();
         AgentStrategy strategy = new AgentStrategy() {
             @Override public String systemPrompt() { return "sys"; }
             @Override public StepDecision step(AgentRunContext c, String r, int round) {
-                if (calls.incrementAndGet() == 1) return new StepDecision.Continue("follow-up");
+                if (steps.incrementAndGet() == 1) return new StepDecision.Continue("follow-up");
                 return new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), null));
             }
             @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) { return LoopOutcome.fail(c.baseBranch()); }
         };
 
-        loop.run(ctx, "kickoff", strategy);
+        try (var run = AiAuditContext.openRun("issue-writer", null)) {
+            loop.run(ctx, "kickoff", strategy);
+            assertThat(run.isRoundLimitReached()).isFalse();
+        }
 
-        // The audit recorder reads the round from the thread-local while the call is
-        // in flight; it must be gone once the loop stops calling the provider.
-        assertThat(roundsDuringCalls).containsExactly(1, 2);
-        assertThat(AiAuditContext.getRound()).isNull();
+        // The retried call stays in round 1; the follow-up is round 2.
+        assertThat(roundsDuringCalls).containsExactly(1, 1, 2);
     }
 
     @Test
@@ -216,7 +223,11 @@ class AgentLoopTest {
             }
         };
 
-        LoopOutcome outcome = loop.run(ctx, "go", strategy);
+        LoopOutcome outcome;
+        try (var run = AiAuditContext.openRun("issue-writer", null)) {
+            outcome = loop.run(ctx, "go", strategy);
+            assertThat(run.isRoundLimitReached()).isTrue();
+        }
 
         assertThat(outcome.success()).isFalse();
         assertThat(outcome.selectedBranch()).isEqualTo("dead-branch");
@@ -319,7 +330,6 @@ class AgentLoopTest {
 
         verify(aiClient, times(2)).chatWithTools(anyList(), eq("go"), eq(List.of()), eq("sys"), isNull(), eq(8000));
         verify(sessionService, never()).flushMessages(any(), anyList(), anyLong(), anyLong());
-        assertThat(AiAuditContext.getRound()).isNull();
     }
 
     @ParameterizedTest
@@ -371,5 +381,84 @@ class AgentLoopTest {
                 throw new AssertionError("budget should not be exhausted");
             }
         };
+    }
+    // ------------------------------------------------------------------ pinned context
+
+    private static final String PINNED = "## Repository guidance\n\nRepository guidance: L17@1";
+
+    @Test
+    void pinnedContext_isNotAddedWhileTheRequestStillCarriesIt() {
+        List<AiMessage> history = new ArrayList<>();
+        AiMessage pinned = AiMessage.builder().role("user").content(PINNED).build();
+
+        AgentLoop.restorePinned(history, "kickoff\n\n" + PINNED, pinned);
+        assertThat(history).isEmpty();
+
+        history.add(AiMessage.builder().role("user").content("kickoff\n\n" + PINNED).build());
+        AgentLoop.restorePinned(history, "", pinned);
+        assertThat(history).hasSize(1);
+    }
+
+    @Test
+    void pinnedContext_isRestoredOnceAtTheStartAfterCompactionDroppedIt() {
+        List<AiMessage> history = new ArrayList<>(List.of(
+                AiMessage.builder().role("user").content("[Earlier conversation compacted]").build(),
+                AiMessage.builder().role("assistant").content("later answer").build()));
+        AiMessage pinned = AiMessage.builder().role("user").content(PINNED).build();
+
+        AgentLoop.restorePinned(history, "next", pinned);
+        AgentLoop.restorePinned(history, "next", pinned);
+
+        assertThat(history).hasSize(3);
+        assertThat(history.getFirst().getContent()).isEqualTo(PINNED);
+        assertThat(history.stream().filter(m -> PINNED.equals(m.getContent()))).hasSize(1);
+    }
+
+    @Test
+    void pinnedContext_survivesAggressiveCompactionWithoutBeingPersistedOrDuplicated() {
+        when(aiClient.isPromptTooLongError(any())).thenReturn(true);
+        List<List<AiMessage>> requests = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        when(aiClient.chatWithTools(anyList(), anyString(), eq(List.of()), anyString(), isNull(), anyInt()))
+                .thenAnswer(invocation -> {
+                    int call = calls.incrementAndGet();
+                    requests.add(List.copyOf(invocation.getArgument(0)));
+                    if (call == 3) {
+                        throw new HttpClientErrorException(HttpStatus.BAD_REQUEST, "too long");
+                    }
+                    return ChatTurn.text("answer-" + call);
+                });
+        AgentLoop loop = new AgentLoop(aiClient, sessionService,
+                // A tiny history budget, so the prompt-too-long retry really drops the kickoff.
+                new AgentBudget(5, 3, 3, 8000, 8_000, 10, 200_000, 0.7));
+        AtomicInteger rounds = new AtomicInteger();
+
+        LoopOutcome outcome = loop.run(ctx, "kickoff\n\n" + PINNED, new AgentStrategy() {
+            @Override public String systemPrompt() { return "sys"; }
+            @Override public String pinnedContext() { return PINNED; }
+            @Override public StepDecision step(AgentRunContext c, String r, int round) {
+                return rounds.incrementAndGet() < 3
+                        ? new StepDecision.Continue("next-" + round)
+                        : new StepDecision.Finish(LoopOutcome.success(c.baseBranch(), r));
+            }
+            @Override public LoopOutcome onBudgetExhausted(AgentRunContext c) {
+                throw new AssertionError("budget should not be exhausted");
+            }
+        });
+
+        assertThat(outcome.success()).isTrue();
+        // Before compaction the kickoff carries the guidance; the retry after compaction gets it back.
+        List<AiMessage> retried = requests.get(3);
+        assertThat(retried.stream().map(AiMessage::getContent)).doesNotContain("kickoff\n\n" + PINNED);
+        assertThat(retried.getFirst().getContent()).isEqualTo(PINNED);
+        for (List<AiMessage> request : requests) {
+            assertThat(request.stream().filter(m -> m.getContent() != null
+                    && m.getContent().contains(PINNED))).hasSizeLessThanOrEqualTo(1);
+        }
+        // Only the kickoff that delivered it is session history; the restored copy never is.
+        verify(sessionService, atLeastOnce()).flushMessages(any(), anyList(), anyLong(), anyLong());
+        verify(sessionService, never()).flushMessages(any(),
+                argThat(messages -> messages.contains(new PendingMessage("user", PINNED))),
+                anyLong(), anyLong());
     }
 }

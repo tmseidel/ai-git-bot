@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviewQuality}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="reviewQualityPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <style th:replace="~{review-quality/fragments :: styles}"></style>
+    <div th:replace="~{review-quality/fragments :: header('topics')}"></div>
+    <form th:replace="~{review-quality/fragments :: filters('/review-quality/topics', true)}"></form>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0" th:text="#{reviewQuality.topics.categories}">Finding categories</h5>
+                    <small class="text-secondary" th:text="#{reviewQuality.topics.categoriesHint}">Share of findings and change against the previous period.</small>
+                </div>
+                <div class="card-body">
+                    <div class="chart-box tall"><canvas id="categoryChart"></canvas></div>
+                    <div class="src mt-2" th:text="#{reviewQuality.topics.categoriesSource}">Categories are normalised.</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <h5 class="mb-0" th:text="#{reviewQuality.topics.hotSpots}">Hot spots</h5>
+                    <small class="text-secondary" th:text="#{reviewQuality.topics.hotSpotsHint(${view.depth})}">Directories with the most blocker and medium findings.</small>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0 small">
+                        <thead>
+                        <tr>
+                            <th th:text="#{reviewQuality.col.directory}">Directory</th>
+                            <th class="num" th:text="#{reviewQuality.col.findings}">Findings</th>
+                            <th class="num" th:text="#{reviewQuality.col.prs}">PRs</th>
+                            <th th:text="#{reviewQuality.col.topCategory}">Top category</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr th:if="${view.rows.rows.isEmpty()}">
+                            <td colspan="4" class="text-center text-secondary py-4" th:text="#{reviewQuality.topics.empty}">No blocker or medium finding in this period.</td>
+                        </tr>
+                        <tr th:each="row : ${view.rows.rows}">
+                            <td class="ref"><span class="text-secondary" th:text="|${row.project}:|">owner/repo:</span>
+                                <span th:text="${row.directory.isEmpty() ? #messages.msg('reviewQuality.topics.noLocation') : row.directory}">src/</span></td>
+                            <td class="num" th:text="${row.findings}">0</td>
+                            <td class="num" th:text="${row.prs}">0</td>
+                            <td th:text="${row.topCategory}">category</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="card-body pt-0">
+                    <div th:replace="~{reviews/fragments :: pager(${view.rows}, '/review-quality/topics')}"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div th:replace="~{review-quality/fragments :: definitions}"></div>
+    <th:block th:replace="~{review-quality/fragments :: scripts}"></th:block>
+</div>
+</body>
+</html>

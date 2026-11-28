@@ -3,6 +3,8 @@ package org.remus.giteabot.review.structured;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.validation.ToolResult;
+import org.remus.giteabot.ai.ToolCallAudit;
+import org.remus.giteabot.util.UrlRedaction;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.JsonNode;
 
@@ -29,7 +31,14 @@ public class ReviewLookupToolExecutor {
         return LOOKUP.equals(tool == null ? null : tool.trim());
     }
 
+    /** One lookup, recorded as a tool call of the current AI interaction ({@link ToolCallAudit}). */
     public ToolResult execute(ReviewLookupInvocation invocation, ReviewToolCall call) {
+        String arguments = call.arguments() == null ? "{}" : UrlRedaction.redactAll(call.arguments().toString());
+        return ToolCallAudit.record(ToolCallAudit.BUILT_IN, call.tool() != null ? call.tool() : "unknown",
+                arguments, () -> dispatch(invocation, call), ToolResult::failureMessage);
+    }
+
+    private ToolResult dispatch(ReviewLookupInvocation invocation, ReviewToolCall call) {
         if (!isLookupTool(call.tool())) {
             return failed("Tool '" + call.tool() + "' is not a review lookup");
         }

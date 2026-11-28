@@ -7,13 +7,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.remus.giteabot.agent.session.AgentSession;
 import org.remus.giteabot.agent.session.AgentSessionRepository;
-import org.remus.giteabot.aiusage.AiErrorLogRepository;
-import org.remus.giteabot.aiusage.AiUsageLogRepository;
+import org.remus.giteabot.aiusage.AiInteractionRepository;
 import org.remus.giteabot.audit.AuditEventType;
 import org.remus.giteabot.audit.PrAuditEventRepository;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 
@@ -33,8 +33,7 @@ public class PrometheusMetricsRegistrar {
 
     private final MeterRegistry meterRegistry;
     private final PrAuditEventRepository auditRepository;
-    private final AiUsageLogRepository usageRepository;
-    private final AiErrorLogRepository errorRepository;
+    private final AiInteractionRepository usageRepository;
     private final AgentSessionRepository sessionRepository;
 
     @PostConstruct
@@ -87,8 +86,9 @@ public class PrometheusMetricsRegistrar {
     }
 
     private void registerAiErrorGauge() {
-        Gauge.builder("giteabot.ai_errors", errorRepository, AiErrorLogRepository::count)
-                .description("Total AI provider errors")
+        Gauge.builder("giteabot.ai_errors", usageRepository,
+                        r -> safeLong(() -> r.countFailedCallsStartedAfter(Instant.EPOCH)))
+                .description("Total failed AI calls (the last failed attempt of a round; recovered retries do not count)")
                 .register(meterRegistry);
     }
 

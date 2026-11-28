@@ -253,6 +253,5 @@ class OpenRouterUsageEvidenceTest {
             this.rawResponse = rawResponse;
         }
 
-        @Override public void recordError(Throwable error) { throw new AssertionError(error); }
     }
 }

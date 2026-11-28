@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <th:block th:fragment="layout(title, content)"
           th:replace="~{::layoutWithExtras(${title}, ${content}, null, null)}"></th:block>
-<html lang="en" xmlns:th="http://www.thymeleaf.org"
+<html lang="en" th:lang="${#locale.toLanguageTag()}" xmlns:th="http://www.thymeleaf.org"
       th:fragment="layoutWithExtras(title, content, extraHead, extraScripts)">
 <head>
     <meta charset="UTF-8"/>
@@ -65,11 +65,27 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" th:href="@{/usage}"
-                           th:classappend="${activeNav == 'usage'} ? 'active'"
-                           data-tour="usage" th:data-tour-title="#{tour.usage.title}"
-                           th:data-tour-text="#{tour.usage.text}">
-                            <i class="bi bi-graph-up"></i> <span th:text="#{nav.usage}">Usage</span>
+                        <a class="nav-link" th:href="@{/reviews}"
+                           th:classappend="${activeNav == 'reviews'} ? 'active'"
+                           data-tour="reviews" th:data-tour-title="#{tour.reviews.title}"
+                           th:data-tour-text="#{tour.reviews.text}">
+                            <i class="bi bi-clipboard-check"></i> <span th:text="#{nav.reviews}">Reviews</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" th:href="@{/review-quality}"
+                           th:classappend="${activeNav == 'reviewQuality'} ? 'active'"
+                           data-tour="reviewQuality" th:data-tour-title="#{tour.reviewQuality.title}"
+                           th:data-tour-text="#{tour.reviewQuality.text}">
+                            <i class="bi bi-bar-chart-line"></i> <span th:text="#{nav.reviewQuality}">Review quality</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" th:href="@{/workflow-runs}"
+                           th:classappend="${activeNav == 'workflowRuns'} ? 'active'"
+                           data-tour="workflowRuns" th:data-tour-title="#{tour.workflowRuns.title}"
+                           th:data-tour-text="#{tour.workflowRuns.text}">
+                            <i class="bi bi-graph-up"></i> <span th:text="#{nav.workflowRuns}">Workflow runs</span>
                         </a>
                     </li>
                     <li class="nav-item">

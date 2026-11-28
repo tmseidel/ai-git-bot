@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{layout :: layout(#{nav.reviews}, ~{::pageContent})}">
+<body>
+<div th:fragment="pageContent" id="feedbackPage">
+    <style th:replace="~{reviews/fragments :: styles}"></style>
+    <div th:replace="~{reviews/fragments :: header('feedback')}"></div>
+
+    <form method="get" th:action="@{/reviews/feedback}" class="row g-2 align-items-end mb-3">
+        <th:block th:replace="~{reviews/fragments :: scopeFields}"></th:block>
+        <div class="col-auto" style="width: 8rem;">
+            <label for="filterNumber" class="form-label mb-0 small" th:text="#{reviews.filter.pr}">PR</label>
+            <input type="number" min="1" class="form-control form-control-sm" id="filterNumber" name="number"
+                   th:value="${filter.number}"/>
+        </div>
+        <div class="col-auto" style="width: 12rem;">
+            <label for="filterVerdict" class="form-label mb-0 small" th:text="#{reviews.filter.verdict}">Verdict</label>
+            <select class="form-select form-select-sm" id="filterVerdict" name="verdict">
+                <option value="" th:text="#{reviews.filter.allVerdicts}">All verdicts</option>
+                <option th:each="v : ${ {'USEFUL', 'INCORRECT', 'IRRELEVANT', 'NEEDS_IMPROVEMENT'} }" th:value="${v}"
+                        th:text="${#messages.msg('reviews.verdict.' + v)}" th:selected="${v == filter.verdict}">verdict</option>
+            </select>
+        </div>
+        <div class="col-auto" style="width: 11rem;">
+            <label for="filterCategory" class="form-label mb-0 small" th:text="#{reviews.filter.category}">Category</label>
+            <input type="text" class="form-control form-control-sm" id="filterCategory" name="category" maxlength="64"
+                   th:value="${filter.category}"/>
+        </div>
+        <div class="col-auto pb-1">
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="filterUncited" name="uncited" value="true"
+                       th:checked="${filter.uncited}"/>
+                <label class="form-check-label small" for="filterUncited" th:text="#{reviews.filter.uncited}">Not yet cited by a lesson</label>
+            </div>
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" id="filterAll" name="all" value="true"
+                       th:checked="${filter.all}"/>
+                <label class="form-check-label small" for="filterAll" th:text="#{reviews.filter.includeWithdrawn}">Include superseded and retracted</label>
+            </div>
+        </div>
+        <div th:replace="~{reviews/fragments :: filterButtons('/reviews/feedback')}"></div>
+    </form>
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                <tr>
+                    <th th:text="#{reviews.col.feedback}">Feedback</th>
+                    <th th:text="#{reviews.col.target}">On</th>
+                    <th th:text="#{reviews.col.verdict}">Verdict</th>
+                    <th th:text="#{reviews.col.reason}">Reason</th>
+                    <th th:text="#{reviews.col.by}">By</th>
+                    <th th:text="#{reviews.col.repositoryPr}">Repository / PR</th>
+                    <th th:text="#{reviews.col.lessons}">Lessons</th>
+                    <th class="w-1"></th>
+                </tr>
+                </thead>
+                <tbody class="table-group-divider">
+                <tr th:if="${feedback.rows.isEmpty()}">
+                    <td colspan="8" class="text-center text-secondary py-4" th:text="#{reviews.feedback.empty}">No feedback matches.</td>
+                </tr>
+                <tr th:each="row : ${feedback.rows}" th:with="fb=${row.item}"
+                    th:classappend="${fb.state.name() != 'EFFECTIVE'} ? 'text-secondary'">
+                    <td>
+                        <span class="ref fw-semibold" th:text="${fb.reference}">FB1</span>
+                        <div th:if="${fb.state.name() != 'EFFECTIVE'}"><span class="badge text-bg-light border"
+                             th:text="${#messages.msg('reviews.feedbackState.' + fb.state.name())} + (${fb.supersededBy != null} ? ' → ' + ${fb.supersededBy} : '')">retracted</span></div>
+                        <div class="small text-secondary" th:text="${#temporals.format(fb.createdAt, 'yyyy-MM-dd HH:mm')}">date</div>
+                    </td>
+                    <td><a class="ref" th:href="@{/reviews/{ref}(ref=${row.outputReference()})}" th:text="${fb.targetReference}">O1-F1</a>
+                        <div class="small text-secondary" th:text="${#messages.msg('reviews.targetType.' + fb.targetType.name())}">finding</div></td>
+                    <td><span th:replace="~{reviews/fragments :: verdict(${fb.verdict})}"></span></td>
+                    <td class="small" style="max-width: 24rem;"><div class="md text-pre" th:text="${fb.reason}">reason</div></td>
+                    <td class="small"><span th:replace="~{reviews/fragments :: actor(${fb.actor})}"></span></td>
+                    <td class="small text-nowrap"><span th:text="${row.project()}">owner/repo</span>
+                        <span class="text-secondary" th:if="${row.prNumber != null}" th:text="|#${row.prNumber}|">#1</span>
+                        <div class="text-secondary" th:text="${row.botName}">bot</div></td>
+                    <td class="small">
+                        <div th:each="l : ${row.lessons}"><a class="ref" th:href="@{/reviews/lessons/{ref}(ref=${l.lessonReference})}"
+                                                             th:text="${l.label()}">L1@1 (active)</a></div>
+                        <span th:if="${row.lessons.isEmpty()}" class="text-secondary">–</span>
+                    </td>
+                    <td class="text-nowrap">
+                        <div class="dropdown" th:if="${fb.state.name() == 'EFFECTIVE'}">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown"
+                                    data-bs-popper-config='{"strategy":"fixed"}'
+                                    aria-expanded="false" th:text="#{reviews.actions}">Actions</button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li th:if="${row.curated}">
+                                    <button type="button" class="dropdown-item" data-bs-toggle="modal" data-bs-target="#proposeModal"
+                                            th:data-reference="${fb.reference}" th:data-target="${fb.targetReference}"
+                                            th:data-action="@{/reviews/feedback/{ref}/propose(ref=${fb.reference})}">
+                                        <i class="bi bi-mortarboard" aria-hidden="true"></i> <span th:text="#{reviews.action.propose}">Propose a lesson</span></button>
+                                </li>
+                                <li th:unless="${row.curated}"><span class="dropdown-item-text small text-secondary"
+                                                                     th:text="#{reviews.curatedOffHint}">Curated learning is off for this bot.</span></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li>
+                                    <form method="post" th:action="@{/reviews/feedback/{ref}/retract(ref=${fb.reference})}"
+                                          th:data-confirm="${#messages.msg('reviews.confirm.retract', fb.reference)}">
+                                        <input type="hidden" name="returnTo" th:value="|/reviews/feedback?${filter.with('page', filter.page)}|"/>
+                                        <button type="submit" class="dropdown-item text-danger">
+                                            <i class="bi bi-x-circle" aria-hidden="true"></i> <span th:text="#{reviews.action.retract}">Retract</span></button>
+                                    </form>
+                                </li>
+                            </ul>
+                        </div>
+                    </td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div th:replace="~{reviews/fragments :: pager(${feedback}, '/reviews/feedback')}"></div>
+
+    <!-- Propose a lesson from one feedback record -->
+    <div class="modal fade" id="proposeModal" tabindex="-1" aria-labelledby="proposeTitle" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <form class="modal-content" method="post" id="proposeForm" th:action="@{/reviews/feedback}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="proposeTitle"><span th:text="#{reviews.propose.title}">Propose a lesson from</span>
+                        <span class="ref" id="proposeReference"></span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" th:aria-label="#{button.close}"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="requestId" th:value="${requestId}"/>
+                    <input type="hidden" name="returnTo" th:value="|/reviews/feedback?${filter.with('page', filter.page)}|"/>
+                    <div class="mb-3">
+                        <label for="proposeText" class="form-label" th:text="#{reviews.form.guidance}">Guidance</label>
+                        <textarea class="form-control" id="proposeText" name="text" rows="4" maxlength="2000" required></textarea>
+                        <div class="form-text" th:text="#{reviews.form.guidanceHint}">What later reviews of this repository should know.</div>
+                    </div>
+                    <div class="mb-1">
+                        <label for="proposePaths" class="form-label" th:text="#{reviews.form.paths}">Applies to</label>
+                        <input type="text" class="form-control loc" id="proposePaths" name="paths" placeholder="src/main/java/**"/>
+                        <div class="form-text" th:text="#{reviews.form.pathsHint}">Glob patterns separated by spaces; empty or ** for the whole repository.</div>
+                    </div>
+                </div>
+                <div class="modal-footer justify-content-between">
+                    <small class="text-secondary" th:text="#{reviews.form.sameAsCommand('learning propose')}">Same as the Git command.</small>
+                    <div>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" th:text="#{button.cancel}">Cancel</button>
+                        <button type="submit" class="btn btn-primary" th:text="#{reviews.action.propose}">Propose</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script th:replace="~{reviews/fragments :: markdownScripts}"></script>
+    <script th:src="@{/js/reviews.js}"></script>
+</div>
+</body>
+</html>

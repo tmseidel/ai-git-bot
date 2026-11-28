@@ -64,6 +64,19 @@ class PullRequestWebUrlTest {
     }
 
     @Test
+    void issueLinksExistOnlyWhereTheIssuePageIsKnown() {
+        assertThat(gitea("https://git.example/").getIssueWebUrl("acme", "web", 7L))
+                .contains("https://git.example/acme/web/issues/7");
+        assertThat(github("https://github.com").getIssueWebUrl("acme", "web", 7L))
+                .contains("https://github.com/acme/web/issues/7");
+        assertThat(gitlab().getIssueWebUrl("group/sub", "web", 7L))
+                .contains("https://gitlab.com/group/sub/web/-/issues/7");
+        assertThat(bitbucket().getIssueWebUrl("acme", "web", 7L)).isEmpty();
+        assertThat(azure("https://dev.azure.com").getIssueWebUrl("contoso", "MyProject/my-service", 7L)).isEmpty();
+        assertThat(github("https://github.com").getIssueWebUrl("acme", "web", null)).isEmpty();
+    }
+
+    @Test
     void azureDevOpsPullRequestsLiveBelowTheGitPage() {
         assertThat(azure("https://dev.azure.com").getPullRequestWebUrl("contoso", "MyProject/my-service", 5L))
                 .contains("https://dev.azure.com/contoso/MyProject/_git/my-service/pullrequest/5");

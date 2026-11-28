@@ -143,6 +143,10 @@ public class WorkflowSelectionService {
                 try {
                     Map<String, String> canonical = paramsValidator.validate(
                             rawParams, registered.get().paramsSchema());
+                    List<String> crossField = registered.get().validateParams(canonical);
+                    if (!crossField.isEmpty()) {
+                        throw new IllegalArgumentException(String.join("; ", crossField));
+                    }
                     row.replaceParams(canonical);
                 } catch (IllegalArgumentException e) {
                     errors.add("Workflow '" + workflowTextResolver.displayName(registered.get()) + "': " + e.getMessage());
@@ -182,6 +186,11 @@ public class WorkflowSelectionService {
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No workflow registered for key '" + workflowKey + "'"));
         Map<String, String> canonical = paramsValidator.validate(params, workflow.paramsSchema());
+        List<String> crossField = workflow.validateParams(canonical);
+        if (!crossField.isEmpty()) {
+            throw new IllegalArgumentException("Workflow '" + workflowTextResolver.displayName(workflow)
+                    + "': " + String.join("; ", crossField));
+        }
         Optional<WorkflowSelection> existing =
                 selectionRepository.findByConfigurationIdAndWorkflowKey(configurationId, workflowKey);
         WorkflowSelection row = existing.orElseGet(WorkflowSelection::new);

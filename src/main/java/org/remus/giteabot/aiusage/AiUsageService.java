@@ -1,233 +1,267 @@
 package org.remus.giteabot.aiusage;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.remus.giteabot.ai.AiAuditContext;
+import org.remus.giteabot.ai.AuditRun;
+import org.remus.giteabot.ai.AuditTrigger;
+import org.remus.giteabot.ai.StopReason;
+import org.remus.giteabot.ai.TokenPrices;
 import org.remus.giteabot.config.AiUsageProperties;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
+import org.remus.giteabot.workflowrun.RunStatus;
+import org.remus.giteabot.workflowrun.WorkflowRun;
+import org.remus.giteabot.workflowrun.WorkflowRunRepository;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.Optional;
-import java.util.Set;
 
 /**
- * Records and queries the audit log of AI provider interactions: token usage
- * of successful calls and details (including stack traces) of failed calls.
+ * Records the audit log of AI provider interactions; the Workflow runs page reads it through
+ * {@link org.remus.giteabot.workflowrun.WorkflowRunQueryService}.
+ *
+ * <p>Recording: every request to the provider becomes an {@link AiInteraction} of the
+ * open {@link AuditRun} on the calling thread (see {@link AiAuditContext}). The run's
+ * {@link WorkflowRun} row is created with its first interaction. Only facts are stored; totals
+ * are computed from the rows when they are read. Persistence problems are logged but never
+ * propagated, so auditing can never break the actual AI workflow.</p>
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class AiUsageService {
+public class AiUsageService implements AuditRun.Sink {
 
-    /** Page size of the tables on the "Usage" page. */
-    public static final int PAGE_SIZE = 20;
-
-    /** Upper bound for user-requested page sizes — keeps a single page query bounded. */
-    public static final int MAX_PAGE_SIZE = 100;
-
-    /** Page size for streaming exports — keeps heap bounded (~10 MB worst case). */
-    private static final int EXPORT_PAGE_SIZE = 100;
+    /** Error message of runs and interactions that were still running when the application stopped. */
+    static final String INTERRUPTED_MESSAGE = "Interrupted by restart";
 
     private static final int MAX_ERROR_MESSAGE_LENGTH = 2000;
     private static final int MAX_STACK_TRACE_LENGTH = 100_000;
-    private static final Set<String> USAGE_SORT_COLUMNS =
-            Set.of("timestamp", "aiIntegrationName", "sessionId", "round", "inputTokens",
-                    "outputTokens", "cacheCreationInputTokens", "cacheReadInputTokens");
-    private static final Set<String> ERROR_SORT_COLUMNS =
-            Set.of("timestamp", "aiIntegrationName", "sessionId", "errorMessage");
 
-    private final AiUsageLogRepository usageRepository;
-    private final AiErrorLogRepository errorRepository;
+    /**
+     * Tool arguments are always stored (unlike the raw payloads, they carry no conversation
+     * context), but a single call can carry a whole file, so they are capped.
+     */
+    private static final int MAX_TOOL_ARGUMENTS_LENGTH = 65_535;
+
+    private final AiInteractionRepository interactionRepository;
+    private final AiToolCallRepository toolCallRepository;
+    private final WorkflowRunRepository runRepository;
     private final AiUsageProperties usageProperties;
 
+    // ------------------------------------------------------------------ recording
+
     /**
-     * Records the token usage of a single AI interaction together with the
-     * raw request/response payloads. Persistence problems are logged but never
-     * propagated so that auditing can never break the actual AI workflow.
-     *
-     * <p>{@code inputTokens} is the total processed input (for cache-capable
-     * providers: uncached + cache write + cache read); the two cache fields
-     * carry the breakdown so cache activity is visible on the Usage page.</p>
-     *
-     * <p>{@code round} is the agent-loop round that produced the call, or
-     * {@code null} when the call was not made inside an agent loop.</p>
+     * A request to the provider is about to be sent: starts the next attempt of the open run and
+     * stores it as running. Every AI call is made inside a workflow run, so a call while no run is
+     * open is not recorded.
      */
-    @Transactional
-    public void recordUsage(String aiIntegrationName, String sessionId, Integer round,
-                            long inputTokens, long outputTokens,
-                            long cacheCreationInputTokens, long cacheReadInputTokens,
-                            String rawRequest, String rawResponse) {
+    public void attemptStarted(String aiIntegrationName) {
+        attemptStarted(aiIntegrationName, null);
+    }
+
+    /**
+     * As {@link #attemptStarted(String)}, with the integration's token prices in effect now: the
+     * attempt's cost is computed with them when it ends and stored with its tokens.
+     */
+    public void attemptStarted(String aiIntegrationName, TokenPrices prices) {
+        AuditRun run = AiAuditContext.currentRun();
+        if (run == null) {
+            return;
+        }
+        run.beginAttempt();
+        run.setAttemptPrices(prices);
         try {
-            AiUsageLog entry = new AiUsageLog();
-            entry.setTimestamp(Instant.now());
-            entry.setAiIntegrationName(aiIntegrationName);
-            entry.setSessionId(sessionId);
-            entry.setRound(round);
-            entry.setInputTokens(inputTokens);
-            entry.setOutputTokens(outputTokens);
-            entry.setCacheCreationInputTokens(cacheCreationInputTokens);
-            entry.setCacheReadInputTokens(cacheReadInputTokens);
-            entry.setRawRequest(truncateRawPayload(rawRequest));
-            entry.setRawResponse(truncateRawPayload(rawResponse));
-            usageRepository.save(entry);
+            ensurePersisted(run);
+            AiInteraction interaction = new AiInteraction();
+            interaction.setWorkflowRun(runRepository.getReferenceById(run.getRunId()));
+            interaction.setRoundNumber(run.getRound());
+            interaction.setAttempt(run.getAttempt());
+            interaction.setAiIntegrationName(aiIntegrationName);
+            interaction.setStatus(RunStatus.RUNNING);
+            interaction.setStartedAt(run.getAttemptStartedAt());
+            run.setInteractionId(interactionRepository.save(interaction).getId());
         } catch (Exception e) {
-            log.warn("Failed to persist AI usage entry: {}", e.getMessage());
+            log.warn("Failed to persist the start of an AI interaction: {}", e.getMessage());
         }
     }
 
     /**
-     * Records a failed AI interaction with its stack trace. Persistence
-     * problems are logged but never propagated.
+     * The provider client parsed the token usage of the current attempt; it is stored when the
+     * attempt ends. Every client the factory builds reports usage inside an attempt
+     * ({@link org.remus.giteabot.ai.RetryAiClient}), so usage reported outside one is
+     * ignored.
+     *
+     * <p>{@code inputTokens} is the total processed input (for cache-capable providers: uncached +
+     * cache write + cache read); the two cache fields carry the breakdown.</p>
      */
-    @Transactional
-    public void recordError(String aiIntegrationName, String sessionId, Throwable error) {
+    public void usageReported(long inputTokens, long outputTokens,
+                              long cacheCreationInputTokens, long cacheReadInputTokens,
+                              String rawRequest, String rawResponse) {
+        AuditRun run = AiAuditContext.currentRun();
+        if (run == null || !run.isAttemptOpen()) {
+            return;
+        }
+        run.setPendingUsage(new AuditRun.PendingUsage(inputTokens, outputTokens,
+                cacheCreationInputTokens, cacheReadInputTokens,
+                truncateRawPayload(rawRequest), truncateRawPayload(rawResponse)));
+    }
+
+    /** The current attempt returned normally. */
+    public void attemptSucceeded(StopReason stopReason) {
+        attemptFinished(RunStatus.SUCCEEDED, stopReason, null);
+    }
+
+    /** The current attempt threw {@code error}. */
+    public void attemptFailed(Throwable error) {
+        attemptFinished(RunStatus.ERROR, null, error);
+    }
+
+    private void attemptFinished(RunStatus status, StopReason stopReason, Throwable error) {
+        AuditRun run = AiAuditContext.currentRun();
+        if (run == null || !run.isAttemptOpen()) {
+            return;
+        }
+        run.endAttempt();
+        long durationMs = run.attemptElapsedMs();
+        AuditRun.PendingUsage usage = run.getPendingUsage() != null ? run.getPendingUsage()
+                : new AuditRun.PendingUsage(0, 0, 0, 0, null, null);
         try {
-            AiErrorLog entry = new AiErrorLog();
-            entry.setTimestamp(Instant.now());
-            entry.setAiIntegrationName(aiIntegrationName);
-            entry.setSessionId(sessionId);
-            entry.setErrorMessage(truncate(error.getMessage() != null
-                    ? error.getMessage() : error.getClass().getName(), MAX_ERROR_MESSAGE_LENGTH));
-            entry.setStackTrace(truncate(stackTraceOf(error), MAX_STACK_TRACE_LENGTH));
-            errorRepository.save(entry);
+            if (run.getInteractionId() != null) {
+                TokenPrices prices = run.getAttemptPrices();
+                BigDecimal cost = prices == null ? null : prices.cost(usage.inputTokens(), usage.outputTokens(),
+                        usage.cacheCreationInputTokens(), usage.cacheReadInputTokens());
+                interactionRepository.finish(run.getInteractionId(), status, durationMs,
+                        stopReason != null ? stopReason.name() : null,
+                        usage.inputTokens(), usage.outputTokens(),
+                        usage.cacheCreationInputTokens(), usage.cacheReadInputTokens(),
+                        error != null ? truncate(errorMessageOf(error), MAX_ERROR_MESSAGE_LENGTH) : null,
+                        error != null ? truncate(stackTraceOf(error), MAX_STACK_TRACE_LENGTH) : null,
+                        usage.rawRequest(), usage.rawResponse(), cost);
+            }
         } catch (Exception e) {
-            log.warn("Failed to persist AI error entry: {}", e.getMessage());
+            log.warn("Failed to persist the end of an AI interaction: {}", e.getMessage());
+        }
+    }
+
+    private void ensurePersisted(AuditRun run) {
+        if (run.isPersisted()) {
+            return;
+        }
+        AuditTrigger trigger = run.getTrigger();
+        WorkflowRun entity = new WorkflowRun();
+        entity.setWorkflowType(run.getWorkflowType());
+        entity.setBotId(trigger.botId());
+        entity.setBotName(trigger.botName());
+        entity.setAiIntegrationName(trigger.aiIntegrationName());
+        entity.setGitIntegrationName(trigger.gitIntegrationName());
+        entity.setRepoOwner(trigger.repoOwner());
+        entity.setRepoName(trigger.repoName());
+        entity.setTriggerKind(trigger.triggerKind());
+        entity.setTriggerNumber(trigger.triggerNumber());
+        entity.setState(RunStatus.RUNNING);
+        entity.setStartedAt(run.getAttemptStartedAt());
+        run.attach(runRepository.save(entity).getId(), this);
+    }
+
+    /**
+     * Persists the end of a run. The workflow reports its own failure ({@link AuditRun#fail}).
+     */
+    @Override
+    public void runFinished(AuditRun run) {
+        String failure = run.getFailureMessage();
+        try {
+            runRepository.finish(run.getRunId(),
+                    failure != null ? RunStatus.ERROR : RunStatus.SUCCEEDED,
+                    Instant.now(), truncate(failure, MAX_ERROR_MESSAGE_LENGTH), run.isRoundLimitReached());
+        } catch (Exception e) {
+            log.warn("Failed to persist the end of workflow run {}: {}", run.getRunId(), e.getMessage());
+        }
+    }
+
+    @Override
+    public void toolCallFinished(AuditRun run, AuditRun.ToolCallRecord record) {
+        Long interactionId = run.getInteractionId();
+        if (interactionId == null) {
+            return;
+        }
+        try {
+            AiToolCall call = new AiToolCall();
+            call.setInteraction(interactionRepository.getReferenceById(interactionId));
+            call.setSequence(run.nextToolSequence());
+            call.setSource(truncate(record.source(), 255));
+            call.setToolName(truncate(record.toolName() != null ? record.toolName() : "unknown", 255));
+            call.setDurationMs(record.durationMs());
+            call.setSuccess(record.success());
+            call.setErrorMessage(record.success() ? null
+                    : truncate(record.errorMessage(), MAX_ERROR_MESSAGE_LENGTH));
+            call.setArguments(truncate(record.arguments(), MAX_TOOL_ARGUMENTS_LENGTH));
+            toolCallRepository.save(call);
+        } catch (Exception e) {
+            log.warn("Failed to persist tool call '{}': {}", record.toolName(), e.getMessage());
         }
     }
 
     /**
-     * Removes all recorded AI usage entries.
+     * Runs and interactions still marked running belong to a previous process that stopped
+     * before finishing them; they will never finish.
      */
+    @EventListener(ApplicationReadyEvent.class)
+    public void failInterruptedRuns() {
+        try {
+            int interactions = interactionRepository.failAllRunning(INTERRUPTED_MESSAGE);
+            int runs = runRepository.failAllRunning(Instant.now(), INTERRUPTED_MESSAGE);
+            if (runs > 0 || interactions > 0) {
+                log.info("Marked {} workflow run(s) and {} AI interaction(s) interrupted by the restart as failed",
+                        runs, interactions);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to mark interrupted workflow runs as failed: {}", e.getMessage());
+        }
+    }
+
+    // ------------------------------------------------------------------ housekeeping and totals
+
+    /** Removes every finished run with its interactions and tool calls. Running runs are kept. */
     @Transactional
     public void clearUsage() {
-        usageRepository.deleteAllInBatch();
-    }
-
-    /** A page of Usage table rows; the raw payloads are not loaded (see {@link #findRawPayload}). */
-    @Transactional(readOnly = true)
-    public Page<AiUsageRow> findUsage(Instant from, Instant to, int page, int pageSize,
-                                      String sortColumn, boolean ascending) {
-        String column = USAGE_SORT_COLUMNS.contains(sortColumn) ? sortColumn : "timestamp";
-        return usageRepository.findRowsByTimestampBetween(effectiveFrom(from), effectiveTo(to),
-                PageRequest.of(page, effectivePageSize(pageSize), sortOf(column, ascending)));
+        toolCallRepository.deleteAllOfFinishedRuns();
+        interactionRepository.deleteAllOfFinishedRuns();
+        runRepository.deleteAllFinished();
     }
 
     /**
-     * The raw payloads of one usage entry, or empty when the entry does not exist or raw payload
-     * capture is disabled (stored payloads are then not shown, as the page hides the Details column).
-     */
-    @Transactional(readOnly = true)
-    public Optional<AiUsageRawPayload> findRawPayload(long id) {
-        if (usageProperties == null || !usageProperties.isRawPayloadsEnabled()) {
-            return Optional.empty();
-        }
-        return usageRepository.findRawPayloadById(id);
-    }
-
-    @Transactional(readOnly = true)
-    public Page<AiErrorLog> findErrors(Instant from, Instant to, int page, int pageSize,
-                                       String sortColumn, boolean ascending) {
-        String column = ERROR_SORT_COLUMNS.contains(sortColumn) ? sortColumn : "timestamp";
-        return errorRepository.findByTimestampBetween(effectiveFrom(from), effectiveTo(to),
-                PageRequest.of(page, effectivePageSize(pageSize), sortOf(column, ascending)));
-    }
-
-    /**
-     * Normalizes a user-requested page size: non-positive values fall back to
-     * {@link #PAGE_SIZE}, oversized values are clamped to {@link #MAX_PAGE_SIZE}
-     * (the largest size the rows-per-page select offers) so a single request can
-     * never force an unbounded page query.
-     */
-    private static int effectivePageSize(int pageSize) {
-        return pageSize > 0 ? Math.min(pageSize, MAX_PAGE_SIZE) : PAGE_SIZE;
-    }
-
-    /**
-     * Streams all error entries in the given timespan as a JSON array directly
-     * to the provided output stream.  Results are fetched in pages of
-     * {@value #EXPORT_PAGE_SIZE} rows so that heap usage stays bounded
-     * regardless of the total number of matching rows.
-     *
-     * <p>This method intentionally does <em>not</em> carry a
-     * {@code @Transactional} annotation — each page query opens its own
-     * short-lived read-only transaction via the Spring Data proxy, which is
-     * the correct pattern for streaming responses that outlive a single
-     * transaction.</p>
-     */
-    public void exportErrors(Instant from, Instant to, OutputStream outputStream) throws IOException {
-        Instant f = effectiveFrom(from);
-        Instant t = effectiveTo(to);
-
-        try (JsonGenerator gen = new ObjectMapper().getFactory().createGenerator(outputStream)) {
-            gen.writeStartArray();
-            int page = 0;
-            Page<AiErrorLog> result;
-            do {
-                result = errorRepository.findAllByTimestampBetweenOrderByTimestampDesc(
-                        f, t, PageRequest.of(page, EXPORT_PAGE_SIZE));
-                for (AiErrorLog entry : result.getContent()) {
-                    gen.writeStartObject();
-                    gen.writeObjectField("timestamp", entry.getTimestamp());
-                    gen.writeStringField("aiIntegration", entry.getAiIntegrationName());
-                    gen.writeStringField("sessionId", entry.getSessionId());
-                    gen.writeStringField("errorMessage", entry.getErrorMessage());
-                    gen.writeStringField("stackTrace", entry.getStackTrace());
-                    gen.writeEndObject();
-                }
-                gen.flush();
-                page++;
-            } while (result.hasNext());
-            gen.writeEndArray();
-        }
-    }
-
-    /**
-     * Number of AI errors recorded after the given instant (dashboard badge).
+     * Number of failed AI calls started after the given instant (dashboard badge): the last
+     * attempt of each round that failed. A failed attempt that a retry recovered from does not
+     * count, and neither does a failed call the workflow went on from.
      */
     @Transactional(readOnly = true)
     public long countErrorsSince(Instant after) {
-        return errorRepository.countByTimestampAfter(after);
+        return interactionRepository.countFailedCallsStartedAfter(after);
     }
 
-    /**
-     * Total input tokens consumed across all recorded AI interactions.
-     */
+    /** Total input tokens consumed across all recorded AI interactions. */
     @Transactional(readOnly = true)
     public long totalInputTokens() {
-        return usageRepository.sumInputTokens();
+        return interactionRepository.sumInputTokens();
     }
 
-    /**
-     * Total output tokens consumed across all recorded AI interactions.
-     */
+    /** Total output tokens consumed across all recorded AI interactions. */
     @Transactional(readOnly = true)
     public long totalOutputTokens() {
-        return usageRepository.sumOutputTokens();
+        return interactionRepository.sumOutputTokens();
     }
 
-    private static Sort sortOf(String column, boolean ascending) {
-        Sort sort = Sort.by(ascending ? Sort.Direction.ASC : Sort.Direction.DESC, column);
-        if (!"timestamp".equals(column)) {
-            sort = sort.and(Sort.by(Sort.Direction.DESC, "timestamp"));
-        }
-        return sort;
+    private boolean rawPayloadsEnabled() {
+        return usageProperties != null && usageProperties.isRawPayloadsEnabled();
     }
 
-    private static Instant effectiveFrom(Instant from) {
-        return from != null ? from : Instant.EPOCH;
-    }
-
-    private static Instant effectiveTo(Instant to) {
-        return to != null ? to : Instant.now().plusSeconds(60);
+    private static String errorMessageOf(Throwable error) {
+        return error.getMessage() != null ? error.getMessage() : error.getClass().getName();
     }
 
     private static String stackTraceOf(Throwable error) {
@@ -244,10 +278,7 @@ public class AiUsageService {
     }
 
     private String truncateRawPayload(String value) {
-        if (value == null) {
-            return null;
-        }
-        if (usageProperties == null || !usageProperties.isRawPayloadsEnabled()) {
+        if (value == null || !rawPayloadsEnabled()) {
             return null;
         }
         int maxLength = usageProperties.getEffectiveMaxRawPayloadLength();

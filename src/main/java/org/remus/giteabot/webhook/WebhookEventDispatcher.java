@@ -67,6 +67,9 @@ public class WebhookEventDispatcher {
         if (PR_COMMENT_KINDS.contains(event.kind()) && payload.getPullRequest() == null && payload.getIssue() == null) {
             return ignored(bot, event, "pull request comment carries neither pull request nor issue");
         }
+        if (event.kind() == WebhookEventKind.PR_REOPENED) {
+            botWebhookService.handlePrReopened(bot, payload);
+        }
         return switch (event.kind()) {
             case PR_OPENED, PR_REOPENED -> bot.isRunOnPrCreation() || event.botIsReviewer()
                     ? automaticReview(bot, event)

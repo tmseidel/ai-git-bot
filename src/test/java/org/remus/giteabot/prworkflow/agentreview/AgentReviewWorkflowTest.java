@@ -58,13 +58,40 @@ class AgentReviewWorkflowTest {
         AgentReviewWorkflow wf = workflow();
         assertEquals("agentic-review", wf.key());
         assertEquals(PrWorkflowCategory.REVIEW, wf.category());
-        assertEquals(7, wf.paramsSchema().fields().size());
+        assertEquals(9, wf.paramsSchema().fields().size());
         assertFalse(wf.paramsSchema().isEmpty());
         var progress = wf.paramsSchema().fields().stream()
                 .filter(field -> field.name().equals("enableProgressComments")).findFirst().orElseThrow();
         assertEquals(WorkflowParamField.ParamType.BOOLEAN, progress.type());
         assertEquals("false", progress.defaultValue());
         org.assertj.core.api.Assertions.assertThat(progress.description()).contains("review or clarification");
+    }
+
+    @Test
+    void theLearningParametersShipOnlyImplementedModesAndDefaultToOff() {
+        var schema = workflow().paramsSchema();
+        var mode = schema.require("learningMode");
+        assertEquals(WorkflowParamField.ParamType.ENUM, mode.type());
+        assertEquals("OFF", mode.defaultValue());
+        org.assertj.core.api.Assertions.assertThat(mode.allowedValues())
+                .extracting(WorkflowParamField.EnumOption::key)
+                .containsExactly("OFF", "CURATED");
+        // The configuration is shared between bots; the form has to say so.
+        org.assertj.core.api.Assertions.assertThat(mode.description()).contains("shared");
+
+        var maintainers = schema.require("learningMaintainers");
+        assertEquals(WorkflowParamField.ParamType.TEXT, maintainers.type());
+        org.assertj.core.api.Assertions.assertThat(maintainers.defaultValue()).isNull();
+        org.assertj.core.api.Assertions.assertThat(maintainers.description()).contains("nobody");
+    }
+
+    @Test
+    void invalidLearningParametersAreRefusedByTheWorkflow() {
+        org.assertj.core.api.Assertions.assertThat(workflow().validateParams(
+                Map.of("learningMode", "CURATED", "learningMaintainers", "alex\nmaria")))
+                .isEmpty();
+        org.assertj.core.api.Assertions.assertThat(workflow().validateParams(
+                Map.of("learningMaintainers", "two names"))).hasSize(1);
     }
 
     @Test
@@ -117,7 +144,7 @@ class AgentReviewWorkflowTest {
         when(serviceFactory.create(bot)).thenReturn(service);
         when(service.reviewPullRequest(any(), anyInt(), anyBoolean(), any(),
                 anyLong(), any(), anyBoolean(), any())).thenReturn(AgentReviewService.ReviewResult.POSTED);
-        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean()))
+        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean(), any()))
                 .thenReturn(AgentReviewService.ReviewResult.POSTED);
 
         assertEquals(WorkflowResultStatus.SUCCESS, workflow().run(context(bot)).status());
@@ -128,7 +155,7 @@ class AgentReviewWorkflowTest {
 
         verify(service).reviewPullRequest(any(), anyInt(), anyBoolean(), any(),
                 eq(1L), isNull(), eq(true), any());
-        verify(service).answerClarification(any(), anyString(), anyInt(), eq(true));
+        verify(service).answerClarification(any(), anyString(), anyInt(), eq(true), any());
     }
 
     @Test
@@ -189,7 +216,7 @@ class AgentReviewWorkflowTest {
                                          WorkflowResultStatus expected) {
         AgentReviewService service = mock(AgentReviewService.class);
         when(serviceFactory.create(any())).thenReturn(service);
-        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean())).thenReturn(serviceResult);
+        when(service.answerClarification(any(), anyString(), anyInt(), anyBoolean(), any())).thenReturn(serviceResult);
         PrWorkflowContext context = new PrWorkflowContext(new Bot(), new WebhookPayload(), 1L,
                 (name, log) -> { }, () -> false,
                 Map.of(PrWorkflowContext.HINT_AGENTIC_REVIEW_CLARIFICATION, "Why was this changed?"), null);

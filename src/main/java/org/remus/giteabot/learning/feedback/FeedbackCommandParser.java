@@ -190,8 +190,11 @@ public final class FeedbackCommandParser {
         return sb.toString().trim();
     }
 
-    /** Blanks fenced blocks and block-quoted lines so documented examples stay examples. */
-    static String stripQuotedAndFenced(String body) {
+    /**
+     * Blanks fenced blocks and block-quoted lines so documented examples stay examples. Shared by
+     * every learning-command parser, so all of them ignore the same quoted text.
+     */
+    public static String stripQuotedAndFenced(String body) {
         String withoutFences = FENCE.matcher(body).replaceAll(match -> "\n".repeat(
                 (int) match.group().chars().filter(c -> c == '\n').count() + 1));
         StringBuilder sb = new StringBuilder(withoutFences.length());

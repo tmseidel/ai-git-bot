@@ -148,9 +148,5 @@ class OpenAiUsageAvailabilityTest {
             this.rawResponse = rawResponse;
         }
 
-        @Override
-        public void recordError(Throwable error) {
-            throw new AssertionError("Unexpected provider error", error);
-        }
     }
 }

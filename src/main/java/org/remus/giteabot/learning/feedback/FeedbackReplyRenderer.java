@@ -94,8 +94,12 @@ public final class FeedbackReplyRenderer {
         return sb.toString().trim();
     }
 
+    /**
+     * @param lessons labels of lessons citing this record ({@code L17@1 (active)}), so a reader
+     *                sees what a retraction would affect
+     */
     public static String show(FeedbackService.Detail detail, String botName, String mention,
-                              FeedbackLinks links) {
+                              FeedbackLinks links, java.util.List<String> lessons) {
         FeedbackService.Summary row = detail.summary();
         StringBuilder sb = new StringBuilder();
         sb.append("**").append(row.reference()).append("** — `").append(row.targetReference())
@@ -114,6 +118,9 @@ public final class FeedbackReplyRenderer {
         }
         if (row.reason() != null && !row.reason().isBlank()) {
             sb.append("\n> ").append(row.reason().replace("\n", "\n> ")).append('\n');
+        }
+        if (lessons != null && !lessons.isEmpty()) {
+            sb.append("\nLessons citing it: ").append(String.join(", ", lessons)).append('\n');
         }
         if (!detail.history().isEmpty()) {
             sb.append("\nHistory:\n");

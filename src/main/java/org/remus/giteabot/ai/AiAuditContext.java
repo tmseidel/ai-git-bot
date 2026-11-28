@@ -1,48 +1,76 @@
 package org.remus.giteabot.ai;
 
 /**
- * Thread-local context carrying the logical session identifier (e.g.
- * {@code owner/repo#42}) and, inside an agent loop, the current round of the
- * work being processed, so that AI usage and error records can be correlated
- * with the originating session (and the round that produced them).
+ * Thread-local context that correlates AI interactions with what caused them: the open
+ * {@link AuditRun workflow run} of the current thread. It receives the AI interactions and tool
+ * calls.
  *
- * <p>Callers that orchestrate AI interactions (webhook handlers, PR workflows)
- * set the session id at the start of processing and must clear it in a
- * {@code finally} block.</p>
+ * <p>The PR and issue workflow orchestrators open a run per workflow with try-with-resources.
+ * Runs do not nest: workflows run one after another, and every AI call of a webhook task is made
+ * inside one of them. {@link AiAuditContextClearingTaskDecorator} clears the context after every
+ * async task, so a run left open can never outlive its task.</p>
  */
 public final class AiAuditContext {
 
-    private static final ThreadLocal<String> SESSION_ID = new ThreadLocal<>();
-    private static final ThreadLocal<Integer> ROUND = new ThreadLocal<>();
+    private static final ThreadLocal<AuditRun> CURRENT = new ThreadLocal<>();
 
     private AiAuditContext() {
     }
 
-    public static void setSessionId(String sessionId) {
-        SESSION_ID.set(sessionId);
+    /**
+     * Opens a workflow run on this thread. It receives the AI interactions until it is closed.
+     *
+     * @param workflowType the workflow key (e.g. {@code agentic-review})
+     * @param trigger      the bot and the pull request / issue it works on
+     */
+    public static AuditRun openRun(String workflowType, AuditTrigger trigger) {
+        AuditRun run = new AuditRun(workflowType, trigger);
+        CURRENT.set(run);
+        return run;
     }
 
-    public static String getSessionId() {
-        return SESSION_ID.get();
+    /** The open run, or {@code null}. */
+    public static AuditRun currentRun() {
+        return CURRENT.get();
     }
 
-    /** Marks the agent-loop round the current AI call belongs to. */
-    public static void setRound(int round) {
-        ROUND.set(round);
+    /** Called by {@link AuditRun#close()}: forgets the run if it is still the open one. */
+    static void removeRun(AuditRun run) {
+        if (CURRENT.get() == run) {
+            CURRENT.remove();
+        }
     }
 
-    /** The agent-loop round of the current AI call, or {@code null} outside a loop. */
-    public static Integer getRound() {
-        return ROUND.get();
+    /** Starts a logical AI call in the open run (see {@link AuditRun#beginCall}). */
+    public static void beginCall() {
+        AuditRun run = CURRENT.get();
+        if (run != null) {
+            run.beginCall();
+        }
     }
 
-    /** Clears only the round marker, leaving the session id in place. */
-    public static void clearRound() {
-        ROUND.remove();
+    /** The next AI call repeats the previous one and keeps its round number. */
+    public static void markRetry() {
+        AuditRun run = CURRENT.get();
+        if (run != null) {
+            run.markRetry();
+        }
     }
 
+    /** The agent loop of the open run ran out of rounds. */
+    public static void markRoundLimitReached() {
+        AuditRun run = CURRENT.get();
+        if (run != null) {
+            run.markRoundLimitReached();
+        }
+    }
+
+    /** Closes the open run, if any (persisting its end), and clears the context. */
     public static void clear() {
-        SESSION_ID.remove();
-        ROUND.remove();
+        AuditRun run = CURRENT.get();
+        if (run != null) {
+            run.close();
+        }
+        CURRENT.remove();
     }
 }
