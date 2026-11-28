@@ -30,7 +30,7 @@ License: MIT
 
 ## Keywords
 
-ai code review, code review bot, pull request automation, AI unit tests, unit test author, white-box test generation, coding agent, issue implementation agent, technical writer agent, AI issue triage, i18n coverage, README sync, self-hosted AI, Git automation, Gitea bot, GitHub bot, GitHub Enterprise bot, GitLab bot, Bitbucket bot, Azure DevOps bot, Anthropic Claude, OpenAI, Google Gemini, Ollama, llama.cpp, local LLM, MCP, Model Context Protocol, Spring Boot, Java 21, Docker, PostgreSQL, Prometheus metrics, outgoing webhooks
+ai code review, code review bot, pull request automation, AI unit tests, unit test author, white-box test generation, coding agent, issue implementation agent, technical writer agent, AI issue triage, i18n coverage, README sync, self-hosted AI, Git automation, Gitea bot, GitHub bot, GitHub Enterprise bot, GitLab bot, Bitbucket bot, Azure DevOps bot, Anthropic Claude, OpenAI, Google Gemini, Ollama, llama.cpp, local LLM, MCP, Model Context Protocol, Spring Boot, Java 25, Docker, PostgreSQL, Prometheus metrics, outgoing webhooks
 
 ## Essential documentation
 

@@ -18,7 +18,7 @@ not apply the base H2 dialect to PostgreSQL or load application profiles, extern
 `spring.jpa.*` overrides or customizers. This is a fresh-schema mapping and
 transaction contract, not a full production application-startup check.
 
-## Local checks (Linux, Java 21+, Maven 3.9+)
+## Local checks (Linux, Java 25+, Maven 3.9+)
 
 ```bash
 mvn --batch-mode '-Dtest=org.remus.giteabot.database.*ContractTest' clean verify

@@ -9,7 +9,7 @@ This file provides a compact, LLM-friendly overview of AI-Git-Bot. It is intende
 - Primary repository: https://github.com/tmseidel/ai-git-bot
 - Docker image: https://hub.docker.com/r/tmseidel/ai-git-bot
 - License: MIT
-- Runtime: Java 21, Spring Boot, PostgreSQL
+- Runtime: Java 25, Spring Boot, PostgreSQL
 - Deployment model: self-hosted web application, commonly deployed via Docker Compose
 
 ## One-sentence summary

@@ -25,7 +25,7 @@ You run the software, connect it to your Git hosts and AI providers, and configu
 | [Deployment](DEPLOYMENT.md) | Docker Compose deployment, environment variables, production setup |
 | [Secret References](SECRET_REFERENCES.md) | Keeping credentials out of configuration with `${env:NAME}` references: syntax, resolution, whitelist and reserved names |
 | [Admin Guide](USER_GUIDE.md) | The admin web UI: creating bots, AI integrations, Git integrations, workflow configurations, interface language |
-| [Migration 1.0 → 1.1](MIGRATION_1.0_TO_1.1.md) · [Migration 1.6 → 1.7](MIGRATION_1.6_TO_1.7.md) · [Migration 1.12 → 1.13](MIGRATION_1.12_TO_1.13.md) · [Migration 1.31 → 1.32](MIGRATION_1.31_TO_1.32.md) | Upgrade notes between releases |
+| [Migration 1.0 → 1.1](MIGRATION_1.0_TO_1.1.md) · [Migration 1.6 → 1.7](MIGRATION_1.6_TO_1.7.md) · [Migration 1.12 → 1.13](MIGRATION_1.12_TO_1.13.md) · [Migration 1.31 → 1.32](MIGRATION_1.31_TO_1.32.md) · [Migration 1.33 → 1.34](MIGRATION_1.33_TO_1.34.md) | Upgrade notes between releases |
 
 ### Connect a Git provider
 

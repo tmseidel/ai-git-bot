@@ -439,8 +439,8 @@ After upgrade, edit or clone prompt entries in the UI instead of editing bot pro
 
 The Dockerfile uses a **multi-stage build**:
 
-1. **Build stage** (`eclipse-temurin:21-jdk-alpine`): Compiles the application with Maven
-2. **Runtime stage** (`eclipse-temurin:21-jre-noble`): Runs the JAR as a non-root user
+1. **Build stage** (`eclipse-temurin:25-jdk-alpine`): Compiles the application with Maven
+2. **Runtime stage** (`eclipse-temurin:25-jre-noble`): Runs the JAR as a non-root user
 
 Key features:
 - Maven dependency layer caching for fast rebuilds

@@ -14,7 +14,7 @@
     "Dockerfile"
   ],
   "runtimePlatform": [
-    "Java 21",
+    "Java 25",
     "Spring Boot",
     "Docker",
     "PostgreSQL"
@@ -72,7 +72,7 @@
     }
   ],
   "softwareRequirements": [
-    "Java 21 or later",
+    "Java 25 or later",
     "Maven 3.9+",
     "PostgreSQL for production deployments",
     "Docker Compose for containerized deployments"
